@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: native-sfu-config
+  namespace: native-sfu
+data:
+  NODE_ENV: production
+  PORT: "3000"
+  PUBLIC_URL: https://sfu.example.com
+  FRONTEND_URL: https://sfu.example.com
+  MONGODB_URI: mongodb://mongo:27017/native_sfu
+  REDIS_URL: redis://redis:6379
+  TURN_REALM: native-sfu.local
+  TURN_URIS: turn:sfu.example.com:3478?transport=udp,turn:sfu.example.com:3478?transport=tcp
+  RECORDING_STORAGE_DRIVER: local
+  RECORDING_LOCAL_PATH: /app/recordings

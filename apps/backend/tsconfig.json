@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@native-sfu/contracts": [
+        "../../packages/contracts/dist/index.d.ts"
+      ],
+      "@native-sfu/sfu-core": [
+        "../../packages/sfu-core/dist/index.d.ts"
+      ],
+      "@native-sfu/nest-sfu": [
+        "../../packages/nest-sfu/dist/index.d.ts"
+      ]
+    },
+    "declaration": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "removeComments": true,
+    "incremental": true,
+    "exactOptionalPropertyTypes": false,
+    "strictPropertyInitialization": false
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ]
+}

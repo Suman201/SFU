@@ -1,0 +1,12 @@
+node_modules
+dist
+.angular
+.nx
+coverage
+.env
+.env.*
+!.env.example
+recordings
+*.log
+*.tsbuildinfo
+.DS_Store

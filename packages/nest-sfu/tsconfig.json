@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@native-sfu/contracts": [
+        "../contracts/dist/index.d.ts"
+      ],
+      "@native-sfu/sfu-core": [
+        "../sfu-core/dist/index.d.ts"
+      ]
+    },
+    "declaration": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "src/**/*.ts"
+  ]
+}

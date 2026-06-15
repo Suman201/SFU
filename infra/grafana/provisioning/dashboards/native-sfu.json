@@ -1,0 +1,98 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "sfu_active_rooms",
+          "legendFormat": "rooms"
+        }
+      ],
+      "title": "Active rooms",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum(sfu_active_participants)",
+          "legendFormat": "participants"
+        }
+      ],
+      "title": "Active participants",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum(rate(sfu_forwarded_rtp_packets_total[1m])) by (kind)",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "title": "Forwarded RTP packets",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum(rate(sfu_dropped_rtp_packets_total[1m])) by (reason)",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "title": "Dropped RTP packets",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": [
+    "sfu",
+    "webrtc"
+  ],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "title": "Native SFU Overview",
+  "uid": "native-sfu-overview",
+  "version": 1
+}
