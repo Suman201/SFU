@@ -52,7 +52,7 @@ export class IceService {
     );
     const candidates = await agent.gatherCandidates();
     agent.close();
-    return candidates;
+    return candidates.map(toPublicCandidate);
   }
 
   async createAgent(transportId: string, roomId: string, participantId: string): Promise<IceAgent> {
@@ -148,4 +148,19 @@ export class IceService {
     }
     return agent;
   }
+}
+
+function toPublicCandidate(candidate: IceCandidate): IceCandidate {
+  return {
+    foundation: candidate.foundation,
+    component: candidate.component,
+    protocol: candidate.protocol,
+    priority: candidate.priority,
+    ip: candidate.ip,
+    port: candidate.port,
+    type: candidate.type,
+    relatedAddress: candidate.relatedAddress,
+    relatedPort: candidate.relatedPort,
+    tcpType: candidate.tcpType
+  };
 }

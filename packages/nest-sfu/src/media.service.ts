@@ -31,7 +31,7 @@ export class MediaService {
     const agent = await this.ice.createAgent(id, roomId, participantId);
     const snapshot = agent.snapshot();
     const iceParameters = snapshot.localParameters;
-    const iceCandidates = snapshot.localCandidates;
+    const iceCandidates = snapshot.localCandidates.map(toPublicCandidate);
     const dtlsParameters = this.dtls.createParameters();
     const options: TransportOptions = {
       id,
@@ -71,7 +71,7 @@ export class MediaService {
     transport.options = {
       ...transport.options,
       iceParameters: snapshot.localParameters,
-      iceCandidates: snapshot.localCandidates
+      iceCandidates: snapshot.localCandidates.map(toPublicCandidate)
     };
     transport.remoteCandidates = [];
     return transport.options;
@@ -145,4 +145,19 @@ export class MediaService {
     }
     return transport;
   }
+}
+
+function toPublicCandidate(candidate: IceCandidate): IceCandidate {
+  return {
+    foundation: candidate.foundation,
+    component: candidate.component,
+    protocol: candidate.protocol,
+    priority: candidate.priority,
+    ip: candidate.ip,
+    port: candidate.port,
+    type: candidate.type,
+    relatedAddress: candidate.relatedAddress,
+    relatedPort: candidate.relatedPort,
+    tcpType: candidate.tcpType
+  };
 }
