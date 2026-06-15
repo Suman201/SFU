@@ -213,8 +213,17 @@ export class ConsumerDocument {
   @Prop({ required: true, index: true })
   participantId!: string;
 
+  @Prop({ required: true, index: true })
+  transportId!: string;
+
   @Prop({ enum: ['low', 'medium', 'high'] })
   preferredLayer?: 'low' | 'medium' | 'high';
+
+  @Prop({ type: Object })
+  preferredLayers?: Record<string, unknown>;
+
+  @Prop({ type: Object })
+  currentLayers?: Record<string, unknown>;
 
   @Prop({ type: Object, required: true })
   rtpParameters!: Record<string, unknown>;
@@ -232,6 +241,7 @@ export class ConsumerDocument {
 export const ConsumerSchema = SchemaFactory.createForClass(ConsumerDocument);
 ConsumerSchema.index({ roomId: 1, participantId: 1, status: 1 });
 ConsumerSchema.index({ producerId: 1, status: 1 });
+ConsumerSchema.index({ transportId: 1 });
 
 @Schema({ collection: 'moderation', timestamps: true })
 export class ModerationDocument {

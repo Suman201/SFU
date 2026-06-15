@@ -10,6 +10,7 @@ export interface LocalIceCandidate extends IceCandidate {
   foundation: string;
   baseAddress: string;
   basePort: number;
+  relay?: TurnRelayAllocation;
 }
 
 export interface RemoteIceCandidate extends IceCandidate {
@@ -56,4 +57,26 @@ export interface IceAgentOptions {
   maxConsentFailures?: number;
   transactionTimeoutMs?: number;
   taMs?: number;
+  stunServers?: string[];
+  turnServers?: TurnServerOptions[];
+}
+
+export interface TurnServerOptions {
+  url: string;
+  username: string;
+  credential: string;
+  realm?: string;
+}
+
+export interface TurnRelayAllocation {
+  server: {
+    host: string;
+    port: number;
+  };
+  username: string;
+  credential: string;
+  realm: string;
+  nonce: string;
+  lifetimeSeconds?: number;
+  permissions: Set<string>;
 }

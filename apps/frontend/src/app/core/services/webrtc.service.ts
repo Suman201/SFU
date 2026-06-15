@@ -1,5 +1,5 @@
 import { Injectable, signal } from '@angular/core';
-import type { IceParameters, ProducerKind, RtpParameters, TransportOptions } from '@native-sfu/contracts';
+import type { DtlsParameters, IceParameters, ProducerKind, RtpParameters, TransportOptions } from '@native-sfu/contracts';
 import { SocketService } from './socket.service';
 
 export interface DeviceOption {
@@ -86,6 +86,10 @@ export class WebRtcService {
       if (iceParameters) {
         await this.socket.emitAck('transport:ice-parameters', { transportId: transport.id, iceParameters });
       }
+      const dtlsParameters = parseDtlsParameters(this.peer.localDescription?.sdp ?? '');
+      if (dtlsParameters) {
+        await this.socket.emitAck('transport:dtls-parameters', { transportId: transport.id, dtlsParameters });
+      }
     }
     const rtpParameters = createRtpParameters(kind);
     const event = kind === 'screen' ? 'screen:start' : 'producer:create';
@@ -151,5 +155,19 @@ function parseIceParameters(sdp: string): IceParameters | undefined {
     usernameFragment,
     password,
     iceLite: false
+  };
+}
+
+function parseDtlsParameters(sdp: string): DtlsParameters | undefined {
+  const fingerprints = [...sdp.matchAll(/^a=fingerprint:(sha-256|sha-384|sha-512)\s+(.+)$/gm)].map((match) => ({
+    algorithm: match[1] as 'sha-256' | 'sha-384' | 'sha-512',
+    value: match[2]?.trim() ?? ''
+  }));
+  if (!fingerprints.length) {
+    return undefined;
+  }
+  return {
+    role: 'client',
+    fingerprints
   };
 }

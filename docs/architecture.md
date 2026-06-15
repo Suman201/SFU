@@ -11,9 +11,12 @@ flowchart LR
   Rooms --> Redis["Redis state and pub/sub"]
   Gateway --> Media["Media service"]
   Media --> RTP["RTP router"]
-  Media --> ICE["ICE agent and TURN credentials"]
+  Media --> SDP["SDP helpers"]
+  Media --> ICE["ICE agent"]
+  ICE --> STUN["STUN/TURN servers"]
   Media --> DTLS["DTLS boundary"]
   DTLS --> SRTP["SRTP boundary"]
+  SRTP --> RTP
   API --> Metrics["Prometheus metrics"]
   Coturn["Coturn"] --> Browser
 ```
@@ -28,8 +31,8 @@ flowchart LR
 ## Reusable Packages
 
 - `@native-sfu/contracts` contains shared API and signaling contracts.
-- `@native-sfu/sfu-core` is framework-free and owns RTP/RTCP parsing, packet routing, simulcast layer selection, bandwidth estimation, and audio-level observation.
-- `@native-sfu/nest-sfu` wraps `sfu-core` for NestJS with a configurable ICE agent, TURN credential generation, fail-closed DTLS/SRTP boundaries, and a reusable `MediaService`.
+- `@native-sfu/sfu-core` is framework-free and owns RTP/RTCP parsing, packet routing, retransmission cache/NACK recovery, PLI/FIR aggregation, simulcast layer selection, bandwidth estimation, and audio-level observation.
+- `@native-sfu/nest-sfu` wraps `sfu-core` for NestJS with a configurable ICE agent, STUN/TURN candidate gathering, TURN credential generation, DTLS transport establishment, SRTP/SRTCP protection, SDP helpers, RTCP processing, live media packet bridging, and a reusable `MediaService`.
 
 ## Media Plane
 
@@ -49,6 +52,10 @@ sequenceDiagram
   Publisher->>MediaService: SRTP packet
   MediaService->>RtpRouter: RTP after SRTP unprotect
   RtpRouter->>Consumer: RTP after layer and pause checks
+  Consumer->>MediaService: SRTCP NACK or PLI/FIR
+  MediaService->>RtpRouter: RTCP feedback
+  RtpRouter->>Consumer: Cached RTP retransmission
+  RtpRouter->>Publisher: Coalesced keyframe request
 ```
 
 The router forwards RTP packets only. It does not mix, decode, encode, transcode, or compose media.

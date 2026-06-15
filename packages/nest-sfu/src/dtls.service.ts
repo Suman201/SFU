@@ -1,35 +1,71 @@
 import { Injectable } from '@nestjs/common';
-import { createHash, generateKeyPairSync } from 'crypto';
 import type { DtlsParameters } from '@native-sfu/contracts';
+import type { IceAgent } from './ice/ice-agent';
+import { createLocalDtlsCertificate } from './dtls/certificate';
+import { DtlsTransport } from './dtls/dtls-transport';
+import type { DtlsTransportSnapshot, LocalDtlsCertificate } from './dtls/dtls.types';
 
-export class DtlsTransportUnavailableError extends Error {
+export class DtlsTransportNotFoundError extends Error {
   constructor() {
-    super('Native DTLS-SRTP transport is not available in Node.js core; provide a hardened native transport adapter before accepting browser media.');
+    super('DTLS transport not found.');
   }
 }
 
 @Injectable()
 export class DtlsService {
-  private readonly keyPair = generateKeyPairSync('ec', {
-    namedCurve: 'P-256',
-    publicKeyEncoding: { type: 'spki', format: 'der' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'der' }
-  });
+  private readonly certificatePromise = createLocalDtlsCertificate();
+  private readonly transports = new Map<string, DtlsTransport>();
 
-  createParameters(): DtlsParameters {
-    const fingerprint = createHash('sha256').update(this.keyPair.publicKey).digest('hex').match(/.{2}/g)?.join(':').toUpperCase() ?? '';
+  async createParameters(): Promise<DtlsParameters> {
+    const certificate = await this.localCertificate();
     return {
       role: 'auto',
-      fingerprints: [
-        {
-          algorithm: 'sha-256',
-          value: fingerprint
-        }
-      ]
+      fingerprints: certificate.fingerprints
     };
   }
 
-  async handshake(): Promise<never> {
-    throw new DtlsTransportUnavailableError();
+  async createTransport(transportId: string, iceAgent: IceAgent): Promise<DtlsTransport> {
+    const existing = this.transports.get(transportId);
+    if (existing) {
+      return existing;
+    }
+    const transport = new DtlsTransport(transportId, iceAgent, await this.localCertificate());
+    transport.on('error', () => undefined);
+    await transport.start();
+    this.transports.set(transportId, transport);
+    return transport;
+  }
+
+  setRemoteParameters(transportId: string, parameters: DtlsParameters): void {
+    this.requireTransport(transportId).setRemoteParameters(parameters);
+  }
+
+  getTransport(transportId: string): DtlsTransport | undefined {
+    return this.transports.get(transportId);
+  }
+
+  getTransportSnapshot(transportId: string): DtlsTransportSnapshot | undefined {
+    return this.transports.get(transportId)?.snapshot();
+  }
+
+  closeTransport(transportId: string): void {
+    const transport = this.transports.get(transportId);
+    if (!transport) {
+      return;
+    }
+    transport.close();
+    this.transports.delete(transportId);
+  }
+
+  async localCertificate(): Promise<LocalDtlsCertificate> {
+    return this.certificatePromise;
+  }
+
+  private requireTransport(transportId: string): DtlsTransport {
+    const transport = this.transports.get(transportId);
+    if (!transport) {
+      throw new DtlsTransportNotFoundError();
+    }
+    return transport;
   }
 }

@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { randomBytes } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { Model } from 'mongoose';
 import {
@@ -16,6 +17,8 @@ import {
   Permissions,
   Producer,
   Role,
+  RtpLayerSelection,
+  RtpParameters,
   Room,
   TransportOptions,
   VIEWER_PERMISSIONS
@@ -176,6 +179,10 @@ export class RoomsService {
     await this.media.setRemoteIceParameters(transportId, participantId, parameters);
   }
 
+  async setRemoteDtlsParameters(transportId: string, participantId: string, parameters: TransportOptions['dtlsParameters']): Promise<void> {
+    await this.media.setRemoteDtlsParameters(transportId, participantId, parameters);
+  }
+
   async restartIce(transportId: string, participantId: string): Promise<TransportOptions> {
     return this.media.restartIce(transportId, participantId);
   }
@@ -242,12 +249,16 @@ export class RoomsService {
       throw new NotFoundException('Producer not found');
     }
     await this.assertParticipant(request.roomId, participantId);
+    await this.media.assertTransportOwner(request.transportId, participantId);
+    const preferredLayers = normalizeLayerSelection(request.preferredLayers ?? preferredLayerNameToSelection(request.preferredLayer ?? 'high'));
     const consumerDoc = await this.consumers.create({
       roomId: request.roomId,
       producerId: producer.id,
       participantId,
+      transportId: request.transportId,
       preferredLayer: request.preferredLayer ?? 'high',
-      rtpParameters: producer.rtpParameters,
+      preferredLayers,
+      rtpParameters: consumerRtpParametersForProducer(producer.rtpParameters as unknown as RtpParameters),
       status: 'live'
     });
     await this.media.registerConsumer(this.toConsumer(consumerDoc));
@@ -263,6 +274,18 @@ export class RoomsService {
     consumer.status = status;
     await consumer.save();
     await this.media.setConsumerPaused(consumerId, status === 'paused');
+    return this.toConsumer(consumer);
+  }
+
+  async setConsumerPreferredLayers(consumerId: string, participantId: string, preferredLayers: RtpLayerSelection): Promise<Consumer> {
+    const consumer = await this.consumers.findById(consumerId);
+    if (!consumer || consumer.participantId !== participantId) {
+      throw new NotFoundException('Consumer not found');
+    }
+    consumer.preferredLayers = normalizeLayerSelection(preferredLayers) as Record<string, unknown>;
+    const snapshot = await this.media.setConsumerPreferredLayers(consumerId, normalizeLayerSelection(preferredLayers) ?? {});
+    consumer.currentLayers = snapshot?.currentLayers as Record<string, unknown> | undefined;
+    await consumer.save();
     return this.toConsumer(consumer);
   }
 
@@ -509,10 +532,69 @@ export class RoomsService {
       roomId: doc.roomId,
       producerId: doc.producerId,
       participantId: doc.participantId,
+      transportId: doc.transportId,
       preferredLayer: doc.preferredLayer,
+      preferredLayers: normalizeLayerSelection(doc.preferredLayers as RtpLayerSelection | undefined),
+      currentLayers: normalizeLayerSelection(doc.currentLayers as RtpLayerSelection | undefined),
       rtpParameters: doc.rtpParameters as unknown as Consumer['rtpParameters'],
       status: doc.status,
       createdAt: doc.createdAt.toISOString()
     };
   }
+}
+
+function consumerRtpParametersForProducer(producerRtp: RtpParameters): RtpParameters {
+  const primaryCodec = producerRtp.codecs.find((codec) => !/\/rtx$/i.test(codec.mimeType));
+  const rtxCodec = producerRtp.codecs.find((codec) => /\/rtx$/i.test(codec.mimeType) && Number(codec.parameters?.apt) === primaryCodec?.payloadType);
+  const ssrc = randomSsrc();
+  const rtxSsrc = rtxCodec ? randomSsrc() : undefined;
+  return {
+    ...producerRtp,
+    encodings: [
+      {
+        ssrc,
+        rtx: rtxSsrc !== undefined ? { ssrc: rtxSsrc, payloadType: rtxCodec?.payloadType } : undefined
+      }
+    ],
+    simulcast: undefined,
+    rtcp: {
+      ...producerRtp.rtcp,
+      cname: `sfu-${ssrc.toString(16)}`
+    }
+  };
+}
+
+function preferredLayerNameToSelection(layer: 'low' | 'medium' | 'high' | undefined): RtpLayerSelection | undefined {
+  switch (layer) {
+    case 'low':
+      return { spatialLayer: 0 };
+    case 'medium':
+      return { spatialLayer: 1 };
+    case 'high':
+      return { spatialLayer: 2 };
+    default:
+      return undefined;
+  }
+}
+
+function normalizeLayerSelection(selection: RtpLayerSelection | undefined): RtpLayerSelection | undefined {
+  if (!selection) {
+    return undefined;
+  }
+  return {
+    spatialLayer: normalizeLayerNumber(selection.spatialLayer),
+    temporalLayer: normalizeLayerNumber(selection.temporalLayer)
+  };
+}
+
+function normalizeLayerNumber(value: number | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return Math.max(0, Math.trunc(value));
+}
+
+function randomSsrc(): number {
+  const value = randomBytes(4).readUInt32BE(0);
+  return value === 0 ? 1 : value;
 }

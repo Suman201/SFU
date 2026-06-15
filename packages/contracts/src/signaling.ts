@@ -1,10 +1,10 @@
 import type { ChatMessage, SendChatMessageRequest } from './chat.js';
-import type { Consumer, CreateConsumerRequest } from './consumers.js';
+import type { Consumer, CreateConsumerRequest, SetConsumerPreferredLayersRequest } from './consumers.js';
 import type { Participant, ParticipantPatch } from './participants.js';
 import type { Permissions } from './permissions.js';
 import type { CreateProducerRequest, Producer } from './producers.js';
 import type { CreateRoomRequest, JoinRoomRequest, JoinRoomResponse, Room } from './rooms.js';
-import type { IceCandidate, IceParameters, TransportOptions } from './transport.js';
+import type { DtlsParameters, IceCandidate, IceParameters, TransportOptions } from './transport.js';
 
 export interface ClientToServerEvents {
   'room:create': (request: CreateRoomRequest, ack: Ack<Room>) => void;
@@ -19,6 +19,7 @@ export interface ClientToServerEvents {
   'transport:ice-parameters': (request: { transportId: string; iceParameters: IceParameters }, ack: Ack<void>) => void;
   'transport:ice-candidate': (request: { transportId: string; candidate: IceCandidate }, ack: Ack<void>) => void;
   'transport:ice-restart': (request: { transportId: string }, ack: Ack<TransportOptions>) => void;
+  'transport:dtls-parameters': (request: { transportId: string; dtlsParameters: DtlsParameters }, ack: Ack<void>) => void;
   'producer:create': (request: CreateProducerRequest, ack: Ack<Producer>) => void;
   'producer:pause': (request: { producerId: string }, ack: Ack<void>) => void;
   'producer:resume': (request: { producerId: string }, ack: Ack<void>) => void;
@@ -26,6 +27,7 @@ export interface ClientToServerEvents {
   'consumer:create': (request: CreateConsumerRequest, ack: Ack<Consumer>) => void;
   'consumer:pause': (request: { consumerId: string }, ack: Ack<void>) => void;
   'consumer:resume': (request: { consumerId: string }, ack: Ack<void>) => void;
+  'consumer:set-preferred-layers': (request: SetConsumerPreferredLayersRequest, ack: Ack<Consumer>) => void;
   'consumer:close': (request: { consumerId: string }, ack: Ack<void>) => void;
   'permission:update': (request: { roomId: string; participantId: string; permissions: Partial<Permissions> }, ack: Ack<void>) => void;
   'participant:kick': (request: { roomId: string; participantId: string; reason?: string }, ack: Ack<void>) => void;

@@ -39,15 +39,24 @@ export class RtpPacket {
     let offset = 12;
     const csrc: number[] = [];
     for (let index = 0; index < csrcCount; index += 1) {
+      if (offset + 4 > buffer.length) {
+        throw new Error('RTP CSRC list truncated');
+      }
       csrc.push(buffer.readUInt32BE(offset));
       offset += 4;
     }
     let headerExtension: RtpHeaderExtension | null = null;
     if (extension) {
+      if (offset + 4 > buffer.length) {
+        throw new Error('RTP header extension truncated');
+      }
       const profile = buffer.readUInt16BE(offset);
       const extensionLengthWords = buffer.readUInt16BE(offset + 2);
       offset += 4;
       const extensionLength = extensionLengthWords * 4;
+      if (offset + extensionLength > buffer.length) {
+        throw new Error('RTP header extension exceeds packet bounds');
+      }
       headerExtension = {
         profile,
         value: buffer.subarray(offset, offset + extensionLength)
@@ -62,7 +71,8 @@ export class RtpPacket {
   }
 
   serialize(): Buffer {
-    const extensionLength = this.headerExtension ? 4 + this.headerExtension.value.length : 0;
+    const paddedHeaderExtensionValue = this.headerExtension ? padToWordBoundary(this.headerExtension.value) : null;
+    const extensionLength = this.headerExtension && paddedHeaderExtensionValue ? 4 + paddedHeaderExtensionValue.length : 0;
     const csrcLength = this.csrc.length * 4;
     const buffer = Buffer.alloc(12 + csrcLength + extensionLength + this.payload.length);
     buffer[0] = (this.version << 6) | (this.padding ? 0x20 : 0) | (this.headerExtension ? 0x10 : 0) | this.csrc.length;
@@ -75,14 +85,22 @@ export class RtpPacket {
       buffer.writeUInt32BE(csrc, offset);
       offset += 4;
     }
-    if (this.headerExtension) {
+    if (this.headerExtension && paddedHeaderExtensionValue) {
       buffer.writeUInt16BE(this.headerExtension.profile, offset);
-      buffer.writeUInt16BE(Math.ceil(this.headerExtension.value.length / 4), offset + 2);
+      buffer.writeUInt16BE(paddedHeaderExtensionValue.length / 4, offset + 2);
       offset += 4;
-      this.headerExtension.value.copy(buffer, offset);
-      offset += this.headerExtension.value.length;
+      paddedHeaderExtensionValue.copy(buffer, offset);
+      offset += paddedHeaderExtensionValue.length;
     }
     this.payload.copy(buffer, offset);
     return buffer;
   }
+}
+
+function padToWordBoundary(value: Buffer): Buffer {
+  const padding = (4 - (value.length % 4)) % 4;
+  if (padding === 0) {
+    return value;
+  }
+  return Buffer.concat([value, Buffer.alloc(padding)]);
 }

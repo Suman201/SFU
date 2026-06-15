@@ -21,6 +21,7 @@ import type {
   Producer,
   Room,
   ServerToClientEvents,
+  SetConsumerPreferredLayersRequest,
   TransportOptions
 } from '@native-sfu/contracts';
 import type { Server, Socket } from 'socket.io';
@@ -178,6 +179,11 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return socketAck(ack, () => this.rooms.restartIce(request.transportId, this.requireParticipant(socket)));
   }
 
+  @SubscribeMessage('transport:dtls-parameters')
+  dtlsParameters(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: Parameters<ClientToServerEvents['transport:dtls-parameters']>[0], ack: Ack<void>): Promise<void> {
+    return socketAck(ack, () => this.rooms.setRemoteDtlsParameters(request.transportId, this.requireParticipant(socket), request.dtlsParameters));
+  }
+
   @SubscribeMessage('producer:create')
   createProducer(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: CreateProducerRequest, ack: Ack<Producer>): Promise<void> {
     return socketAck(ack, async () => {
@@ -222,6 +228,15 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('consumer:resume')
   resumeConsumer(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { consumerId: string }, ack: Ack<void>): Promise<void> {
     return this.setConsumerStatus(socket, request.consumerId, 'live', ack);
+  }
+
+  @SubscribeMessage('consumer:set-preferred-layers')
+  setConsumerPreferredLayers(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: SetConsumerPreferredLayersRequest, ack: Ack<Consumer>): Promise<void> {
+    return socketAck(ack, async () => {
+      const consumer = await this.rooms.setConsumerPreferredLayers(request.consumerId, this.requireParticipant(socket), request.preferredLayers);
+      socket.emit('consumer:updated', consumer);
+      return consumer;
+    });
   }
 
   @SubscribeMessage('consumer:close')

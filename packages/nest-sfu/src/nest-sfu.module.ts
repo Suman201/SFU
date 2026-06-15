@@ -88,7 +88,38 @@ function coreProviders(): Provider[] {
       useFactory: (options: NestSfuOptions) =>
         new RtpRouter({
           onForwardedPacket: (kind) => options.metrics?.onForwardedRtpPacket?.(kind),
-          onDroppedPacket: (reason) => options.metrics?.onDroppedRtpPacket?.(reason)
+          onDroppedPacket: (reason) => options.metrics?.onDroppedRtpPacket?.(reason),
+          onBufferedPacket: (ssrc, sequenceNumber) => options.metrics?.onBufferedRtpPacket?.(ssrc, sequenceNumber),
+          onStreamRestart: (producerId, ssrc) => options.metrics?.onRtpStreamRestart?.(producerId, ssrc),
+          onForwardedRtcpPacket: (kind, direction) => options.metrics?.onForwardedRtcpPacket?.(kind, direction),
+          onDroppedRtcpPacket: (reason) => options.metrics?.onDroppedRtcpPacket?.(reason),
+          onRetransmittedPacket: (kind) => options.metrics?.onRetransmittedRtpPacket?.(kind),
+          onRetransmissionMiss: (ssrc, sequenceNumber) => options.metrics?.onRetransmissionMiss?.(ssrc, sequenceNumber),
+          onKeyframeRequestForwarded: (producerId, feedbackKind) => options.metrics?.onKeyframeRequestForwarded?.(producerId, feedbackKind),
+          onKeyframeRequestCoalesced: (producerId, feedbackKind) => options.metrics?.onKeyframeRequestCoalesced?.(producerId, feedbackKind),
+          onTwccPacketArrival: (id, sequenceNumber, direction) => options.metrics?.onTwccPacketArrival?.(id, sequenceNumber, direction),
+          onTwccFeedback: (consumerId, feedback) => options.metrics?.onTwccFeedback?.(consumerId, feedback),
+          onBandwidthEstimate: (id, estimate) => options.metrics?.onBandwidthEstimate?.(id, estimate),
+          onPacingQueueDepth: (snapshot) => options.metrics?.onPacingQueueDepth?.(snapshot),
+          onKeyframeDetected: (producerId, ssrc, codec) => options.metrics?.onKeyframeDetected?.(producerId, ssrc, codec),
+          onKeyframeGateOpened: (consumerId, producerId) => options.metrics?.onKeyframeGateOpened?.(consumerId, producerId),
+          onKeyframeGateDropped: (consumerId, producerId) => options.metrics?.onKeyframeGateDropped?.(consumerId, producerId),
+          onProducerLayerActive: (producerId, layer) => options.metrics?.onProducerLayerActive?.(producerId, layer),
+          onConsumerLayersChanged: (consumerId, layers) => options.metrics?.onConsumerLayersChanged?.(consumerId, layers),
+          onLayerSwitch: (consumerId, producerId, from, to) => options.metrics?.onLayerSwitch?.(consumerId, producerId, from, to),
+          onLayerSwitchFailed: (consumerId, producerId, target, reason) => options.metrics?.onLayerSwitchFailed?.(consumerId, producerId, target, reason),
+          retransmissionCacheSize: options.rtpRetransmissionCacheSize,
+          keyframeRequestIntervalMs: options.keyframeRequestIntervalMs,
+          maxReorderPackets: options.maxRtpReorderPackets,
+          restartSequenceGap: options.rtpRestartSequenceGap,
+          duplicateWindowSize: options.rtpDuplicateWindowSize,
+          enableTwcc: options.enableTwcc,
+          enablePacing: options.enablePacing,
+          enableJoinKeyframeGate: options.enableJoinKeyframeGate,
+          enableAdaptiveLayerSelection: options.enableAdaptiveLayerSelection,
+          defaultPacingBitrateBps: options.defaultPacingBitrateBps,
+          maxPacingQueueBytes: options.maxPacingQueueBytes,
+          twccFeedbackIntervalMs: options.twccFeedbackIntervalMs
         })
     },
     {
@@ -96,7 +127,13 @@ function coreProviders(): Provider[] {
       inject: [NEST_SFU_OPTIONS],
       useFactory: (options: NestSfuOptions) =>
         new RtcpProcessor({
-          onReceiverReport: (roomId, participantId, report) => options.metrics?.onReceiverReport?.(roomId, participantId, report)
+          onSenderReport: (roomId, participantId, report) => options.metrics?.onSenderReport?.(roomId, participantId, report),
+          onReceiverReport: (roomId, participantId, report) => options.metrics?.onReceiverReport?.(roomId, participantId, report),
+          onNack: (roomId, participantId, feedback) => options.metrics?.onNack?.(roomId, participantId, feedback),
+          onPli: (roomId, participantId, feedback) => options.metrics?.onPli?.(roomId, participantId, feedback),
+          onFir: (roomId, participantId, feedback) => options.metrics?.onFir?.(roomId, participantId, feedback),
+          onRemb: (roomId, participantId, feedback) => options.metrics?.onRemb?.(roomId, participantId, feedback),
+          onTwcc: (roomId, participantId, feedback) => options.metrics?.onTwcc?.(roomId, participantId, feedback)
         })
     },
     { provide: SimulcastSelector, useFactory: () => new SimulcastSelector() },

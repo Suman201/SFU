@@ -46,7 +46,9 @@ export class IceService {
         consentTimeoutMs: this.options.consentTimeoutMs,
         maxConsentFailures: this.options.maxConsentFailures,
         transactionTimeoutMs: this.options.iceTransactionTimeoutMs,
-        taMs: this.options.iceTaMs
+        taMs: this.options.iceTaMs,
+        stunServers: this.options.stunServers,
+        turnServers: this.options.turnServers
       },
       this.portAllocator
     );
@@ -73,7 +75,9 @@ export class IceService {
         consentTimeoutMs: this.options.consentTimeoutMs,
         maxConsentFailures: this.options.maxConsentFailures,
         transactionTimeoutMs: this.options.iceTransactionTimeoutMs,
-        taMs: this.options.iceTaMs
+        taMs: this.options.iceTaMs,
+        stunServers: this.options.stunServers,
+        turnServers: this.options.turnServers
       },
       this.portAllocator
     );

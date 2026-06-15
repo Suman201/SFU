@@ -1,32 +1,43 @@
 import { EventEmitter } from 'events';
 import dgram, { RemoteInfo, Socket } from 'dgram';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { networkInterfaces } from 'os';
 import type { IceCandidate, IceParameters } from '@native-sfu/contracts';
 import { computeCandidateFoundation, computeCandidatePriority, createCandidatePair, isCompatiblePair, pairId } from './candidate';
 import {
   createTransactionId,
   decodeXorMappedAddress,
+  encodeDataAttribute,
   encodeEmptyAttribute,
+  encodeRequestedTransport,
   encodeStunMessage,
   encodeStringAttribute,
   encodeUInt32Attribute,
   encodeUInt64Attribute,
   encodeXorMappedAddress,
+  encodeXorPeerAddress,
   getAttribute,
   getUsername,
   hasUseCandidate,
   isStunMessage,
   parseStunMessage,
   readUInt64Attribute,
+  type StunAttribute,
   STUN_BINDING_REQUEST,
   STUN_BINDING_SUCCESS_RESPONSE,
+  STUN_ALLOCATE_REQUEST,
+  STUN_ALLOCATE_SUCCESS_RESPONSE,
+  STUN_ALLOCATE_ERROR_RESPONSE,
+  STUN_CREATE_PERMISSION_REQUEST,
+  STUN_CREATE_PERMISSION_SUCCESS_RESPONSE,
+  STUN_DATA_INDICATION,
+  STUN_SEND_INDICATION,
   StunAttributeType,
   verifyFingerprint,
   verifyMessageIntegrity
 } from './stun-message';
 import { UdpPortAllocator } from './udp-port-allocator';
-import type { IceAgentOptions, IceAgentSnapshot, IceAgentState, IceCandidatePair, IceRole, LocalIceCandidate, RemoteIceCandidate } from './ice.types';
+import type { IceAgentOptions, IceAgentSnapshot, IceAgentState, IceCandidatePair, IceRole, LocalIceCandidate, RemoteIceCandidate, TurnRelayAllocation, TurnServerOptions } from './ice.types';
 
 interface IceSocketContext {
   id: string;
@@ -41,6 +52,22 @@ interface PendingTransaction {
   sentAt: number;
   consent: boolean;
   timeout: NodeJS.Timeout;
+}
+
+interface ServerTransaction {
+  timeout: NodeJS.Timeout;
+  resolve: (response: StunServerResponse) => void;
+  reject: (error: Error) => void;
+}
+
+interface StunServerResponse {
+  raw: Buffer;
+  message: ReturnType<typeof parseStunMessage>;
+  remote: RemoteInfo;
+}
+
+interface RelayIngressContext {
+  localCandidate: LocalIceCandidate;
 }
 
 export class IceAgent extends EventEmitter {
@@ -58,6 +85,7 @@ export class IceAgent extends EventEmitter {
   private readonly pairs = new Map<string, IceCandidatePair>();
   private readonly sockets = new Map<string, IceSocketContext>();
   private readonly transactions = new Map<string, PendingTransaction>();
+  private readonly serverTransactions = new Map<string, ServerTransaction>();
   private selectedPair?: IceCandidatePair;
   private checkTimer?: NodeJS.Timeout;
   private consentTimer?: NodeJS.Timeout;
@@ -103,6 +131,8 @@ export class IceAgent extends EventEmitter {
     for (const address of interfaces) {
       await this.bindHostCandidate(address);
     }
+    await this.gatherServerReflexiveCandidates();
+    await this.gatherRelayCandidates();
     this.setState('new');
     return [...this.localCandidates];
   }
@@ -149,6 +179,11 @@ export class IceAgent extends EventEmitter {
       clearTimeout(transaction.timeout);
     }
     this.transactions.clear();
+    for (const transaction of this.serverTransactions.values()) {
+      clearTimeout(transaction.timeout);
+      transaction.reject(new Error('ICE agent closed'));
+    }
+    this.serverTransactions.clear();
     this.localParameters.usernameFragment = randomBytes(12).toString('base64url');
     this.localParameters.password = randomBytes(24).toString('base64url');
     this.stopCheckTimer();
@@ -195,6 +230,22 @@ export class IceAgent extends EventEmitter {
     return this.selectedPair;
   }
 
+  async sendSelectedDatagram(packet: Buffer): Promise<void> {
+    this.assertOpen();
+    if (!this.selectedPair) {
+      throw new Error('ICE selected candidate pair is required before sending media datagrams');
+    }
+    const socketContext = this.sockets.get(this.selectedPair.local.socketId);
+    if (!socketContext) {
+      throw new Error('Local ICE socket not found');
+    }
+    if (this.selectedPair.local.relay) {
+      await this.sendViaTurnRelay(socketContext, this.selectedPair, packet);
+      return;
+    }
+    await sendUdp(socketContext.socket, packet, this.selectedPair.remote.port, this.selectedPair.remote.ip);
+  }
+
   close(): void {
     if (this.closed) {
       return;
@@ -206,6 +257,11 @@ export class IceAgent extends EventEmitter {
       clearTimeout(transaction.timeout);
     }
     this.transactions.clear();
+    for (const transaction of this.serverTransactions.values()) {
+      clearTimeout(transaction.timeout);
+      transaction.reject(new Error('ICE agent closed'));
+    }
+    this.serverTransactions.clear();
     for (const context of this.sockets.values()) {
       context.socket.close();
       this.portAllocator?.release(context.candidate.port);
@@ -257,6 +313,153 @@ export class IceAgent extends EventEmitter {
     socket.on('error', (error) => this.emit('error', error));
     this.localCandidates.push(candidate);
     this.sockets.set(candidate.socketId, { id: candidate.socketId, socket, candidate });
+  }
+
+  private async gatherServerReflexiveCandidates(): Promise<void> {
+    for (const url of this.options.stunServers ?? []) {
+      const server = parseIceServerUrl(url, 'stun');
+      if (!server || server.transport !== 'udp') {
+        continue;
+      }
+      for (const context of [...this.sockets.values()]) {
+        try {
+          const response = await this.sendServerRequest(context, server, STUN_BINDING_REQUEST, []);
+          if (response.message.type !== STUN_BINDING_SUCCESS_RESPONSE) {
+            continue;
+          }
+          const mapped = getAttribute(response.message, StunAttributeType.XOR_MAPPED_ADDRESS);
+          if (!mapped) {
+            continue;
+          }
+          const address = decodeXorMappedAddress(mapped, response.message.transactionId);
+          this.addLocalCandidate({
+            transportId: this.transportId,
+            socketId: context.candidate.socketId,
+            foundation: computeCandidateFoundation({ type: 'srflx', protocol: 'udp', ip: address.address }, context.candidate.baseAddress),
+            component: 1,
+            protocol: 'udp',
+            priority: computeCandidatePriority({ type: 'srflx', component: 1 }),
+            ip: address.address,
+            port: address.port,
+            type: 'srflx',
+            relatedAddress: context.candidate.baseAddress,
+            relatedPort: context.candidate.basePort,
+            baseAddress: context.candidate.baseAddress,
+            basePort: context.candidate.basePort
+          });
+        } catch (error) {
+          this.emit('warning', error);
+        }
+      }
+    }
+  }
+
+  private async gatherRelayCandidates(): Promise<void> {
+    for (const serverOptions of this.options.turnServers ?? []) {
+      const server = parseIceServerUrl(serverOptions.url, 'turn');
+      if (!server || server.transport !== 'udp') {
+        continue;
+      }
+      for (const context of [...this.sockets.values()]) {
+        try {
+          const allocation = await this.allocateTurnRelay(context, server, serverOptions);
+          if (!allocation) {
+            continue;
+          }
+          this.addLocalCandidate({
+            transportId: this.transportId,
+            socketId: context.candidate.socketId,
+            foundation: computeCandidateFoundation({ type: 'relay', protocol: 'udp', ip: allocation.address.address }, context.candidate.baseAddress),
+            component: 1,
+            protocol: 'udp',
+            priority: computeCandidatePriority({ type: 'relay', component: 1 }),
+            ip: allocation.address.address,
+            port: allocation.address.port,
+            type: 'relay',
+            relatedAddress: context.candidate.baseAddress,
+            relatedPort: context.candidate.basePort,
+            baseAddress: context.candidate.baseAddress,
+            basePort: context.candidate.basePort,
+            relay: allocation.relay
+          });
+        } catch (error) {
+          this.emit('warning', error);
+        }
+      }
+    }
+  }
+
+  private addLocalCandidate(candidate: LocalIceCandidate): void {
+    if (this.localCandidates.some((existing) => existing.type === candidate.type && existing.ip === candidate.ip && existing.port === candidate.port && existing.component === candidate.component)) {
+      return;
+    }
+    this.localCandidates.push(candidate);
+    this.formCandidatePairs();
+  }
+
+  private async allocateTurnRelay(
+    context: IceSocketContext,
+    server: IceServerAddress,
+    serverOptions: TurnServerOptions
+  ): Promise<{ address: { address: string; port: number }; relay: TurnRelayAllocation } | undefined> {
+    const unauthenticated = await this.sendServerRequest(context, server, STUN_ALLOCATE_REQUEST, [encodeRequestedTransport()]);
+    let realm = serverOptions.realm ?? getAttribute(unauthenticated.message, StunAttributeType.REALM)?.toString('utf8') ?? '';
+    let nonce = getAttribute(unauthenticated.message, StunAttributeType.NONCE)?.toString('utf8') ?? '';
+    if (unauthenticated.message.type === STUN_ALLOCATE_SUCCESS_RESPONSE) {
+      const relayed = getAttribute(unauthenticated.message, StunAttributeType.XOR_RELAYED_ADDRESS);
+      if (!relayed) {
+        return undefined;
+      }
+      const address = decodeXorMappedAddress(relayed, unauthenticated.message.transactionId);
+      return {
+        address,
+        relay: {
+          server: { host: server.host, port: server.port },
+          username: serverOptions.username,
+          credential: serverOptions.credential,
+          realm,
+          nonce,
+          permissions: new Set<string>()
+        }
+      };
+    }
+    if (unauthenticated.message.type !== STUN_ALLOCATE_ERROR_RESPONSE || !realm || !nonce) {
+      return undefined;
+    }
+    const key = turnLongTermKey(serverOptions.username, realm, serverOptions.credential);
+    const authenticated = await this.sendServerRequest(
+      context,
+      server,
+      STUN_ALLOCATE_REQUEST,
+      [
+        encodeRequestedTransport(),
+        encodeStringAttribute(StunAttributeType.USERNAME, serverOptions.username),
+        encodeStringAttribute(StunAttributeType.REALM, realm),
+        encodeStringAttribute(StunAttributeType.NONCE, nonce)
+      ],
+      key
+    );
+    if (authenticated.message.type !== STUN_ALLOCATE_SUCCESS_RESPONSE) {
+      return undefined;
+    }
+    const relayed = getAttribute(authenticated.message, StunAttributeType.XOR_RELAYED_ADDRESS);
+    if (!relayed) {
+      return undefined;
+    }
+    const address = decodeXorMappedAddress(relayed, authenticated.message.transactionId);
+    const lifetime = readUInt32AttributeSafe(authenticated.message, StunAttributeType.LIFETIME);
+    return {
+      address,
+      relay: {
+        server: { host: server.host, port: server.port },
+        username: serverOptions.username,
+        credential: serverOptions.credential,
+        realm,
+        nonce,
+        lifetimeSeconds: lifetime,
+        permissions: new Set<string>()
+      }
+    };
   }
 
   private formCandidatePairs(): void {
@@ -357,17 +560,32 @@ export class IceAgent extends EventEmitter {
       timeout
     });
     pair.lastRequestAt = Date.now();
+    if (pair.local.relay) {
+      await this.sendViaTurnRelay(socketContext, pair, packet);
+      return;
+    }
     await sendUdp(socketContext.socket, packet, pair.remote.port, pair.remote.ip);
   }
 
-  private async handleSocketMessage(socketId: string, message: Buffer, remote: RemoteInfo): Promise<void> {
+  private async handleSocketMessage(socketId: string, message: Buffer, remote: RemoteInfo, relayIngress?: RelayIngressContext): Promise<void> {
     if (!isStunMessage(message)) {
       this.emit('data', { socketId, message, remote });
       return;
     }
     const stun = parseStunMessage(message);
+    if (stun.type === STUN_DATA_INDICATION) {
+      await this.handleTurnDataIndication(socketId, stun, remote);
+      return;
+    }
+    const serverTransaction = this.serverTransactions.get(stun.transactionId.toString('hex'));
+    if (serverTransaction) {
+      clearTimeout(serverTransaction.timeout);
+      this.serverTransactions.delete(stun.transactionId.toString('hex'));
+      serverTransaction.resolve({ raw: message, message: stun, remote });
+      return;
+    }
     if (stun.type === STUN_BINDING_REQUEST) {
-      await this.handleBindingRequest(socketId, message, stun, remote);
+      await this.handleBindingRequest(socketId, message, stun, remote, relayIngress);
       return;
     }
     if (stun.type === STUN_BINDING_SUCCESS_RESPONSE) {
@@ -375,7 +593,28 @@ export class IceAgent extends EventEmitter {
     }
   }
 
-  private async handleBindingRequest(socketId: string, raw: Buffer, request: ReturnType<typeof parseStunMessage>, remote: RemoteInfo): Promise<void> {
+  private async handleTurnDataIndication(socketId: string, indication: ReturnType<typeof parseStunMessage>, turnRemote: RemoteInfo): Promise<void> {
+    const data = getAttribute(indication, StunAttributeType.DATA);
+    const peer = getAttribute(indication, StunAttributeType.XOR_PEER_ADDRESS);
+    if (!data || !peer) {
+      return;
+    }
+    const peerAddress = decodeXorMappedAddress(peer, indication.transactionId);
+    const remote: RemoteInfo = {
+      address: peerAddress.address,
+      port: peerAddress.port,
+      family: peerAddress.family === 'IPv6' ? 'IPv6' : 'IPv4',
+      size: data.length
+    };
+    const relayCandidate = this.relayCandidateForDataIndication(socketId, turnRemote);
+    if (isStunMessage(data)) {
+      await this.handleSocketMessage(socketId, data, remote, relayCandidate ? { localCandidate: relayCandidate } : undefined);
+      return;
+    }
+    this.emit('data', { socketId, message: data, remote });
+  }
+
+  private async handleBindingRequest(socketId: string, raw: Buffer, request: ReturnType<typeof parseStunMessage>, remote: RemoteInfo, relayIngress?: RelayIngressContext): Promise<void> {
     const username = getUsername(request);
     if (!username?.startsWith(`${this.localParameters.usernameFragment}:`)) {
       return;
@@ -387,8 +626,9 @@ export class IceAgent extends EventEmitter {
     if (!socketContext) {
       return;
     }
+    const localCandidate = relayIngress?.localCandidate ?? socketContext.candidate;
     const remoteCandidate = this.ensurePeerReflexiveCandidate(remote, readUInt32AttributeSafe(request, StunAttributeType.PRIORITY));
-    const pair = this.ensurePair(socketContext.candidate, remoteCandidate);
+    const pair = this.ensurePair(localCandidate, remoteCandidate);
     pair.state = 'succeeded';
     pair.lastResponseAt = Date.now();
     pair.failures = 0;
@@ -407,6 +647,11 @@ export class IceAgent extends EventEmitter {
       this.localParameters.password,
       true
     );
+    if (localCandidate.relay) {
+      await this.ensureTurnPermission(socketContext, localCandidate.relay, remoteCandidate);
+      await this.sendTurnIndication(socketContext, localCandidate.relay, remoteCandidate, response);
+      return;
+    }
     await sendUdp(socketContext.socket, response, remote.port, remote.address);
   }
 
@@ -432,6 +677,93 @@ export class IceAgent extends EventEmitter {
       this.selectedPair = transaction.pair;
       this.setState(transaction.consent ? this.state : 'connected');
       this.startConsentFreshness();
+    }
+  }
+
+  private async sendServerRequest(
+    context: IceSocketContext,
+    server: IceServerAddress,
+    type: number,
+    attributes: StunAttribute[],
+    integrityKey?: Buffer
+  ): Promise<StunServerResponse> {
+    const transactionId = createTransactionId();
+    const packet = encodeStunMessage({ type, transactionId, attributes }, integrityKey, true);
+    const transactionIdHex = transactionId.toString('hex');
+    const timeoutMs = this.options.transactionTimeoutMs ?? 5000;
+    const response = new Promise<StunServerResponse>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.serverTransactions.delete(transactionIdHex);
+        reject(new Error(`Timed out waiting for STUN/TURN response from ${server.host}:${server.port}`));
+      }, timeoutMs);
+      timeout.unref?.();
+      this.serverTransactions.set(transactionIdHex, { timeout, resolve, reject });
+    });
+    await sendUdp(context.socket, packet, server.port, server.host);
+    return response;
+  }
+
+  private async sendViaTurnRelay(context: IceSocketContext, pair: IceCandidatePair, packet: Buffer): Promise<void> {
+    const relay = pair.local.relay;
+    if (!relay) {
+      throw new Error('TURN relay allocation is required for relay candidate send');
+    }
+    await this.ensureTurnPermission(context, relay, pair.remote);
+    await this.sendTurnIndication(context, relay, pair.remote, packet);
+  }
+
+  private async sendTurnIndication(context: IceSocketContext, relay: TurnRelayAllocation, remote: Pick<RemoteIceCandidate, 'ip' | 'port'>, packet: Buffer): Promise<void> {
+    const transactionId = createTransactionId();
+    const indication = encodeStunMessage(
+      {
+        type: STUN_SEND_INDICATION,
+        transactionId,
+        attributes: [
+          encodeXorPeerAddress({ family: 'IPv4', address: remote.ip, port: remote.port }, transactionId),
+          encodeDataAttribute(packet)
+        ]
+      },
+      undefined,
+      true
+    );
+    await sendUdp(context.socket, indication, relay.server.port, relay.server.host);
+  }
+
+  private relayCandidateForDataIndication(socketId: string, turnRemote: RemoteInfo): LocalIceCandidate | undefined {
+    const relays = this.localCandidates.filter((candidate) => candidate.relay);
+    const sameSocketRelays = relays.filter((candidate) => candidate.socketId === socketId);
+    const sameServer = (candidate: LocalIceCandidate): boolean => candidate.relay?.server.port === turnRemote.port && candidate.relay.server.host === turnRemote.address;
+    return sameSocketRelays.find(sameServer) ?? sameSocketRelays[0] ?? relays.find(sameServer) ?? relays[0];
+  }
+
+  private async ensureTurnPermission(context: IceSocketContext, relay: TurnRelayAllocation, remote: RemoteIceCandidate): Promise<void> {
+    const permissionKey = `${remote.ip}:${remote.port}`;
+    if (relay.permissions.has(permissionKey)) {
+      return;
+    }
+    const transactionId = createTransactionId();
+    const attributes = [
+      encodeStringAttribute(StunAttributeType.USERNAME, relay.username),
+      encodeStringAttribute(StunAttributeType.REALM, relay.realm),
+      encodeStringAttribute(StunAttributeType.NONCE, relay.nonce),
+      encodeXorPeerAddress({ family: 'IPv4', address: remote.ip, port: remote.port }, transactionId)
+    ];
+    const key = turnLongTermKey(relay.username, relay.realm, relay.credential);
+    const packet = encodeStunMessage({ type: STUN_CREATE_PERMISSION_REQUEST, transactionId, attributes }, key, true);
+    const transactionIdHex = transactionId.toString('hex');
+    const timeoutMs = this.options.transactionTimeoutMs ?? 5000;
+    const response = new Promise<StunServerResponse>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.serverTransactions.delete(transactionIdHex);
+        reject(new Error(`Timed out waiting for TURN permission response from ${relay.server.host}:${relay.server.port}`));
+      }, timeoutMs);
+      timeout.unref?.();
+      this.serverTransactions.set(transactionIdHex, { timeout, resolve, reject });
+    });
+    await sendUdp(context.socket, packet, relay.server.port, relay.server.host);
+    const result = await response;
+    if (result.message.type === STUN_CREATE_PERMISSION_SUCCESS_RESPONSE) {
+      relay.permissions.add(permissionKey);
     }
   }
 
@@ -483,6 +815,49 @@ export class IceAgent extends EventEmitter {
 
 function randomTieBreaker(): bigint {
   return randomBytes(8).readBigUInt64BE(0);
+}
+
+interface IceServerAddress {
+  scheme: 'stun' | 'turn';
+  host: string;
+  port: number;
+  transport: 'udp' | 'tcp';
+}
+
+function parseIceServerUrl(url: string, expectedScheme: 'stun' | 'turn'): IceServerAddress | undefined {
+  const trimmed = url.trim();
+  const match = trimmed.match(/^(stun|stuns|turn|turns):(.+)$/i);
+  if (!match) {
+    return undefined;
+  }
+  const scheme = match[1]!.toLowerCase().replace(/s$/, '') as 'stun' | 'turn';
+  if (scheme !== expectedScheme) {
+    return undefined;
+  }
+  const rest = match[2]!.replace(/^\/\//, '');
+  const [authority, query = ''] = rest.split('?');
+  const transport = query
+    .split('&')
+    .map((part) => part.split('='))
+    .find(([key]) => key?.toLowerCase() === 'transport')?.[1]?.toLowerCase();
+  const hostPort = authority ?? '';
+  const lastColon = hostPort.lastIndexOf(':');
+  const defaultPort = scheme === 'turn' ? 3478 : 3478;
+  const host = lastColon > 0 ? hostPort.slice(0, lastColon) : hostPort;
+  const port = lastColon > 0 ? Number(hostPort.slice(lastColon + 1)) : defaultPort;
+  if (!host || !Number.isInteger(port) || port <= 0 || port > 65535) {
+    return undefined;
+  }
+  return {
+    scheme,
+    host,
+    port,
+    transport: transport === 'tcp' ? 'tcp' : 'udp'
+  };
+}
+
+function turnLongTermKey(username: string, realm: string, credential: string): Buffer {
+  return createHash('md5').update(`${username}:${realm}:${credential}`).digest();
 }
 
 function gatherInterfaceAddresses(includeLoopback: boolean, allowList?: string[]): string[] {
