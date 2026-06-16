@@ -15,7 +15,6 @@ import { MediaApiModule } from './media/media-api.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { MetricsService } from './metrics/metrics.service';
 import { RedisModule } from './redis/redis.module';
-import { RecordingsModule } from './recordings/recordings.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { ClusterModule } from './cluster/cluster.module';
 
@@ -111,7 +110,6 @@ import { ClusterModule } from './cluster/cluster.module';
     AuthModule,
     RoomsModule,
     MediaApiModule,
-    RecordingsModule,
     HealthModule
   ]
 })
