@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -32,8 +33,8 @@ import { ClusterModule } from './cluster/cluster.module';
         pinoHttp: {
           level: config.get<string>('app.nodeEnv') === 'production' ? 'info' : 'debug',
           transport: config.get<string>('app.nodeEnv') === 'production' ? undefined : { target: 'pino-pretty', options: { singleLine: true } },
-          genReqId: (request) => request.headers['x-request-id']?.toString() ?? randomUUID(),
-          customProps: (request) => ({ requestId: String((request as { id?: string | number }).id ?? '') }),
+          genReqId: (request: IncomingMessage) => request.headers['x-request-id']?.toString() ?? randomUUID(),
+          customProps: (request: IncomingMessage) => ({ requestId: String((request as { id?: string | number }).id ?? '') }),
           redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]']
         }
       })
