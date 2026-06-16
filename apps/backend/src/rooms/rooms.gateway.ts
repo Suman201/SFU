@@ -1,4 +1,5 @@
-import { Logger, UseGuards } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -34,18 +35,25 @@ type SfuSocket = Socket<ClientToServerEvents, ServerToClientEvents> & {
     user?: SocketUser;
     participantId?: string;
     roomId?: string;
+    requestId?: string;
   };
 };
+
+const socketAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? process.env.FRONTEND_URL ?? 'http://localhost:4200')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 @WebSocketGateway({
   namespace: '/sfu',
   cors: {
-    origin: true,
+    origin: socketAllowedOrigins,
     credentials: true
   }
 })
 export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(RoomsGateway.name);
+  private readonly connectionAttempts = new Map<string, { count: number; resetAt: number }>();
 
   @WebSocketServer()
   server!: Server<ClientToServerEvents, ServerToClientEvents>;
@@ -56,8 +64,15 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {}
 
   async handleConnection(socket: SfuSocket): Promise<void> {
+    socket.data.requestId = randomUUID();
+    if (this.isConnectionThrottled(socket)) {
+      this.logger.warn(`Socket connection throttled requestId=${socket.data.requestId}`);
+      socket.disconnect(true);
+      return;
+    }
     const token = this.extractToken(socket);
     if (!token) {
+      this.logger.warn(`Socket missing bearer token requestId=${socket.data.requestId}`);
       socket.disconnect(true);
       return;
     }
@@ -69,7 +84,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         roles: payload.roles
       };
     } catch (error) {
-      this.logger.warn(`Socket auth failed: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.warn(`Socket auth failed requestId=${socket.data.requestId}: ${error instanceof Error ? error.message : String(error)}`);
       socket.disconnect(true);
     }
   }
@@ -357,5 +372,17 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       throw new Error('Socket has not joined a room');
     }
     return socket.data.participantId;
+  }
+
+  private isConnectionThrottled(socket: SfuSocket): boolean {
+    const address = socket.handshake.address ?? 'unknown';
+    const now = Date.now();
+    const current = this.connectionAttempts.get(address);
+    if (!current || current.resetAt <= now) {
+      this.connectionAttempts.set(address, { count: 1, resetAt: now + 60_000 });
+      return false;
+    }
+    current.count += 1;
+    return current.count > 60;
   }
 }

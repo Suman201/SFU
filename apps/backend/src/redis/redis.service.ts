@@ -11,14 +11,20 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   constructor(private readonly config: ConfigService) {}
 
-  onModuleInit(): void {
-    const url = this.config.getOrThrow<string>('REDIS_URL');
-    this.client = new Redis(url, { lazyConnect: true, maxRetriesPerRequest: 3 });
-    this.pub = new Redis(url, { lazyConnect: true, maxRetriesPerRequest: 3 });
-    this.sub = new Redis(url, { lazyConnect: true, maxRetriesPerRequest: 3 });
-    void Promise.all([this.client.connect(), this.pub.connect(), this.sub.connect()]).catch((error: unknown) => {
+  async onModuleInit(): Promise<void> {
+    const url = this.config.getOrThrow<string>('redis.url');
+    this.client = this.createClient(url, 'client');
+    this.pub = this.createClient(url, 'pub');
+    this.sub = this.createClient(url, 'sub');
+    try {
+      await Promise.all([this.client.connect(), this.pub.connect(), this.sub.connect()]);
+      this.logger.log('Redis clients connected');
+    } catch (error: unknown) {
       this.logger.error('Redis connection failed', error instanceof Error ? error.stack : String(error));
-    });
+      if (this.config.get<boolean>('redis.required', true)) {
+        throw error;
+      }
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -67,5 +73,22 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async removePresence(roomId: string, participantId: string): Promise<void> {
     await this.client.hdel(`presence:${roomId}`, participantId);
+  }
+
+  async ping(): Promise<'PONG'> {
+    return (await this.client.ping()) as 'PONG';
+  }
+
+  private createClient(url: string, name: string): Redis {
+    const client = new Redis(url, {
+      lazyConnect: true,
+      maxRetriesPerRequest: 3,
+      enableReadyCheck: true,
+      connectionName: `educonnect-${name}`
+    });
+    client.on('error', (error) => this.logger.error(`Redis ${name} error`, error.stack));
+    client.on('reconnecting', () => this.logger.warn(`Redis ${name} reconnecting`));
+    client.on('ready', () => this.logger.log(`Redis ${name} ready`));
+    return client;
   }
 }

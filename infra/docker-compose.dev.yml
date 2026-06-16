@@ -28,7 +28,7 @@ services:
       dockerfile: apps/backend/Dockerfile
     restart: unless-stopped
     env_file:
-      - ../.env
+      - ../.env.development
     ports:
       - "3000:3000"
       - "40000-40100:40000-40100/udp"
@@ -45,15 +45,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-
-  coturn:
-    image: coturn/coturn:4
-    profiles: ["media"]
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - ./docker/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
-    command: ["-c", "/etc/coturn/turnserver.conf"]
 
   prometheus:
     image: prom/prometheus:v2.55.0
@@ -73,8 +64,6 @@ services:
     restart: unless-stopped
     ports:
       - "3001:3000"
-    env_file:
-      - ../.env
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-development-grafana-password-32chars}
     volumes:

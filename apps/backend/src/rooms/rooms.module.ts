@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { DatabaseModule } from '../database/database.module';
 import { MetricsModule } from '../metrics/metrics.module';
 import { RedisModule } from '../redis/redis.module';
@@ -7,7 +8,7 @@ import { RoomsGateway } from './rooms.gateway';
 import { RoomsService } from './rooms.service';
 
 @Module({
-  imports: [DatabaseModule, RedisModule, MetricsModule],
+  imports: [AuthModule, DatabaseModule, RedisModule, MetricsModule],
   controllers: [RoomsController],
   providers: [RoomsService, RoomsGateway],
   exports: [RoomsService]
