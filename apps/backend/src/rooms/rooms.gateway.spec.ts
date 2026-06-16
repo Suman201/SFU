@@ -2,143 +2,159 @@ import type { ConsumerLayerEvent, ProducerDynacastEvent, RoomFailureEvent } from
 import { RoomOwnerRedirectException } from '../cluster/node-registry.service';
 import { RoomsGateway } from './rooms.gateway';
 
-describe('RoomsGateway Dynacast signaling', () => {
-  it('re-emits cross-node room signals onto the local Socket.IO room', () => {
-    const { emitSignal, emissions } = createGatewayHarness();
+describe('RoomsGateway', () => {
+  it('disconnects unauthorized sockets', async () => {
+    const gateway = new RoomsGateway({} as never, {} as never, {} as never);
+    const socket: { data: { requestId?: string }; handshake: { auth: Record<string, unknown>; headers: Record<string, unknown>; address: string }; disconnect: jest.Mock } = {
+      data: {},
+      handshake: { auth: {}, headers: {}, address: '127.0.0.1' },
+      disconnect: jest.fn()
+    };
 
-    emitSignal({
-      sourceNodeId: 'node-b',
-      roomId: 'room-1',
-      event: 'participant:joined',
-      payload: [{ participantId: 'viewer-1' }]
+    await gateway.handleConnection(socket as never);
+
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(socket.data.requestId).toBeDefined();
+  });
+
+  describe('Dynacast signaling', () => {
+    it('re-emits cross-node room signals onto the local Socket.IO room', () => {
+      const { emitSignal, emissions } = createGatewayHarness();
+
+      emitSignal({
+        sourceNodeId: 'node-b',
+        roomId: 'room-1',
+        event: 'participant:joined',
+        payload: [{ participantId: 'viewer-1' }]
+      });
+
+      expect(emissions).toEqual([{ target: 'room-1', event: 'participant:joined', payload: { participantId: 'viewer-1' } }]);
     });
 
-    expect(emissions).toEqual([{ target: 'room-1', event: 'participant:joined', payload: { participantId: 'viewer-1' } }]);
-  });
+    it('targets producer Dynacast events only to the publisher socket', async () => {
+      const { rooms, emitProducerDynacast, emissions } = createGatewayHarness();
+      const event = dynacastEvent('layers-needed');
 
-  it('targets producer Dynacast events only to the publisher socket', async () => {
-    const { rooms, emitProducerDynacast, emissions } = createGatewayHarness();
-    const event = dynacastEvent('layers-needed');
+      emitProducerDynacast(event);
+      await flushPromises();
 
-    emitProducerDynacast(event);
-    await flushPromises();
+      expect(rooms.producerDynacastSignalTarget).toHaveBeenCalledWith(event, 3);
+      expect(emissions).toEqual([{ target: 'publisher-socket', event: 'producer:layers-needed', payload: event }]);
+      expect(rooms.recordDynacastSignalDelivery).toHaveBeenCalledWith(event, 2);
+      expect(rooms.recordDynacastSignalFailure).not.toHaveBeenCalled();
+      expect(emissions.some((emission) => emission.target === event.roomId)).toBe(false);
+    });
 
-    expect(rooms.producerDynacastSignalTarget).toHaveBeenCalledWith(event, 3);
-    expect(emissions).toEqual([{ target: 'publisher-socket', event: 'producer:layers-needed', payload: event }]);
-    expect(rooms.recordDynacastSignalDelivery).toHaveBeenCalledWith(event, 2);
-    expect(rooms.recordDynacastSignalFailure).not.toHaveBeenCalled();
-    expect(emissions.some((emission) => emission.target === event.roomId)).toBe(false);
-  });
+    it('records a control failure when the publisher socket cannot be resolved', async () => {
+      const { rooms, emitProducerDynacast, emissions } = createGatewayHarness({ targetMissing: true });
+      const event = dynacastEvent('updated');
 
-  it('records a control failure when the publisher socket cannot be resolved', async () => {
-    const { rooms, emitProducerDynacast, emissions } = createGatewayHarness({ targetMissing: true });
-    const event = dynacastEvent('updated');
+      emitProducerDynacast(event);
+      await flushPromises();
 
-    emitProducerDynacast(event);
-    await flushPromises();
+      expect(emissions).toEqual([]);
+      expect(rooms.recordDynacastSignalFailure).toHaveBeenCalledWith(event, 'publisher_socket_missing');
+      expect(rooms.recordDynacastSignalDelivery).not.toHaveBeenCalled();
+    });
 
-    expect(emissions).toEqual([]);
-    expect(rooms.recordDynacastSignalFailure).toHaveBeenCalledWith(event, 'publisher_socket_missing');
-    expect(rooms.recordDynacastSignalDelivery).not.toHaveBeenCalled();
-  });
+    it('ignores stale disconnects after publisher socket replacement', async () => {
+      const { gateway, rooms, emissions } = createGatewayHarness();
+      rooms.leaveRoomForSocket.mockResolvedValueOnce({ closed: false, left: false });
+      const socket = {
+        id: 'old-publisher-socket',
+        data: { roomId: 'room-1', participantId: 'publisher' },
+        to: jest.fn(() => ({ emit: jest.fn() }))
+      };
 
-  it('ignores stale disconnects after publisher socket replacement', async () => {
-    const { gateway, rooms, emissions } = createGatewayHarness();
-    rooms.leaveRoomForSocket.mockResolvedValueOnce({ closed: false, left: false });
-    const socket = {
-      id: 'old-publisher-socket',
-      data: { roomId: 'room-1', participantId: 'publisher' },
-      to: jest.fn(() => ({ emit: jest.fn() }))
-    };
+      await gateway.handleDisconnect(socket as never);
 
-    await gateway.handleDisconnect(socket as never);
+      expect(rooms.leaveRoomForSocket).toHaveBeenCalledWith('room-1', 'publisher', 'old-publisher-socket');
+      expect(socket.to).not.toHaveBeenCalled();
+      expect(emissions).toEqual([]);
+    });
 
-    expect(rooms.leaveRoomForSocket).toHaveBeenCalledWith('room-1', 'publisher', 'old-publisher-socket');
-    expect(socket.to).not.toHaveBeenCalled();
-    expect(emissions).toEqual([]);
-  });
-
-  it('emits SVC layer events on SVC-specific socket channels', () => {
-    const { emitConsumerLayer, emissions } = createGatewayHarness();
-    const event: ConsumerLayerEvent = {
-      type: 'changed',
-      roomId: 'room-1',
-      participantId: 'viewer',
-      consumerId: 'consumer-svc',
-      producerId: 'producer-svc',
-      currentSvcLayers: { spatialLayerId: 2, temporalLayerId: 1 },
-      targetSvcLayers: { spatialLayerId: 2, temporalLayerId: 1 },
-      preferredSvcLayers: { spatialLayerId: 2, temporalLayerId: 1 },
-      reason: 'preferred',
-      timestamp: '2026-06-16T00:00:00.000Z'
-    };
-
-    emitConsumerLayer(event);
-
-    expect(emissions).toEqual([{ target: 'room-1', event: 'consumer:svc-layers-changed', payload: event }]);
-  });
-
-  it('emits room media failure events to the affected room', () => {
-    const { emitRoomFailure, emissions } = createGatewayHarness();
-    const event: RoomFailureEvent = {
-      roomId: 'room-1',
-      workerId: 'media-worker-1',
-      reason: 'worker_crashed',
-      message: 'Media worker media-worker-1 crashed',
-      failedAt: '2026-06-16T00:00:00.000Z',
-      recoverable: false,
-      affectedParticipants: ['publisher', 'viewer'],
-      affectedTransports: ['transport-1'],
-      affectedProducers: ['producer-1'],
-      affectedConsumers: ['consumer-1']
-    };
-
-    emitRoomFailure(event);
-
-    expect(emissions).toEqual([{ target: 'room-1', event: 'room:failed', payload: event }]);
-  });
-
-  it('returns room owner lookup over Socket.IO', async () => {
-    const { gateway, rooms } = createGatewayHarness();
-    const ack = jest.fn();
-
-    await gateway.getRoomOwner({ roomId: 'room-1' }, ack);
-
-    expect(rooms.lookupRoomOwner).toHaveBeenCalledWith('room-1');
-    const response = ack.mock.calls[0]![0];
-    expect(response.ok).toBe(true);
-    expect(response.data.roomId).toBe('room-1');
-    expect(response.data.local).toBe(true);
-    expect(response.data.available).toBe(true);
-  });
-
-  it('returns redirect details and does not join socket room on remote-owned join', async () => {
-    const { gateway, rooms } = createGatewayHarness();
-    rooms.joinRoom.mockRejectedValueOnce(
-      new RoomOwnerRedirectException({
+    it('emits SVC layer events on SVC-specific socket channels', () => {
+      const { emitConsumerLayer, emissions } = createGatewayHarness();
+      const event: ConsumerLayerEvent = {
+        type: 'changed',
         roomId: 'room-1',
-        ownerNodeId: 'node-a',
-        ownerUrl: 'https://node-a.example.test',
-        reason: 'room_owned_by_remote_node'
-      })
-    );
-    const socket = {
-      id: 'viewer-socket',
-      data: { user: { id: 'user-1', email: 'viewer@example.test', roles: ['participant'] } },
-      join: jest.fn(),
-      to: jest.fn(() => ({ emit: jest.fn() }))
-    };
-    const ack = jest.fn();
+        participantId: 'viewer',
+        consumerId: 'consumer-svc',
+        producerId: 'producer-svc',
+        currentSvcLayers: { spatialLayerId: 2, temporalLayerId: 1 },
+        targetSvcLayers: { spatialLayerId: 2, temporalLayerId: 1 },
+        preferredSvcLayers: { spatialLayerId: 2, temporalLayerId: 1 },
+        reason: 'preferred',
+        timestamp: '2026-06-16T00:00:00.000Z'
+      };
 
-    await gateway.joinRoom(socket as never, { roomId: 'room-1', displayName: 'Viewer' }, ack);
+      emitConsumerLayer(event);
 
-    expect(socket.join).not.toHaveBeenCalled();
-    const response = ack.mock.calls[0]![0];
-    expect(response.ok).toBe(false);
-    expect(response.error.code).toBe('ROOM_REDIRECT');
-    expect(response.error.message).toBe('Room is owned by node node-a');
-    expect(response.error.details.ownerNodeId).toBe('node-a');
-    expect(response.error.details.ownerUrl).toBe('https://node-a.example.test');
+      expect(emissions).toEqual([{ target: 'room-1', event: 'consumer:svc-layers-changed', payload: event }]);
+    });
+
+    it('emits room media failure events to the affected room', () => {
+      const { emitRoomFailure, emissions } = createGatewayHarness();
+      const event: RoomFailureEvent = {
+        roomId: 'room-1',
+        workerId: 'media-worker-1',
+        reason: 'worker_crashed',
+        message: 'Media worker media-worker-1 crashed',
+        failedAt: '2026-06-16T00:00:00.000Z',
+        recoverable: false,
+        affectedParticipants: ['publisher', 'viewer'],
+        affectedTransports: ['transport-1'],
+        affectedProducers: ['producer-1'],
+        affectedConsumers: ['consumer-1']
+      };
+
+      emitRoomFailure(event);
+
+      expect(emissions).toEqual([{ target: 'room-1', event: 'room:failed', payload: event }]);
+    });
+
+    it('returns room owner lookup over Socket.IO', async () => {
+      const { gateway, rooms } = createGatewayHarness();
+      const ack = jest.fn();
+
+      await gateway.getRoomOwner({ roomId: 'room-1' }, ack);
+
+      expect(rooms.lookupRoomOwner).toHaveBeenCalledWith('room-1');
+      const response = ack.mock.calls[0]![0];
+      expect(response.ok).toBe(true);
+      expect(response.data.roomId).toBe('room-1');
+      expect(response.data.local).toBe(true);
+      expect(response.data.available).toBe(true);
+    });
+
+    it('returns redirect details and does not join socket room on remote-owned join', async () => {
+      const { gateway, rooms } = createGatewayHarness();
+      rooms.joinRoom.mockRejectedValueOnce(
+        new RoomOwnerRedirectException({
+          roomId: 'room-1',
+          ownerNodeId: 'node-a',
+          ownerUrl: 'https://node-a.example.test',
+          reason: 'room_owned_by_remote_node'
+        })
+      );
+      const socket = {
+        id: 'viewer-socket',
+        data: { user: { id: 'user-1', email: 'viewer@example.test', roles: ['participant'] } },
+        join: jest.fn(),
+        to: jest.fn(() => ({ emit: jest.fn() }))
+      };
+      const ack = jest.fn();
+
+      await gateway.joinRoom(socket as never, { roomId: 'room-1', displayName: 'Viewer' }, ack);
+
+      expect(socket.join).not.toHaveBeenCalled();
+      const response = ack.mock.calls[0]![0];
+      expect(response.ok).toBe(false);
+      expect(response.error.code).toBe('ROOM_REDIRECT');
+      expect(response.error.message).toBe('Room is owned by node node-a');
+      expect(response.error.details.ownerNodeId).toBe('node-a');
+      expect(response.error.details.ownerUrl).toBe('https://node-a.example.test');
+    });
   });
 });
 

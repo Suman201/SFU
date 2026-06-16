@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { DatabaseModule } from '../database/database.module';
 import { ClusterModule } from '../cluster/cluster.module';
 import { MetricsModule } from '../metrics/metrics.module';
@@ -9,7 +10,7 @@ import { RoomSignalService } from './room-signal.service';
 import { RoomsService } from './rooms.service';
 
 @Module({
-  imports: [DatabaseModule, RedisModule, MetricsModule, ClusterModule],
+  imports: [AuthModule, DatabaseModule, RedisModule, MetricsModule, ClusterModule],
   controllers: [RoomsController],
   providers: [RoomsService, RoomsGateway, RoomSignalService],
   exports: [RoomsService]

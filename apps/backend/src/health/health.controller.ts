@@ -1,15 +1,18 @@
-import { Controller, Get } from '@nestjs/common';
-import { HealthCheck, HealthCheckError, HealthCheckService, MemoryHealthIndicator, type HealthIndicatorResult } from '@nestjs/terminus';
+import { Controller, Get, VERSION_NEUTRAL } from '@nestjs/common';
+import { HealthCheck, HealthCheckError, HealthCheckService, MemoryHealthIndicator, MongooseHealthIndicator, type HealthIndicatorResult } from '@nestjs/terminus';
 import { MediaService } from '@native-sfu/nest-sfu';
 import { PipeCoordinatorService } from '../cluster/pipe-coordinator.service';
 import { NodeRegistryService } from '../cluster/node-registry.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { RedisService } from '../redis/redis.service';
 
-@Controller({ path: 'health', version: '1' })
+@Controller({ path: 'health', version: VERSION_NEUTRAL })
 export class HealthController {
   constructor(
     private readonly health: HealthCheckService,
     private readonly memory: MemoryHealthIndicator,
+    private readonly mongoose: MongooseHealthIndicator,
+    private readonly redis: RedisService,
     private readonly media: MediaService,
     private readonly pipe: PipeCoordinatorService,
     private readonly cluster: NodeRegistryService,
@@ -22,6 +25,11 @@ export class HealthController {
     return this.health.check([
       () => this.memory.checkHeap('memory_heap', 512 * 1024 * 1024),
       () => this.memory.checkRSS('memory_rss', 1024 * 1024 * 1024),
+      () => this.mongoose.pingCheck('mongodb'),
+      async () => {
+        await this.redis.ping();
+        return { redis: { status: 'up' } };
+      },
       () => this.checkMediaWorkers(),
       () => this.checkPipeTransport(),
       () => this.checkCluster()
@@ -31,6 +39,23 @@ export class HealthController {
   @Get('live')
   live() {
     return { status: 'ok' };
+  }
+
+  @Get('db')
+  @HealthCheck()
+  db() {
+    return this.health.check([() => this.mongoose.pingCheck('mongodb')]);
+  }
+
+  @Get('redis')
+  @HealthCheck()
+  redisHealth() {
+    return this.health.check([
+      async () => {
+        await this.redis.ping();
+        return { redis: { status: 'up' } };
+      }
+    ]);
   }
 
   private async checkCluster(): Promise<HealthIndicatorResult> {

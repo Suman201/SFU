@@ -1,0 +1,52 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: always
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+    restart: always
+    env_file:
+      - ../.env.production
+    ports:
+      - "3000:3000"
+      - "40000-40100:40000-40100/udp"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - recordings:/app/recordings
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  mongo-data:
+  redis-data:
+  recordings:

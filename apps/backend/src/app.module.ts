@@ -1,9 +1,12 @@
-import { Module } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { NestSfuModule } from '@native-sfu/nest-sfu';
+import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module';
+import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { appConfig } from './config/app.config';
 import { validateConfig } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
@@ -20,23 +23,36 @@ import { ClusterModule } from './cluster/cluster.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: [`.env.${process.env.NODE_ENV ?? 'development'}`, '.env'],
       load: [appConfig],
       validate: validateConfig
+    }),
+    LoggerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        pinoHttp: {
+          level: config.get<string>('app.nodeEnv') === 'production' ? 'info' : 'debug',
+          transport: config.get<string>('app.nodeEnv') === 'production' ? undefined : { target: 'pino-pretty', options: { singleLine: true } },
+          genReqId: (request) => request.headers['x-request-id']?.toString() ?? randomUUID(),
+          customProps: (request) => ({ requestId: String((request as { id?: string | number }).id ?? '') }),
+          redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]']
+        }
+      })
     }),
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => [
         {
-          ttl: config.get<number>('RATE_LIMIT_TTL', 60_000),
-          limit: config.get<number>('RATE_LIMIT_MAX', 120)
+          ttl: config.get<number>('security.rateLimitTtl', 60),
+          limit: config.get<number>('security.rateLimitMax', 120)
         }
       ]
     }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        uri: config.getOrThrow<string>('MONGODB_URI'),
-        autoIndex: config.get<string>('NODE_ENV') !== 'production',
+        uri: config.getOrThrow<string>('database.uri'),
+        autoIndex: config.get<string>('app.nodeEnv') !== 'production',
         serverSelectionTimeoutMS: 10_000
       })
     }),
@@ -73,13 +89,6 @@ import { ClusterModule } from './cluster/cluster.module';
         pipePortRange: config.get<{ min: number; max: number }>('pipe.portRange'),
         pipeAdvertiseIp: config.get<string>('pipe.advertiseIp'),
         metrics: {
-          onMediaWorkerIpcRequest: (operation, status, durationMs) => {
-            metrics.mediaWorkerIpcRequests.labels(operation, status).inc();
-            metrics.mediaWorkerIpcLatency.labels(operation).observe(durationMs);
-          },
-          onMediaWorkerCrash: (workerId, reason) => metrics.mediaWorkerCrashes.labels(workerId, reason).inc(),
-          onMediaWorkerRestart: (workerId, reason) => metrics.mediaWorkerRestarts.labels(workerId, reason).inc(),
-          onMediaWorkerDrain: (workerId, state) => metrics.mediaWorkerDrains.labels(workerId, state).inc(),
           onForwardedRtpPacket: (kind) => metrics.forwardedRtpPackets.labels(kind).inc(),
           onDroppedRtpPacket: (reason) => metrics.droppedRtpPackets.labels(reason).inc(),
           onPipeRtpPacket: (direction, bytes) => {
@@ -106,4 +115,8 @@ import { ClusterModule } from './cluster/cluster.module';
     HealthModule
   ]
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}

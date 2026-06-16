@@ -1,0 +1,79 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../.env.development
+    ports:
+      - "3000:3000"
+      - "40000-40100:40000-40100/udp"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - recordings:/app/recordings
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-development-grafana-password-32chars}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  mongo-data:
+  redis-data:
+  recordings:
+  grafana-data:

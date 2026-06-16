@@ -2,8 +2,6 @@ services:
   mongo:
     image: mongo:7
     restart: unless-stopped
-    ports:
-      - "27017:27017"
     volumes:
       - mongo-data:/data/db
     healthcheck:
@@ -16,27 +14,13 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "6379:6379"
     volumes:
       - redis-data:/data
-
-  coturn:
-    image: coturn/coturn:4
-    restart: unless-stopped
-    ports:
-      - "3478:3478"
-      - "3478:3478/udp"
-      - "5349:5349"
-      - "5349:5349/udp"
-      - "49152-49200:49152-49200/udp"
-    volumes:
-      - ./docker/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
-    command:
-      - "-c"
-      - "/etc/coturn/turnserver.conf"
-      - "--realm=${TURN_REALM:-native-sfu.local}"
-      - "--static-auth-secret=${TURN_SECRET:-replace-with-turn-rest-secret}"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   backend:
     build:
@@ -88,37 +72,49 @@ services:
       mongo:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       coturn:
         condition: service_started
     volumes:
       - recordings:/app/recordings
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
-  frontend:
-    build:
-      context: ..
-      dockerfile: apps/frontend/Dockerfile
+  coturn:
+    image: coturn/coturn:4
+    profiles: ["media"]
     restart: unless-stopped
-    ports:
-      - "4200:80"
-    depends_on:
-      - backend
+    network_mode: host
+    volumes:
+      - ./docker/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
 
   prometheus:
     image: prom/prometheus:v2.55.0
+    profiles: ["observability"]
     restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      backend:
+        condition: service_healthy
 
   grafana:
     image: grafana/grafana:11.4.0
+    profiles: ["observability"]
     restart: unless-stopped
     ports:
       - "3001:3000"
+    env_file:
+      - ../.env
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-development-grafana-password-32chars}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro

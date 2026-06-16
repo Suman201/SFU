@@ -1,62 +1,58 @@
-const requiredKeys = ['MONGODB_URI', 'REDIS_URL', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'TURN_SECRET'] as const;
+import Joi from 'joi';
+
+const forbiddenSecretValues = ['changeme', 'change-me', 'secret', 'admin', 'password', 'replace-with-strong-access-secret', 'replace-with-strong-refresh-secret', 'replace-with-turn-rest-secret'];
+
+const secretSchema = Joi.string()
+  .min(24)
+  .custom((value: string, helpers) => {
+    if (forbiddenSecretValues.includes(value.toLowerCase())) {
+      return helpers.error('any.invalid');
+    }
+    return value;
+  });
+
+const schema = Joi.object({
+  NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
+  PORT: Joi.number().port().default(3000),
+  PUBLIC_URL: Joi.string().uri().default('http://localhost:3000'),
+  FRONTEND_URL: Joi.string().default('http://localhost:4200'),
+  CORS_ALLOWED_ORIGINS: Joi.string().default(Joi.ref('FRONTEND_URL')),
+  MONGODB_URI: Joi.string().uri({ scheme: ['mongodb', 'mongodb+srv'] }).required(),
+  REDIS_URL: Joi.string().uri({ scheme: ['redis', 'rediss'] }).required(),
+  REDIS_REQUIRED: Joi.boolean().truthy('true').falsy('false').default(true),
+  JWT_ACCESS_SECRET: secretSchema.required(),
+  JWT_REFRESH_SECRET: secretSchema.required(),
+  JWT_ACCESS_TTL: Joi.string().default('15m'),
+  JWT_REFRESH_TTL: Joi.string().default('7d'),
+  JWT_ISSUER: Joi.string().default('native-sfu-auth'),
+  JWT_AUDIENCE: Joi.string().default('native-sfu-clients'),
+  TURN_REALM: Joi.string().default('native-sfu.local'),
+  TURN_SECRET: secretSchema.required(),
+  TURN_URIS: Joi.string().allow('').default(''),
+  RECORDING_STORAGE_DRIVER: Joi.string().valid('local', 's3').default('local'),
+  RECORDING_LOCAL_PATH: Joi.string().default('/app/recordings'),
+  S3_ENDPOINT: Joi.string().allow('').optional(),
+  S3_BUCKET: Joi.string().allow('').optional(),
+  S3_ACCESS_KEY_ID: Joi.string().allow('').optional(),
+  S3_SECRET_ACCESS_KEY: Joi.string().allow('').optional(),
+  RATE_LIMIT_TTL: Joi.number().integer().min(1).default(60),
+  RATE_LIMIT_MAX: Joi.number().integer().min(1).default(120),
+  SWAGGER_TITLE: Joi.string().default('EduConnect Live Backend API'),
+  SWAGGER_VERSION: Joi.string().default('0.1.0'),
+  SWAGGER_PATH: Joi.string().default('api/docs'),
+  METRICS_PATH: Joi.string().default('metrics'),
+  MEDIA_WORKER_MODE: Joi.string().valid('in-process', 'worker').default('in-process'),
+  MEDIA_WORKER_COUNT: Joi.number().integer().min(1).default(1),
+  ENABLE_PIPE_TRANSPORT: Joi.boolean().truthy('true').falsy('false').default(false),
+  PIPE_CLUSTER_SECRET: Joi.string().min(24).when('ENABLE_PIPE_TRANSPORT', { is: true, then: Joi.required() }),
+  PIPE_ADVERTISE_IP: Joi.string().when('ENABLE_PIPE_TRANSPORT', { is: true, then: Joi.required() }),
+  PIPE_PORT_RANGE: Joi.string().pattern(/^\d{2,5}-\d{2,5}$/).default('41000-41100')
+}).unknown(true);
 
 export function validateConfig(config: Record<string, unknown>): Record<string, unknown> {
-  const nodeEnv = String(config.NODE_ENV ?? 'development').toLowerCase();
-  const missing = requiredKeys.filter((key) => typeof config[key] !== 'string' || String(config[key]).length < 12);
-  if (missing.length > 0) {
-    throw new Error(`Missing or weak environment values: ${missing.join(', ')}`);
+  const { error, value } = schema.validate(config, { abortEarly: false, convert: true });
+  if (error) {
+    throw new Error(`Invalid environment configuration: ${error.details.map((detail) => detail.message).join('; ')}`);
   }
-  const mediaWorkerMode = String(config.MEDIA_WORKER_MODE ?? 'in-process');
-  if (!['in-process', 'worker'].includes(mediaWorkerMode)) {
-    throw new Error('MEDIA_WORKER_MODE must be one of: in-process, worker');
-  }
-  const mediaWorkerCount = Number(config.MEDIA_WORKER_COUNT ?? 1);
-  if (!Number.isInteger(mediaWorkerCount) || mediaWorkerCount < 1) {
-    throw new Error('MEDIA_WORKER_COUNT must be a positive integer');
-  }
-  for (const key of [
-    'MEDIA_WORKER_MAX_ROOMS_PER_WORKER',
-    'MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER',
-    'MEDIA_WORKER_MAX_INFLIGHT_REQUESTS_PER_WORKER',
-    'MEDIA_WORKER_DRAIN_TIMEOUT_MS',
-    'MEDIA_WORKER_SOFT_IPC_LATENCY_MS',
-    'MEDIA_WORKER_HARD_IPC_LATENCY_MS',
-    'MEDIA_WORKER_SOFT_MEMORY_LIMIT_BYTES',
-    'MEDIA_WORKER_HARD_MEMORY_LIMIT_BYTES',
-    'MEDIA_WORKER_SOFT_RTP_PACKET_RATE',
-    'MEDIA_WORKER_SOFT_RTCP_PACKET_RATE',
-    'NODE_HEARTBEAT_INTERVAL_MS',
-    'NODE_TTL_MS',
-    'NODE_MAX_ROOMS',
-    'NODE_MAX_TRANSPORTS',
-    'PIPE_COORDINATION_TIMEOUT_MS',
-    'PIPE_COORDINATION_MAX_ATTEMPTS',
-    'PIPE_MAX_SETUP_REQUESTS_PER_MINUTE'
-  ]) {
-    if (config[key] !== undefined && String(config[key]).length > 0 && (!Number.isFinite(Number(config[key])) || Number(config[key]) < 1)) {
-      throw new Error(`${key} must be a positive number`);
-    }
-  }
-  if (String(config.ENABLE_PIPE_TRANSPORT ?? 'false').toLowerCase() === 'true') {
-    if (typeof config.PIPE_CLUSTER_SECRET !== 'string' || String(config.PIPE_CLUSTER_SECRET).length < 24) {
-      throw new Error('PIPE_CLUSTER_SECRET must be at least 24 characters when ENABLE_PIPE_TRANSPORT=true');
-    }
-    if (nodeEnv !== 'test' && String(config.PIPE_ADVERTISE_IP ?? '').trim().length === 0) {
-      throw new Error('PIPE_ADVERTISE_IP is required when ENABLE_PIPE_TRANSPORT=true outside test mode');
-    }
-  }
-  if (config.PIPE_PORT_RANGE !== undefined && !/^\d{2,5}-\d{2,5}$/.test(String(config.PIPE_PORT_RANGE))) {
-    throw new Error('PIPE_PORT_RANGE must use min-max format, for example 41000-41100');
-  }
-  if (config.PIPE_ALLOWED_NODE_IDS !== undefined) {
-    const invalid = String(config.PIPE_ALLOWED_NODE_IDS)
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean)
-      .some((value) => !/^[a-zA-Z0-9._:-]+$/.test(value));
-    if (invalid) {
-      throw new Error('PIPE_ALLOWED_NODE_IDS must be a comma-separated list of node IDs');
-    }
-  }
-  return config;
+  return value as Record<string, unknown>;
 }

@@ -1,7 +1,7 @@
-import { Controller, Get, Header } from '@nestjs/common';
+import { Controller, Get, Header, VERSION_NEUTRAL } from '@nestjs/common';
 import { MetricsService } from './metrics.service';
 
-@Controller()
+@Controller({ version: VERSION_NEUTRAL })
 export class MetricsController {
   constructor(private readonly metrics: MetricsService) {}
 
