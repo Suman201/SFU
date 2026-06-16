@@ -44,6 +44,7 @@ socket.emit('room:create', payload, (response) => {
 - `producer:pause`
 - `producer:resume`
 - `producer:close`
+- `producer:get-layers`
 
 ## Consumer Events
 
@@ -80,6 +81,9 @@ socket.emit('room:create', payload, (response) => {
 - `producer:created`
 - `producer:updated`
 - `producer:closed`
+- `producer:layers-needed`
+- `producer:layers-unneeded`
+- `producer:dynacast-updated`
 - `consumer:created`
 - `consumer:updated`
 - `consumer:closed`

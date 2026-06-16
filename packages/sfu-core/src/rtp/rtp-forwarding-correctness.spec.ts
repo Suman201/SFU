@@ -1,7 +1,9 @@
 import type { Consumer, Producer, RtpParameters } from '@native-sfu/contracts';
-import { createNack } from '../rtcp/rtcp-packet';
+import { createNack, createReceiverReport, createSenderReport, parseReceiverReport, parseRtcpCompound, parseSenderReport } from '../rtcp/rtcp-packet';
+import { DeterministicPacketLossHarness } from './packet-loss-harness';
 import { RtpPacket } from './rtp-packet';
 import { RtpRouter } from './rtp-router';
+import { originalSequenceNumberFromRtx } from './rtx';
 
 describe('RtpRouter forwarding correctness', () => {
   it('validates payload type and drops malformed RTP packets without throwing', async () => {
@@ -44,6 +46,29 @@ describe('RtpRouter forwarding correctness', () => {
     expect(drops).toEqual(['duplicate_packet', 'late_packet']);
   });
 
+  it('drains reordered packets after missing packet timeout', async () => {
+    const expired: string[] = [];
+    const router = new RtpRouter({
+      maxReorderDelayMs: 5,
+      sequenceNumberGenerator: () => 30000,
+      timestampGenerator: () => 700000,
+      onReorderGapExpired: (ssrc, expected, released) => expired.push(`${ssrc}:${expected}->${released}`)
+    });
+    const producer = createProducer('producer-1', 'publisher', 'transport-pub', rtpParameters(1111, 96));
+    const writes: RtpPacket[] = [];
+    router.addProducer(producer);
+    router.addConsumer(createConsumer('consumer-1', producer, 'viewer', 'transport-sub', rtpParameters(2222, 120)), async (packet) => {
+      writes.push(packet);
+    });
+
+    expect(await router.route(rawPacket(1111, 96, 10, 1000))).toBe(1);
+    expect(await router.route(rawPacket(1111, 96, 12, 7000))).toBe(0);
+    await waitFor(() => writes.length === 2);
+
+    expect(writes.map((packet) => packet.sequenceNumber)).toEqual([30000, 30001]);
+    expect(expired).toEqual(['1111:11->12']);
+  });
+
   it('rewrites RTP per consumer and maps rewritten NACK repairs back to cached producer packets', async () => {
     const router = new RtpRouter({
       retransmissionCacheSize: 16,
@@ -75,6 +100,177 @@ describe('RtpRouter forwarding correctness', () => {
     expect(repaired).toBe(1);
     expect(writes.map((packet) => packet.sequenceNumber)).toEqual([40000, 40000]);
     expect(upstreamFeedback).toEqual([]);
+  });
+
+  it('generates RTX packets for cached NACK repairs when RTX is negotiated', async () => {
+    let sequence = 41000;
+    const router = new RtpRouter({
+      retransmissionCacheSize: 16,
+      sequenceNumberGenerator: () => sequence++,
+      timestampGenerator: () => 900000
+    });
+    const producer = createProducer('producer-1', 'publisher', 'transport-pub', rtpParameters(1111, 96, 1122, 97));
+    const consumer = createConsumer('consumer-1', producer, 'viewer', 'transport-sub', rtpParameters(2222, 120, 2233, 121));
+    const writes: RtpPacket[] = [];
+    const upstreamFeedback: Buffer[] = [];
+    router.addProducer(producer, async (packet) => {
+      upstreamFeedback.push(packet);
+    });
+    router.addConsumer(consumer, async (packet) => {
+      writes.push(packet);
+    });
+
+    await router.route(rawPacket(1111, 96, 10, 1000));
+    const targetSequenceNumber = writes[0]!.sequenceNumber;
+    const repaired = await router.routeRtcp(createNack({ senderSsrc: 9999, mediaSsrc: 2222, lostPacketIds: [targetSequenceNumber] }), {
+      sourceTransportId: 'transport-sub',
+      sourceParticipantId: 'viewer'
+    });
+
+    expect(repaired).toBe(1);
+    expect(writes[1]?.ssrc).toBe(2233);
+    expect(writes[1]?.payloadType).toBe(121);
+    expect(originalSequenceNumberFromRtx(writes[1]!)).toBe(targetSequenceNumber);
+    expect(writes[1]?.payload.subarray(2).toString()).toBe('forwarding');
+    expect(upstreamFeedback).toEqual([]);
+  });
+
+  it('uses deterministic packet loss validation to prove NACK to RTX repair and separated metrics', async () => {
+    let sequence = 42000;
+    const router = new RtpRouter({
+      retransmissionCacheSize: 16,
+      enablePacing: false,
+      sequenceNumberGenerator: () => sequence++,
+      timestampGenerator: () => 900000
+    });
+    const producer = createProducer('producer-1', 'publisher', 'transport-pub', rtpParameters(1111, 96, 1122, 97));
+    const consumer = createConsumer('consumer-1', producer, 'viewer', 'transport-sub', rtpParameters(2222, 120, 2233, 121));
+    const delivered: RtpPacket[] = [];
+    const dropped: RtpPacket[] = [];
+    const loss = new DeterministicPacketLossHarness({
+      lossPercentage: 100,
+      dropRetransmissions: false,
+      classifyRetransmission: (packet) => packet.ssrc === 2233,
+      onDroppedPacket: (packet) => dropped.push(packet)
+    });
+    router.addProducer(producer);
+    router.addConsumer(consumer, async (packet) => {
+      if (!loss.shouldDrop(packet)) {
+        delivered.push(packet);
+      }
+    });
+
+    expect(await router.route(rawPacket(1111, 96, 10, 1000))).toBe(1);
+    expect(delivered).toEqual([]);
+    const lostSequenceNumber = dropped[0]!.sequenceNumber;
+
+    const repaired = await router.routeRtcp(createNack({ senderSsrc: 9999, mediaSsrc: 2222, lostPacketIds: [lostSequenceNumber] }), {
+      sourceTransportId: 'transport-sub',
+      sourceParticipantId: 'viewer'
+    });
+
+    expect(repaired).toBe(1);
+    expect(delivered[0]?.ssrc).toBe(2233);
+    expect(originalSequenceNumberFromRtx(delivered[0]!)).toBe(lostSequenceNumber);
+    expect(loss.snapshot().droppedPackets).toBe(1);
+    const stats = router.statistics().consumers[0]!;
+    expect(stats.primaryRtp.packets).toBe(1);
+    expect(stats.retransmissions.requestedPackets).toBe(1);
+    expect(stats.retransmissions.rtxPackets).toBe(1);
+    expect(stats.retransmissions.successRate).toBe(1);
+    expect(stats.retransmissions.failureRate).toBe(0);
+  });
+
+  it('rewrites Sender Reports to the consumer SSRC and RTP timestamp mapping', async () => {
+    const router = new RtpRouter({
+      sequenceNumberGenerator: () => 40000,
+      timestampGenerator: () => 900000
+    });
+    const producer = createProducer('producer-1', 'publisher', 'transport-pub', rtpParameters(1111, 96));
+    const consumer = createConsumer('consumer-1', producer, 'viewer', 'transport-sub', rtpParameters(2222, 120));
+    const rtcpWrites: Buffer[] = [];
+    router.addProducer(producer);
+    router.addConsumer(
+      consumer,
+      async () => undefined,
+      async (packet) => {
+        rtcpWrites.push(packet);
+      }
+    );
+
+    await router.route(rawPacket(1111, 96, 10, 1000));
+    await router.routeRtcp(
+      createSenderReport({
+        senderSsrc: 1111,
+        ntpTimestamp: 0x100000002n,
+        rtpTimestamp: 4000,
+        packetCount: 10,
+        octetCount: 1000
+      })
+    );
+    const rewritten = parseSenderReport(parseRtcpCompound(rtcpWrites[0]!)[0]!);
+
+    expect(rewritten?.senderSsrc).toBe(2222);
+    expect(rewritten?.rtpTimestamp).toBe(903000);
+    expect(rewritten?.ntpTimestamp).toBe(0x100000002n);
+  });
+
+  it('rewrites compound Sender Report blocks for mapped consumer streams', async () => {
+    const router = new RtpRouter({
+      sequenceNumberGenerator: () => 43000,
+      timestampGenerator: () => 1_000_000
+    });
+    const producer = createProducer('producer-1', 'publisher', 'transport-pub', rtpParameters(1111, 96));
+    const consumer = createConsumer('consumer-1', producer, 'viewer', 'transport-sub', rtpParameters(2222, 120));
+    const rtcpWrites: Buffer[] = [];
+    router.addProducer(producer);
+    router.addConsumer(
+      consumer,
+      async () => undefined,
+      async (packet) => {
+        rtcpWrites.push(packet);
+      }
+    );
+
+    await router.route(rawPacket(1111, 96, 10, 1000));
+    await router.routeRtcp(
+      Buffer.concat([
+        createSenderReport({
+          senderSsrc: 1111,
+          ntpTimestamp: 0x100000002n,
+          rtpTimestamp: 4000,
+          packetCount: 10,
+          octetCount: 1000,
+          reports: [{ ssrc: 1111, fractionLost: 0, packetsLost: 0, highestSequence: 10, jitter: 1, lastSenderReport: 2, delaySinceLastSenderReport: 3 }]
+        })
+      ])
+    );
+
+    const senderReport = parseSenderReport(parseRtcpCompound(rtcpWrites[0]!)[0]!);
+    expect(senderReport?.senderSsrc).toBe(2222);
+    expect(senderReport?.reports[0]?.ssrc).toBe(2222);
+  });
+
+  it('rewrites upstream Receiver Reports for negotiated RTX SSRCs before a repair stream exists', async () => {
+    const router = new RtpRouter();
+    const producer = createProducer('producer-1', 'publisher', 'transport-pub', rtpParameters(1111, 96, 1122, 97));
+    const consumer = createConsumer('consumer-1', producer, 'viewer', 'transport-sub', rtpParameters(2222, 120, 2233, 121));
+    const upstreamFeedback: Buffer[] = [];
+    router.addProducer(producer, async (packet) => {
+      upstreamFeedback.push(packet);
+    });
+    router.addConsumer(consumer, async () => undefined);
+
+    const forwarded = await router.routeRtcp(
+      createReceiverReport({
+        reporterSsrc: 9999,
+        reports: [{ ssrc: 2233, fractionLost: 0, packetsLost: 0, highestSequence: 10, jitter: 1, lastSenderReport: 2, delaySinceLastSenderReport: 3 }]
+      }),
+      { sourceTransportId: 'transport-sub', sourceParticipantId: 'viewer' }
+    );
+
+    expect(forwarded).toBe(1);
+    expect(parseReceiverReport(parseRtcpCompound(upstreamFeedback[0]!)[0]!)?.reports[0]?.ssrc).toBe(1122);
   });
 
   it('detects producer stream restart and resets consumer rewrite state', async () => {
@@ -192,4 +388,14 @@ function rawPacket(ssrc: number, payloadType: number, sequenceNumber: number, ti
   packet.writeUInt32BE(ssrc >>> 0, 8);
   payload.copy(packet, 12);
   return packet;
+}
+
+async function waitFor(predicate: () => boolean, timeoutMs = 100): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error('Timed out waiting for condition');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }

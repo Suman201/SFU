@@ -79,6 +79,15 @@ describe('SDP helpers', () => {
     expect(answer).toContain('a=rid:high recv');
     expect(answer).toContain('a=simulcast:recv low;medium;high');
   });
+
+  it('selects VP9 when a browser offers VP9 before RTX', () => {
+    const rtp = parseSdpRtpParameters('video', chromeVp9Offer());
+
+    expect(rtp.codecs[0]?.mimeType).toBe('video/VP9');
+    expect(rtp.codecs[0]?.payloadType).toBe(98);
+    expect(rtp.codecs[1]?.mimeType).toBe('video/rtx');
+    expect(rtp.codecs[1]?.parameters?.apt).toBe(98);
+  });
 });
 
 function transportFixture(): TransportOptions {
@@ -172,6 +181,39 @@ function chromeSimulcastOffer(): string {
     'a=simulcast:send low;medium;high',
     'a=candidate:1 1 udp 2130706431 127.0.0.1 40000 typ host',
     'a=end-of-candidates',
+    ''
+  ].join('\r\n');
+}
+
+function chromeVp9Offer(): string {
+  return [
+    'v=0',
+    'o=- 6 2 IN IP4 127.0.0.1',
+    's=-',
+    't=0 0',
+    'a=group:BUNDLE 0',
+    'a=msid-semantic: WMS stream',
+    'm=video 9 UDP/TLS/RTP/SAVPF 98 99 96 97',
+    'c=IN IP4 0.0.0.0',
+    'a=mid:0',
+    'a=ice-ufrag:chromeUfrag',
+    'a=ice-pwd:chromePassword',
+    'a=fingerprint:sha-256 11:22:33',
+    'a=setup:actpass',
+    'a=sendonly',
+    'a=rtcp-mux',
+    'a=rtcp-rsize',
+    'a=rtpmap:98 VP9/90000',
+    'a=rtcp-fb:98 nack pli',
+    'a=rtpmap:99 rtx/90000',
+    'a=fmtp:99 apt=98',
+    'a=rtpmap:96 VP8/90000',
+    'a=rtpmap:97 rtx/90000',
+    'a=fmtp:97 apt=96',
+    'a=ssrc-group:FID 11111111 11111112',
+    'a=ssrc:11111111 cname:chrome-cname',
+    'a=ssrc:11111112 cname:chrome-cname',
+    'a=candidate:1 1 UDP 2130706431 127.0.0.1 50000 typ host',
     ''
   ].join('\r\n');
 }

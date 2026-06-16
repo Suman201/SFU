@@ -32,6 +32,7 @@ The repository implements the control-plane and packet-router shape of a native 
 - Live outbound RTP/SRTP and RTCP/SRTCP egress through the selected ICE pair.
 - SDP parsing and Unified Plan answer generation hardened against Chrome, Firefox, and Safari offer shapes.
 - Browser publisher-to-subscriber media bridge coverage for audio, video, and screen tracks.
+- Dynacast producer layer demand tracking with consumer demand aggregation, producer layer control events, suspended-layer metrics, and browser sender-control hooks.
 - Coturn REST credential generation.
 
 These pieces are now split into reusable modules:
@@ -121,4 +122,24 @@ Remaining adaptive transport blockers:
 - Probe clusters and probing controller for bitrate ramp-up.
 - Full transport-cc feedback scheduling policy with feedback-window compaction.
 - Producer/consumer scoring and priority-based bandwidth allocation.
-- Simulcast/SVC layer switching, dynacast, and dependency-descriptor handling.
+- SVC layer switching, dependency-descriptor handling, producer/consumer scoring, and multi-node routing.
+
+## Phase 5 Dynacast Foundation
+
+Implemented:
+
+- Per-producer Dynacast state in `sfu-core`, separate from observed RTP activity.
+- Per-consumer layer demand tracking across join, leave, pause, resume, preferred layer changes, and bandwidth-selected targets.
+- Room-wide desired layer aggregation with highest required spatial and temporal layer snapshots.
+- Producer control events: `producer:layers-needed`, `producer:layers-unneeded`, and `producer:dynacast-updated`.
+- Suspended layer state, resume/suspend counters, demand-change counters, and estimated upstream bitrate savings.
+- Router integration that keeps the current layer demanded until a keyframe-gated spatial switch completes, preserving RTP continuity.
+- Nest/backend propagation through `MediaService`, `RoomsService`, Socket.IO contracts, room state, and Prometheus metrics.
+- Client-side RTCRtpSender encoding activation hook for browsers that expose simulcast sender encodings.
+
+Deferred:
+
+- SVC and AV1 dependency descriptors.
+- Worker isolation and multi-node routing.
+- Publisher-only socket targeting for producer control events.
+- Full LiveKit-grade client publishing stack built around `addTransceiver(...sendEncodings)`.

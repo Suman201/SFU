@@ -16,6 +16,50 @@ export const appConfig = () => ({
     secret: process.env.TURN_SECRET,
     uris: (process.env.TURN_URIS ?? '').split(',').filter(Boolean)
   },
+  mediaWorker: {
+    mode: process.env.MEDIA_WORKER_MODE ?? 'in-process',
+    count: Number(process.env.MEDIA_WORKER_COUNT ?? 1),
+    requestTimeoutMs: Number(process.env.MEDIA_WORKER_REQUEST_TIMEOUT_MS ?? 5000),
+    startupTimeoutMs: Number(process.env.MEDIA_WORKER_STARTUP_TIMEOUT_MS ?? 10000),
+    heartbeatIntervalMs: Number(process.env.MEDIA_WORKER_HEARTBEAT_INTERVAL_MS ?? 2000),
+    heartbeatTimeoutMs: Number(process.env.MEDIA_WORKER_HEARTBEAT_TIMEOUT_MS ?? 6000),
+    restartBackoffMs: Number(process.env.MEDIA_WORKER_RESTART_BACKOFF_MS ?? 1000),
+    drainTimeoutMs: Number(process.env.MEDIA_WORKER_DRAIN_TIMEOUT_MS ?? 30000),
+    maxRoomsPerWorker: Number(process.env.MEDIA_WORKER_MAX_ROOMS_PER_WORKER ?? 100),
+    maxTransportsPerWorker: Number(process.env.MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER ?? 500),
+    maxInFlightRequestsPerWorker: Number(process.env.MEDIA_WORKER_MAX_INFLIGHT_REQUESTS_PER_WORKER ?? 1000),
+    softIpcLatencyMs: Number(process.env.MEDIA_WORKER_SOFT_IPC_LATENCY_MS ?? 100),
+    hardIpcLatencyMs: Number(process.env.MEDIA_WORKER_HARD_IPC_LATENCY_MS ?? 1000),
+    softMemoryLimitBytes: process.env.MEDIA_WORKER_SOFT_MEMORY_LIMIT_BYTES ? Number(process.env.MEDIA_WORKER_SOFT_MEMORY_LIMIT_BYTES) : undefined,
+    hardMemoryLimitBytes: process.env.MEDIA_WORKER_HARD_MEMORY_LIMIT_BYTES ? Number(process.env.MEDIA_WORKER_HARD_MEMORY_LIMIT_BYTES) : undefined,
+    softRtpPacketRate: Number(process.env.MEDIA_WORKER_SOFT_RTP_PACKET_RATE ?? 50000),
+    softRtcpPacketRate: Number(process.env.MEDIA_WORKER_SOFT_RTCP_PACKET_RATE ?? 5000)
+  },
+  cluster: {
+    nodeId: process.env.NODE_ID,
+    region: process.env.NODE_REGION,
+    zone: process.env.NODE_ZONE,
+    publicUrl: process.env.NODE_PUBLIC_URL ?? process.env.PUBLIC_URL ?? 'http://localhost:3000',
+    heartbeatIntervalMs: Number(process.env.NODE_HEARTBEAT_INTERVAL_MS ?? 5000),
+    ttlMs: Number(process.env.NODE_TTL_MS ?? 15000),
+    draining: String(process.env.NODE_DRAINING ?? 'false').toLowerCase() === 'true',
+    preferLocalNode: String(process.env.NODE_PREFER_LOCAL ?? 'true').toLowerCase() !== 'false',
+    maxRooms: Number(process.env.NODE_MAX_ROOMS ?? process.env.MEDIA_WORKER_MAX_ROOMS_PER_WORKER ?? 1000),
+    maxTransports: Number(process.env.NODE_MAX_TRANSPORTS ?? process.env.MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER ?? 5000)
+  },
+  pipe: {
+    enabled: String(process.env.ENABLE_PIPE_TRANSPORT ?? 'false').toLowerCase() === 'true',
+    clusterSecret: process.env.PIPE_CLUSTER_SECRET,
+    advertiseIp: process.env.PIPE_ADVERTISE_IP,
+    allowedNodeIds: (process.env.PIPE_ALLOWED_NODE_IDS ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+    portRange: parsePortRange(process.env.PIPE_PORT_RANGE ?? '41000-41100'),
+    coordinationTimeoutMs: Number(process.env.PIPE_COORDINATION_TIMEOUT_MS ?? 5000),
+    coordinationMaxAttempts: Number(process.env.PIPE_COORDINATION_MAX_ATTEMPTS ?? 3),
+    maxSetupRequestsPerMinute: Number(process.env.PIPE_MAX_SETUP_REQUESTS_PER_MINUTE ?? 120)
+  },
   recording: {
     driver: process.env.RECORDING_STORAGE_DRIVER ?? 'local',
     localPath: process.env.RECORDING_LOCAL_PATH ?? './recordings',
@@ -25,3 +69,13 @@ export const appConfig = () => ({
     s3SecretAccessKey: process.env.S3_SECRET_ACCESS_KEY
   }
 });
+
+function parsePortRange(value: string): { min: number; max: number } {
+  const parts = value.split('-').map((part) => Number(part.trim()));
+  const min = parts[0];
+  const max = parts[1];
+  if (!Number.isInteger(min) || !Number.isInteger(max)) {
+    return { min: 41000, max: 41100 };
+  }
+  return { min: Number(min), max: Number(max) };
+}

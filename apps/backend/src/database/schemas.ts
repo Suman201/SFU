@@ -66,6 +66,26 @@ export class RoomSettingsDocument {
 
 export const RoomSettingsSchema = SchemaFactory.createForClass(RoomSettingsDocument);
 
+@Schema({ _id: false })
+export class RoomMediaStateDocument {
+  @Prop({ required: true, enum: ['active', 'failed'], default: 'active' })
+  status!: 'active' | 'failed';
+
+  @Prop()
+  failedAt?: Date;
+
+  @Prop()
+  failureReason?: string;
+
+  @Prop()
+  failureMessage?: string;
+
+  @Prop()
+  workerId?: string;
+}
+
+export const RoomMediaStateSchema = SchemaFactory.createForClass(RoomMediaStateDocument);
+
 @Schema({ collection: 'rooms', timestamps: true })
 export class RoomDocument {
   @Prop({ required: true, trim: true, maxlength: 160 })
@@ -76,6 +96,9 @@ export class RoomDocument {
 
   @Prop({ type: RoomSettingsSchema, required: true })
   settings!: RoomSettingsDocument;
+
+  @Prop({ type: RoomMediaStateSchema, default: () => ({ status: 'active' }) })
+  mediaState!: RoomMediaStateDocument;
 
   @Prop({ type: [String], default: [] })
   invitedUserIds!: string[];
@@ -184,8 +207,20 @@ export class ProducerDocument {
   @Prop({ required: true, index: true })
   transportId!: string;
 
+  @Prop({ required: true, index: true })
+  nodeId!: string;
+
+  @Prop({ min: 0.1, max: 10, default: 1 })
+  priority!: number;
+
   @Prop({ type: Object, required: true })
   rtpParameters!: Record<string, unknown>;
+
+  @Prop({ type: Object })
+  dynacastState?: Record<string, unknown>;
+
+  @Prop({ type: Object })
+  svcState?: Record<string, unknown>;
 
   @Prop({ required: true, enum: ['live', 'paused', 'closed'], default: 'live' })
   status!: 'live' | 'paused' | 'closed';
@@ -201,6 +236,7 @@ export const ProducerSchema = SchemaFactory.createForClass(ProducerDocument);
 ProducerSchema.index({ roomId: 1, kind: 1, status: 1 });
 ProducerSchema.index({ participantId: 1, status: 1 });
 ProducerSchema.index({ transportId: 1 });
+ProducerSchema.index({ roomId: 1, nodeId: 1, status: 1 });
 
 @Schema({ collection: 'consumers', timestamps: true })
 export class ConsumerDocument {
@@ -216,6 +252,9 @@ export class ConsumerDocument {
   @Prop({ required: true, index: true })
   transportId!: string;
 
+  @Prop({ min: 0.1, max: 10, default: 1 })
+  priority!: number;
+
   @Prop({ enum: ['low', 'medium', 'high'] })
   preferredLayer?: 'low' | 'medium' | 'high';
 
@@ -224,6 +263,24 @@ export class ConsumerDocument {
 
   @Prop({ type: Object })
   currentLayers?: Record<string, unknown>;
+
+  @Prop({ type: Object })
+  targetLayers?: Record<string, unknown>;
+
+  @Prop({ type: Object })
+  preferredSvcLayers?: Record<string, unknown>;
+
+  @Prop({ type: Object })
+  currentSvcLayers?: Record<string, unknown>;
+
+  @Prop({ type: Object })
+  targetSvcLayers?: Record<string, unknown>;
+
+  @Prop()
+  layerSwitchReason?: string;
+
+  @Prop({ type: Date })
+  layerSwitchedAt?: Date;
 
   @Prop({ type: Object, required: true })
   rtpParameters!: Record<string, unknown>;

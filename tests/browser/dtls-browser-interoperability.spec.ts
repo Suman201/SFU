@@ -30,7 +30,7 @@ test('browser DTLS 1.2 handshake establishes over the Node ICE transport', async
 
     await page.exposeFunction('serverAnswer', async (offer: string) => {
       iceAgent.setRemoteParameters(parseIceParameters(offer));
-      for (const remoteCandidate of parseCandidates(offer)) {
+      for (const remoteCandidate of parseCandidates(offer).filter((item) => item.protocol === 'udp')) {
         iceAgent.addRemoteCandidate(remoteCandidate);
       }
       dtlsTransport.setRemoteParameters(parseDtlsParameters(offer));

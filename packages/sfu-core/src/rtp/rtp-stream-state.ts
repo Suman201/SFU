@@ -18,8 +18,10 @@ export interface RtpSourceStreamStateOptions {
   ssrc: number;
   allowedPayloadTypes: Iterable<number>;
   maxReorderPackets?: number;
+  maxReorderDelayMs?: number;
   restartSequenceGap?: number;
   duplicateWindowSize?: number;
+  now?: () => number;
 }
 
 export interface RtpStreamSnapshot {
@@ -34,7 +36,22 @@ export interface RtpStreamSnapshot {
   duplicatePackets: number;
   latePackets: number;
   restartCount: number;
+  expiredGaps: number;
   bufferedSequences: number[];
+  oldestBufferedAt?: number;
+}
+
+export interface RtpReorderGapExpiration {
+  ssrc: number;
+  previousExpectedSequenceNumber: number;
+  releasedSequenceNumber: number;
+  bufferedForMs: number;
+  expiredAt: number;
+}
+
+export interface RtpReorderDrainResult {
+  packets: RtpPacket[];
+  expiredGap?: RtpReorderGapExpiration;
 }
 
 export interface RtpSourceStreamAcceptResult {
@@ -42,18 +59,20 @@ export interface RtpSourceStreamAcceptResult {
   buffered: boolean;
   restarted: boolean;
   dropReason?: RtpPacketDropReason;
+  expiredGap?: RtpReorderGapExpiration;
 }
 
 export class RtpSourceStreamState {
   private readonly allowedPayloadTypes: Set<number>;
   private readonly maxReorderPackets: number;
+  private readonly maxReorderDelayMs: number;
   private readonly restartSequenceGap: number;
   private readonly duplicateWindowSize: number;
   private started = false;
   private highestSequenceNumber?: number;
   private expectedSequenceNumber?: number;
   private lastTimestamp?: number;
-  private readonly reorderBuffer = new Map<number, RtpPacket>();
+  private readonly reorderBuffer = new Map<number, { packet: RtpPacket; bufferedAt: number }>();
   private readonly deliveredWindow: number[] = [];
   private readonly deliveredSet = new Set<number>();
   private packetsReceived = 0;
@@ -61,10 +80,12 @@ export class RtpSourceStreamState {
   private duplicatePackets = 0;
   private latePackets = 0;
   private restartCount = 0;
+  private expiredGaps = 0;
 
   constructor(private readonly options: RtpSourceStreamStateOptions) {
     this.allowedPayloadTypes = new Set([...options.allowedPayloadTypes].map((value) => value & 0x7f));
     this.maxReorderPackets = options.maxReorderPackets ?? 64;
+    this.maxReorderDelayMs = Math.max(0, options.maxReorderDelayMs ?? 0);
     this.restartSequenceGap = options.restartSequenceGap ?? 3000;
     this.duplicateWindowSize = options.duplicateWindowSize ?? 128;
   }
@@ -95,14 +116,23 @@ export class RtpSourceStreamState {
     if (deltaFromExpected === 0) {
       return { packets: this.release(packet), buffered: false, restarted: false };
     }
-    this.reorderBuffer.set(packet.sequenceNumber, packet);
+    this.reorderBuffer.set(packet.sequenceNumber, { packet, bufferedAt: this.now() });
     if (this.reorderBuffer.size > this.maxReorderPackets) {
-      return { packets: this.releaseFromSmallestBuffered(), buffered: false, restarted: false, dropReason: 'reorder_buffer_overflow' };
+      return { packets: this.releaseFromSmallestBuffered().packets, buffered: false, restarted: false, dropReason: 'reorder_buffer_overflow' };
+    }
+    const expired = this.releaseExpiredGap();
+    if (expired.packets.length > 0) {
+      return { packets: expired.packets, buffered: false, restarted: false, expiredGap: expired.expiredGap };
     }
     return { packets: [], buffered: true, restarted: false };
   }
 
+  drainExpired(): RtpReorderDrainResult {
+    return this.releaseExpiredGap();
+  }
+
   snapshot(): RtpStreamSnapshot {
+    const oldestBufferedAt = this.oldestBufferedEntry()?.bufferedAt;
     return {
       ssrc: this.options.ssrc,
       started: this.started,
@@ -115,7 +145,9 @@ export class RtpSourceStreamState {
       duplicatePackets: this.duplicatePackets,
       latePackets: this.latePackets,
       restartCount: this.restartCount,
-      bufferedSequences: [...this.reorderBuffer.keys()].sort((left, right) => sequenceDelta(left, right))
+      expiredGaps: this.expiredGaps,
+      bufferedSequences: [...this.reorderBuffer.keys()].sort((left, right) => sequenceDelta(left, right)),
+      oldestBufferedAt
     };
   }
 
@@ -155,7 +187,7 @@ export class RtpSourceStreamState {
     this.expectedSequenceNumber = addSequenceNumber(packet.sequenceNumber, 1);
     this.lastTimestamp = packet.timestamp;
     while (this.reorderBuffer.has(this.expectedSequenceNumber)) {
-      const buffered = this.reorderBuffer.get(this.expectedSequenceNumber)!;
+      const buffered = this.reorderBuffer.get(this.expectedSequenceNumber)!.packet;
       this.reorderBuffer.delete(this.expectedSequenceNumber);
       released.push(buffered);
       this.recordDelivered(buffered.sequenceNumber);
@@ -167,13 +199,48 @@ export class RtpSourceStreamState {
     return released;
   }
 
-  private releaseFromSmallestBuffered(): RtpPacket[] {
-    const next = [...this.reorderBuffer.values()].sort((left, right) => sequenceDistance(this.expectedSequenceNumber!, left.sequenceNumber) - sequenceDistance(this.expectedSequenceNumber!, right.sequenceNumber))[0];
+  private releaseFromSmallestBuffered(): RtpReorderDrainResult {
+    const previousExpectedSequenceNumber = this.expectedSequenceNumber!;
+    const next = [...this.reorderBuffer.values()].sort(
+      (left, right) => sequenceDistance(previousExpectedSequenceNumber, left.packet.sequenceNumber) - sequenceDistance(previousExpectedSequenceNumber, right.packet.sequenceNumber)
+    )[0];
     if (!next) {
-      return [];
+      return { packets: [] };
     }
-    this.reorderBuffer.delete(next.sequenceNumber);
-    return this.release(next);
+    this.reorderBuffer.delete(next.packet.sequenceNumber);
+    const packets = this.release(next.packet);
+    this.expiredGaps += 1;
+    return {
+      packets,
+      expiredGap: {
+        ssrc: this.options.ssrc,
+        previousExpectedSequenceNumber,
+        releasedSequenceNumber: next.packet.sequenceNumber,
+        bufferedForMs: Math.max(0, this.now() - next.bufferedAt),
+        expiredAt: this.now()
+      }
+    };
+  }
+
+  private releaseExpiredGap(): RtpReorderDrainResult {
+    if (this.maxReorderDelayMs <= 0 || !this.started || this.expectedSequenceNumber === undefined || this.reorderBuffer.size === 0) {
+      return { packets: [] };
+    }
+    const oldest = this.oldestBufferedEntry();
+    if (!oldest || this.now() - oldest.bufferedAt < this.maxReorderDelayMs) {
+      return { packets: [] };
+    }
+    return this.releaseFromSmallestBuffered();
+  }
+
+  private oldestBufferedEntry(): { packet: RtpPacket; bufferedAt: number } | undefined {
+    let oldest: { packet: RtpPacket; bufferedAt: number } | undefined;
+    for (const entry of this.reorderBuffer.values()) {
+      if (!oldest || entry.bufferedAt < oldest.bufferedAt) {
+        oldest = entry;
+      }
+    }
+    return oldest;
   }
 
   private recordDelivered(sequenceNumber: number): void {
@@ -185,5 +252,9 @@ export class RtpSourceStreamState {
         this.deliveredSet.delete(removed);
       }
     }
+  }
+
+  private now(): number {
+    return this.options.now?.() ?? Date.now();
   }
 }

@@ -1,10 +1,36 @@
 import { Injectable, signal } from '@angular/core';
-import type { DtlsParameters, IceParameters, ProducerKind, RtpParameters, TransportOptions } from '@native-sfu/contracts';
+import type {
+  Consumer,
+  ConsumerQualityState,
+  DtlsParameters,
+  IceParameters,
+  Producer,
+  ProducerDynacastEvent,
+  ProducerKind,
+  ProducerQualityState,
+  RoomQualityState,
+  RtpLayerSelection,
+  RtpParameters,
+  SvcLayerSelection,
+  TransportOptions
+} from '@native-sfu/contracts';
 import { SocketService } from './socket.service';
 
 export interface DeviceOption {
   id: string;
   label: string;
+}
+
+interface PublishedSender {
+  sender: RTCRtpSender;
+  userMaxSpatialLayer: number;
+  svc: boolean;
+}
+
+export interface PublishOptions {
+  svc?: boolean;
+  scalabilityMode?: string;
+  codec?: 'VP8' | 'VP9' | 'H264';
 }
 
 @Injectable({ providedIn: 'root' })
@@ -14,6 +40,7 @@ export class WebRtcService {
   readonly devices = signal<{ audioInputs: DeviceOption[]; videoInputs: DeviceOption[] }>({ audioInputs: [], videoInputs: [] });
   readonly networkScore = signal(5);
   private peer?: RTCPeerConnection;
+  private readonly publishedProducers = new Map<string, { kind: ProducerKind; svc: boolean; senders: PublishedSender[] }>();
 
   constructor(private readonly socket: SocketService) {}
 
@@ -69,15 +96,19 @@ export class WebRtcService {
     return transport;
   }
 
-  async publish(roomId: string, transport: TransportOptions, kind: ProducerKind, stream: MediaStream): Promise<void> {
+  async publish(roomId: string, transport: TransportOptions, kind: ProducerKind, stream: MediaStream, options: PublishOptions = {}): Promise<Producer> {
     if (!this.peer) {
       await this.preparePeer(roomId);
     }
+    const senders: PublishedSender[] = [];
     for (const track of stream.getTracks()) {
       if ((kind === 'audio' && track.kind !== 'audio') || (kind !== 'audio' && track.kind !== 'video')) {
         continue;
       }
-      this.peer?.addTrack(track, stream);
+      const sender = this.peer ? addSenderForTrack(this.peer, track, stream, kind, options) : undefined;
+      if (sender?.sender) {
+        senders.push(sender);
+      }
     }
     if (this.peer && this.peer.signalingState === 'stable') {
       const offer = await this.peer.createOffer();
@@ -91,28 +122,140 @@ export class WebRtcService {
         await this.socket.emitAck('transport:dtls-parameters', { transportId: transport.id, dtlsParameters });
       }
     }
-    const rtpParameters = createRtpParameters(kind);
+    const rtpParameters = createRtpParameters(kind, options);
     const event = kind === 'screen' ? 'screen:start' : 'producer:create';
-    await this.socket.emitAck(event, { roomId, kind, transportId: transport.id, rtpParameters });
+    const producer = await this.socket.emitAck(event, { roomId, kind, transportId: transport.id, rtpParameters });
+    this.publishedProducers.set(producer.id, { kind, svc: Boolean(options.svc && kind !== 'audio'), senders });
+    return producer;
+  }
+
+  async setPreferredSvcLayers(consumerId: string, preferredSvcLayers: SvcLayerSelection): Promise<void> {
+    await this.socket.emitAck('consumer:set-preferred-svc-layers', { consumerId, preferredSvcLayers });
+  }
+
+  async setConsumerPriority(consumerId: string, priority: number): Promise<Consumer> {
+    return this.socket.emitAck('consumer:set-priority', { consumerId, priority });
+  }
+
+  async setProducerPriority(producerId: string, priority: number): Promise<Producer> {
+    return this.socket.emitAck('producer:set-priority', { producerId, priority });
+  }
+
+  async getConsumerQuality(consumerId: string): Promise<ConsumerQualityState> {
+    return this.socket.emitAck('consumer:get-quality', { consumerId });
+  }
+
+  async getProducerQuality(producerId: string): Promise<ProducerQualityState> {
+    return this.socket.emitAck('producer:get-quality', { producerId });
+  }
+
+  async getRoomQuality(roomId: string): Promise<RoomQualityState> {
+    return this.socket.emitAck('room:get-quality', { roomId });
+  }
+
+  setNetworkQualityScore(score: number): void {
+    this.networkScore.set(Math.max(1, Math.min(5, Math.ceil(score / 20))));
+  }
+
+  setLocalPublishQuality(producerId: string, maxSpatialLayer: number): void {
+    const publication = this.publishedProducers.get(producerId);
+    if (!publication) {
+      return;
+    }
+    const normalized = Math.max(0, Math.min(2, Math.trunc(maxSpatialLayer)));
+    publication.senders = publication.senders.map((entry) => ({ ...entry, userMaxSpatialLayer: normalized }));
+  }
+
+  async applyProducerDynacast(event: ProducerDynacastEvent): Promise<void> {
+    const publication = this.publishedProducers.get(event.producerId);
+    if (!publication || publication.kind === 'audio' || publication.svc) {
+      return;
+    }
+    const results = await Promise.all(publication.senders.map((entry) => applySenderDynacast(entry.sender, event, entry.userMaxSpatialLayer)));
+    await Promise.all(
+      results
+        .filter((result) => !result.ok)
+        .map((result) =>
+          this.socket
+            .emitAck('producer:dynacast-control-failed', {
+              producerId: event.producerId,
+              reason: result.reason ?? 'set_parameters_failed',
+              layer: result.layer
+            })
+            .catch(() => undefined)
+        )
+    );
   }
 }
 
-function createRtpParameters(kind: ProducerKind): RtpParameters {
+function addSenderForTrack(peer: RTCPeerConnection, track: MediaStreamTrack, stream: MediaStream, kind: ProducerKind, options: PublishOptions): PublishedSender | undefined {
+  if (track.kind === 'video' && kind !== 'audio') {
+    try {
+      const transceiver = peer.addTransceiver(track, {
+        direction: 'sendonly',
+        streams: [stream],
+        sendEncodings: options.svc ? svcSendEncodings(kind, options.scalabilityMode) : simulcastSendEncodings(kind)
+      });
+      return { sender: transceiver.sender, userMaxSpatialLayer: 2, svc: Boolean(options.svc) };
+    } catch {
+      try {
+        const transceiver = peer.addTransceiver(track, { direction: 'sendonly', streams: [stream] });
+        return { sender: transceiver.sender, userMaxSpatialLayer: 2, svc: false };
+      } catch {
+        return { sender: peer.addTrack(track, stream), userMaxSpatialLayer: 2, svc: false };
+      }
+    }
+  }
+  try {
+    const transceiver = peer.addTransceiver(track, { direction: 'sendonly', streams: [stream] });
+    return { sender: transceiver.sender, userMaxSpatialLayer: 0, svc: false };
+  } catch {
+    return { sender: peer.addTrack(track, stream), userMaxSpatialLayer: 0, svc: false };
+  }
+}
+
+function simulcastSendEncodings(kind: ProducerKind): RTCRtpEncodingParameters[] {
+  const screenMultiplier = kind === 'screen' ? 1.4 : 1;
+  return [
+    { rid: 'low', maxBitrate: Math.round(250_000 * screenMultiplier), scaleResolutionDownBy: 4, active: true },
+    { rid: 'medium', maxBitrate: Math.round(900_000 * screenMultiplier), scaleResolutionDownBy: 2, active: true },
+    { rid: 'high', maxBitrate: Math.round(2_500_000 * screenMultiplier), scaleResolutionDownBy: 1, active: true }
+  ];
+}
+
+function svcSendEncodings(kind: ProducerKind, scalabilityMode = 'L3T3_KEY'): RTCRtpEncodingParameters[] {
+  const screenMultiplier = kind === 'screen' ? 1.4 : 1;
+  return [
+    {
+      maxBitrate: Math.round(2_500_000 * screenMultiplier),
+      scaleResolutionDownBy: 1,
+      active: true,
+      scalabilityMode
+    } as RTCRtpEncodingParameters & { scalabilityMode: string }
+  ];
+}
+
+function createRtpParameters(kind: ProducerKind, options: PublishOptions = {}): RtpParameters {
   const ssrcBase = Math.floor(Math.random() * 0xffffffff);
+  const videoCodec = options.codec ?? (options.svc ? 'VP9' : 'VP8');
+  const scalabilityMode = options.svc ? options.scalabilityMode ?? 'L3T3_KEY' : undefined;
   return {
     codecs: [
       {
-        mimeType: kind === 'audio' ? 'audio/opus' : 'video/VP8',
+        mimeType: kind === 'audio' ? 'audio/opus' : `video/${videoCodec}`,
         payloadType: kind === 'audio' ? 111 : 96,
         clockRate: kind === 'audio' ? 48000 : 90000,
         channels: kind === 'audio' ? 2 : undefined,
+        parameters: scalabilityMode ? { 'scalability-mode': scalabilityMode } : undefined,
         rtcpFeedback: kind === 'audio' ? ['transport-cc'] : ['nack', 'nack pli', 'goog-remb', 'transport-cc']
       }
     ],
     encodings:
       kind === 'audio'
         ? [{ ssrc: ssrcBase }]
-        : [
+        : options.svc
+          ? [{ ssrc: ssrcBase, maxBitrate: 2500000, scalabilityMode }]
+          : [
             { rid: 'low', ssrc: ssrcBase, maxBitrate: 250000, scaleResolutionDownBy: 4 },
             { rid: 'medium', ssrc: ssrcBase + 1, maxBitrate: 900000, scaleResolutionDownBy: 2 },
             { rid: 'high', ssrc: ssrcBase + 2, maxBitrate: 2500000, scaleResolutionDownBy: 1 }
@@ -170,4 +313,55 @@ function parseDtlsParameters(sdp: string): DtlsParameters | undefined {
     role: 'client',
     fingerprints
   };
+}
+
+async function applySenderDynacast(
+  sender: RTCRtpSender,
+  event: ProducerDynacastEvent,
+  userMaxSpatialLayer: number
+): Promise<{ ok: boolean; reason?: string; layer?: RtpLayerSelection }> {
+  const parameters = sender.getParameters();
+  if (!parameters.encodings?.length) {
+    return { ok: false, reason: 'sender_encodings_missing' };
+  }
+  const desiredLayers = event.enabled ? event.desiredLayers : undefined;
+  parameters.encodings = parameters.encodings.map((encoding, index) => ({
+    ...encoding,
+    active: desiredLayers ? encodingDesired(encoding, index, desiredLayers, userMaxSpatialLayer) : spatialLayerFromRid(encoding.rid, index) <= userMaxSpatialLayer
+  }));
+  try {
+    await sender.setParameters(parameters);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.name || 'set_parameters_failed' : 'set_parameters_failed' };
+  }
+}
+
+function encodingDesired(encoding: RTCRtpEncodingParameters, index: number, desiredLayers: RtpLayerSelection[], userMaxSpatialLayer: number): boolean {
+  if (desiredLayers.length === 0) {
+    return false;
+  }
+  const spatialLayer = spatialLayerFromRid(encoding.rid, index);
+  if (spatialLayer > userMaxSpatialLayer) {
+    return false;
+  }
+  return desiredLayers.some((layer) => layer.spatialLayer === undefined || layer.spatialLayer === spatialLayer);
+}
+
+function spatialLayerFromRid(rid: string | undefined, fallbackIndex: number): number {
+  switch (rid) {
+    case 'low':
+    case 'q':
+      return 0;
+    case 'medium':
+    case 'mid':
+    case 'm':
+      return 1;
+    case 'high':
+    case 'h':
+    case 'f':
+      return 2;
+    default:
+      return fallbackIndex;
+  }
 }

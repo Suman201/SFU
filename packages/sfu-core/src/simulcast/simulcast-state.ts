@@ -13,6 +13,7 @@ export interface LayerActivityResult {
 
 export class ProducerSimulcastState {
   private readonly activeSsrcs = new Map<number, { lastSeenAt: number; packets: number }>();
+  private readonly activeTemporalLayers = new Map<number, Set<number>>();
   private readonly knownSsrcs = new Set<number>();
 
   constructor(private readonly producer: Producer, private readonly now: () => number = () => Date.now()) {
@@ -90,7 +91,7 @@ export class ProducerSimulcastState {
     return source;
   }
 
-  markPacket(ssrc: number): LayerActivityResult | undefined {
+  markPacket(ssrc: number, temporalLayer?: number): LayerActivityResult | undefined {
     const source = this.encodingForSsrc(ssrc);
     if (!source || source.isRtx) {
       return undefined;
@@ -100,8 +101,13 @@ export class ProducerSimulcastState {
     current.lastSeenAt = this.now();
     current.packets += 1;
     this.activeSsrcs.set(source.mediaSsrc, current);
+    if (temporalLayer !== undefined) {
+      const active = this.activeTemporalLayers.get(source.mediaSsrc) ?? new Set<number>();
+      active.add(Math.max(0, Math.trunc(temporalLayer)));
+      this.activeTemporalLayers.set(source.mediaSsrc, active);
+    }
     source.encoding.active = true;
-    const layer = this.layerInfoForEncoding(source.encoding, source.index);
+    const layer = this.layerInfoForEncoding(source.encoding, source.index, temporalLayer);
     this.publishSnapshots();
     return { layer, becameActive: !existed };
   }
@@ -111,13 +117,21 @@ export class ProducerSimulcastState {
     return source ? this.layerInfoForEncoding(source.encoding, source.index) : undefined;
   }
 
-  layerSelectionForSsrc(ssrc: number): RtpLayerSelection | undefined {
+  layerSelectionForSsrc(ssrc: number, temporalLayer?: number): RtpLayerSelection | undefined {
     const source = this.encodingForSsrc(ssrc);
-    return source ? layerSelectionForEncoding(source.encoding, source.index) : undefined;
+    return source ? layerSelectionForEncoding(source.encoding, source.index, temporalLayer) : undefined;
   }
 
   availableLayers(): RtpLayerInfo[] {
-    return this.producer.rtpParameters.encodings.map((encoding, index) => this.layerInfoForEncoding(encoding, index)).sort(compareLayers);
+    return this.producer.rtpParameters.encodings
+      .flatMap((encoding, index) => {
+        const temporalLayers = isKnownSsrc(encoding.ssrc) ? this.activeTemporalLayers.get(encoding.ssrc) : undefined;
+        if (!temporalLayers || temporalLayers.size === 0) {
+          return [this.layerInfoForEncoding(encoding, index)];
+        }
+        return [...temporalLayers].sort((left, right) => left - right).map((temporalLayer) => this.layerInfoForEncoding(encoding, index, temporalLayer));
+      })
+      .sort(compareLayers);
   }
 
   currentLayers(): RtpLayerSelection | undefined {
@@ -148,11 +162,11 @@ export class ProducerSimulcastState {
     return { selection: selectionFromLayer((affordable.length > 0 ? affordable : [candidates[0]!]).at(-1)!), reason: 'adaptive' };
   }
 
-  private layerInfoForEncoding(encoding: RtpEncodingParameters, index: number): RtpLayerInfo {
+  private layerInfoForEncoding(encoding: RtpEncodingParameters, index: number, temporalLayer = encoding.temporalLayer): RtpLayerInfo {
     const spatialLayer = encoding.spatialLayer ?? spatialLayerFromRid(encoding.rid, index);
     return {
       spatialLayer,
-      temporalLayer: encoding.temporalLayer,
+      temporalLayer,
       rid: encoding.rid,
       ssrc: encoding.ssrc,
       rtxSsrc: encoding.rtx?.ssrc,
@@ -186,10 +200,10 @@ export function spatialLayerFromRid(rid: string | undefined, fallbackIndex: numb
   }
 }
 
-export function layerSelectionForEncoding(encoding: RtpEncodingParameters, index: number): RtpLayerSelection {
+export function layerSelectionForEncoding(encoding: RtpEncodingParameters, index: number, temporalLayer = encoding.temporalLayer): RtpLayerSelection {
   return {
     spatialLayer: encoding.spatialLayer ?? spatialLayerFromRid(encoding.rid, index),
-    temporalLayer: encoding.temporalLayer
+    temporalLayer
   };
 }
 

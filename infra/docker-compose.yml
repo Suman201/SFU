@@ -24,10 +24,19 @@ services:
   coturn:
     image: coturn/coturn:4
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "5349:5349"
+      - "5349:5349/udp"
+      - "49152-49200:49152-49200/udp"
     volumes:
       - ./docker/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
-    command: ["-c", "/etc/coturn/turnserver.conf"]
+    command:
+      - "-c"
+      - "/etc/coturn/turnserver.conf"
+      - "--realm=${TURN_REALM:-native-sfu.local}"
+      - "--static-auth-secret=${TURN_SECRET:-replace-with-turn-rest-secret}"
 
   backend:
     build:
@@ -36,13 +45,51 @@ services:
     restart: unless-stopped
     env_file:
       - ../.env
+    environment:
+      TURN_REALM: ${TURN_REALM:-native-sfu.local}
+      TURN_SECRET: ${TURN_SECRET:-replace-with-turn-rest-secret}
+      TURN_URIS: ${TURN_URIS:-turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp}
+      NODE_ID: ${NODE_ID:-compose-backend-1}
+      NODE_REGION: ${NODE_REGION:-local}
+      NODE_ZONE: ${NODE_ZONE:-local-a}
+      NODE_PUBLIC_URL: ${NODE_PUBLIC_URL:-http://localhost:3000}
+      NODE_HEARTBEAT_INTERVAL_MS: ${NODE_HEARTBEAT_INTERVAL_MS:-5000}
+      NODE_TTL_MS: ${NODE_TTL_MS:-15000}
+      NODE_DRAINING: ${NODE_DRAINING:-false}
+      NODE_PREFER_LOCAL: ${NODE_PREFER_LOCAL:-true}
+      NODE_MAX_ROOMS: ${NODE_MAX_ROOMS:-1000}
+      NODE_MAX_TRANSPORTS: ${NODE_MAX_TRANSPORTS:-5000}
+      ENABLE_PIPE_TRANSPORT: ${ENABLE_PIPE_TRANSPORT:-false}
+      PIPE_PORT_RANGE: ${PIPE_PORT_RANGE:-41000-41100}
+      PIPE_CLUSTER_SECRET: ${PIPE_CLUSTER_SECRET:-}
+      PIPE_ADVERTISE_IP: ${PIPE_ADVERTISE_IP:-}
+      PIPE_ALLOWED_NODE_IDS: ${PIPE_ALLOWED_NODE_IDS:-}
+      PIPE_COORDINATION_TIMEOUT_MS: ${PIPE_COORDINATION_TIMEOUT_MS:-5000}
+      PIPE_COORDINATION_MAX_ATTEMPTS: ${PIPE_COORDINATION_MAX_ATTEMPTS:-3}
+      PIPE_MAX_SETUP_REQUESTS_PER_MINUTE: ${PIPE_MAX_SETUP_REQUESTS_PER_MINUTE:-120}
+      MEDIA_WORKER_MODE: ${MEDIA_WORKER_MODE:-in-process}
+      MEDIA_WORKER_COUNT: ${MEDIA_WORKER_COUNT:-1}
+      MEDIA_WORKER_DRAIN_TIMEOUT_MS: ${MEDIA_WORKER_DRAIN_TIMEOUT_MS:-30000}
+      MEDIA_WORKER_MAX_ROOMS_PER_WORKER: ${MEDIA_WORKER_MAX_ROOMS_PER_WORKER:-100}
+      MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER: ${MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER:-500}
+      MEDIA_WORKER_MAX_INFLIGHT_REQUESTS_PER_WORKER: ${MEDIA_WORKER_MAX_INFLIGHT_REQUESTS_PER_WORKER:-1000}
+      MEDIA_WORKER_SOFT_IPC_LATENCY_MS: ${MEDIA_WORKER_SOFT_IPC_LATENCY_MS:-100}
+      MEDIA_WORKER_HARD_IPC_LATENCY_MS: ${MEDIA_WORKER_HARD_IPC_LATENCY_MS:-1000}
+      MEDIA_WORKER_SOFT_MEMORY_LIMIT_BYTES: ${MEDIA_WORKER_SOFT_MEMORY_LIMIT_BYTES:-}
+      MEDIA_WORKER_HARD_MEMORY_LIMIT_BYTES: ${MEDIA_WORKER_HARD_MEMORY_LIMIT_BYTES:-}
+      MEDIA_WORKER_SOFT_RTP_PACKET_RATE: ${MEDIA_WORKER_SOFT_RTP_PACKET_RATE:-50000}
+      MEDIA_WORKER_SOFT_RTCP_PACKET_RATE: ${MEDIA_WORKER_SOFT_RTCP_PACKET_RATE:-5000}
     ports:
       - "3000:3000"
       - "40000-40100:40000-40100/udp"
+      # Cross-node pipe transport is disabled by default. Enable only in controlled test clusters.
+      - "41000-41100:41000-41100/udp"
     depends_on:
       mongo:
         condition: service_healthy
       redis:
+        condition: service_started
+      coturn:
         condition: service_started
     volumes:
       - recordings:/app/recordings

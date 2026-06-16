@@ -1,5 +1,5 @@
 import { RtpPacket } from './rtp-packet';
-import { addSequenceNumber, addTimestamp, sequenceDelta, sequenceDistance, timestampDistance } from './rtp-sequence';
+import { addSequenceNumber, addTimestamp, sequenceDelta, timestampDistance } from './rtp-sequence';
 
 export interface RtpRewriteMapping {
   sourceSsrc: number;
@@ -16,6 +16,12 @@ export interface RtpRewriteSnapshot {
   sourceBaseTimestamp: number;
   targetBaseTimestamp: number;
   packetsRewritten: number;
+}
+
+export interface RtpRewriteTargetInfo {
+  sourceSsrc: number;
+  targetSsrc: number;
+  targetTimestamp: number;
 }
 
 export interface ConsumerRtpRewriterOptions {
@@ -54,6 +60,14 @@ export class ConsumerRtpRewriter {
     return rewritten;
   }
 
+  preview(packet: RtpPacket, mapping: RtpRewriteMapping): RtpPacket {
+    const stream = this.streams.get(mapping.sourceSsrc);
+    if (!stream || stream.targetSsrc !== mapping.targetSsrc) {
+      return this.rewrite(packet, mapping);
+    }
+    return stream.rewrite(packet, mapping, false);
+  }
+
   resetSource(sourceSsrc: number): void {
     const stream = this.streams.get(sourceSsrc);
     if (stream) {
@@ -82,6 +96,18 @@ export class ConsumerRtpRewriter {
     };
   }
 
+  targetInfoForSource(sourceSsrc: number, sourceTimestamp: number): RtpRewriteTargetInfo | undefined {
+    const stream = this.streams.get(sourceSsrc);
+    if (!stream) {
+      return undefined;
+    }
+    return {
+      sourceSsrc,
+      targetSsrc: stream.targetSsrc,
+      targetTimestamp: stream.targetTimestampForSource(sourceTimestamp)
+    };
+  }
+
   snapshot(): RtpRewriteSnapshot[] {
     return [...this.streams.values()].map((stream) => stream.snapshot());
   }
@@ -94,6 +120,9 @@ class RtpStreamRewriter {
   private readonly targetBaseSequenceNumber: number;
   private readonly sourceBaseTimestamp: number;
   private readonly targetBaseTimestamp: number;
+  private readonly sourceToTargetSequence = new Map<number, number>();
+  private readonly targetToSourceSequence = new Map<number, number>();
+  private nextTargetSequenceNumber: number;
   private packetsRewritten = 0;
 
   constructor(packet: RtpPacket, mapping: RtpRewriteMapping, options: ConsumerRtpRewriterOptions, continuity?: TargetContinuity) {
@@ -103,19 +132,22 @@ class RtpStreamRewriter {
     this.targetBaseSequenceNumber = continuity?.nextSequenceNumber ?? options.sequenceNumberGenerator?.() ?? packet.sequenceNumber;
     this.sourceBaseTimestamp = packet.timestamp;
     this.targetBaseTimestamp = continuity?.nextTimestamp ?? options.timestampGenerator?.() ?? packet.timestamp;
+    this.nextTargetSequenceNumber = this.targetBaseSequenceNumber;
   }
 
-  rewrite(packet: RtpPacket, mapping: RtpRewriteMapping): RtpPacket {
-    const sequenceOffset = sequenceDistance(this.sourceBaseSequenceNumber, packet.sequenceNumber);
+  rewrite(packet: RtpPacket, mapping: RtpRewriteMapping, record = true): RtpPacket {
     const timestampOffset = timestampDistance(this.sourceBaseTimestamp, packet.timestamp);
-    this.packetsRewritten += 1;
+    const targetSequenceNumber = record ? this.targetSequenceNumberForRecord(packet.sequenceNumber) : this.targetSequenceNumberForPreview(packet.sequenceNumber);
+    if (record) {
+      this.packetsRewritten += 1;
+    }
     return new RtpPacket(
       packet.version,
       packet.padding,
       packet.extension,
       packet.marker,
       mapping.targetPayloadType,
-      addSequenceNumber(this.targetBaseSequenceNumber, sequenceOffset),
+      targetSequenceNumber,
       addTimestamp(this.targetBaseTimestamp, timestampOffset),
       mapping.targetSsrc,
       [...packet.csrc],
@@ -125,7 +157,15 @@ class RtpStreamRewriter {
   }
 
   sourceSequenceForTarget(targetSequenceNumber: number): number {
+    const mapped = this.targetToSourceSequence.get(targetSequenceNumber & 0xffff);
+    if (mapped !== undefined) {
+      return mapped;
+    }
     return addSequenceNumber(this.sourceBaseSequenceNumber, sequenceDelta(targetSequenceNumber, this.targetBaseSequenceNumber));
+  }
+
+  targetTimestampForSource(sourceTimestamp: number): number {
+    return addTimestamp(this.targetBaseTimestamp, timestampDistance(this.sourceBaseTimestamp, sourceTimestamp));
   }
 
   snapshot(): RtpRewriteSnapshot {
@@ -138,5 +178,23 @@ class RtpStreamRewriter {
       targetBaseTimestamp: this.targetBaseTimestamp,
       packetsRewritten: this.packetsRewritten
     };
+  }
+
+  private targetSequenceNumberForRecord(sourceSequenceNumber: number): number {
+    const normalizedSource = sourceSequenceNumber & 0xffff;
+    const existing = this.sourceToTargetSequence.get(normalizedSource);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const target = this.nextTargetSequenceNumber & 0xffff;
+    this.sourceToTargetSequence.set(normalizedSource, target);
+    this.targetToSourceSequence.set(target, normalizedSource);
+    this.nextTargetSequenceNumber = addSequenceNumber(target, 1);
+    return target;
+  }
+
+  private targetSequenceNumberForPreview(sourceSequenceNumber: number): number {
+    const existing = this.sourceToTargetSequence.get(sourceSequenceNumber & 0xffff);
+    return existing ?? this.nextTargetSequenceNumber;
   }
 }

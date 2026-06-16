@@ -7,5 +7,7 @@ export * from './consumers.js';
 export * from './chat.js';
 export * from './recordings.js';
 export * from './metrics.js';
+export * from './cluster.js';
+export * from './pipe.js';
 export * from './signaling.js';
 export * from './transport.js';

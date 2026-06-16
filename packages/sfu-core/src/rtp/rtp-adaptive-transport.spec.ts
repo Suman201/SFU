@@ -75,6 +75,57 @@ describe('RtpRouter adaptive transport foundation', () => {
     expect(router.bandwidthEstimate(consumer.id).packetLoss).toBeGreaterThan(0);
   });
 
+  it('tracks transport-cc send history, probe results, and statistics API state', async () => {
+    let now = 1000;
+    const router = new RtpRouter({
+      enablePacing: false,
+      now: () => now,
+      sequenceNumberGenerator: () => 5000,
+      timestampGenerator: () => 200000,
+      defaultPacingBitrateBps: 100_000,
+      probeClusterIntervalMs: 0,
+      probeBurstPackets: 3,
+      probeBitrateMultiplier: 1.1
+    });
+    const producer = createProducer(rtpParameters(1111, 96, [{ id: 4, uri: RTP_HEADER_EXTENSION_URIS.twcc }]));
+    const consumer = createConsumer(producer, rtpParameters(2222, 120, [{ id: 5, uri: RTP_HEADER_EXTENSION_URIS.twcc }]));
+    const writes: RtpPacket[] = [];
+    router.addProducer(producer);
+    router.addConsumer(consumer, async (packet) => {
+      writes.push(packet);
+    });
+
+    for (let index = 0; index < 4; index += 1) {
+      await router.route(rawPacket(1111, 96, 10 + index, 1000 + index * 3000, Buffer.from('payload'), [{ id: 4, data: Buffer.from([(100 + index) >> 8, (100 + index) & 0xff]) }]));
+      now += 20;
+    }
+    const twccSequences = writes.map((packet) => parseRtpHeaderExtensions(packet, consumer.rtpParameters).find((extension) => extension.kind === 'twcc')?.value as number);
+    await router.routeRtcp(
+      createTransportWideCcFeedback({
+        senderSsrc: 9999,
+        mediaSsrc: 2222,
+        feedbackPacketCount: 2,
+        arrivals: [
+          { sequenceNumber: twccSequences[0]!, arrivalTimeMs: 64000, size: 1000 },
+          { sequenceNumber: twccSequences[1]!, arrivalTimeMs: 64022, size: 1000 },
+          { sequenceNumber: twccSequences[3]!, arrivalTimeMs: 64070, size: 1000 }
+        ]
+      }),
+      { sourceTransportId: consumer.transportId, sourceParticipantId: consumer.participantId }
+    );
+
+    const stats = router.statistics().consumers[0]!;
+    expect(stats.twccSendHistory.sentPackets).toBe(4);
+    expect(stats.bitrate.estimate.rtt).toBeGreaterThan(0);
+    expect(stats.bitrate.estimate.packetLoss).toBeGreaterThan(0);
+    expect(stats.bitrate.probes.length).toBeGreaterThan(0);
+    expect(stats.bitrate.history.length).toBeGreaterThan(0);
+    expect(stats.layers[0]?.fractionLost).toBeGreaterThan(0);
+    expect(stats.layers[0]?.rtt).toBeGreaterThan(0);
+    expect(stats.layers[0]?.score.degradationReason).toBe('packet_loss');
+    expect(router.statistics().probes.length).toBeGreaterThan(0);
+  });
+
   it('requests a keyframe and holds active video joins until a keyframe arrives', async () => {
     const rtcpWrites: Buffer[] = [];
     const gateEvents: string[] = [];

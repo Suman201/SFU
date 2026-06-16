@@ -19,6 +19,24 @@ describe('RtpSourceStreamState', () => {
     expect(state.accept(packet(1111, 96, 11)).packets.map((item) => item.sequenceNumber)).toEqual([11, 12]);
   });
 
+  it('expires missing sequence gaps and drains delayed packets by time', () => {
+    let now = 1000;
+    const state = new RtpSourceStreamState({ ssrc: 1111, allowedPayloadTypes: [96], maxReorderDelayMs: 25, now: () => now });
+
+    expect(state.accept(packet(1111, 96, 10)).packets.map((item) => item.sequenceNumber)).toEqual([10]);
+    now += 10;
+    expect(state.accept(packet(1111, 96, 12)).buffered).toBe(true);
+    expect(state.drainExpired().packets).toEqual([]);
+    now += 30;
+    const drained = state.drainExpired();
+
+    expect(drained.packets.map((item) => item.sequenceNumber)).toEqual([12]);
+    expect(drained.expiredGap?.ssrc).toBe(1111);
+    expect(drained.expiredGap?.previousExpectedSequenceNumber).toBe(11);
+    expect(drained.expiredGap?.releasedSequenceNumber).toBe(12);
+    expect(state.snapshot().expiredGaps).toBe(1);
+  });
+
   it('drops duplicate and late packets', () => {
     const state = new RtpSourceStreamState({ ssrc: 1111, allowedPayloadTypes: [96] });
 

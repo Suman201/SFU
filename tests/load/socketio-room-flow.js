@@ -29,6 +29,32 @@ export default function () {
     return;
   }
 
+  const metrics = http.get(`${baseUrl}/metrics`, { headers: { Authorization: `Bearer ${token}` } });
+  check(metrics, {
+    'quality metrics registered': (response) =>
+      response.status === 200 &&
+      response.body.includes('sfu_consumer_quality_score') &&
+      response.body.includes('sfu_producer_quality_score') &&
+      response.body.includes('sfu_room_quality_score')
+  });
+  check(metrics, {
+    'worker hardening metrics registered': (response) =>
+      response.status === 200 &&
+      response.body.includes('sfu_media_worker_capacity_score') &&
+      response.body.includes('sfu_media_worker_draining') &&
+      response.body.includes('sfu_media_worker_overloaded') &&
+      response.body.includes('sfu_media_worker_room_failures_total') &&
+      response.body.includes('sfu_room_admission_rejections_total')
+  });
+  check(metrics, {
+    'cluster ownership metrics registered': (response) =>
+      response.status === 200 &&
+      response.body.includes('sfu_cluster_registered_nodes') &&
+      response.body.includes('sfu_cluster_owned_rooms') &&
+      response.body.includes('sfu_room_owner_redirects_total') &&
+      response.body.includes('sfu_room_ownership_claims_total')
+  });
+
   const socketUrl = baseUrl.replace('http', 'ws') + `/socket.io/?EIO=4&transport=websocket`;
   ws.connect(socketUrl, {}, (socket) => {
     socket.on('open', () => {

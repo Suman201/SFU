@@ -13,6 +13,7 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService);
   const frontendUrl = config.get<string>('FRONTEND_URL', 'http://localhost:4200');
 
+  app.enableShutdownHooks();
   app.use(helmet());
   app.enableCors({
     origin: frontendUrl.split(',').map((origin) => origin.trim()),

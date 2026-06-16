@@ -370,7 +370,38 @@ export class RoomComponent implements OnInit {
     this.socket.on('producer:created', (producer) => this.store.upsertProducer(producer));
     this.socket.on('producer:updated', (producer) => this.store.upsertProducer(producer));
     this.socket.on('producer:closed', (producerId) => this.store.removeProducer(producerId));
+    this.socket.on('producer:score-updated', (state) => this.store.applyProducerQuality(state));
+    this.socket.on('producer:layers-needed', (event) => {
+      this.store.applyProducerDynacast(event);
+      void this.webrtc.applyProducerDynacast(event);
+    });
+    this.socket.on('producer:layers-unneeded', (event) => {
+      this.store.applyProducerDynacast(event);
+      void this.webrtc.applyProducerDynacast(event);
+    });
+    this.socket.on('producer:dynacast-updated', (event) => this.store.applyProducerDynacast(event));
     this.socket.on('consumer:created', (consumer) => this.store.upsertConsumer(consumer));
+    this.socket.on('consumer:updated', (consumer) => this.store.upsertConsumer(consumer));
+    this.socket.on('consumer:score-updated', (state) => {
+      this.store.applyConsumerQuality(state);
+      if (state.participantId === this.store.localParticipantId()) {
+        this.webrtc.setNetworkQualityScore(state.score.score);
+      }
+    });
+    this.socket.on('room:quality-updated', (state) => this.store.applyRoomQuality(state));
+    this.socket.on('network:quality', (quality) => {
+      if (quality.participantId === this.store.localParticipantId()) {
+        this.webrtc.networkScore.set(quality.score);
+      }
+    });
+    this.socket.on('consumer:layers-changed', (event) => this.store.applyConsumerLayerEvent(event));
+    this.socket.on('consumer:layers-switching', (event) => this.store.applyConsumerLayerEvent(event));
+    this.socket.on('consumer:layers-unavailable', (event) => this.store.applyConsumerLayerEvent(event));
+    this.socket.on('consumer:layers-switch-failed', (event) => this.store.applyConsumerLayerEvent(event));
+    this.socket.on('consumer:svc-layers-changed', (event) => this.store.applyConsumerLayerEvent(event));
+    this.socket.on('consumer:svc-layers-switching', (event) => this.store.applyConsumerLayerEvent(event));
+    this.socket.on('consumer:svc-layers-unavailable', (event) => this.store.applyConsumerLayerEvent(event));
+    this.socket.on('consumer:svc-layers-switch-failed', (event) => this.store.applyConsumerLayerEvent(event));
     this.socket.on('chat:message', (message: ChatMessage) => this.store.addMessage(message));
     this.socket.on('room:closed', () => void this.router.navigate(['/']));
     this.socket.on('participant:kicked', (reason) => {

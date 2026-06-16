@@ -1,5 +1,14 @@
 import type { InjectionToken, ModuleMetadata, OptionalFactoryDependency, Type } from '@nestjs/common';
-import type { ProducerKind, RtpLayerInfo, RtpLayerSelection } from '@native-sfu/contracts';
+import type {
+  ConsumerQualityState,
+  ProducerDynacastEvent,
+  ProducerKind,
+  ProducerQualityState,
+  RoomQualityState,
+  RtpLayerInfo,
+  RtpLayerSelection,
+  TransportQualityState
+} from '@native-sfu/contracts';
 import type {
   FullIntraRequest,
   NackFeedback,
@@ -18,6 +27,11 @@ import type {
 import type { TurnServerOptions } from './ice/ice.types';
 
 export interface NestSfuMetricsHooks {
+  onMediaWorkerIpcRequest?: (operation: string, status: 'ok' | 'error' | 'timeout', durationMs: number) => void;
+  onMediaWorkerCrash?: (workerId: string, reason: string, affectedRooms: number) => void;
+  onMediaWorkerRestart?: (workerId: string, reason: string) => void;
+  onMediaWorkerDrain?: (workerId: string, state: 'started' | 'completed' | 'forced', affectedRooms: number) => void;
+  onMediaWorkerRoomFailed?: (workerId: string, roomId: string, reason: string) => void;
   onForwardedRtpPacket?: (kind: ProducerKind) => void;
   onDroppedRtpPacket?: (reason: RtpPacketDropReason) => void;
   onBufferedRtpPacket?: (ssrc: number, sequenceNumber: number) => void;
@@ -36,6 +50,11 @@ export interface NestSfuMetricsHooks {
   onKeyframeGateOpened?: (consumerId: string, producerId: string) => void;
   onKeyframeGateDropped?: (consumerId: string, producerId: string) => void;
   onProducerLayerActive?: (producerId: string, layer: RtpLayerInfo) => void;
+  onProducerDynacastEvent?: (event: ProducerDynacastEvent) => void;
+  onConsumerScoreUpdated?: (state: ConsumerQualityState) => void;
+  onProducerScoreUpdated?: (state: ProducerQualityState) => void;
+  onTransportQualityUpdated?: (state: TransportQualityState) => void;
+  onRoomQualityUpdated?: (state: RoomQualityState) => void;
   onConsumerLayersChanged?: (consumerId: string, layers: RtpLayerSelection) => void;
   onLayerSwitch?: (consumerId: string, producerId: string, from: RtpLayerSelection | undefined, to: RtpLayerSelection) => void;
   onLayerSwitchFailed?: (consumerId: string, producerId: string, target: RtpLayerSelection, reason: 'missing_keyframe' | 'missing_layer') => void;
@@ -46,11 +65,34 @@ export interface NestSfuMetricsHooks {
   onFir?: (roomId: string, participantId: string, feedback: FullIntraRequest) => void;
   onRemb?: (roomId: string, participantId: string, feedback: ReceiverEstimatedMaximumBitrate) => void;
   onTwcc?: (roomId: string, participantId: string, feedback: TransportWideCcFeedback) => void;
+  onPipeRtpPacket?: (direction: 'sent' | 'received', bytes: number) => void;
+  onPipeRtcpPacket?: (direction: 'sent' | 'received', bytes: number) => void;
+  onPipeBackpressure?: (transportId: string) => void;
+  onPipeDrop?: (reason: string) => void;
 }
 
 export interface NestSfuOptions {
   turnSecret: string;
   turnUris: string[];
+  mediaWorkerMode?: 'in-process' | 'worker';
+  mediaWorkerCount?: number;
+  mediaWorkerRequestTimeoutMs?: number;
+  mediaWorkerStartupTimeoutMs?: number;
+  mediaWorkerShutdownTimeoutMs?: number;
+  mediaWorkerHeartbeatIntervalMs?: number;
+  mediaWorkerHeartbeatTimeoutMs?: number;
+  mediaWorkerRestartBackoffMs?: number;
+  mediaWorkerMaxRoomsPerWorker?: number;
+  mediaWorkerMaxTransportsPerWorker?: number;
+  mediaWorkerMaxInFlightRequestsPerWorker?: number;
+  mediaWorkerSoftMemoryLimitBytes?: number;
+  mediaWorkerHardMemoryLimitBytes?: number;
+  mediaWorkerSoftIpcLatencyMs?: number;
+  mediaWorkerHardIpcLatencyMs?: number;
+  mediaWorkerDrainTimeoutMs?: number;
+  mediaWorkerSoftRtpPacketRate?: number;
+  mediaWorkerSoftRtcpPacketRate?: number;
+  mediaWorkerExecArgv?: string[];
   stunServers?: string[];
   turnServers?: TurnServerOptions[];
   hostCandidatePort?: number;
@@ -74,11 +116,30 @@ export interface NestSfuOptions {
   rtpDuplicateWindowSize?: number;
   enableTwcc?: boolean;
   enablePacing?: boolean;
+  enableProbeScheduling?: boolean;
   enableJoinKeyframeGate?: boolean;
   enableAdaptiveLayerSelection?: boolean;
+  enableDynacast?: boolean;
   defaultPacingBitrateBps?: number;
   maxPacingQueueBytes?: number;
   twccFeedbackIntervalMs?: number;
+  probeClusterIntervalMs?: number;
+  probeBurstPackets?: number;
+  probeBitrateMultiplier?: number;
+  dynacastUpgradeHoldMs?: number;
+  dynacastPriorityBias?: number;
+  qualityUpdateIntervalMs?: number;
+  minAudioBitrateBps?: number;
+  minVideoBitrateBps?: number;
+  minScreenBitrateBps?: number;
+  defaultVideoBitrateBps?: number;
+  defaultScreenBitrateBps?: number;
+  enablePipeTransport?: boolean;
+  pipePortRange?: {
+    min: number;
+    max: number;
+  };
+  pipeAdvertiseIp?: string;
   metrics?: NestSfuMetricsHooks;
 }
 

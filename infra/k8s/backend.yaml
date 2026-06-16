@@ -4,7 +4,7 @@ metadata:
   name: backend
   namespace: native-sfu
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: backend
@@ -13,6 +13,7 @@ spec:
       labels:
         app: backend
     spec:
+      terminationGracePeriodSeconds: 45
       containers:
         - name: backend
           image: native-sfu/backend:latest
@@ -22,11 +23,19 @@ spec:
                 name: native-sfu-config
             - secretRef:
                 name: native-sfu-secrets
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
             - name: http
               containerPort: 3000
             - name: media-udp
               containerPort: 40000
+              protocol: UDP
+            - name: pipe-udp
+              containerPort: 41000
               protocol: UDP
           readinessProbe:
             httpGet:
@@ -36,10 +45,14 @@ spec:
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /api/v1/health
+              path: /api/v1/health/live
               port: http
             initialDelaySeconds: 20
             periodSeconds: 20
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 30"]
           resources:
             requests:
               cpu: 250m
@@ -63,4 +76,8 @@ spec:
     - name: media-udp
       port: 40000
       targetPort: media-udp
+      protocol: UDP
+    - name: pipe-udp
+      port: 41000
+      targetPort: pipe-udp
       protocol: UDP

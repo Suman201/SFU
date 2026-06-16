@@ -1,4 +1,5 @@
 import type { Consumer, Producer } from '@native-sfu/contracts';
+import { BandwidthEstimator } from '../bandwidth/bandwidth-estimator';
 import { createFir, createNack, createPli, createRemb, createSenderReport } from '../rtcp/rtcp-packet';
 import { RtpRouter } from './rtp-router';
 
@@ -181,6 +182,38 @@ describe('RtpRouter', () => {
     expect(producerFeedback).toEqual(['pli', 'pli']);
     expect(forwarded).toEqual(['producer-1:pli', 'producer-1:pli']);
     expect(coalesced).toEqual(['producer-1:pli', 'producer-1:fir', 'producer-1:fir']);
+  });
+
+  it('allocates shared transport bitrate by consumer priority and exposes quality snapshots', () => {
+    const estimator = new BandwidthEstimator();
+    estimator.observePacket('transport:transport-2', 'outgoing', 75_000, 1000);
+    estimator.observePacket('transport:transport-2', 'outgoing', 75_000, 2000);
+    const events: string[] = [];
+    const router = new RtpRouter({
+      bandwidthEstimator: estimator,
+      enablePacing: false,
+      onConsumerScoreUpdated: (state) => events.push(`${state.consumerId}:${state.score.level}`)
+    });
+    const producer = createProducer();
+    const lowPriority = createConsumer(producer);
+    const highPriority = createConsumer(producer);
+    lowPriority.id = 'consumer-low';
+    lowPriority.priority = 1;
+    highPriority.id = 'consumer-high';
+    highPriority.priority = 8;
+    router.addProducer(producer);
+    router.addConsumer(lowPriority, async () => undefined);
+    router.addConsumer(highPriority, async () => undefined);
+
+    router.setConsumerPriority(highPriority.id, 8);
+
+    const stats = router.statistics().consumers;
+    const low = stats.find((consumer) => consumer.consumerId === 'consumer-low')!;
+    const high = stats.find((consumer) => consumer.consumerId === 'consumer-high')!;
+    expect(high.allocation.allocatedBitrate).toBeGreaterThan(low.allocation.allocatedBitrate);
+    expect(high.quality.score.score).toBeGreaterThan(0);
+    expect(router.transportQualitySnapshot('transport-2')?.consumers.length).toBe(2);
+    expect(events.some((event) => event.startsWith('consumer-high:'))).toBe(true);
   });
 });
 

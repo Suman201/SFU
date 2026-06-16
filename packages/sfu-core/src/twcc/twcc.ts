@@ -49,6 +49,52 @@ export interface TwccArrivalSnapshot {
   expectedPackets: number;
 }
 
+export interface TwccFeedbackOptions {
+  compact?: boolean;
+  minIntervalMs?: number;
+  now?: number;
+  force?: boolean;
+}
+
+export interface TwccSendRecord {
+  sequenceNumber: number;
+  sentAtMs: number;
+  size: number;
+  ssrc?: number;
+  retransmission?: boolean;
+}
+
+export interface TwccCorrelationSample {
+  sequenceNumber: number;
+  sentAtMs: number;
+  arrivalTimeMs: number;
+  size: number;
+  ssrc?: number;
+  retransmission: boolean;
+}
+
+export interface TwccFeedbackCorrelation {
+  received: TwccCorrelationSample[];
+  missingSequences: number[];
+  packetLoss: number;
+  meanSendDeltaMs?: number;
+  meanReceiveDeltaMs?: number;
+  delayVariationMs: number;
+  rttMs?: number;
+  correlatedPackets: number;
+  expectedPackets: number;
+}
+
+export interface TwccSendHistorySnapshot {
+  trackedPackets: number;
+  maxWindowSize: number;
+  sentPackets: number;
+  sentBytes: number;
+  retransmissionPackets: number;
+  lastSequenceNumber?: number;
+  lastSentAtMs?: number;
+}
+
 export class TransportWideSequenceNumber {
   private nextValue: number;
 
@@ -71,6 +117,8 @@ export class TwccArrivalTracker {
   private readonly arrivals = new Map<number, TwccArrival>();
   private readonly order: number[] = [];
   private feedbackPacketCount = 0;
+  private lastFeedbackSequenceNumber?: number;
+  private lastFeedbackAt?: number;
 
   constructor(private readonly maxWindowSize = 512) {}
 
@@ -93,18 +141,27 @@ export class TwccArrivalTracker {
     }
   }
 
-  createFeedback(senderSsrc: number, mediaSsrc: number): Buffer | null {
-    const arrivals = this.orderedArrivals();
+  createFeedback(senderSsrc: number, mediaSsrc: number, options: TwccFeedbackOptions = {}): Buffer | null {
+    const now = options.now ?? Date.now();
+    if (!options.force && options.minIntervalMs !== undefined && this.lastFeedbackAt !== undefined && now - this.lastFeedbackAt < options.minIntervalMs) {
+      return null;
+    }
+    const arrivals = options.compact ? this.compactArrivals() : this.orderedArrivals();
     if (arrivals.length === 0) {
       return null;
     }
+    const baseSequenceNumber =
+      options.compact && this.lastFeedbackSequenceNumber !== undefined ? addSequenceNumber(this.lastFeedbackSequenceNumber, 1) : undefined;
     const packet = createTransportWideCcFeedback({
       senderSsrc,
       mediaSsrc,
       arrivals,
-      feedbackPacketCount: this.feedbackPacketCount
+      feedbackPacketCount: this.feedbackPacketCount,
+      baseSequenceNumber
     });
     this.feedbackPacketCount = (this.feedbackPacketCount + 1) & 0xff;
+    this.lastFeedbackSequenceNumber = arrivals[arrivals.length - 1]!.sequenceNumber;
+    this.lastFeedbackAt = now;
     return packet;
   }
 
@@ -152,6 +209,137 @@ export class TwccArrivalTracker {
       .sort((left, right) => sequenceDistance(base, left) - sequenceDistance(base, right))
       .map((sequenceNumber) => this.arrivals.get(sequenceNumber))
       .filter((arrival): arrival is TwccArrival => Boolean(arrival));
+  }
+
+  private compactArrivals(): TwccArrival[] {
+    const arrivals = this.orderedArrivals();
+    if (this.lastFeedbackSequenceNumber === undefined) {
+      return arrivals;
+    }
+    return arrivals.filter((arrival) => sequenceDistance(this.lastFeedbackSequenceNumber!, arrival.sequenceNumber) > 0);
+  }
+}
+
+export class TwccSendHistory {
+  private readonly records = new Map<number, TwccSendRecord>();
+  private readonly order: number[] = [];
+  private sentPackets = 0;
+  private sentBytes = 0;
+  private retransmissionPackets = 0;
+
+  constructor(private readonly maxWindowSize = 1024) {}
+
+  recordSend(record: TwccSendRecord): void {
+    const sequenceNumber = record.sequenceNumber & 0xffff;
+    if (!this.records.has(sequenceNumber)) {
+      this.order.push(sequenceNumber);
+    }
+    this.records.set(sequenceNumber, {
+      sequenceNumber,
+      sentAtMs: record.sentAtMs,
+      size: Math.max(0, record.size),
+      ssrc: record.ssrc,
+      retransmission: record.retransmission === true
+    });
+    this.sentPackets += 1;
+    this.sentBytes += Math.max(0, record.size);
+    if (record.retransmission) {
+      this.retransmissionPackets += 1;
+    }
+    while (this.order.length > this.maxWindowSize) {
+      const evicted = this.order.shift();
+      if (evicted !== undefined) {
+        this.records.delete(evicted);
+      }
+    }
+  }
+
+  correlate(feedback: TransportWideCcFeedback, receivedAtMs: number): TwccFeedbackCorrelation {
+    const received: TwccCorrelationSample[] = [];
+    const missingSequences: number[] = [];
+    for (const status of feedback.statuses) {
+      if (!status.received) {
+        missingSequences.push(status.sequenceNumber);
+        continue;
+      }
+      const record = this.records.get(status.sequenceNumber);
+      if (!record || status.arrivalTimeMs === undefined) {
+        continue;
+      }
+      received.push({
+        sequenceNumber: status.sequenceNumber,
+        sentAtMs: record.sentAtMs,
+        arrivalTimeMs: status.arrivalTimeMs,
+        size: record.size,
+        ssrc: record.ssrc,
+        retransmission: record.retransmission === true
+      });
+    }
+    const sendDeltas: number[] = [];
+    const receiveDeltas: number[] = [];
+    for (let index = 1; index < received.length; index += 1) {
+      sendDeltas.push(Math.max(0, received[index]!.sentAtMs - received[index - 1]!.sentAtMs));
+      receiveDeltas.push(Math.max(0, received[index]!.arrivalTimeMs - received[index - 1]!.arrivalTimeMs));
+    }
+    const meanSendDeltaMs = mean(sendDeltas);
+    const meanReceiveDeltaMs = mean(receiveDeltas);
+    const delayVariationMs =
+      sendDeltas.length === 0
+        ? 0
+        : sendDeltas.reduce((sum, sendDelta, index) => sum + Math.abs((receiveDeltas[index] ?? 0) - sendDelta), 0) / sendDeltas.length;
+    const latestSentAtMs = received.length > 0 ? Math.max(...received.map((sample) => sample.sentAtMs)) : undefined;
+    return {
+      received,
+      missingSequences,
+      packetLoss: feedback.packetStatusCount > 0 ? Math.max(0, feedback.packetStatusCount - received.length) / feedback.packetStatusCount : 0,
+      meanSendDeltaMs,
+      meanReceiveDeltaMs,
+      delayVariationMs,
+      rttMs: latestSentAtMs === undefined ? undefined : Math.max(0, receivedAtMs - latestSentAtMs),
+      correlatedPackets: received.length,
+      expectedPackets: feedback.packetStatusCount
+    };
+  }
+
+  snapshot(): TwccSendHistorySnapshot {
+    const lastSequenceNumber = this.order[this.order.length - 1];
+    const lastSentAtMs = lastSequenceNumber === undefined ? undefined : this.records.get(lastSequenceNumber)?.sentAtMs;
+    return {
+      trackedPackets: this.records.size,
+      maxWindowSize: this.maxWindowSize,
+      sentPackets: this.sentPackets,
+      sentBytes: this.sentBytes,
+      retransmissionPackets: this.retransmissionPackets,
+      lastSequenceNumber,
+      lastSentAtMs
+    };
+  }
+}
+
+export interface TwccFeedbackSchedulerOptions {
+  intervalMs?: number;
+  compact?: boolean;
+  now?: () => number;
+}
+
+export class TwccFeedbackScheduler {
+  private readonly intervalMs: number;
+  private readonly compact: boolean;
+  private readonly now: () => number;
+
+  constructor(private readonly tracker: TwccArrivalTracker, options: TwccFeedbackSchedulerOptions = {}) {
+    this.intervalMs = options.intervalMs ?? 100;
+    this.compact = options.compact ?? true;
+    this.now = options.now ?? (() => Date.now());
+  }
+
+  maybeCreateFeedback(senderSsrc: number, mediaSsrc: number, force = false): Buffer | null {
+    return this.tracker.createFeedback(senderSsrc, mediaSsrc, {
+      compact: this.compact,
+      minIntervalMs: this.intervalMs,
+      force,
+      now: this.now()
+    });
   }
 }
 
@@ -296,6 +484,10 @@ function normalizeArrivals(arrivals: TwccArrival[]): TwccArrival[] {
     });
   }
   return [...latestBySequence.values()].sort((left, right) => sequenceDistance(base, left.sequenceNumber) - sequenceDistance(base, right.sequenceNumber));
+}
+
+function mean(values: number[]): number | undefined {
+  return values.length === 0 ? undefined : values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function encodePacketStatusChunks(symbols: number[]): number[] {

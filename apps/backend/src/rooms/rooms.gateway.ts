@@ -13,20 +13,27 @@ import type {
   ChatMessage,
   ClientToServerEvents,
   Consumer,
+  ConsumerLayerState,
   CreateConsumerRequest,
   CreateProducerRequest,
   CreateRoomRequest,
   JoinRoomRequest,
   JoinRoomResponse,
   Producer,
+  ProducerDynacastEvent,
+  ProducerLayerState,
   Room,
+  RoomFailureEvent,
+  RoomOwnerLookupResponse,
   ServerToClientEvents,
   SetConsumerPreferredLayersRequest,
+  SetConsumerPreferredSvcLayersRequest,
   TransportOptions
 } from '@native-sfu/contracts';
 import type { Server, Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import { socketAck } from '../common/utils/ack';
+import { RoomSignalService } from './room-signal.service';
 import { RoomsService, SocketUser } from './rooms.service';
 
 type SfuSocket = Socket<ClientToServerEvents, ServerToClientEvents> & {
@@ -36,6 +43,52 @@ type SfuSocket = Socket<ClientToServerEvents, ServerToClientEvents> & {
     roomId?: string;
   };
 };
+
+function layerEventName(type: 'changed' | 'switching' | 'unavailable' | 'switch-failed'): keyof Pick<
+  ServerToClientEvents,
+  'consumer:layers-changed' | 'consumer:layers-switching' | 'consumer:layers-unavailable' | 'consumer:layers-switch-failed'
+> {
+  switch (type) {
+    case 'changed':
+      return 'consumer:layers-changed';
+    case 'switching':
+      return 'consumer:layers-switching';
+    case 'unavailable':
+      return 'consumer:layers-unavailable';
+    case 'switch-failed':
+      return 'consumer:layers-switch-failed';
+  }
+}
+
+function svcLayerEventName(type: 'changed' | 'switching' | 'unavailable' | 'switch-failed'): keyof Pick<
+  ServerToClientEvents,
+  'consumer:svc-layers-changed' | 'consumer:svc-layers-switching' | 'consumer:svc-layers-unavailable' | 'consumer:svc-layers-switch-failed'
+> {
+  switch (type) {
+    case 'changed':
+      return 'consumer:svc-layers-changed';
+    case 'switching':
+      return 'consumer:svc-layers-switching';
+    case 'unavailable':
+      return 'consumer:svc-layers-unavailable';
+    case 'switch-failed':
+      return 'consumer:svc-layers-switch-failed';
+  }
+}
+
+function producerDynacastEventName(type: ProducerDynacastEvent['type']): keyof Pick<
+  ServerToClientEvents,
+  'producer:layers-needed' | 'producer:layers-unneeded' | 'producer:dynacast-updated'
+> {
+  switch (type) {
+    case 'layers-needed':
+      return 'producer:layers-needed';
+    case 'layers-unneeded':
+      return 'producer:layers-unneeded';
+    case 'updated':
+      return 'producer:dynacast-updated';
+  }
+}
 
 @WebSocketGateway({
   namespace: '/sfu',
@@ -52,8 +105,42 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   constructor(
     private readonly rooms: RoomsService,
-    private readonly auth: AuthService
-  ) {}
+    private readonly auth: AuthService,
+    private readonly signals: RoomSignalService
+  ) {
+    this.signals.onSignal((signal) => {
+      (this.server.to(signal.roomId) as unknown as { emit: (event: string, ...payload: unknown[]) => void }).emit(signal.event, ...signal.payload);
+    });
+    this.rooms.onConsumerLayerEvent((event) => {
+      const eventName = event.currentSvcLayers || event.targetSvcLayers || event.preferredSvcLayers ? svcLayerEventName(event.type) : layerEventName(event.type);
+      this.server.to(event.roomId).emit(eventName, event);
+    });
+    this.rooms.onProducerDynacastEvent((event) => {
+      void this.emitProducerDynacastEvent(event);
+    });
+    this.rooms.onConsumerScoreUpdated((state) => {
+      this.server.to(state.roomId).emit('consumer:score-updated', state);
+      this.server.to(state.roomId).emit('network:quality', {
+        participantId: state.participantId,
+        score: Math.max(1, Math.min(5, Math.ceil(state.score.score / 20))),
+        packetLoss: state.network.packetLoss,
+        rtt: state.network.rtt,
+        jitter: state.network.jitter
+      });
+    });
+    this.rooms.onProducerScoreUpdated((state) => {
+      this.server.to(state.roomId).emit('producer:score-updated', state);
+    });
+    this.rooms.onTransportQualityUpdated((state) => {
+      this.server.to(state.roomId).emit('transport:quality-updated', state);
+    });
+    this.rooms.onRoomQualityUpdated((state) => {
+      this.server.to(state.roomId).emit('room:quality-updated', state);
+    });
+    this.rooms.onRoomFailed((event: RoomFailureEvent) => {
+      this.emitRoomEvent(event.roomId, 'room:failed', event).catch(() => undefined);
+    });
+  }
 
   async handleConnection(socket: SfuSocket): Promise<void> {
     const token = this.extractToken(socket);
@@ -76,10 +163,13 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleDisconnect(socket: SfuSocket): Promise<void> {
     if (socket.data.roomId && socket.data.participantId) {
-      const result = await this.rooms.leaveRoom(socket.data.roomId, socket.data.participantId);
-      socket.to(socket.data.roomId).emit('participant:left', socket.data.participantId);
+      const result = await this.rooms.leaveRoomForSocket(socket.data.roomId, socket.data.participantId, socket.id);
+      if (!result.left) {
+        return;
+      }
+      await this.emitRoomEvent(socket.data.roomId, 'participant:left', socket.data.participantId);
       if (result.closed) {
-        this.server.to(socket.data.roomId).emit('room:closed', socket.data.roomId);
+        await this.emitRoomEvent(socket.data.roomId, 'room:closed', socket.data.roomId);
       }
     }
   }
@@ -95,6 +185,11 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  @SubscribeMessage('room:get-owner')
+  getRoomOwner(@MessageBody() request: { roomId: string }, ack: Ack<RoomOwnerLookupResponse>): Promise<void> {
+    return socketAck(ack, () => this.rooms.lookupRoomOwner(request.roomId));
+  }
+
   @SubscribeMessage('room:join')
   joinRoom(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: JoinRoomRequest, ack: Ack<JoinRoomResponse>): Promise<void> {
     return socketAck(ack, async () => {
@@ -105,11 +200,11 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (response.admitted) {
         const participant = response.room.participants.find((item) => item.id === response.participantId);
         if (participant) {
-          socket.to(request.roomId).emit('participant:joined', participant);
+          await this.emitRoomEvent(request.roomId, 'participant:joined', participant);
         }
-        this.server.to(request.roomId).emit('room:updated', response.room);
+        await this.emitRoomEvent(request.roomId, 'room:updated', response.room);
       } else {
-        this.server.to(request.roomId).emit('waiting-room:pending', response.room.participants.find((item) => item.id === response.participantId)!);
+        await this.emitRoomEvent(request.roomId, 'waiting-room:pending', response.room.participants.find((item) => item.id === response.participantId)!);
       }
       return response;
     });
@@ -121,7 +216,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const participantId = this.requireParticipant(socket);
       await this.rooms.leaveRoom(request.roomId, participantId);
       await socket.leave(request.roomId);
-      socket.to(request.roomId).emit('participant:left', participantId);
+      await this.emitRoomEvent(request.roomId, 'participant:left', participantId);
     });
   }
 
@@ -129,7 +224,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   closeRoom(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { roomId: string }, ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
       await this.rooms.closeRoom(request.roomId, this.requireParticipant(socket));
-      this.server.to(request.roomId).emit('room:closed', request.roomId);
+      await this.emitRoomEvent(request.roomId, 'room:closed', request.roomId);
     });
   }
 
@@ -147,7 +242,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   admit(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { roomId: string; participantId: string }, ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
       const room = await this.rooms.admit(request.roomId, this.requireParticipant(socket), request.participantId);
-      this.server.to(request.roomId).emit('room:updated', room);
+      await this.emitRoomEvent(request.roomId, 'room:updated', room);
     });
   }
 
@@ -155,7 +250,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   reject(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { roomId: string; participantId: string }, ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
       await this.rooms.reject(request.roomId, this.requireParticipant(socket), request.participantId);
-      this.server.to(request.roomId).emit('participant:left', request.participantId);
+      await this.emitRoomEvent(request.roomId, 'participant:left', request.participantId);
     });
   }
 
@@ -188,7 +283,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   createProducer(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: CreateProducerRequest, ack: Ack<Producer>): Promise<void> {
     return socketAck(ack, async () => {
       const producer = await this.rooms.createProducer(request, this.requireParticipant(socket));
-      this.server.to(request.roomId).emit('producer:created', producer);
+      await this.emitRoomEvent(request.roomId, 'producer:created', producer);
       return producer;
     });
   }
@@ -207,8 +302,30 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   closeProducer(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { producerId: string }, ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
       const producer = await this.rooms.closeProducer(request.producerId, this.requireParticipant(socket));
-      this.server.to(producer.roomId).emit('producer:closed', request.producerId);
+      await this.emitRoomEvent(producer.roomId, 'producer:closed', request.producerId);
     });
+  }
+
+  @SubscribeMessage('producer:set-priority')
+  setProducerPriority(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['producer:set-priority']>[0],
+    ack: Ack<Producer>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const producer = await this.rooms.setProducerPriority(request.producerId, this.requireParticipant(socket), request.priority);
+      await this.emitRoomEvent(producer.roomId, 'producer:updated', producer);
+      return producer;
+    });
+  }
+
+  @SubscribeMessage('producer:dynacast-control-failed')
+  producerDynacastControlFailed(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['producer:dynacast-control-failed']>[0],
+    ack: Ack<void>
+  ): Promise<void> {
+    return socketAck(ack, () => this.rooms.recordProducerDynacastControlFailure(request, this.requireParticipant(socket)));
   }
 
   @SubscribeMessage('consumer:create')
@@ -239,6 +356,65 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  @SubscribeMessage('consumer:set-preferred-svc-layers')
+  setConsumerPreferredSvcLayers(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: SetConsumerPreferredSvcLayersRequest, ack: Ack<Consumer>): Promise<void> {
+    return socketAck(ack, async () => {
+      const consumer = await this.rooms.setConsumerPreferredSvcLayers(request.consumerId, this.requireParticipant(socket), request.preferredSvcLayers);
+      socket.emit('consumer:updated', consumer);
+      return consumer;
+    });
+  }
+
+  @SubscribeMessage('consumer:set-priority')
+  setConsumerPriority(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['consumer:set-priority']>[0],
+    ack: Ack<Consumer>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const consumer = await this.rooms.setConsumerPriority(request.consumerId, this.requireParticipant(socket), request.priority);
+      socket.emit('consumer:updated', consumer);
+      return consumer;
+    });
+  }
+
+  @SubscribeMessage('consumer:get-layers')
+  getConsumerLayers(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { consumerId: string }, ack: Ack<ConsumerLayerState>): Promise<void> {
+    return socketAck(ack, () => this.rooms.getConsumerLayerState(request.consumerId, this.requireParticipant(socket)));
+  }
+
+  @SubscribeMessage('producer:get-layers')
+  getProducerLayers(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { producerId: string }, ack: Ack<ProducerLayerState>): Promise<void> {
+    return socketAck(ack, () => this.rooms.getProducerLayerState(request.producerId, this.requireParticipant(socket)));
+  }
+
+  @SubscribeMessage('consumer:get-quality')
+  getConsumerQuality(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['consumer:get-quality']>[0],
+    ack: Ack<Parameters<ServerToClientEvents['consumer:score-updated']>[0]>
+  ): Promise<void> {
+    return socketAck(ack, () => this.rooms.getConsumerQualityState(request.consumerId, this.requireParticipant(socket)));
+  }
+
+  @SubscribeMessage('producer:get-quality')
+  getProducerQuality(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['producer:get-quality']>[0],
+    ack: Ack<Parameters<ServerToClientEvents['producer:score-updated']>[0]>
+  ): Promise<void> {
+    return socketAck(ack, () => this.rooms.getProducerQualityState(request.producerId, this.requireParticipant(socket)));
+  }
+
+  @SubscribeMessage('room:get-quality')
+  getRoomQuality(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['room:get-quality']>[0],
+    ack: Ack<Parameters<ServerToClientEvents['room:quality-updated']>[0]>
+  ): Promise<void> {
+    return socketAck(ack, () => this.rooms.getRoomQualityState(request.roomId, this.requireParticipant(socket)));
+  }
+
   @SubscribeMessage('consumer:close')
   closeConsumer(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { consumerId: string }, ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
@@ -251,7 +427,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   updatePermission(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: Parameters<ClientToServerEvents['permission:update']>[0], ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
       const permissions = await this.rooms.updatePermissions(request.roomId, this.requireParticipant(socket), request.participantId, request.permissions);
-      this.server.to(request.roomId).emit('permissions:updated', request.participantId, permissions);
+      await this.emitRoomEvent(request.roomId, 'permissions:updated', request.participantId, permissions);
     });
   }
 
@@ -259,8 +435,8 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   kick(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: Parameters<ClientToServerEvents['participant:kick']>[0], ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
       await this.rooms.kick(request.roomId, this.requireParticipant(socket), request.participantId, request.reason);
-      this.server.to(request.roomId).emit('participant:kicked', request.reason);
-      this.server.to(request.roomId).emit('participant:left', request.participantId);
+      await this.emitRoomEvent(request.roomId, 'participant:kicked', request.reason);
+      await this.emitRoomEvent(request.roomId, 'participant:left', request.participantId);
     });
   }
 
@@ -268,7 +444,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ban(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: Parameters<ClientToServerEvents['participant:ban']>[0], ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
       await this.rooms.ban(request.roomId, this.requireParticipant(socket), request.participantId, request.reason);
-      this.server.to(request.roomId).emit('participant:banned', request.reason);
+      await this.emitRoomEvent(request.roomId, 'participant:banned', request.reason);
     });
   }
 
@@ -281,7 +457,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   mute(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: Parameters<ClientToServerEvents['participant:mute']>[0], ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
       await this.rooms.mute(request.roomId, this.requireParticipant(socket), request.participantId, request.force);
-      this.server.to(request.roomId).emit('participant:updated', request.participantId, { audioEnabled: false });
+      await this.emitRoomEvent(request.roomId, 'participant:updated', request.participantId, { audioEnabled: false });
     });
   }
 
@@ -299,7 +475,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   sendChat(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: Parameters<ClientToServerEvents['chat:send']>[0], ack: Ack<ChatMessage>): Promise<void> {
     return socketAck(ack, async () => {
       const message = await this.rooms.sendChat(request, this.requireParticipant(socket));
-      this.server.to(request.roomId).emit('chat:message', message);
+      await this.emitRoomEvent(request.roomId, 'chat:message', message);
       return message;
     });
   }
@@ -308,21 +484,21 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   raiseHand(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { roomId: string; raised: boolean }, ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
       await this.rooms.raiseHand(request.roomId, this.requireParticipant(socket), request.raised);
-      this.server.to(request.roomId).emit('participant:updated', this.requireParticipant(socket), { handRaised: request.raised });
+      await this.emitRoomEvent(request.roomId, 'participant:updated', this.requireParticipant(socket), { handRaised: request.raised });
     });
   }
 
   private toggleLock(socket: SfuSocket, roomId: string, locked: boolean, ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
       const room = await this.rooms.setLocked(roomId, this.requireParticipant(socket), locked);
-      this.server.to(roomId).emit('room:updated', room);
+      await this.emitRoomEvent(roomId, 'room:updated', room);
     });
   }
 
   private setProducerStatus(socket: SfuSocket, producerId: string, status: 'live' | 'paused', ack: Ack<void>): Promise<void> {
     return socketAck(ack, async () => {
       const producer = await this.rooms.setProducerStatus(producerId, this.requireParticipant(socket), status);
-      this.server.to(producer.roomId).emit('producer:updated', producer);
+      await this.emitRoomEvent(producer.roomId, 'producer:updated', producer);
     });
   }
 
@@ -331,6 +507,22 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const consumer = await this.rooms.setConsumerStatus(consumerId, this.requireParticipant(socket), status);
       socket.emit('consumer:updated', consumer);
     });
+  }
+
+  private async emitProducerDynacastEvent(event: ProducerDynacastEvent): Promise<void> {
+    const eventName = producerDynacastEventName(event.type);
+    try {
+      const sockets = await this.server.in(event.roomId).fetchSockets();
+      const target = await this.rooms.producerDynacastSignalTarget(event, sockets.length);
+      if (!target) {
+        this.rooms.recordDynacastSignalFailure(event, 'publisher_socket_missing');
+        return;
+      }
+      this.server.to(target.socketId).emit(eventName, event);
+      this.rooms.recordDynacastSignalDelivery(event, target.suppressedSubscribers);
+    } catch (error) {
+      this.rooms.recordDynacastSignalFailure(event, error instanceof Error ? error.name || 'emit_failed' : 'emit_failed');
+    }
   }
 
   private extractToken(socket: SfuSocket): string | null {
@@ -357,5 +549,10 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       throw new Error('Socket has not joined a room');
     }
     return socket.data.participantId;
+  }
+
+  private async emitRoomEvent(roomId: string, event: keyof ServerToClientEvents, ...payload: unknown[]): Promise<void> {
+    (this.server.to(roomId) as unknown as { emit: (event: string, ...payload: unknown[]) => void }).emit(event, ...payload);
+    await this.signals.publish(roomId, event, ...payload);
   }
 }

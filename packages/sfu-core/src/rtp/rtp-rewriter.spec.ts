@@ -29,6 +29,29 @@ describe('ConsumerRtpRewriter', () => {
     expect(second.timestamp).toBe(903000);
     expect(rewriter.sourceSequenceForTarget(2222, 40001)).toEqual({ sourceSsrc: 1111, sequenceNumber: 11 });
   });
+
+  it('assigns contiguous target sequence numbers across filtered source gaps', () => {
+    const rewriter = new ConsumerRtpRewriter({
+      sequenceNumberGenerator: () => 50000,
+      timestampGenerator: () => 900000
+    });
+    const mapping = {
+      sourceSsrc: 1111,
+      targetSsrc: 2222,
+      sourcePayloadType: 96,
+      targetPayloadType: 120
+    };
+
+    const first = rewriter.rewrite(packet(1111, 96, 10, 1000), mapping);
+    const second = rewriter.rewrite(packet(1111, 96, 12, 7000), mapping);
+    const repairPreview = rewriter.preview(packet(1111, 96, 10, 1000), mapping);
+
+    expect(first.sequenceNumber).toBe(50000);
+    expect(second.sequenceNumber).toBe(50001);
+    expect(second.timestamp).toBe(906000);
+    expect(rewriter.sourceSequenceForTarget(2222, 50001)).toEqual({ sourceSsrc: 1111, sequenceNumber: 12 });
+    expect(repairPreview.sequenceNumber).toBe(50000);
+  });
 });
 
 function packet(ssrc: number, payloadType: number, sequenceNumber: number, timestamp: number): RtpPacket {

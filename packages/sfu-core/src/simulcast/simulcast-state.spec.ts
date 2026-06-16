@@ -27,8 +27,13 @@ describe('ProducerSimulcastState', () => {
           recommendedBitrate: 300_000,
           packetLoss: 0,
           rtt: 0,
+          rttVariance: 0,
           jitter: 0,
           delayVariationMs: 0,
+          delayTrend: 0,
+          overuseState: 'normal',
+          probeBitrate: 0,
+          lossCorrelation: 0,
           updatedAt: 1000
         },
         preferredLayerNameToSelection('high')

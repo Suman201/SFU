@@ -246,7 +246,7 @@ function selectPrimaryPayloadType(section: string[], payloadTypes: number[], med
       .map((line) => Number(line.match(/^a=rtpmap:(\d+)/)?.[1]))
       .filter(Number.isFinite)
   );
-  const preferred = mediaKind === 'audio' ? /opus/i : /^(VP8|H264|AV1)\//i;
+  const preferred = mediaKind === 'audio' ? /opus/i : /^(VP8|VP9|H264|AV1)\//i;
   return (
     payloadTypes.find((payloadType) => !rtxPayloads.has(payloadType) && preferred.test(section.find((line) => line.startsWith(`a=rtpmap:${payloadType} `))?.split(/\s+/)[1] ?? '')) ??
     payloadTypes.find((payloadType) => !rtxPayloads.has(payloadType)) ??

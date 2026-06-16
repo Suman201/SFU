@@ -17,7 +17,7 @@
   "scripts": {
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces --if-present",
-    "test:browser": "playwright test",
+    "test:browser": "node scripts/patch-playwright-loader.cjs && playwright test",
     "lint": "npm run lint --workspaces --if-present",
     "dev:backend": "npm run start:dev -w @native-sfu/backend",
     "dev:frontend": "npm run start -w @native-sfu/frontend",

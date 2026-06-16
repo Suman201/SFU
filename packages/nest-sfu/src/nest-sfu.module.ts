@@ -1,14 +1,28 @@
 import { DynamicModule, Global, Module, Provider } from '@nestjs/common';
-import { AudioLevelObserver, BandwidthEstimator, RtcpProcessor, RtpRouter, SimulcastSelector } from '@native-sfu/sfu-core';
+import { AudioLevelObserver, BandwidthEstimator, PipeTransportManager, RtcpProcessor, RtpRouter, SimulcastSelector } from '@native-sfu/sfu-core';
 import { DtlsService } from './dtls.service';
 import { IceService } from './ice.service';
 import { MediaService } from './media.service';
 import { NestSfuAsyncOptions, NestSfuOptions, NestSfuOptionsFactory } from './nest-sfu.options';
+import { PipeTransportService } from './pipe-transport.service';
 import { SrtpService } from './srtp.service';
 import { NEST_SFU_OPTIONS } from './tokens';
 import { UdpPortAllocator } from './ice/udp-port-allocator';
+import { WorkerMediaService } from './worker/worker-media.service';
 
-const exportedProviders = [MediaService, IceService, DtlsService, SrtpService, RtpRouter, RtcpProcessor, SimulcastSelector, BandwidthEstimator, AudioLevelObserver];
+const exportedProviders = [
+  MediaService,
+  IceService,
+  DtlsService,
+  SrtpService,
+  PipeTransportService,
+  PipeTransportManager,
+  RtpRouter,
+  RtcpProcessor,
+  SimulcastSelector,
+  BandwidthEstimator,
+  AudioLevelObserver
+];
 
 @Global()
 @Module({})
@@ -67,10 +81,11 @@ function asyncOptionsProviders(options: NestSfuAsyncOptions): Provider[] {
 
 function coreProviders(): Provider[] {
   return [
-    MediaService,
     IceService,
     DtlsService,
     SrtpService,
+    PipeTransportService,
+    { provide: PipeTransportManager, useFactory: () => new PipeTransportManager() },
     {
       provide: UdpPortAllocator,
       inject: [NEST_SFU_OPTIONS],
@@ -80,6 +95,16 @@ function coreProviders(): Provider[] {
           max: options.hostCandidatePort ?? 40000
         };
         return new UdpPortAllocator(range.min, range.max);
+      }
+    },
+    {
+      provide: MediaService,
+      inject: [NEST_SFU_OPTIONS, IceService, DtlsService, SrtpService, RtcpProcessor, RtpRouter, PipeTransportService],
+      useFactory: (options: NestSfuOptions, ice: IceService, dtls: DtlsService, srtp: SrtpService, rtcp: RtcpProcessor, router: RtpRouter, pipe: PipeTransportService) => {
+        if (options.mediaWorkerMode === 'worker') {
+          return new WorkerMediaService(options, pipe);
+        }
+        return new MediaService(ice, dtls, srtp, rtcp, router, pipe);
       }
     },
     {
@@ -105,6 +130,11 @@ function coreProviders(): Provider[] {
           onKeyframeGateOpened: (consumerId, producerId) => options.metrics?.onKeyframeGateOpened?.(consumerId, producerId),
           onKeyframeGateDropped: (consumerId, producerId) => options.metrics?.onKeyframeGateDropped?.(consumerId, producerId),
           onProducerLayerActive: (producerId, layer) => options.metrics?.onProducerLayerActive?.(producerId, layer),
+          onProducerDynacastEvent: (event) => options.metrics?.onProducerDynacastEvent?.(event),
+          onConsumerScoreUpdated: (state) => options.metrics?.onConsumerScoreUpdated?.(state),
+          onProducerScoreUpdated: (state) => options.metrics?.onProducerScoreUpdated?.(state),
+          onTransportQualityUpdated: (state) => options.metrics?.onTransportQualityUpdated?.(state),
+          onRoomQualityUpdated: (state) => options.metrics?.onRoomQualityUpdated?.(state),
           onConsumerLayersChanged: (consumerId, layers) => options.metrics?.onConsumerLayersChanged?.(consumerId, layers),
           onLayerSwitch: (consumerId, producerId, from, to) => options.metrics?.onLayerSwitch?.(consumerId, producerId, from, to),
           onLayerSwitchFailed: (consumerId, producerId, target, reason) => options.metrics?.onLayerSwitchFailed?.(consumerId, producerId, target, reason),
@@ -115,11 +145,24 @@ function coreProviders(): Provider[] {
           duplicateWindowSize: options.rtpDuplicateWindowSize,
           enableTwcc: options.enableTwcc,
           enablePacing: options.enablePacing,
+          enableProbeScheduling: options.enableProbeScheduling,
           enableJoinKeyframeGate: options.enableJoinKeyframeGate,
           enableAdaptiveLayerSelection: options.enableAdaptiveLayerSelection,
+          enableDynacast: options.enableDynacast,
           defaultPacingBitrateBps: options.defaultPacingBitrateBps,
           maxPacingQueueBytes: options.maxPacingQueueBytes,
-          twccFeedbackIntervalMs: options.twccFeedbackIntervalMs
+          twccFeedbackIntervalMs: options.twccFeedbackIntervalMs,
+          probeClusterIntervalMs: options.probeClusterIntervalMs,
+          probeBurstPackets: options.probeBurstPackets,
+          probeBitrateMultiplier: options.probeBitrateMultiplier,
+          dynacastUpgradeHoldMs: options.dynacastUpgradeHoldMs,
+          dynacastPriorityBias: options.dynacastPriorityBias,
+          qualityUpdateIntervalMs: options.qualityUpdateIntervalMs,
+          minAudioBitrateBps: options.minAudioBitrateBps,
+          minVideoBitrateBps: options.minVideoBitrateBps,
+          minScreenBitrateBps: options.minScreenBitrateBps,
+          defaultVideoBitrateBps: options.defaultVideoBitrateBps,
+          defaultScreenBitrateBps: options.defaultScreenBitrateBps
         })
     },
     {
