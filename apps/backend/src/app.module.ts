@@ -90,7 +90,7 @@ import { ClusterModule } from './cluster/cluster.module';
         mediaWorkerHardMemoryLimitBytes: config.get<number | undefined>('mediaWorker.hardMemoryLimitBytes'),
         mediaWorkerSoftRtpPacketRate: config.get<number>('mediaWorker.softRtpPacketRate', 50000),
         mediaWorkerSoftRtcpPacketRate: config.get<number>('mediaWorker.softRtcpPacketRate', 5000),
-        hostCandidatePortRange: { min: 40000, max: 40100 },
+        hostCandidatePortRange: config.get<{ min: number; max: number }>('mediaWorker.hostCandidatePortRange', { min: 40000, max: 40100 }),
         turnCredentialTtlSeconds: 3600,
         enablePipeTransport: config.get<boolean>('pipe.enabled', false),
         pipePortRange: config.get<{ min: number; max: number }>('pipe.portRange'),
@@ -108,6 +108,19 @@ import { ClusterModule } from './cluster/cluster.module';
           },
           onPipeBackpressure: (transportId) => metrics.pipeBackpressureEvents.labels(transportId).inc(),
           onPipeDrop: (reason) => metrics.pipeErrors.labels(reason).inc(),
+          onMediaWorkerIpcRequest: (operation, status, durationMs) => {
+            metrics.mediaWorkerIpcRequests.labels(operation, status).inc();
+            metrics.mediaWorkerIpcLatency.labels(operation).observe(durationMs);
+          },
+          onMediaWorkerCrash: (workerId, reason) => {
+            metrics.mediaWorkerCrashes.labels(workerId, reason).inc();
+          },
+          onMediaWorkerRestart: (workerId, reason) => {
+            metrics.mediaWorkerRestarts.labels(workerId, reason).inc();
+          },
+          onMediaWorkerDrain: (workerId, state) => {
+            metrics.mediaWorkerDrains.labels(workerId, state).inc();
+          },
           onReceiverReport: (roomId, participantId, report) => {
             metrics.packetLoss.labels(roomId, participantId).set(report.fractionLost);
             metrics.jitter.labels(roomId, participantId).set(report.jitter);

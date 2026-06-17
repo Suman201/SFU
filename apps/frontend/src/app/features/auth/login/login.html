@@ -1,0 +1,28 @@
+<sfu-header />
+
+<main class="auth-shell">
+  <form class="auth-panel" [formRoot]="form" (submit)="submit($event)">
+    <header>
+      <h1>Login</h1>
+      <a routerLink="/register">Create account</a>
+    </header>
+
+    <label>
+      Email
+      <input [formField]="form.email" autocomplete="email">
+    </label>
+
+    <label>
+      Password
+      <input type="password" [formField]="form.password" autocomplete="current-password">
+    </label>
+
+    <button class="primary" type="submit" [disabled]="form().invalid() || busy()">Login</button>
+
+    @if (error()) {
+      <p class="error">{{ error() }}</p>
+    }
+  </form>
+</main>
+
+<sfu-footer />

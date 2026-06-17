@@ -6,16 +6,27 @@ import { UdpPortAllocator } from '../ice/udp-port-allocator';
 import { MediaService } from '../media.service';
 import type { NestSfuOptions } from '../nest-sfu.options';
 import { SrtpService } from '../srtp.service';
-import { serializeError, type MediaWorkerHealth, type MediaWorkerMessage, type MediaWorkerRequest, type MediaWorkerResponse } from './ipc';
+import {
+  serializeError,
+  type MediaWorkerHealth,
+  type MediaWorkerMessage,
+  type MediaWorkerPipeTransportSnapshot,
+  type MediaWorkerRequest,
+  type MediaWorkerResponse
+} from './ipc';
 import { WorkerPipeTransport } from './worker-pipe-transport';
 
 interface WorkerState {
   rooms: Set<string>;
   transports: Map<string, { roomId: string; participantId: string }>;
+  pipeTransports: Map<string, { roomId: string }>;
   producers: Map<string, Producer>;
   consumers: Map<string, Consumer>;
   rtpPackets: number;
   rtcpPackets: number;
+  droppedRtpPackets: number;
+  lastDroppedRtpReason?: string;
+  droppedRtpReasons: Map<string, number>;
 }
 
 export class MediaWorkerRunner {
@@ -25,11 +36,14 @@ export class MediaWorkerRunner {
   private readonly state: WorkerState = {
     rooms: new Set(),
     transports: new Map(),
+    pipeTransports: new Map(),
     producers: new Map(),
-    consumers: new Map(),
-    rtpPackets: 0,
-    rtcpPackets: 0
-  };
+      consumers: new Map(),
+      rtpPackets: 0,
+      rtcpPackets: 0,
+      droppedRtpPackets: 0,
+      droppedRtpReasons: new Map()
+    };
   private readonly media: MediaService;
   private readonly pipe: WorkerPipeTransport;
   private heartbeat?: NodeJS.Timeout;
@@ -75,6 +89,11 @@ export class MediaWorkerRunner {
       onForwardedPacket: () => {
         this.state.rtpPackets += 1;
       },
+      onDroppedPacket: (reason) => {
+        this.state.droppedRtpPackets += 1;
+        this.state.lastDroppedRtpReason = reason;
+        this.state.droppedRtpReasons.set(reason, (this.state.droppedRtpReasons.get(reason) ?? 0) + 1);
+      },
       onForwardedRtcpPacket: () => {
         this.state.rtcpPackets += 1;
       },
@@ -109,7 +128,13 @@ export class MediaWorkerRunner {
     void new BandwidthEstimator();
     void new AudioLevelObserver();
     this.pipe = new WorkerPipeTransport({
-      onRtp: (event) =>
+      onInboundRtp: (event) => {
+        void this.media.handlePipeRtp(event.pipeTransportId, event.producerId, event.packet).catch(() => undefined);
+      },
+      onInboundRtcp: (event) => {
+        void this.media.handlePipeRtcp(event.pipeTransportId, event.packet, { roomId: event.roomId }).catch(() => undefined);
+      },
+      onOutboundIpcRtp: (event) =>
         this.send({
           kind: 'event',
           event: {
@@ -120,7 +145,7 @@ export class MediaWorkerRunner {
             packet: event.packet
           }
         }),
-      onRtcp: (event) =>
+      onOutboundIpcRtcp: (event) =>
         this.send({
           kind: 'event',
           event: {
@@ -194,16 +219,26 @@ export class MediaWorkerRunner {
         return options;
       }
       case 'ensurePipeTransport':
-        this.pipe.ensureTransport(command.pipeTransportId, {
+        this.state.rooms.add(command.roomId);
+        this.state.pipeTransports.set(command.pipeTransportId, { roomId: command.roomId });
+        return (await this.pipe.ensureTransport({
+          pipeTransportId: command.pipeTransportId,
           roomId: command.roomId,
           localNodeId: command.localNodeId,
           remoteNodeId: command.remoteNodeId,
-          active: true
-        });
-        this.state.rooms.add(command.roomId);
-        return undefined;
+          protocol: command.protocol,
+          listenPort: command.listenPort,
+          advertisedIp: command.advertisedIp,
+          peerToken: command.peerToken,
+          remoteEndpoint: command.remoteEndpoint
+        })) as MediaWorkerPipeTransportSnapshot;
+      case 'pipeTransportSnapshot':
+        return this.pipe.transportSnapshot(command.pipeTransportId) as MediaWorkerPipeTransportSnapshot | undefined;
       case 'closePipeTransport':
-        this.pipe.closeTransport(command.pipeTransportId);
+        await this.media.closePipeTransport(command.pipeTransportId);
+        await this.pipe.closeTransport(command.pipeTransportId);
+        this.releasePipeTransportState(command.pipeTransportId);
+        this.state.pipeTransports.delete(command.pipeTransportId);
         return undefined;
       case 'assertTransportOwner':
         this.media.assertTransportOwner(command.transportId, command.participantId);
@@ -274,6 +309,8 @@ export class MediaWorkerRunner {
       case 'setConsumerPriority':
         this.media.setConsumerPriority(command.consumerId, command.priority);
         return undefined;
+      case 'applyConsumerTwccObservation':
+        return this.media.applyConsumerTwccObservation(command.consumerId, command.observation);
       case 'consumerLayerState':
         return this.media.consumerLayerState(command.consumerId);
       case 'consumerQualityState':
@@ -299,6 +336,7 @@ export class MediaWorkerRunner {
         return undefined;
       case 'closeRoom':
         await this.media.closeRoom(command.roomId);
+        await this.pipe.closeRoom(command.roomId);
         this.releaseRoom(command.roomId);
         return undefined;
       case 'workerHealth':
@@ -312,6 +350,7 @@ export class MediaWorkerRunner {
   private forwardMediaEvents(): void {
     this.media.onConsumerLayerEvent((event) => this.send({ kind: 'event', event: { type: 'consumer-layer', event } }));
     this.media.onProducerDynacastEvent((event) => this.send({ kind: 'event', event: { type: 'producer-dynacast', event } }));
+    this.media.onConsumerTwccObservation((state) => this.send({ kind: 'event', event: { type: 'consumer-twcc', state } }));
     this.media.onConsumerScoreUpdated((state) => this.send({ kind: 'event', event: { type: 'consumer-score', state } }));
     this.media.onProducerScoreUpdated((state) => this.send({ kind: 'event', event: { type: 'producer-score', state } }));
     this.media.onTransportQualityUpdated((state) => this.send({ kind: 'event', event: { type: 'transport-quality', state } }));
@@ -336,7 +375,7 @@ export class MediaWorkerRunner {
       crashes: 0,
       uptimeMs: Math.max(0, Date.now() - Date.parse(this.startedAt)),
       activeRooms: this.state.rooms.size,
-      activeTransports: this.state.transports.size,
+      activeTransports: this.state.transports.size + this.state.pipeTransports.size,
       activeProducers: this.state.producers.size,
       activeConsumers: this.state.consumers.size,
       rtpPackets: packetCounts.rtpPackets,
@@ -348,7 +387,10 @@ export class MediaWorkerRunner {
       averageIpcLatencyMs: 0,
       ipcTimeouts: 0,
       memory: process.memoryUsage(),
-      cpu: process.cpuUsage()
+      cpu: process.cpuUsage(),
+      droppedRtpPackets: this.state.droppedRtpPackets,
+      lastDroppedRtpReason: this.state.lastDroppedRtpReason,
+      droppedRtpReasons: Object.fromEntries(this.state.droppedRtpReasons)
     };
   }
 
@@ -384,6 +426,19 @@ export class MediaWorkerRunner {
     return rate;
   }
 
+  private releasePipeTransportState(pipeTransportId: string): void {
+    for (const [producerId, producer] of this.state.producers) {
+      if (producer.transportId === pipeTransportId) {
+        this.state.producers.delete(producerId);
+      }
+    }
+    for (const [consumerId, consumer] of this.state.consumers) {
+      if (consumer.transportId === pipeTransportId) {
+        this.state.consumers.delete(consumerId);
+      }
+    }
+  }
+
   private releaseParticipant(participantId: string): void {
     for (const [transportId, transport] of this.state.transports) {
       if (transport.participantId === participantId) {
@@ -409,6 +464,11 @@ export class MediaWorkerRunner {
         this.state.transports.delete(transportId);
       }
     }
+    for (const [pipeTransportId, transport] of this.state.pipeTransports) {
+      if (transport.roomId === roomId) {
+        this.state.pipeTransports.delete(pipeTransportId);
+      }
+    }
     for (const [producerId, producer] of this.state.producers) {
       if (producer.roomId === roomId) {
         this.state.producers.delete(producerId);
@@ -425,6 +485,9 @@ export class MediaWorkerRunner {
   private rebuildRooms(): void {
     this.state.rooms.clear();
     for (const transport of this.state.transports.values()) {
+      this.state.rooms.add(transport.roomId);
+    }
+    for (const transport of this.state.pipeTransports.values()) {
       this.state.rooms.add(transport.roomId);
     }
   }

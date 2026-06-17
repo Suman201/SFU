@@ -1,11 +1,15 @@
 import { Component, EventEmitter, Input, Output, signal, ChangeDetectionStrategy } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import { FormField, FormRoot, form as signalForm, maxLength } from '@angular/forms/signals';
 import type { ChatMessage, Participant } from '@native-sfu/contracts';
+
+interface ChatDraftFormModel {
+  message: string;
+}
 
 @Component({
   selector: 'sfu-chat-panel',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormField, FormRoot],
   template: `
     <aside class="chat">
       <header>
@@ -19,9 +23,9 @@ import type { ChatMessage, Participant } from '@native-sfu/contracts';
           </article>
         }
       </div>
-      <form (ngSubmit)="submit()">
-        <textarea name="message" [(ngModel)]="draft" rows="3" maxlength="4000"></textarea>
-        <button class="primary" type="submit" [disabled]="!draft.trim()">Send</button>
+      <form [formRoot]="draftForm" (submit)="submit($event)">
+        <textarea [formField]="draftForm.message" rows="3"></textarea>
+        <button class="primary" type="submit" [disabled]="!draftModel().message.trim() || draftForm().invalid()">Send</button>
       </form>
     </aside>
   `,
@@ -78,15 +82,23 @@ export class ChatPanelComponent {
   @Input() messages: ChatMessage[] = [];
   @Input() participants: Participant[] = [];
   @Output() sendMessage = new EventEmitter<string>();
-  draft = '';
+  protected readonly draftModel = signal<ChatDraftFormModel>({ message: '' });
+  protected readonly draftForm = signalForm(this.draftModel, (path) => {
+    maxLength(path.message, 4000);
+  });
 
-  submit(): void {
-    const value = this.draft.trim();
-    if (!value) {
+  protected submit(event?: Event): void {
+    event?.preventDefault();
+    this.draftForm().markAsTouched();
+
+    const value = this.draftModel().message.trim();
+    if (!value || this.draftForm().invalid()) {
       return;
     }
+
     this.sendMessage.emit(value);
-    this.draft = '';
+    this.draftModel.set({ message: '' });
+    this.draftForm().reset();
   }
 
   nameFor(participantId: string): string {

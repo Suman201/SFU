@@ -5,6 +5,24 @@
     <title>Native SFU</title>
     <base href="/">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>
+      (() => {
+        let storedTheme = null;
+        try {
+          storedTheme = localStorage.getItem('native-sfu-theme');
+        } catch {
+          storedTheme = null;
+        }
+        const theme =
+          storedTheme === 'dark' || storedTheme === 'light'
+            ? storedTheme
+            : matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
   </head>
   <body>
     <sfu-root></sfu-root>

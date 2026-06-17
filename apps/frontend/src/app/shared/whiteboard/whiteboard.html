@@ -1,0 +1,309 @@
+<section class="whiteboard-pane" aria-label="Class whiteboard">
+  <div class="whiteboard-toolbar">
+    <div>
+      <p class="eyebrow">{{ eyebrow() }}</p>
+      <h1>{{ title() }}</h1>
+    </div>
+
+    <div class="board-actions" aria-label="Whiteboard tools">
+      @if (!readOnly()) {
+        <button class="history-button" type="button" title="Undo" aria-label="Undo" [disabled]="!canUndo()" (click)="undo()">Undo</button>
+        <button class="history-button" type="button" title="Redo" aria-label="Redo" [disabled]="!canRedo()" (click)="redo()">Redo</button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="activeTool() === 'select'"
+          type="button"
+          title="Select and move"
+          aria-label="Select and move"
+          [attr.aria-pressed]="activeTool() === 'select'"
+          (click)="selectTool('select')"
+        >
+          <span class="tool-icon select-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="activeTool() === 'pen'"
+          type="button"
+          title="Pen"
+          aria-label="Pen"
+          [attr.aria-pressed]="activeTool() === 'pen'"
+          (click)="selectTool('pen')"
+        >
+          <span class="tool-icon pen-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="activeTool() === 'eraser'"
+          type="button"
+          title="Erase element"
+          aria-label="Erase element"
+          [attr.aria-pressed]="activeTool() === 'eraser'"
+          (click)="selectTool('eraser')"
+        >
+          <span class="tool-icon erase-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="activeTool() === 'text'"
+          type="button"
+          title="Text"
+          aria-label="Text"
+          [attr.aria-pressed]="activeTool() === 'text'"
+          (click)="selectTool('text')"
+        >
+          <span class="tool-icon text-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="activeTool() === 'laser'"
+          type="button"
+          title="Laser pointer"
+          aria-label="Laser pointer"
+          [attr.aria-pressed]="activeTool() === 'laser'"
+          (click)="selectTool('laser')"
+        >
+          <span class="tool-icon laser-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="activeTool() === 'line'"
+          type="button"
+          title="Line"
+          aria-label="Line"
+          [attr.aria-pressed]="activeTool() === 'line'"
+          (click)="selectTool('line')"
+        >
+          <span class="tool-icon line-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="activeTool() === 'arrow'"
+          type="button"
+          title="Arrow"
+          aria-label="Arrow"
+          [attr.aria-pressed]="activeTool() === 'arrow'"
+          (click)="selectTool('arrow')"
+        >
+          <span class="tool-icon arrow-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="activeTool() === 'rectangle'"
+          type="button"
+          title="Rectangle"
+          aria-label="Rectangle"
+          [attr.aria-pressed]="activeTool() === 'rectangle'"
+          (click)="selectTool('rectangle')"
+        >
+          <span class="tool-icon rectangle-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="activeTool() === 'ellipse'"
+          type="button"
+          title="Ellipse"
+          aria-label="Ellipse"
+          [attr.aria-pressed]="activeTool() === 'ellipse'"
+          (click)="selectTool('ellipse')"
+        >
+          <span class="tool-icon ellipse-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="activeTool() === 'star'"
+          type="button"
+          title="Star"
+          aria-label="Star"
+          [attr.aria-pressed]="activeTool() === 'star'"
+          (click)="selectTool('star')"
+        >
+          <span class="tool-icon star-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="fillEnabled()"
+          type="button"
+          title="Fill shape"
+          aria-label="Fill shape"
+          [attr.aria-pressed]="fillEnabled()"
+          (click)="toggleFill()"
+        >
+          <span class="tool-icon fill-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="snapToGrid()"
+          type="button"
+          title="Snap to grid"
+          aria-label="Snap to grid"
+          [attr.aria-pressed]="snapToGrid()"
+          (click)="toggleSnapToGrid()"
+        >
+          <span class="tool-icon snap-icon" aria-hidden="true"></span>
+        </button>
+        <button
+          class="icon-button tool-button"
+          [class.active]="showGrid()"
+          type="button"
+          title="Show grid"
+          aria-label="Show grid"
+          [attr.aria-pressed]="showGrid()"
+          (click)="toggleGrid()"
+        >
+          <span class="tool-icon grid-icon" aria-hidden="true"></span>
+        </button>
+        <button class="icon-button tool-button" type="button" title="Import image or PDF" aria-label="Import image or PDF" (click)="triggerFileImport()">
+          <span class="tool-icon import-icon" aria-hidden="true"></span>
+        </button>
+        <input #fileInput class="file-input" type="file" accept="image/*,.pdf,application/pdf" (change)="importFile($event)" />
+        <button class="icon-button tool-button" type="button" title="Clear" aria-label="Clear whiteboard" (click)="clearWhiteboard()">
+          <span class="tool-icon clear-icon" aria-hidden="true"></span>
+        </button>
+      }
+
+      <button
+        class="icon-button tool-button"
+        [class.active]="activeTool() === 'pan'"
+        type="button"
+        title="Pan"
+        aria-label="Pan"
+        [attr.aria-pressed]="activeTool() === 'pan'"
+        (click)="selectTool('pan')"
+      >
+        <span class="tool-icon pan-icon" aria-hidden="true"></span>
+      </button>
+
+      @if (!readOnly()) {
+        <div class="color-swatches" aria-label="Drawing colors">
+          @for (color of colors; track color) {
+            <button
+              class="color-swatch"
+              [class.active]="strokeColor() === color"
+              [style.background]="color"
+              type="button"
+              title="Drawing color"
+              aria-label="Drawing color"
+              [attr.aria-pressed]="strokeColor() === color"
+              (click)="selectColor(color)"
+            ></button>
+          }
+        </div>
+
+        <div class="brush-presets" aria-label="Brush sizes">
+          @for (size of brushSizes; track size) {
+            <button
+              class="brush-size"
+              [class.active]="strokeWidth() === size"
+              type="button"
+              title="Brush size"
+              aria-label="Brush size"
+              [attr.aria-pressed]="strokeWidth() === size"
+              (click)="selectBrushSize(size)"
+            >
+              <span [style.width.px]="size + 6" [style.height.px]="size + 6"></span>
+            </button>
+          }
+        </div>
+
+        <input
+          class="stroke-range"
+          type="range"
+          min="2"
+          max="14"
+          [value]="strokeWidth()"
+          aria-label="Stroke size"
+          (input)="setStrokeWidth($event)"
+        />
+      }
+
+      <div class="zoom-controls" aria-label="Zoom controls">
+        <button class="icon-button tool-button" type="button" title="Zoom out" aria-label="Zoom out" (click)="zoomOut()">-</button>
+        <button class="zoom-reset" type="button" title="Reset view" aria-label="Reset view" (click)="resetView()">{{ zoomPercent() }}</button>
+        <button class="icon-button tool-button" type="button" title="Zoom in" aria-label="Zoom in" (click)="zoomIn()">+</button>
+      </div>
+
+      <div class="export-controls" aria-label="Export controls">
+        <button type="button" title="Export PNG" aria-label="Export PNG" (click)="exportPng()">PNG</button>
+        <button type="button" title="Export PDF" aria-label="Export PDF" (click)="exportPdf()">PDF</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-tabs" aria-label="Whiteboard pages">
+    @for (page of pages(); track page.id) {
+      <button type="button" [class.active]="page.id === activePageId()" (click)="selectPage(page.id)">{{ page.title }}</button>
+    }
+    @if (!readOnly()) {
+      <button type="button" aria-label="Add board page" title="Add board page" (click)="addPage()">+</button>
+      <button type="button" aria-label="Remove current board page" title="Remove current board page" [disabled]="pages().length <= 1" (click)="removeActivePage()">-</button>
+    }
+  </div>
+
+  <div
+    #whiteboardSurface
+    class="whiteboard-surface"
+    [class.grid-hidden]="!showGrid()"
+    [class.select-mode]="activeTool() === 'select'"
+    [class.eraser-mode]="activeTool() === 'eraser'"
+    [class.pan-mode]="activeTool() === 'pan'"
+    [class.text-mode]="activeTool() === 'text'"
+    [class.laser-mode]="activeTool() === 'laser'"
+    aria-label="Whiteboard drawing area"
+    (click)="closeContextMenu()"
+    (contextmenu)="openContextMenu($event)"
+  >
+    <div class="board-stage" [style.transform]="boardTransform()">
+      <canvas
+        #whiteboardCanvas
+        class="whiteboard-canvas"
+        aria-label="Writable class whiteboard"
+        (pointerdown)="startDrawing($event)"
+        (pointermove)="draw($event)"
+        (pointerup)="stopDrawing($event)"
+        (pointercancel)="stopDrawing($event)"
+        (pointerleave)="stopDrawing($event)"
+      ></canvas>
+
+      @if (textDraft(); as draft) {
+        <input
+          #textEditor
+          class="text-editor"
+          type="text"
+          [value]="draft.value"
+          [style.left.px]="draft.x"
+          [style.top.px]="draft.y"
+          aria-label="Whiteboard text"
+          (input)="updateTextDraft($event)"
+          (keydown.enter)="commitTextDraft()"
+          (keydown.escape)="cancelTextDraft()"
+          (blur)="commitTextDraft()"
+        />
+      }
+
+      @if (laserPoint(); as point) {
+        <span class="laser-dot" [style.transform]="'translate(' + point.x + 'px, ' + point.y + 'px)'"></span>
+      }
+
+      @for (cursor of cursors(); track cursor.participantId) {
+        <span class="remote-cursor" [style.transform]="cursorTransform(cursor)" [style.color]="cursor.color">
+          <span class="cursor-pointer"></span>
+          <span class="cursor-label">{{ cursor.displayName }}</span>
+        </span>
+      }
+    </div>
+
+    @if (contextMenu(); as menu) {
+      <div class="context-menu" [style.left.px]="menu.x" [style.top.px]="menu.y" role="menu" aria-label="Element actions">
+        <button type="button" role="menuitem" (click)="activateTransform()">Transform</button>
+        <button type="button" role="menuitem" (click)="groupSelected()">Group</button>
+        <button type="button" role="menuitem" (click)="ungroupSelected()">Ungroup</button>
+        <button type="button" role="menuitem" (click)="duplicateSelected()">Duplicate</button>
+        <button type="button" role="menuitem" (click)="flipSelected('horizontal')">Flip horizontal</button>
+        <button type="button" role="menuitem" (click)="flipSelected('vertical')">Flip vertical</button>
+        <button type="button" role="menuitem" (click)="bringSelectedForward()">Bring forward</button>
+        <button type="button" role="menuitem" (click)="sendSelectedBackward()">Send backward</button>
+        <button class="danger-item" type="button" role="menuitem" (click)="deleteSelected()">Delete</button>
+      </div>
+    }
+  </div>
+</section>

@@ -23,7 +23,7 @@ import { Component, Input, ChangeDetectionStrategy } from '@angular/core';
       span {
         width: 5px;
         border-radius: 2px;
-        background: #cbd3cb;
+        background: var(--line-strong);
       }
 
       span:nth-child(1) {

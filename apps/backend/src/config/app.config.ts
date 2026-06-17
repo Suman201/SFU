@@ -45,6 +45,7 @@ export const appConfig = () => ({
   mediaWorker: {
     mode: process.env.MEDIA_WORKER_MODE ?? 'in-process',
     count: Number(process.env.MEDIA_WORKER_COUNT ?? 1),
+    hostCandidatePortRange: parsePortRange(process.env.HOST_CANDIDATE_PORT_RANGE ?? '40000-40100'),
     requestTimeoutMs: Number(process.env.MEDIA_WORKER_REQUEST_TIMEOUT_MS ?? 5000),
     startupTimeoutMs: Number(process.env.MEDIA_WORKER_STARTUP_TIMEOUT_MS ?? 10000),
     heartbeatIntervalMs: Number(process.env.MEDIA_WORKER_HEARTBEAT_INTERVAL_MS ?? 2000),

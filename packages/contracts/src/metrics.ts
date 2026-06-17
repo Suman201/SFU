@@ -185,3 +185,7 @@ export interface GetProducerQualityRequest {
 export interface GetRoomQualityRequest {
   roomId: string;
 }
+
+export interface GetTransportQualityRequest {
+  transportId: string;
+}

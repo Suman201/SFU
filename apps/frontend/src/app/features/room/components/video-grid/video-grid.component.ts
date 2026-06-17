@@ -41,8 +41,8 @@ import type { Participant, Producer } from '@native-sfu/contracts';
         position: relative;
         overflow: hidden;
         border-radius: var(--radius);
-        background: #20231f;
-        border: 1px solid #31372f;
+        background: var(--video-bg);
+        border: 1px solid var(--video-border);
         min-height: 180px;
       }
 
@@ -58,10 +58,10 @@ import type { Participant, Producer } from '@native-sfu/contracts';
         height: 100%;
         display: grid;
         place-items: center;
-        color: #f7faf5;
+        color: var(--video-text);
         font-size: 42px;
         font-weight: 760;
-        background: #28342c;
+        background: var(--video-avatar-bg);
       }
 
       footer {
@@ -76,8 +76,8 @@ import type { Participant, Producer } from '@native-sfu/contracts';
         gap: 8px;
         border-radius: 6px;
         padding: 6px 8px;
-        color: #f7faf5;
-        background: rgba(0, 0, 0, 0.58);
+        color: var(--video-text);
+        background: var(--video-overlay);
         font-size: 12px;
       }
     `

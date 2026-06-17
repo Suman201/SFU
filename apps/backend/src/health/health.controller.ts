@@ -41,6 +41,24 @@ export class HealthController {
     return { status: 'ok' };
   }
 
+  @Get('ready')
+  @HealthCheck()
+  ready() {
+    return this.health.check([
+      () => this.memory.checkHeap('memory_heap', 512 * 1024 * 1024),
+      () => this.memory.checkRSS('memory_rss', 1024 * 1024 * 1024),
+      () => this.mongoose.pingCheck('mongodb'),
+      async () => {
+        await this.redis.ping();
+        return { redis: { status: 'up' } };
+      },
+      () => this.checkMediaWorkers(),
+      () => this.checkPipeTransport(),
+      () => this.checkCluster(),
+      () => this.checkTrafficReadiness()
+    ]);
+  }
+
   @Get('db')
   @HealthCheck()
   db() {
@@ -81,36 +99,7 @@ export class HealthController {
 
   private async checkMediaWorkers(): Promise<HealthIndicatorResult> {
     const snapshot = this.media.workerPoolSnapshot();
-    this.metrics.mediaWorkerModeInfo.labels('in-process').set(snapshot.mode === 'in-process' ? 1 : 0);
-    this.metrics.mediaWorkerModeInfo.labels('worker').set(snapshot.mode === 'worker' ? 1 : 0);
-    this.metrics.mediaWorkersConfigured.set(snapshot.workerCount);
-    this.metrics.mediaWorkersReady.set(snapshot.readyWorkers);
-    this.metrics.mediaWorkerFailedRooms.set(snapshot.failedRooms.length);
-    for (const worker of snapshot.workers) {
-      this.metrics.mediaWorkerUp.labels(worker.workerId).set(worker.healthy ? 1 : 0);
-      this.metrics.mediaWorkerDraining.labels(worker.workerId).set(worker.draining ? 1 : 0);
-      this.metrics.mediaWorkerOverloaded.labels(worker.workerId).set(worker.overloaded ? 1 : 0);
-      this.metrics.mediaWorkerCapacityScore.labels(worker.workerId).set(worker.capacityScore ?? 0);
-      if (worker.pid) {
-        this.metrics.mediaWorkerPid.labels(worker.workerId).set(worker.pid);
-      }
-      this.metrics.mediaWorkerUptimeMs.labels(worker.workerId).set(worker.uptimeMs ?? 0);
-      this.metrics.mediaWorkerRooms.labels(worker.workerId).set(worker.activeRooms);
-      this.metrics.mediaWorkerTransports.labels(worker.workerId).set(worker.activeTransports);
-      this.metrics.mediaWorkerProducers.labels(worker.workerId).set(worker.activeProducers);
-      this.metrics.mediaWorkerConsumers.labels(worker.workerId).set(worker.activeConsumers);
-      this.metrics.mediaWorkerRtpPackets.labels(worker.workerId).set(worker.rtpPackets);
-      this.metrics.mediaWorkerRtcpPackets.labels(worker.workerId).set(worker.rtcpPackets);
-      this.metrics.mediaWorkerRtpPacketRate.labels(worker.workerId).set(worker.rtpPacketRate ?? 0);
-      this.metrics.mediaWorkerRtcpPacketRate.labels(worker.workerId).set(worker.rtcpPacketRate ?? 0);
-      this.metrics.mediaWorkerIpcInflight.labels(worker.workerId).set(worker.inflightRequests);
-      this.metrics.mediaWorkerIpcQueueDepth.labels(worker.workerId).set(worker.queueDepth);
-      this.metrics.mediaWorkerIpcTimeouts.labels(worker.workerId).set(worker.ipcTimeouts);
-      this.metrics.mediaWorkerRssBytes.labels(worker.workerId).set(worker.memory?.rss ?? 0);
-      this.metrics.mediaWorkerHeapUsedBytes.labels(worker.workerId).set(worker.memory?.heapUsed ?? 0);
-      this.metrics.mediaWorkerCpuUserMicros.labels(worker.workerId).set(worker.cpu?.user ?? 0);
-      this.metrics.mediaWorkerCpuSystemMicros.labels(worker.workerId).set(worker.cpu?.system ?? 0);
-    }
+    this.metrics.refreshMediaWorkerSnapshot(snapshot);
     const isHealthy =
       snapshot.mode === 'in-process' ||
       (snapshot.readyWorkers === snapshot.workerCount && snapshot.drainingWorkers === 0 && snapshot.overloadedWorkers < snapshot.workerCount && snapshot.failedRooms.length === 0);
@@ -175,6 +164,34 @@ export class HealthController {
     };
     if (!snapshot.supported) {
       throw new HealthCheckError('Pipe transport runtime health check failed', result);
+    }
+    return result;
+  }
+
+  private async checkTrafficReadiness(): Promise<HealthIndicatorResult> {
+    const snapshot = await this.cluster.snapshot();
+    const acceptingTraffic =
+      snapshot.localNode.health === 'healthy'
+      && !snapshot.localNode.draining
+      && snapshot.localNode.capacity.capacityScore < 1;
+    const reason = acceptingTraffic
+      ? undefined
+      : snapshot.localNode.draining
+        ? 'node_draining'
+        : snapshot.localNode.capacity.capacityScore >= 1
+          ? 'node_overloaded'
+          : `node_${snapshot.localNode.health}`;
+    const result: HealthIndicatorResult = {
+      readiness: {
+        status: acceptingTraffic ? 'up' : 'down',
+        acceptingTraffic,
+        nodeId: snapshot.localNode.nodeId,
+        reason,
+        capacityScore: snapshot.localNode.capacity.capacityScore
+      }
+    };
+    if (!acceptingTraffic) {
+      throw new HealthCheckError('Traffic readiness check failed', result);
     }
     return result;
   }

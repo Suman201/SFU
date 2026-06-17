@@ -86,6 +86,31 @@ export interface RtcpRouteContext {
 
 export type RtpRouteContext = RtcpRouteContext;
 
+export interface ConsumerTwccObservation {
+  packetLoss: number;
+  delayVariationMs: number;
+  jitter?: number;
+  rtt?: number;
+  sendDeltaMs?: number;
+  receiveDeltaMs?: number;
+  timestamp?: number;
+}
+
+export interface ConsumerTwccObservationEvent {
+  roomId: string;
+  participantId: string;
+  consumerId: string;
+  producerId: string;
+  transportId: string;
+  currentLayers?: RtpLayerSelection;
+  targetLayers?: RtpLayerSelection;
+  preferredLayers?: RtpLayerSelection;
+  currentSvcLayers?: SvcLayerSelection;
+  targetSvcLayers?: SvcLayerSelection;
+  preferredSvcLayers?: SvcLayerSelection;
+  observation: ConsumerTwccObservation;
+}
+
 export interface RtpRouterOptions {
   onForwardedPacket?: (kind: ProducerKind) => void;
   onDroppedPacket?: (reason: RtpPacketDropReason) => void;
@@ -100,6 +125,7 @@ export interface RtpRouterOptions {
   onKeyframeRequestCoalesced?: (producerId: string, feedbackKind: 'pli' | 'fir') => void;
   onTwccPacketArrival?: (id: string, sequenceNumber: number, direction: 'incoming' | 'outgoing') => void;
   onTwccFeedback?: (consumerId: string, feedback: TransportWideCcFeedback) => void;
+  onConsumerTwccObservation?: (state: ConsumerTwccObservationEvent) => void;
   onBandwidthEstimate?: (id: string, estimate: BandwidthEstimate) => void;
   onPacingQueueDepth?: (snapshot: PacketPacingQueueSnapshot) => void;
   onKeyframeDetected?: (producerId: string, ssrc: number, codec: string) => void;
@@ -326,6 +352,7 @@ interface ConsumerRoute {
   lastSwitchingKey?: string;
   lastFailedKey?: string;
   lastUnavailableKey?: string;
+  lastExternalObservationAt?: number;
 }
 
 interface SourceEncoding {
@@ -333,6 +360,20 @@ interface SourceEncoding {
   index: number;
   isRtx: boolean;
   mediaSsrc: number;
+}
+
+interface ConsumerDeliveryStateSnapshot {
+  awaitingKeyframe: boolean;
+  keyframeRequested: boolean;
+  currentLayers?: RtpLayerSelection;
+  currentSvcLayers?: SvcLayerSelection;
+  switchStartedAt?: number;
+  switchReason?: ConsumerLayerSwitchReason;
+  lastSwitchingKey?: string;
+  lastFailedKey?: string;
+  consumerCurrentLayers?: RtpLayerSelection;
+  consumerCurrentSvcLayers?: SvcLayerSelection;
+  consumerLayerState?: ConsumerLayerState;
 }
 
 interface FeedbackSsrcResolution {
@@ -349,13 +390,14 @@ export class RtpRouter {
   private readonly consumersByProducer = new Map<string, Set<string>>();
   private readonly participantProducers = new Map<string, Set<string>>();
   private readonly participantConsumers = new Map<string, Set<string>>();
-  private readonly keyframeRequests = new Map<string, number>();
+  private readonly keyframeRequests = new Map<string, { forwardedAt: number; origin: 'internal' | 'external' }>();
   private readonly transportPacers = new Map<string, PacketPacingQueue>();
   private readonly bandwidthEstimator: BandwidthEstimator;
   private readonly lastTransportQualityScores = new Map<string, { score: number; emittedAt: number }>();
   private readonly lastRoomQualityScores = new Map<string, { score: number; emittedAt: number }>();
   private readonly layerEventListeners = new Set<(event: ConsumerLayerEvent) => void>();
   private readonly producerDynacastListeners = new Set<(event: ProducerDynacastEvent) => void>();
+  private readonly consumerTwccObservationListeners = new Set<(state: ConsumerTwccObservationEvent) => void>();
   private readonly consumerQualityListeners = new Set<(state: ConsumerQualityState) => void>();
   private readonly producerQualityListeners = new Set<(state: ProducerQualityState) => void>();
   private readonly transportQualityListeners = new Set<(state: TransportQualityState) => void>();
@@ -378,18 +420,7 @@ export class RtpRouter {
     const ssrcs = new Set(simulcast.knownSsrcList());
     const streams = new Map<number, RtpSourceStreamState>();
     for (const ssrc of ssrcs) {
-      streams.set(
-        ssrc,
-        new RtpSourceStreamState({
-          ssrc,
-          allowedPayloadTypes: allowedPayloadTypesForSsrc(producer, ssrc),
-          maxReorderPackets: this.options.maxReorderPackets,
-          maxReorderDelayMs: this.options.maxReorderDelayMs,
-          restartSequenceGap: this.options.restartSequenceGap,
-          duplicateWindowSize: this.options.duplicateWindowSize,
-          now: this.now
-        })
-      );
+      streams.set(ssrc, this.createProducerStreamState(producer, ssrc));
     }
     this.producers.set(producer.id, {
       producer,
@@ -546,6 +577,11 @@ export class RtpRouter {
     return () => this.producerDynacastListeners.delete(listener);
   }
 
+  onConsumerTwccObservation(listener: (state: ConsumerTwccObservationEvent) => void): () => void {
+    this.consumerTwccObservationListeners.add(listener);
+    return () => this.consumerTwccObservationListeners.delete(listener);
+  }
+
   onConsumerScoreUpdated(listener: (state: ConsumerQualityState) => void): () => void {
     this.consumerQualityListeners.add(listener);
     return () => this.consumerQualityListeners.delete(listener);
@@ -657,6 +693,22 @@ export class RtpRouter {
     return this.producers.get(producerId)?.dynacast.snapshot();
   }
 
+  applyExternalConsumerTwccObservation(
+    consumerId: string,
+    observation: ConsumerTwccObservation
+  ): ConsumerQualityState | undefined {
+    const route = this.consumers.get(consumerId);
+    if (!route) {
+      return undefined;
+    }
+    const timestamp = observation.timestamp ?? this.now();
+    if (route.lastExternalObservationAt !== undefined && timestamp <= route.lastExternalObservationAt) {
+      return route.lastQuality ?? this.buildConsumerQuality(route, timestamp);
+    }
+    route.lastExternalObservationAt = timestamp;
+    return this.applyTwccObservationToRoute(route, { ...observation, timestamp }, { emitObservation: false });
+  }
+
   consumerQualitySnapshot(consumerId: string): ConsumerQualityState | undefined {
     const route = this.consumers.get(consumerId);
     return route ? this.buildConsumerQuality(route, this.now()) : undefined;
@@ -760,7 +812,11 @@ export class RtpRouter {
       }
       for (const consumerId of consumerIds) {
         const consumerRoute = this.consumers.get(consumerId);
-        if (!consumerRoute || consumerRoute.paused || !packetLayer || !this.shouldForwardLayer(producerRoute, consumerRoute, released, packetLayer, Boolean(svcDetection))) {
+        if (!consumerRoute) {
+          continue;
+        }
+        const deliveryState = captureConsumerDeliveryState(consumerRoute);
+        if (consumerRoute.paused || !packetLayer || !this.shouldForwardLayer(producerRoute, consumerRoute, released, packetLayer, Boolean(svcDetection))) {
           continue;
         }
         if (this.shouldHoldForKeyframe(producerRoute, consumerRoute, released)) {
@@ -768,10 +824,16 @@ export class RtpRouter {
         }
         const rewritten = this.rewriteForConsumer(producerRoute.producer, consumerRoute, released);
         if (!rewritten) {
+          restoreConsumerDeliveryState(consumerRoute, deliveryState);
           this.options.onDroppedPacket?.('invalid_ssrc');
           continue;
         }
-        await this.sendRtpToConsumer(consumerRoute, rewritten, { kind: 'primary', layer: packetLayer, svcLayer: svcDetection ? toRtpLayerSelection(producerRoute.svc.svcSelectionForPacket(svcDetection)) : undefined });
+        try {
+          await this.sendRtpToConsumer(consumerRoute, rewritten, { kind: 'primary', layer: packetLayer, svcLayer: svcDetection ? toRtpLayerSelection(producerRoute.svc.svcSelectionForPacket(svcDetection)) : undefined });
+        } catch {
+          restoreConsumerDeliveryState(consumerRoute, deliveryState);
+          continue;
+        }
         this.options.onForwardedPacket?.(producerRoute.producer.kind);
         forwarded += 1;
       }
@@ -924,6 +986,9 @@ export class RtpRouter {
     const knownProducerId = this.producerBySsrc.get(packet.ssrc);
     if (knownProducerId) {
       const producerRoute = this.producers.get(knownProducerId);
+      if (producerRoute) {
+        this.reconcileProducerEncodingForPacket(producerRoute, packet);
+      }
       const stream = producerRoute?.streams.get(packet.ssrc);
       return producerRoute && stream ? { producerId: knownProducerId, producerRoute, stream } : undefined;
     }
@@ -937,6 +1002,10 @@ export class RtpRouter {
       }
       const stream = this.registerProducerSsrc(producerRoute, packet.ssrc);
       return { producerId: producerRoute.producer.id, producerRoute, stream };
+    }
+    const rebound = this.bindSingleEncodingProducerSsrcForPacket(packet, context);
+    if (rebound) {
+      return rebound;
     }
     return undefined;
   }
@@ -959,18 +1028,95 @@ export class RtpRouter {
     this.mediaSsrcBySsrc.set(ssrc, sourceEncodingForSsrc(producerRoute.producer, ssrc)?.mediaSsrc ?? ssrc);
     let stream = producerRoute.streams.get(ssrc);
     if (!stream) {
-      stream = new RtpSourceStreamState({
-        ssrc,
-        allowedPayloadTypes: allowedPayloadTypesForSsrc(producerRoute.producer, ssrc),
-        maxReorderPackets: this.options.maxReorderPackets,
-        maxReorderDelayMs: this.options.maxReorderDelayMs,
-        restartSequenceGap: this.options.restartSequenceGap,
-        duplicateWindowSize: this.options.duplicateWindowSize,
-        now: this.now
-      });
+      stream = this.createProducerStreamState(producerRoute.producer, ssrc);
       producerRoute.streams.set(ssrc, stream);
     }
     return stream;
+  }
+
+  private createProducerStreamState(producer: Producer, ssrc: number): RtpSourceStreamState {
+    return new RtpSourceStreamState({
+      ssrc,
+      allowedPayloadTypes: allowedPayloadTypesForSsrc(producer, ssrc),
+      maxReorderPackets: this.options.maxReorderPackets,
+      maxReorderDelayMs: this.options.maxReorderDelayMs,
+      restartSequenceGap: this.options.restartSequenceGap,
+      duplicateWindowSize: this.options.duplicateWindowSize,
+      now: this.now
+    });
+  }
+
+  private reconcileProducerEncodingForPacket(producerRoute: ProducerRoute, packet: RtpPacket): void {
+    const source = sourceEncodingForSsrc(producerRoute.producer, packet.ssrc);
+    if (!source?.isRtx || source.encoding.rtx?.ssrc !== packet.ssrc) {
+      return;
+    }
+    const primaryPayloadTypes = producerRoute.producer.rtpParameters.codecs
+      .filter((codec) => !isRtxCodec(codec))
+      .map((codec) => codec.payloadType);
+    if (!primaryPayloadTypes.includes(packet.payloadType)) {
+      return;
+    }
+    const previousMediaSsrc = source.encoding.ssrc;
+    if (!isKnownSsrc(previousMediaSsrc) || previousMediaSsrc === packet.ssrc) {
+      return;
+    }
+    const previousMediaStream = producerRoute.streams.get(previousMediaSsrc);
+    if (previousMediaStream?.snapshot().packetsReceived) {
+      return;
+    }
+    const currentRtxStream = producerRoute.streams.get(packet.ssrc);
+    if (currentRtxStream?.snapshot().packetsReceived) {
+      return;
+    }
+    source.encoding.ssrc = packet.ssrc;
+    source.encoding.rtx = { ...source.encoding.rtx, ssrc: previousMediaSsrc };
+    this.mediaSsrcBySsrc.set(packet.ssrc, packet.ssrc);
+    this.mediaSsrcBySsrc.set(previousMediaSsrc, packet.ssrc);
+    producerRoute.streams.set(packet.ssrc, this.createProducerStreamState(producerRoute.producer, packet.ssrc));
+    producerRoute.streams.set(previousMediaSsrc, this.createProducerStreamState(producerRoute.producer, previousMediaSsrc));
+  }
+
+  private bindSingleEncodingProducerSsrcForPacket(
+    packet: RtpPacket,
+    context: RtpRouteContext
+  ): { producerId: string; producerRoute: ProducerRoute; stream: RtpSourceStreamState } | undefined {
+    const candidates = this.producerRoutesForContext(context).filter((producerRoute) => {
+      if (producerRoute.producer.rtpParameters.encodings.length !== 1) {
+        return false;
+      }
+      const primaryPayloadTypes = producerRoute.producer.rtpParameters.codecs
+        .filter((codec) => !isRtxCodec(codec))
+        .map((codec) => codec.payloadType);
+      return primaryPayloadTypes.includes(packet.payloadType);
+    });
+    if (candidates.length !== 1) {
+      return undefined;
+    }
+    const producerRoute = candidates[0]!;
+    const encoding = producerRoute.producer.rtpParameters.encodings[0];
+    if (!encoding || !isKnownSsrc(encoding.ssrc) || encoding.ssrc === packet.ssrc || encoding.rtx?.ssrc === packet.ssrc) {
+      return undefined;
+    }
+    const previousMediaStream = producerRoute.streams.get(encoding.ssrc);
+    if (previousMediaStream?.snapshot().packetsReceived) {
+      return undefined;
+    }
+    const previousMediaSsrc = encoding.ssrc;
+    encoding.ssrc = packet.ssrc;
+    producerRoute.ssrcs.delete(previousMediaSsrc);
+    producerRoute.ssrcs.add(packet.ssrc);
+    this.producerBySsrc.delete(previousMediaSsrc);
+    this.producerBySsrc.set(packet.ssrc, producerRoute.producer.id);
+    this.mediaSsrcBySsrc.delete(previousMediaSsrc);
+    this.mediaSsrcBySsrc.set(packet.ssrc, packet.ssrc);
+    if (isKnownSsrc(encoding.rtx?.ssrc)) {
+      this.mediaSsrcBySsrc.set(encoding.rtx.ssrc, packet.ssrc);
+    }
+    producerRoute.streams.delete(previousMediaSsrc);
+    const stream = this.createProducerStreamState(producerRoute.producer, packet.ssrc);
+    producerRoute.streams.set(packet.ssrc, stream);
+    return { producerId: producerRoute.producer.id, producerRoute, stream };
   }
 
   private shouldForwardLayer(producerRoute: ProducerRoute, consumerRoute: ConsumerRoute, packet: RtpPacket, packetLayer: RtpLayerSelection, isSvcPacket = false): boolean {
@@ -1899,12 +2045,18 @@ export class RtpRouter {
     }
     let forwarded = 0;
     for (const producerId of producerIds) {
-      if (!this.shouldForwardKeyframeRequest(producerId, feedbackKind)) {
+      if (!this.canForwardKeyframeRequest(producerId, feedbackKind, 'external')) {
         this.options.onKeyframeRequestCoalesced?.(producerId, feedbackKind);
         continue;
       }
-      this.options.onKeyframeRequestForwarded?.(producerId, feedbackKind);
-      forwarded += await this.routeRtcpToProducerSsrcs(new Set([...resolutions].filter((resolution) => resolution.producerId === producerId)), packet, feedbackKind);
+      try {
+        const sent = await this.routeRtcpToProducerSsrcs(new Set([...resolutions].filter((resolution) => resolution.producerId === producerId)), packet, feedbackKind);
+        if (sent > 0) {
+          this.recordForwardedKeyframeRequest(producerId, 'external');
+          this.options.onKeyframeRequestForwarded?.(producerId, feedbackKind);
+          forwarded += sent;
+        }
+      } catch {}
     }
     if (producerIds.size === 0) {
       this.options.onDroppedRtcpPacket?.('unknown_ssrc');
@@ -2019,15 +2171,22 @@ export class RtpRouter {
     }
   }
 
-  private shouldForwardKeyframeRequest(producerId: string, feedbackKind: 'pli' | 'fir'): boolean {
+  private canForwardKeyframeRequest(producerId: string, feedbackKind: 'pli' | 'fir', origin: 'internal' | 'external'): boolean {
     const key = `${producerId}:keyframe`;
     const now = this.now();
-    const lastForwardedAt = this.keyframeRequests.get(key);
-    if (lastForwardedAt !== undefined && now - lastForwardedAt < (this.options.keyframeRequestIntervalMs ?? 1000)) {
+    const lastRequest = this.keyframeRequests.get(key);
+    if (
+      lastRequest &&
+      now - lastRequest.forwardedAt < (this.options.keyframeRequestIntervalMs ?? 1000) &&
+      (lastRequest.origin === 'external' || origin === 'internal')
+    ) {
       return false;
     }
-    this.keyframeRequests.set(key, now);
     return true;
+  }
+
+  private recordForwardedKeyframeRequest(producerId: string, origin: 'internal' | 'external'): void {
+    this.keyframeRequests.set(`${producerId}:keyframe`, { forwardedAt: this.now(), origin });
   }
 
   private scheduleReorderDrain(producerId: string, ssrc: number): void {
@@ -2376,15 +2535,24 @@ export class RtpRouter {
     if (mediaSsrc === undefined) {
       return;
     }
-    consumerRoute.keyframeRequested = true;
-    if (!this.shouldForwardKeyframeRequest(producerRoute.producer.id, 'pli')) {
+    if (!this.canForwardKeyframeRequest(producerRoute.producer.id, 'pli', 'internal')) {
       this.options.onKeyframeRequestCoalesced?.(producerRoute.producer.id, 'pli');
       return;
     }
+    consumerRoute.keyframeRequested = true;
     const senderSsrc = firstMediaSsrcFromRtpParameters(consumerRoute.consumer.rtpParameters) ?? 0;
-    this.options.onKeyframeRequestForwarded?.(producerRoute.producer.id, 'pli');
-    await producerRoute.rtcpWriter(createPli({ senderSsrc, mediaSsrc }), producerRoute.producer, 'pli');
-    this.options.onForwardedRtcpPacket?.('pli', 'producer');
+    try {
+      await producerRoute.rtcpWriter(createPli({ senderSsrc, mediaSsrc }), producerRoute.producer, 'pli');
+      this.recordForwardedKeyframeRequest(producerRoute.producer.id, 'internal');
+      this.options.onKeyframeRequestForwarded?.(producerRoute.producer.id, 'pli');
+      this.options.onForwardedRtcpPacket?.('pli', 'producer');
+      if (producerRoute.producer.transportId.startsWith('pipe')) {
+        consumerRoute.keyframeRequested = false;
+      }
+    } catch (error) {
+      consumerRoute.keyframeRequested = false;
+      throw error;
+    }
   }
 
   private targetMediaSsrcForConsumer(producerRoute: ProducerRoute, consumerRoute: ConsumerRoute): number | undefined {
@@ -2415,15 +2583,34 @@ export class RtpRouter {
       rtt: correlation.rttMs,
       timestamp: now
     };
-    const estimate = this.bandwidthEstimator.updateTwcc(route.consumer.id, observation);
-    const transportEstimate = this.bandwidthEstimator.updateTwcc(`transport:${route.consumer.transportId}`, observation);
+    this.options.onTwccFeedback?.(route.consumer.id, feedback);
+    this.applyTwccObservationToRoute(route, observation);
+  }
+
+  private applyTwccObservationToRoute(
+    route: ConsumerRoute,
+    observation: ConsumerTwccObservation,
+    options: { emitObservation?: boolean } = {}
+  ): ConsumerQualityState {
+    const now = observation.timestamp ?? this.now();
+    const normalizedObservation: ConsumerTwccObservation = {
+      packetLoss: clamp01(observation.packetLoss),
+      delayVariationMs: Math.max(0, observation.delayVariationMs),
+      jitter: observation.jitter === undefined ? undefined : Math.max(0, observation.jitter),
+      rtt: observation.rtt === undefined ? undefined : Math.max(0, observation.rtt),
+      sendDeltaMs: observation.sendDeltaMs,
+      receiveDeltaMs: observation.receiveDeltaMs,
+      timestamp: now
+    };
+    const estimate = this.bandwidthEstimator.updateTwcc(route.consumer.id, normalizedObservation);
+    const transportEstimate = this.bandwidthEstimator.updateTwcc(`transport:${route.consumer.transportId}`, normalizedObservation);
     if (route.currentLayers) {
       recordLayerCongestion(
         route.metrics,
         route.currentLayers,
-        correlation.correlatedPackets > 0 ? correlation.packetLoss : metrics.packetLoss,
-        correlation.rttMs,
-        correlation.correlatedPackets > 0 ? correlation.delayVariationMs : metrics.delayVariationMs,
+        normalizedObservation.packetLoss,
+        normalizedObservation.rtt,
+        normalizedObservation.delayVariationMs,
         now
       );
       const producerRoute = this.producers.get(route.consumer.producerId);
@@ -2431,9 +2618,9 @@ export class RtpRouter {
         recordLayerCongestion(
           producerRoute.metrics,
           route.currentLayers,
-          correlation.correlatedPackets > 0 ? correlation.packetLoss : metrics.packetLoss,
-          correlation.rttMs,
-          correlation.correlatedPackets > 0 ? correlation.delayVariationMs : metrics.delayVariationMs,
+          normalizedObservation.packetLoss,
+          normalizedObservation.rtt,
+          normalizedObservation.delayVariationMs,
           now
         );
       }
@@ -2442,9 +2629,9 @@ export class RtpRouter {
       recordSvcLayerCongestion(
         route.metrics,
         route.currentLayers,
-        correlation.correlatedPackets > 0 ? correlation.packetLoss : metrics.packetLoss,
-        correlation.rttMs,
-        correlation.correlatedPackets > 0 ? correlation.delayVariationMs : metrics.delayVariationMs,
+        normalizedObservation.packetLoss,
+        normalizedObservation.rtt,
+        normalizedObservation.delayVariationMs,
         now
       );
       const producerRoute = this.producers.get(route.consumer.producerId);
@@ -2452,19 +2639,43 @@ export class RtpRouter {
         recordSvcLayerCongestion(
           producerRoute.metrics,
           route.currentLayers,
-          correlation.correlatedPackets > 0 ? correlation.packetLoss : metrics.packetLoss,
-          correlation.rttMs,
-          correlation.correlatedPackets > 0 ? correlation.delayVariationMs : metrics.delayVariationMs,
+          normalizedObservation.packetLoss,
+          normalizedObservation.rtt,
+          normalizedObservation.delayVariationMs,
           now
         );
       }
     }
     this.recalculateTransportAllocation(route.consumer.transportId);
     route.pacer.updateTargetBitrate(route.allocation?.allocatedBitrate || estimate.recommendedBitrate || this.options.defaultPacingBitrateBps || 50_000_000);
-    this.options.onTwccFeedback?.(route.consumer.id, feedback);
     this.options.onBandwidthEstimate?.(route.consumer.id, estimate);
     this.options.onBandwidthEstimate?.(`transport:${route.consumer.transportId}`, transportEstimate);
+    if (options.emitObservation !== false) {
+      const event: ConsumerTwccObservationEvent = {
+        roomId: route.consumer.roomId,
+        participantId: route.consumer.participantId,
+        consumerId: route.consumer.id,
+        producerId: route.consumer.producerId,
+        transportId: route.consumer.transportId,
+        currentLayers: route.currentLayers,
+        targetLayers: route.targetLayers,
+        preferredLayers: route.preferredLayers,
+        currentSvcLayers: route.currentSvcLayers,
+        targetSvcLayers: route.targetSvcLayers,
+        preferredSvcLayers: route.preferredSvcLayers,
+        observation: {
+          ...normalizedObservation,
+          jitter: normalizedObservation.jitter ?? estimate.jitter,
+          rtt: normalizedObservation.rtt ?? estimate.rtt
+        }
+      };
+      this.options.onConsumerTwccObservation?.(event);
+      for (const listener of this.consumerTwccObservationListeners) {
+        listener(event);
+      }
+    }
     this.maybeEmitQualityForConsumer(route);
+    return route.lastQuality ?? this.buildConsumerQuality(route, now);
   }
 
   private rewriteForConsumer(producer: Producer, consumerRoute: ConsumerRoute, packet: RtpPacket): RtpPacket | undefined {
@@ -2592,6 +2803,9 @@ export class RtpRouter {
 
   private shouldGateConsumerUntilKeyframe(consumer: Consumer): boolean {
     if (this.options.enableJoinKeyframeGate === false) {
+      return false;
+    }
+    if (consumer.participantId.startsWith('pipe:')) {
       return false;
     }
     const producerRoute = this.producers.get(consumer.producerId);
@@ -3115,6 +3329,36 @@ function retransmissionMetricsSnapshot(metrics: RouteMetrics): RtxRepairMetrics 
     successRate: requestedPackets === 0 ? 1 : metrics.retransmission.retransmittedPackets / requestedPackets,
     failureRate: requestedPackets === 0 ? 0 : missingPackets / requestedPackets
   };
+}
+
+function captureConsumerDeliveryState(consumerRoute: ConsumerRoute): ConsumerDeliveryStateSnapshot {
+  return {
+    awaitingKeyframe: consumerRoute.awaitingKeyframe,
+    keyframeRequested: consumerRoute.keyframeRequested,
+    currentLayers: normalizeLayerSelection(consumerRoute.currentLayers),
+    currentSvcLayers: normalizeOptionalSvcLayer(consumerRoute.currentSvcLayers),
+    switchStartedAt: consumerRoute.switchStartedAt,
+    switchReason: consumerRoute.switchReason,
+    lastSwitchingKey: consumerRoute.lastSwitchingKey,
+    lastFailedKey: consumerRoute.lastFailedKey,
+    consumerCurrentLayers: normalizeLayerSelection(consumerRoute.consumer.currentLayers),
+    consumerCurrentSvcLayers: normalizeOptionalSvcLayer(consumerRoute.consumer.currentSvcLayers),
+    consumerLayerState: consumerRoute.consumer.layerState ? { ...consumerRoute.consumer.layerState } : undefined
+  };
+}
+
+function restoreConsumerDeliveryState(consumerRoute: ConsumerRoute, snapshot: ConsumerDeliveryStateSnapshot): void {
+  consumerRoute.awaitingKeyframe = snapshot.awaitingKeyframe;
+  consumerRoute.keyframeRequested = snapshot.keyframeRequested;
+  consumerRoute.currentLayers = snapshot.currentLayers;
+  consumerRoute.currentSvcLayers = snapshot.currentSvcLayers;
+  consumerRoute.switchStartedAt = snapshot.switchStartedAt;
+  consumerRoute.switchReason = snapshot.switchReason;
+  consumerRoute.lastSwitchingKey = snapshot.lastSwitchingKey;
+  consumerRoute.lastFailedKey = snapshot.lastFailedKey;
+  consumerRoute.consumer.currentLayers = snapshot.consumerCurrentLayers;
+  consumerRoute.consumer.currentSvcLayers = snapshot.consumerCurrentSvcLayers;
+  consumerRoute.consumer.layerState = snapshot.consumerLayerState ? { ...snapshot.consumerLayerState } : undefined;
 }
 
 function allowedPayloadTypesForSsrc(producer: Producer, ssrc: number): number[] {

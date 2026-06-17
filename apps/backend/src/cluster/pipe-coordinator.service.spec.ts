@@ -1,8 +1,10 @@
 import type {
   Consumer,
   PipeAckMessage,
+  PipeCloseMessage,
   PipeCoordinationEnvelope,
   PipeCreateMessage,
+  PipeTransportProtocol,
   PipeProducerCloseMessage,
   PipeProducerCreateMessage,
   PipeRtcpMessage,
@@ -269,6 +271,89 @@ describe('PipeCoordinatorService', () => {
     });
   });
 
+  it('delegates worker-mode UDP pipe provisioning to the media worker instead of parent pipe sockets', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { mediaWorkerMode: 'worker', advertiseIp: '127.0.0.1', media: ownerMedia });
+    const remote = createHarness('node-b', { mediaWorkerMode: 'worker', advertiseIp: '127.0.0.1', media: remoteMedia });
+
+    const promise = owner.service.createPipe({
+      targetNodeId: 'node-b',
+      roomId: 'room-1',
+      pipeTransportId: 'pipe-udp',
+      remoteNodeId: 'node-b',
+      protocol: 'udp'
+    });
+    await waitForMessageCount(owner.redis, 1);
+    await remote.service.handleEnvelope(owner.redis.messages[0]!);
+    await owner.service.handleEnvelope(remote.redis.messages[0]!);
+    await promise;
+
+    expect(owner.pipe.hasTransport('pipe-udp')).toBe(false);
+    expect(remote.pipe.hasTransport('pipe-udp')).toBe(false);
+    expect(ownerMedia.ensurePipeTransport).toHaveBeenCalledTimes(2);
+    expect(remoteMedia.ensurePipeTransport).toHaveBeenCalledTimes(1);
+    expect(ownerMedia.ensurePipeTransport.mock.calls[0]?.[0]?.pipeTransportId).toBe('pipe-udp');
+    expect(ownerMedia.ensurePipeTransport.mock.calls[0]?.[0]?.roomId).toBe('room-1');
+    expect(ownerMedia.ensurePipeTransport.mock.calls[0]?.[0]?.localNodeId).toBe('node-a');
+    expect(ownerMedia.ensurePipeTransport.mock.calls[0]?.[0]?.remoteNodeId).toBe('node-b');
+    expect(ownerMedia.ensurePipeTransport.mock.calls[0]?.[0]?.protocol).toBe('udp');
+    expect(ownerMedia.ensurePipeTransport.mock.calls[0]?.[0]?.advertisedIp).toBe('127.0.0.1');
+    expect(typeof ownerMedia.ensurePipeTransport.mock.calls[0]?.[0]?.peerToken).toBe('string');
+    expect(remoteMedia.ensurePipeTransport.mock.calls[0]?.[0]?.pipeTransportId).toBe('pipe-udp');
+    expect(remoteMedia.ensurePipeTransport.mock.calls[0]?.[0]?.roomId).toBe('room-1');
+    expect(remoteMedia.ensurePipeTransport.mock.calls[0]?.[0]?.localNodeId).toBe('node-b');
+    expect(remoteMedia.ensurePipeTransport.mock.calls[0]?.[0]?.remoteNodeId).toBe('node-a');
+    expect(remoteMedia.ensurePipeTransport.mock.calls[0]?.[0]?.protocol).toBe('udp');
+    expect(remoteMedia.ensurePipeTransport.mock.calls[0]?.[0]?.advertisedIp).toBe('127.0.0.1');
+    expect(typeof remoteMedia.ensurePipeTransport.mock.calls[0]?.[0]?.peerToken).toBe('string');
+    expect(ownerMedia.ensurePipeTransport.mock.calls[1]?.[0]?.remoteEndpoint).toEqual({
+      nodeId: 'node-b',
+      advertiseIp: '127.0.0.1',
+      port: 41000
+    });
+    expect(owner.service.snapshot().activePipeTransports).toBe(1);
+    expect(remote.service.snapshot().activePipeTransports).toBe(1);
+  });
+
+  it('closes worker-mode pipe transports through media cleanup without requiring a parent UDP transport', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { mediaWorkerMode: 'worker', advertiseIp: '127.0.0.1', media: ownerMedia });
+    const remote = createHarness('node-b', { mediaWorkerMode: 'worker', advertiseIp: '127.0.0.1', media: remoteMedia });
+
+    const createPromise = owner.service.createPipe({
+      targetNodeId: 'node-b',
+      roomId: 'room-1',
+      pipeTransportId: 'pipe-udp',
+      remoteNodeId: 'node-b',
+      protocol: 'udp'
+    });
+    await waitForMessageCount(owner.redis, 1);
+    await remote.service.handleEnvelope(owner.redis.messages[0]!);
+    await owner.service.handleEnvelope(remote.redis.messages[0]!);
+    await createPromise;
+
+    const ownerMessagesBeforeClose = owner.redis.messages.length;
+    const remoteMessagesBeforeClose = remote.redis.messages.length;
+    const closePromise = owner.service.publish('node-b', {
+      type: 'pipe:close',
+      roomId: 'room-1',
+      pipeTransportId: 'pipe-udp',
+      ownerClaimedAt: CLAIMED_AT,
+      reason: 'manual'
+    });
+    await waitForMessageCount(owner.redis, ownerMessagesBeforeClose + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[ownerMessagesBeforeClose]!);
+    await waitForMessageCount(remote.redis, remoteMessagesBeforeClose + 1);
+    await owner.service.handleEnvelope(remote.redis.messages[remoteMessagesBeforeClose]!);
+    await closePromise;
+
+    expect(remoteMedia.closePipeTransport).toHaveBeenCalledWith('pipe-udp');
+    expect(remote.pipe.hasTransport('pipe-udp')).toBe(false);
+    expect(remote.service.snapshot().activePipeTransports).toBe(0);
+  });
+
   it('allows remote subscriber feed attachment attempts in worker mode', async () => {
     const harness = createHarness('node-b', { mediaWorkerMode: 'worker', ownerNodeId: 'node-a', coordinationTimeoutMs: 5, coordinationMaxAttempts: 1 });
 
@@ -306,7 +391,11 @@ describe('PipeCoordinatorService', () => {
     const promise = remote.service.ensureRemoteConsumerFeed({
       roomId: 'room-1',
       producerId: 'producer-1',
-      consumerId: 'consumer-1'
+      consumerId: 'consumer-1',
+      status: 'paused',
+      priority: 4,
+      preferredLayers: { spatialLayer: 1, temporalLayer: 2 },
+      preferredSvcLayers: { spatialLayerId: 1, temporalLayerId: 2, qualityLayerId: 1 }
     });
 
     await waitForMessageCount(remote.redis, 1);
@@ -331,7 +420,17 @@ describe('PipeCoordinatorService', () => {
     expect(ownerPipeConsumer?.id).toBe('pipe-consumer:producer-1:node-b');
     expect(ownerPipeConsumer?.producerId).toBe('producer-1');
     expect(ownerPipeConsumer?.transportId).toBe('pipe:internal:room-1:node-a:node-b');
+    expect(ownerPipeConsumer?.status).toBe('paused');
+    expect(ownerPipeConsumer?.priority).toBe(4);
     expect(media.registerPipeConsumer.mock.calls[0]?.[1]).toBe('pipe:internal:room-1:node-a:node-b');
+    expect(media.setConsumerPaused).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b', true);
+    expect(media.setConsumerPriority).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b', 4);
+    expect(media.setConsumerPreferredLayers).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b', { spatialLayer: 1, temporalLayer: 2 });
+    expect(media.setConsumerPreferredSvcLayers).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b', {
+      spatialLayerId: 1,
+      temporalLayerId: 2,
+      qualityLayerId: 1
+    });
     const remotePipeProducer = remote.media?.registerPipeProducer.mock.calls[0]?.[0];
     expect(remotePipeProducer?.id).toBe('producer-1');
     expect(remotePipeProducer?.roomId).toBe('room-1');
@@ -437,6 +536,315 @@ describe('PipeCoordinatorService', () => {
     expect(remotePipeConsumer?.id).toBe('pipe-publisher:producer-1:node-b');
     expect(remotePipeConsumer?.producerId).toBe('producer-1');
     expect(remotePipeConsumer?.transportId).toBe('pipe:internal:room-1:node-a:node-b');
+    expect(remotePipeConsumer?.status).toBe('paused');
+    expect(remoteMedia.setConsumerPaused).toHaveBeenCalledWith('pipe-publisher:producer-1:node-b', true);
+  });
+
+  it('synchronizes remote consumer demand to the owner-side pipe consumer', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    await establishRemoteConsumerFeed(owner, remote, {
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1'
+    });
+    const baselineRemoteMessages = remote.redis.messages.length;
+    const baselineOwnerMessages = owner.redis.messages.length;
+
+    const syncPromise = remote.service.syncRemoteConsumerState({
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1',
+      status: 'live',
+      priority: 6,
+      preferredLayers: { spatialLayer: 2, temporalLayer: 1 },
+      preferredSvcLayers: { spatialLayerId: 2, temporalLayerId: 1, qualityLayerId: 2 }
+    });
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+    await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages]!);
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+    await syncPromise;
+
+    expect(ownerMedia.setConsumerPaused).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b', false);
+    expect(ownerMedia.setConsumerPriority).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b', 6);
+    expect(ownerMedia.setConsumerPreferredLayers).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b', { spatialLayer: 2, temporalLayer: 1 });
+    expect(ownerMedia.setConsumerPreferredSvcLayers).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b', {
+      spatialLayerId: 2,
+      temporalLayerId: 1,
+      qualityLayerId: 2
+    });
+  });
+
+  it('ignores stale remote consumer state versions within the same binding epoch', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    await establishRemoteConsumerFeed(owner, remote, {
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1'
+    });
+    const baselineRemoteMessages = remote.redis.messages.length;
+    const baselineOwnerMessages = owner.redis.messages.length;
+
+    const syncPromise = remote.service.syncRemoteConsumerState({
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1',
+      status: 'live',
+      priority: 6,
+      preferredLayers: { spatialLayer: 2, temporalLayer: 1 }
+    });
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+    const appliedEnvelope = remote.redis.messages[baselineRemoteMessages]!;
+    await owner.service.handleEnvelope(appliedEnvelope);
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+    await syncPromise;
+
+    ownerMedia.setConsumerPaused.mockClear();
+    ownerMedia.setConsumerPriority.mockClear();
+    ownerMedia.setConsumerPreferredLayers.mockClear();
+    const staleStateBaselineRemote = remote.redis.messages.length;
+    const staleStateBaselineOwner = owner.redis.messages.length;
+    const staleStatePromise = remote.service.publish('node-a', {
+      type: 'pipe:consumer:state',
+      roomId: 'room-1',
+      pipeTransportId: 'pipe:internal:room-1:node-a:node-b',
+      ownerClaimedAt: CLAIMED_AT,
+      ownerNodeId: 'node-a',
+      remoteNodeId: 'node-b',
+      consumerId: 'pipe-consumer:producer-1:node-b',
+      producerId: 'producer-1',
+      bindingEpoch: (appliedEnvelope.payload as { bindingEpoch?: string }).bindingEpoch,
+      stateVersion: Math.max(0, (((appliedEnvelope.payload as { stateVersion?: number }).stateVersion) ?? 1) - 1),
+      status: 'paused',
+      priority: 1,
+      preferredLayers: { spatialLayer: 0, temporalLayer: 0 }
+    });
+    await waitForMessageCount(remote.redis, staleStateBaselineRemote + 1);
+    await owner.service.handleEnvelope(remote.redis.messages[staleStateBaselineRemote]!);
+    await waitForMessageCount(owner.redis, staleStateBaselineOwner + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[staleStateBaselineOwner]!);
+    await staleStatePromise;
+
+    expect(ownerMedia.setConsumerPaused).not.toHaveBeenCalled();
+    expect(ownerMedia.setConsumerPriority).not.toHaveBeenCalled();
+    expect(ownerMedia.setConsumerPreferredLayers).not.toHaveBeenCalled();
+  });
+
+  it('forwards remote consumer TWCC observations to the owner-side pipe consumer', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    await establishRemoteConsumerFeed(owner, remote, {
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1'
+    });
+    const baselineRemoteMessages = remote.redis.messages.length;
+    const baselineOwnerMessages = owner.redis.messages.length;
+    const observation = {
+      packetLoss: 0.18,
+      delayVariationMs: 64,
+      jitter: 51,
+      rtt: 122,
+      sendDeltaMs: 20,
+      receiveDeltaMs: 67,
+      timestamp: 1234
+    } as const;
+
+    remoteMedia.emitConsumerTwccObservation({
+      roomId: 'room-1',
+      participantId: 'subscriber',
+      consumerId: 'consumer-1',
+      producerId: 'producer-1',
+      transportId: 'transport-subscriber',
+      observation
+    });
+
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+    await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages]!);
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+
+    expect(ownerMedia.applyConsumerTwccObservation).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b', observation);
+  });
+
+  it('ignores stale remote consumer feedback versions within the same binding epoch', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    await establishRemoteConsumerFeed(owner, remote, {
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1'
+    });
+    const baselineRemoteMessages = remote.redis.messages.length;
+    const baselineOwnerMessages = owner.redis.messages.length;
+
+    remoteMedia.emitConsumerTwccObservation({
+      roomId: 'room-1',
+      participantId: 'subscriber',
+      consumerId: 'consumer-1',
+      producerId: 'producer-1',
+      transportId: 'transport-subscriber',
+      observation: {
+        packetLoss: 0.22,
+        delayVariationMs: 72,
+        rtt: 130,
+        timestamp: 2000
+      }
+    });
+
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+    const appliedEnvelope = remote.redis.messages[baselineRemoteMessages]!;
+
+    await owner.service.handleEnvelope(appliedEnvelope);
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+
+    ownerMedia.applyConsumerTwccObservation.mockClear();
+    const staleFeedbackBaselineRemote = remote.redis.messages.length;
+    const staleFeedbackBaselineOwner = owner.redis.messages.length;
+    const staleFeedbackPromise = remote.service.publish('node-a', {
+      type: 'pipe:consumer:feedback',
+      roomId: 'room-1',
+      pipeTransportId: 'pipe:internal:room-1:node-a:node-b',
+      ownerClaimedAt: CLAIMED_AT,
+      ownerNodeId: 'node-a',
+      remoteNodeId: 'node-b',
+      consumerId: 'pipe-consumer:producer-1:node-b',
+      producerId: 'producer-1',
+      bindingEpoch: (appliedEnvelope.payload as { bindingEpoch?: string }).bindingEpoch,
+      feedbackVersion: Math.max(0, (((appliedEnvelope.payload as { feedbackVersion?: number }).feedbackVersion) ?? 1) - 1),
+      observation: {
+        packetLoss: 0.01,
+        delayVariationMs: 8,
+        rtt: 20,
+        timestamp: 1500
+      }
+    });
+    await waitForMessageCount(remote.redis, staleFeedbackBaselineRemote + 1);
+    await owner.service.handleEnvelope(remote.redis.messages[staleFeedbackBaselineRemote]!);
+    await waitForMessageCount(owner.redis, staleFeedbackBaselineOwner + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[staleFeedbackBaselineOwner]!);
+    await staleFeedbackPromise;
+
+    expect(ownerMedia.applyConsumerTwccObservation).not.toHaveBeenCalled();
+  });
+
+  it('aggregates multi-subscriber remote feedback without collapsing entirely to the single worst observation', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    await establishRemoteConsumerFeed(owner, remote, {
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1'
+    });
+    await remote.service.ensureRemoteConsumerFeed({
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-2'
+    });
+    const baselineRemoteMessages = remote.redis.messages.length;
+    const baselineOwnerMessages = owner.redis.messages.length;
+    const healthy = {
+      packetLoss: 0.02,
+      delayVariationMs: 12,
+      jitter: 8,
+      rtt: 40,
+      sendDeltaMs: 20,
+      receiveDeltaMs: 23,
+      timestamp: 1000
+    } as const;
+    const degraded = {
+      packetLoss: 0.18,
+      delayVariationMs: 64,
+      jitter: 51,
+      rtt: 122,
+      sendDeltaMs: 20,
+      receiveDeltaMs: 67,
+      timestamp: 1100
+    } as const;
+
+    remoteMedia.emitConsumerTwccObservation({
+      roomId: 'room-1',
+      participantId: 'subscriber-a',
+      consumerId: 'consumer-1',
+      producerId: 'producer-1',
+      transportId: 'transport-a',
+      observation: healthy
+    });
+    remoteMedia.emitConsumerTwccObservation({
+      roomId: 'room-1',
+      participantId: 'subscriber-b',
+      consumerId: 'consumer-2',
+      producerId: 'producer-1',
+      transportId: 'transport-b',
+      observation: degraded
+    });
+
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+    await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages]!);
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+
+    const aggregated = ownerMedia.applyConsumerTwccObservation.mock.calls.at(-1)?.[1];
+    expect(aggregated).toBeDefined();
+    expect(aggregated!.packetLoss).toBeCloseTo(0.14, 5);
+    expect(aggregated!.delayVariationMs).toBeCloseTo(51, 5);
+    expect(aggregated!.jitter).toBeCloseTo(40.25, 5);
+    expect(aggregated!.rtt).toBeCloseTo(101.5, 5);
+    expect(aggregated!.receiveDeltaMs).toBeCloseTo(56, 5);
+    expect(aggregated!.packetLoss).toBeLessThan(degraded.packetLoss);
+    expect(aggregated!.packetLoss).toBeGreaterThan(healthy.packetLoss);
+  });
+
+  it('ignores stale feed release messages after the same remote feed is reattached with a new binding epoch', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    await establishRemoteConsumerFeed(owner, remote, {
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1'
+    });
+
+    const releaseBaseline = remote.redis.messages.length;
+    const ownerReleaseBaseline = owner.redis.messages.length;
+    const releasePromise = remote.service.releaseRemoteConsumerFeed('consumer-1');
+    await waitForMessageCount(remote.redis, releaseBaseline + 1);
+    const staleReleaseEnvelope = remote.redis.messages[releaseBaseline]!;
+    const ownerReleaseTask = owner.service.handleEnvelope(staleReleaseEnvelope);
+    await waitForMessageCount(owner.redis, ownerReleaseBaseline + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[ownerReleaseBaseline]!);
+    await owner.service.handleEnvelope(remote.redis.messages[releaseBaseline + 1]!);
+    await ownerReleaseTask;
+    await waitForMessageCount(owner.redis, ownerReleaseBaseline + 2);
+    await remote.service.handleEnvelope(owner.redis.messages[ownerReleaseBaseline + 1]!);
+    await releasePromise;
+
+    await establishRemoteConsumerFeed(owner, remote, {
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1'
+    });
+
+    ownerMedia.unregisterConsumer.mockClear();
+
+    await owner.service.handleEnvelope(staleReleaseEnvelope);
+
+    expect(ownerMedia.unregisterConsumer).not.toHaveBeenCalled();
   });
 
   it('synchronizes remote producer state to the owner proxy', async () => {
@@ -479,6 +887,203 @@ describe('PipeCoordinatorService', () => {
     expect(ownerMedia.setProducerPaused).toHaveBeenCalledWith('producer-1', true);
     expect(ownerMedia.setProducerPriority).toHaveBeenCalledWith('producer-1', 3);
   });
+
+  it('propagates owner-authoritative producer state changes back to the origin producer', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    const producer = remoteMedia.getProducer('producer-1')!;
+    await establishRemotePublication(owner, remote, producer);
+    const baselineOwnerMessages = owner.redis.messages.length;
+    const baselineRemoteMessages = remote.redis.messages.length;
+
+    const statePromise = owner.service.syncOriginProducerState({
+      roomId: 'room-1',
+      producerId: producer.id,
+      status: 'paused',
+      priority: 5
+    });
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+    await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages]!);
+    await statePromise;
+
+    expect(remoteMedia.setProducerPaused).toHaveBeenCalledWith('producer-1', true);
+    expect(remoteMedia.setProducerPriority).toHaveBeenCalledWith('producer-1', 5);
+  });
+
+  it('propagates owner-authoritative consumer demand back to the origin pipe consumer', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    const producer = remoteMedia.getProducer('producer-1')!;
+    await establishRemotePublication(owner, remote, producer);
+    const baselineOwnerMessages = owner.redis.messages.length;
+    const baselineRemoteMessages = remote.redis.messages.length;
+
+    const statePromise = owner.service.syncOriginConsumerState({
+      roomId: 'room-1',
+      producerId: producer.id,
+      status: 'live',
+      priority: 5,
+      preferredLayers: { spatialLayer: 2, temporalLayer: 2 },
+      preferredSvcLayers: { spatialLayerId: 1, temporalLayerId: 2, qualityLayerId: 1 }
+    });
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+    await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages]!);
+    await statePromise;
+
+    expect(remoteMedia.setConsumerPaused).toHaveBeenCalledWith('pipe-publisher:producer-1:node-b', false);
+    expect(remoteMedia.setConsumerPriority).toHaveBeenCalledWith('pipe-publisher:producer-1:node-b', 5);
+    expect(remoteMedia.setConsumerPreferredLayers).toHaveBeenCalledWith('pipe-publisher:producer-1:node-b', { spatialLayer: 2, temporalLayer: 2 });
+    expect(remoteMedia.setConsumerPreferredSvcLayers).toHaveBeenCalledWith('pipe-publisher:producer-1:node-b', {
+      spatialLayerId: 1,
+      temporalLayerId: 2,
+      qualityLayerId: 1
+    });
+  });
+
+  it('propagates owner-authoritative close to the origin producer and tears down the remote publication chain', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    const producer = remoteMedia.getProducer('producer-1')!;
+    await establishRemotePublication(owner, remote, producer);
+    const baselineOwnerMessages = owner.redis.messages.length;
+    const baselineRemoteMessages = remote.redis.messages.length;
+
+    const closePromise = owner.service.closeOriginProducer({
+      roomId: 'room-1',
+      producerId: producer.id,
+      reason: 'producer_closed'
+    });
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    const closeCommand = owner.redis.messages[baselineOwnerMessages]!;
+    const remoteCloseTask = remote.service.handleEnvelope(closeCommand);
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+    const publishRelease = remote.redis.messages[baselineRemoteMessages]!;
+    const ownerReleaseTask = owner.service.handleEnvelope(publishRelease);
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 2);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages + 1]!);
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 2);
+    await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages + 1]!);
+    await ownerReleaseTask;
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 3);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages + 2]!);
+    await remoteCloseTask;
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 3);
+    await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages + 2]!);
+    await closePromise;
+
+    expect(remoteMedia.unregisterProducer).toHaveBeenCalledWith('producer-1');
+    expect(ownerMedia.unregisterProducer).toHaveBeenCalledWith('producer-1');
+    expect(remoteMedia.unregisterConsumer).toHaveBeenCalledWith('pipe-publisher:producer-1:node-b');
+  });
+
+  it('clears remote feed cache state on pipe close so release becomes a no-op and reattach can reuse the same transport id', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    expect(
+      await establishRemoteConsumerFeed(owner, remote, {
+        roomId: 'room-1',
+        producerId: 'producer-1',
+        consumerId: 'consumer-1'
+      })
+    ).toEqual({
+      pipeTransportId: 'pipe:internal:room-1:node-a:node-b',
+      proxyProducerId: 'producer-1'
+    });
+    const baselineOwnerMessages = owner.redis.messages.length;
+    const baselineRemoteMessages = remote.redis.messages.length;
+
+    const closePromise = owner.service.publish('node-b', {
+      type: 'pipe:close',
+      roomId: 'room-1',
+      pipeTransportId: 'pipe:internal:room-1:node-a:node-b',
+      ownerClaimedAt: CLAIMED_AT,
+      reason: 'manual'
+    });
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+    await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages]!);
+    await closePromise;
+
+    const remoteMessagesBeforeRelease = remote.redis.messages.length;
+    await remote.service.releaseRemoteConsumerFeed('consumer-1');
+    expect(remote.redis.messages.length).toBe(remoteMessagesBeforeRelease);
+    expect(remote.service.snapshot().activePipeTransports).toBe(0);
+
+    expect(
+      await establishRemoteConsumerFeed(owner, remote, {
+        roomId: 'room-1',
+        producerId: 'producer-1',
+        consumerId: 'consumer-1'
+      })
+    ).toEqual({
+      pipeTransportId: 'pipe:internal:room-1:node-a:node-b',
+      proxyProducerId: 'producer-1'
+    });
+  });
+
+  it('ignores stale pipe stats after close and clears per-pipe observability state', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    await establishRemoteConsumerFeed(owner, remote, {
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1'
+    });
+    (owner.metrics.clearPipeTransportMetrics as jest.Mock).mockClear();
+    (remote.metrics.clearPipeTransportMetrics as jest.Mock).mockClear();
+    (owner.metrics.updatePipeTransportMetrics as jest.Mock).mockClear();
+    await closePipeAcrossNodes(owner, remote, {
+      type: 'pipe:close',
+      roomId: 'room-1',
+      pipeTransportId: 'pipe:internal:room-1:node-a:node-b',
+      ownerClaimedAt: CLAIMED_AT,
+      reason: 'manual'
+    });
+
+    expect(owner.metrics.clearPipeTransportMetrics).toHaveBeenCalledWith('pipe:internal:room-1:node-a:node-b');
+    expect(remote.metrics.clearPipeTransportMetrics).toHaveBeenCalledWith('pipe:internal:room-1:node-a:node-b');
+
+    const staleStatsBaselineRemote = remote.redis.messages.length;
+    const staleStatsBaselineOwner = owner.redis.messages.length;
+    const staleStatsPromise = remote.service.publish('node-a', {
+      type: 'pipe:stats',
+      roomId: 'room-1',
+      pipeTransportId: 'pipe:internal:room-1:node-a:node-b',
+      ownerClaimedAt: CLAIMED_AT,
+      active: false,
+      rtpPackets: 0,
+      rtpBytes: 0,
+      rtcpPackets: 0,
+      rtcpBytes: 0,
+      droppedPackets: 0,
+      backpressureEvents: 0,
+      packetLoss: 0.45,
+      jitterMs: 77,
+      rttMs: 120
+    });
+    await waitForMessageCount(remote.redis, staleStatsBaselineRemote + 1);
+    await owner.service.handleEnvelope(remote.redis.messages[staleStatsBaselineRemote]!);
+    await waitForMessageCount(owner.redis, staleStatsBaselineOwner + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[staleStatsBaselineOwner]!);
+    await staleStatsPromise;
+
+    expect(owner.metrics.updatePipeTransportMetrics).not.toHaveBeenCalled();
+  });
 });
 
 async function captureError(operation: () => Promise<unknown>): Promise<unknown> {
@@ -507,6 +1112,82 @@ function errorResponse(error: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
+async function establishRemotePublication(
+  owner: ReturnType<typeof createHarness>,
+  remote: ReturnType<typeof createHarness>,
+  producer: Producer
+): Promise<{ pipeTransportId: string; proxyProducerId: string }> {
+  const baselineOwnerMessages = owner.redis.messages.length;
+  const baselineRemoteMessages = remote.redis.messages.length;
+  const publishPromise = remote.service.ensureRemoteProducerPublication({
+    roomId: 'room-1',
+    producer
+  });
+  await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+  const publishRequest = remote.redis.messages[baselineRemoteMessages]!;
+  const ownerPublishTask = owner.service.handleEnvelope(publishRequest);
+  await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+  await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+  await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages + 1]!);
+  await waitForMessageCount(owner.redis, baselineOwnerMessages + 2);
+  await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages + 1]!);
+  await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages + 2]!);
+  await ownerPublishTask;
+  await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages + 2]!);
+  return publishPromise;
+}
+
+async function establishRemoteConsumerFeed(
+  owner: ReturnType<typeof createHarness>,
+  remote: ReturnType<typeof createHarness>,
+  request: { roomId: string; producerId: string; consumerId: string }
+): Promise<{ pipeTransportId: string; proxyProducerId: string }> {
+  const baselineOwnerMessages = owner.redis.messages.length;
+  const baselineRemoteMessages = remote.redis.messages.length;
+  const feedPromise = remote.service.ensureRemoteConsumerFeed(request);
+  await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+  const feedRequest = remote.redis.messages[baselineRemoteMessages]!;
+  const ownerAttachTask = owner.service.handleEnvelope(feedRequest);
+  await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+  await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+  await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages + 1]!);
+  if (await hasMessageCount(owner.redis, baselineOwnerMessages + 2)) {
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages + 1]!);
+    await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages + 2]!);
+    await ownerAttachTask;
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages + 2]!);
+  } else {
+    await ownerAttachTask;
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages + 1]!);
+  }
+  return feedPromise;
+}
+
+async function closePipeAcrossNodes(
+  owner: ReturnType<typeof createHarness>,
+  remote: ReturnType<typeof createHarness>,
+  message: PipeCloseMessage
+): Promise<void> {
+  const baselineOwnerMessages = owner.redis.messages.length;
+  const baselineRemoteMessages = remote.redis.messages.length;
+  await (owner.service as unknown as { handleClose: (message: PipeCloseMessage) => Promise<void> }).handleClose(message);
+  const publishPromise = owner.service.publish(remote.registry.localNodeId(), message);
+  await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+  await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+  await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+  await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages]!);
+  await publishPromise;
+}
+
+async function hasMessageCount(redis: FakeRedisService, count: number, timeoutMs = 25): Promise<boolean> {
+  try {
+    await waitForMessageCount(redis, count, timeoutMs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function createHarness(
   nodeId: string,
   options: {
@@ -527,6 +1208,7 @@ function createHarness(
   pipe: PipeTransportService;
   redis: FakeRedisService;
   registry: ReturnType<typeof fakeRegistry>;
+  metrics: ReturnType<typeof fakeMetrics>;
   media?: ReturnType<typeof fakeMedia>;
 } {
   const config = {
@@ -549,7 +1231,7 @@ function createHarness(
   const pipe = new PipeTransportService(new PipeTransportManager());
   const metrics = fakeMetrics();
   const service = new PipeCoordinatorService(config as never, registry as never, redis as never, pipe, metrics as never, options.media as never);
-  return { service, pipe, redis, registry, media: options.media };
+  return { service, pipe, redis, registry, metrics, media: options.media };
 }
 
 function fakeRegistry(
@@ -628,15 +1310,86 @@ function rtpParameters(ssrc: number) {
 
 function fakeMedia(): {
   getProducer: jest.Mock<Producer | undefined, [string]>;
+  ensurePipeTransport: jest.Mock<
+    Promise<{ localEndpoint?: { nodeId: string; advertiseIp: string; port: number } }>,
+    [
+      {
+        pipeTransportId: string;
+        roomId: string;
+        localNodeId: string;
+        remoteNodeId: string;
+        protocol: PipeTransportProtocol;
+        listenPort?: number;
+        advertisedIp?: string;
+        peerToken?: string;
+        remoteEndpoint?: { nodeId: string; advertiseIp: string; port: number };
+      }
+    ]
+  >;
   registerPipeProducer: jest.Mock<Promise<void>, [Producer, string?]>;
   registerPipeConsumer: jest.Mock<Promise<void>, [Consumer, string?]>;
   unregisterProducer: jest.Mock<Promise<void>, [string]>;
   unregisterConsumer: jest.Mock<Promise<void>, [string]>;
   setProducerPaused: jest.Mock<Promise<void>, [string, boolean]>;
   setProducerPriority: jest.Mock<void, [string, number]>;
+  setConsumerPaused: jest.Mock<Promise<void>, [string, boolean]>;
+  setConsumerPreferredLayers: jest.Mock<Promise<void>, [string, { spatialLayer?: number; temporalLayer?: number }]>;
+  setConsumerPreferredSvcLayers: jest.Mock<Promise<void>, [string, { spatialLayerId?: number; temporalLayerId?: number; qualityLayerId?: number }]>;
+  setConsumerPriority: jest.Mock<void, [string, number]>;
+  applyConsumerTwccObservation: jest.Mock<Promise<void>, [string, { packetLoss: number; delayVariationMs: number; jitter?: number; rtt?: number; sendDeltaMs?: number; receiveDeltaMs?: number; timestamp?: number }]>;
+  onConsumerTwccObservation: jest.Mock<() => void, [(state: {
+    roomId: string;
+    participantId: string;
+    consumerId: string;
+    producerId: string;
+    transportId: string;
+    observation: {
+      packetLoss: number;
+      delayVariationMs: number;
+      jitter?: number;
+      rtt?: number;
+      sendDeltaMs?: number;
+      receiveDeltaMs?: number;
+      timestamp?: number;
+    };
+  }) => void]>;
+  emitConsumerTwccObservation: (state: {
+    roomId: string;
+    participantId: string;
+    consumerId: string;
+    producerId: string;
+    transportId: string;
+    observation: {
+      packetLoss: number;
+      delayVariationMs: number;
+      jitter?: number;
+      rtt?: number;
+      sendDeltaMs?: number;
+      receiveDeltaMs?: number;
+      timestamp?: number;
+    };
+  }) => void;
   handlePipeRtcp: jest.Mock<Promise<{ forwarded: number }>, [string, Buffer, { roomId?: string }]>;
   closePipeTransport: jest.Mock<Promise<void>, [string]>;
 } {
+  const consumerTwccListeners = new Set<
+    (state: {
+      roomId: string;
+      participantId: string;
+      consumerId: string;
+      producerId: string;
+      transportId: string;
+      observation: {
+        packetLoss: number;
+        delayVariationMs: number;
+        jitter?: number;
+        rtt?: number;
+        sendDeltaMs?: number;
+        receiveDeltaMs?: number;
+        timestamp?: number;
+      };
+    }) => void
+  >();
   return {
     getProducer: jest.fn((producerId: string) =>
       producerId === 'producer-1'
@@ -652,12 +1405,57 @@ function fakeMedia(): {
           } satisfies Producer)
         : undefined
     ),
+    ensurePipeTransport: jest.fn(
+      async ({
+        localNodeId,
+        protocol,
+        listenPort,
+        advertisedIp
+      }: {
+        localNodeId: string;
+        pipeTransportId: string;
+        roomId: string;
+        remoteNodeId: string;
+        protocol: PipeTransportProtocol;
+        listenPort?: number;
+        advertisedIp?: string;
+        peerToken?: string;
+        remoteEndpoint?: { nodeId: string; advertiseIp: string; port: number };
+      }) => ({
+        localEndpoint:
+          protocol === 'udp'
+            ? {
+                nodeId: localNodeId,
+                advertiseIp: advertisedIp ?? '127.0.0.1',
+                port: listenPort ?? 41000
+              }
+            : undefined
+      })
+    ),
     registerPipeProducer: jest.fn(async (_producer: Producer, _transportId?: string) => undefined),
     registerPipeConsumer: jest.fn(async (_consumer: Consumer, _transportId?: string) => undefined),
     unregisterProducer: jest.fn(async (_producerId: string) => undefined),
     unregisterConsumer: jest.fn(async (_consumerId: string) => undefined),
     setProducerPaused: jest.fn(async (_producerId: string, _paused: boolean) => undefined),
     setProducerPriority: jest.fn((_producerId: string, _priority: number) => undefined),
+    setConsumerPaused: jest.fn(async (_consumerId: string, _paused: boolean) => undefined),
+    setConsumerPreferredLayers: jest.fn(async (_consumerId: string, _preferredLayers: { spatialLayer?: number; temporalLayer?: number }) => undefined),
+    setConsumerPreferredSvcLayers: jest.fn(
+      async (_consumerId: string, _preferredSvcLayers: { spatialLayerId?: number; temporalLayerId?: number; qualityLayerId?: number }) => undefined
+    ),
+    setConsumerPriority: jest.fn((_consumerId: string, _priority: number) => undefined),
+    applyConsumerTwccObservation: jest.fn(async (_consumerId: string, _observation) => undefined),
+    onConsumerTwccObservation: jest.fn((listener) => {
+      consumerTwccListeners.add(listener);
+      return () => {
+        consumerTwccListeners.delete(listener);
+      };
+    }),
+    emitConsumerTwccObservation: (state) => {
+      for (const listener of consumerTwccListeners) {
+        listener(state);
+      }
+    },
     handlePipeRtcp: jest.fn(async (_pipeTransportId: string, _packet: Buffer, _options: { roomId?: string }) => ({ forwarded: 1 }))
     ,
     closePipeTransport: jest.fn(async (_pipeTransportId: string) => undefined)
@@ -683,6 +1481,7 @@ function fakeMetrics(): Record<string, unknown> {
     pipePacketLoss: metric,
     pipeTransportsCreated: metric,
     pipeTeardowns: metric,
+    pipeCleanupFailures: metric,
     pipeRtcpPackets: metric,
     pipeRtcpBytes: metric,
     pipeCoordinationRetries: metric,
@@ -697,6 +1496,9 @@ function fakeMetrics(): Record<string, unknown> {
     pipeRtcpForwarded: metric,
     pipeJitter: metric,
     pipeRtt: metric,
+    refreshPipeTransportMetrics: jest.fn(),
+    updatePipeTransportMetrics: jest.fn(),
+    clearPipeTransportMetrics: jest.fn(),
     controlPlaneMessagesPublished: metric,
     controlPlanePublishFailures: metric,
     controlPlaneMessagesDelivered: metric,

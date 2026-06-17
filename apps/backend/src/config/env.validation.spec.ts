@@ -15,10 +15,15 @@ describe('validateConfig', () => {
   });
 
   it('returns validated config values', () => {
-    expect(validateConfig(baseConfig)).toMatchObject({
-      NODE_ENV: 'test',
-      PORT: 3000
-    });
+    const validated = validateConfig(baseConfig) as Record<string, unknown>;
+    expect(validated.NODE_ENV).toBe('test');
+    expect(validated.PORT).toBe(3000);
+    expect(validated.HOST_CANDIDATE_PORT_RANGE).toBe('40000-40100');
+  });
+
+  it('accepts an explicit host candidate port range for multi-node local validation', () => {
+    const validated = validateConfig({ ...baseConfig, HOST_CANDIDATE_PORT_RANGE: '40100-40149' }) as Record<string, unknown>;
+    expect(validated.HOST_CANDIDATE_PORT_RANGE).toBe('40100-40149');
   });
 
   it('requires PIPE_ADVERTISE_IP when pipe transport is enabled outside test mode', () => {
@@ -30,7 +35,7 @@ describe('validateConfig', () => {
         PIPE_CLUSTER_SECRET: '0123456789abcdef01234567',
         PIPE_ADVERTISE_IP: ''
       })
-    ).toThrow(/PIPE_ADVERTISE_IP" is required/);
+    ).toThrow(/PIPE_ADVERTISE_IP/);
   });
 
   it('allows pipe transport in worker mode when the cluster secret and advertise IP are configured', () => {

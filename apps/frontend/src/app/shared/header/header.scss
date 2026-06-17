@@ -1,0 +1,136 @@
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 76px;
+  padding: 14px 32px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-glass);
+  backdrop-filter: blur(16px);
+}
+
+.brand {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 2px 12px;
+  align-items: center;
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.brand::before {
+  grid-row: 1 / span 2;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, var(--accent-soft), transparent 54%),
+    linear-gradient(135deg, var(--panel), var(--panel-muted));
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-sm);
+  color: var(--accent);
+  content: 'SFU';
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: end;
+}
+
+a {
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-weight: 650;
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+a.active,
+a:hover {
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+}
+
+button {
+  font-weight: 700;
+}
+
+.theme-toggle {
+  display: inline-grid;
+  min-height: 38px;
+  width: 58px;
+  place-items: center;
+  padding: 0;
+  border-color: var(--line);
+  background: var(--panel);
+}
+
+.theme-toggle-track {
+  position: relative;
+  display: block;
+  width: 38px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--panel-muted);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.theme-toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.68);
+  transition:
+    background 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.theme-toggle.dark .theme-toggle-thumb {
+  background: var(--info);
+  box-shadow:
+    inset -4px -2px 0 rgba(0, 0, 0, 0.26),
+    0 0 0 2px rgba(255, 255, 255, 0.12);
+  transform: translateX(16px);
+}
+
+@media (max-width: 680px) {
+  .site-header {
+    align-items: start;
+    flex-direction: column;
+    padding: 16px 18px;
+  }
+
+  nav {
+    justify-content: start;
+  }
+}

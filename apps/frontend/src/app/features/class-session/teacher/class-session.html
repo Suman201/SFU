@@ -1,0 +1,61 @@
+<sfu-header />
+<main class="class-session-shell">
+  <sfu-whiteboard [cursors]="studentCursors()" />
+
+  <aside class="participants-pane" aria-label="Participants">
+    <div class="participants-header">
+      <div>
+        <p class="eyebrow">Live class</p>
+        <h2>Participants</h2>
+      </div>
+      <span class="count">{{ participants().length }}</span>
+    </div>
+
+    <div class="participant-list">
+      @for (participant of participants(); track participant.id) {
+        <article class="participant-card" [class.camera-disabled]="participant.cameraOff">
+          <div class="camera-feed">
+            @if (participant.cameraOff) {
+              <span class="avatar">{{ participant.initials }}</span>
+            } @else {
+              <span class="feed-shine" aria-hidden="true"></span>
+              <span class="avatar live">{{ participant.initials }}</span>
+            }
+          </div>
+
+          <div class="participant-meta">
+            <strong>{{ participant.name }}</strong>
+            <span>{{ participant.muted ? 'Muted' : 'Speaking allowed' }}</span>
+          </div>
+
+          <div class="participant-controls">
+            <button
+              class="control-button"
+              [class.disabled-state]="participant.muted"
+              type="button"
+              [title]="participant.muted ? 'Unmute participant' : 'Mute participant'"
+              [attr.aria-label]="participant.muted ? 'Unmute ' + participant.name : 'Mute ' + participant.name"
+              [attr.aria-pressed]="participant.muted"
+              (click)="toggleMute(participant.id)"
+            >
+              <span class="control-icon mic-icon" aria-hidden="true"></span>
+            </button>
+            <button
+              class="control-button"
+              [class.disabled-state]="participant.cameraOff"
+              type="button"
+              [title]="participant.cameraOff ? 'Turn camera on' : 'Turn camera off'"
+              [attr.aria-label]="participant.cameraOff ? 'Turn camera on for ' + participant.name : 'Turn camera off for ' + participant.name"
+              [attr.aria-pressed]="participant.cameraOff"
+              (click)="toggleCamera(participant.id)"
+            >
+              <span class="control-icon camera-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+        </article>
+      }
+    </div>
+  </aside>
+</main>
+<sfu-session-chat currentUser="Teacher" currentRole="Teacher" />
+<sfu-footer />

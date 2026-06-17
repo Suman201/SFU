@@ -4,6 +4,8 @@ import type {
   ConsumerLayerState,
   ConsumerQualityState,
   IceCandidate,
+  PipeNodeEndpoint,
+  PipeTransportProtocol,
   Producer,
   ProducerDynacastEvent,
   ProducerLayerState,
@@ -15,7 +17,7 @@ import type {
   TransportOptions,
   TransportQualityState
 } from '@native-sfu/contracts';
-import type { RtcpFeedback } from '@native-sfu/sfu-core';
+import type { ConsumerTwccObservation, ConsumerTwccObservationEvent, RtcpFeedback } from '@native-sfu/sfu-core';
 import type { MediaPacketBridgeCounters } from '../media/media-packet-bridge';
 
 export type MediaWorkerMode = 'in-process' | 'worker';
@@ -61,6 +63,9 @@ export interface MediaWorkerHealth {
   inflightLimit?: number;
   memory?: NodeJS.MemoryUsage;
   cpu?: NodeJS.CpuUsage;
+  droppedRtpPackets?: number;
+  lastDroppedRtpReason?: string;
+  droppedRtpReasons?: Partial<Record<string, number>>;
 }
 
 export interface MediaWorkerRoomFailureEvent {
@@ -88,9 +93,46 @@ export interface MediaWorkerPoolSnapshot {
   workers: MediaWorkerHealth[];
 }
 
+export interface MediaWorkerPipeTransportSnapshot {
+  pipeTransportId: string;
+  roomId: string;
+  localNodeId: string;
+  remoteNodeId: string;
+  protocol: PipeTransportProtocol;
+  active: boolean;
+  listening?: boolean;
+  localEndpoint?: PipeNodeEndpoint;
+  remoteEndpoint?: PipeNodeEndpoint;
+  rtpPackets?: number;
+  rtcpPackets?: number;
+  sentRtpPackets?: number;
+  sentRtcpPackets?: number;
+  droppedPackets?: number;
+  backpressureEvents?: number;
+  errors?: number;
+  lastRtpSsrc?: number;
+  lastRtpSequenceNumber?: number;
+  lastRtpTimestamp?: number;
+  lastSentRtpSsrc?: number;
+  lastSentRtpSequenceNumber?: number;
+  lastSentRtpTimestamp?: number;
+}
+
 export type MediaWorkerRequestCommand =
   | { type: 'createWebRtcTransport'; roomId: string; participantId: string }
-  | { type: 'ensurePipeTransport'; pipeTransportId: string; roomId: string; localNodeId: string; remoteNodeId: string }
+  | {
+      type: 'ensurePipeTransport';
+      pipeTransportId: string;
+      roomId: string;
+      localNodeId: string;
+      remoteNodeId: string;
+      protocol: PipeTransportProtocol;
+      listenPort?: number;
+      advertisedIp?: string;
+      peerToken?: string;
+      remoteEndpoint?: PipeNodeEndpoint;
+    }
+  | { type: 'pipeTransportSnapshot'; pipeTransportId: string }
   | { type: 'closePipeTransport'; pipeTransportId: string }
   | { type: 'assertTransportOwner'; transportId: string; participantId: string }
   | { type: 'addRemoteCandidate'; transportId: string; participantId: string; candidate: IceCandidate }
@@ -113,6 +155,7 @@ export type MediaWorkerRequestCommand =
   | { type: 'setConsumerPreferredLayers'; consumerId: string; preferredLayers: RtpLayerSelection }
   | { type: 'setConsumerPreferredSvcLayers'; consumerId: string; preferredSvcLayers: SvcLayerSelection }
   | { type: 'setConsumerPriority'; consumerId: string; priority: number }
+  | { type: 'applyConsumerTwccObservation'; consumerId: string; observation: ConsumerTwccObservation }
   | { type: 'consumerLayerState'; consumerId: string }
   | { type: 'consumerQualityState'; consumerId: string }
   | { type: 'producerQualityState'; producerId: string }
@@ -132,6 +175,7 @@ export type MediaWorkerCommandResult =
   | void
   | number
   | { feedback: RtcpFeedback; forwarded: number }
+  | MediaWorkerPipeTransportSnapshot
   | ConsumerLayerState
   | ProducerLayerState
   | ConsumerQualityState
@@ -167,6 +211,7 @@ export type MediaWorkerEventPayload =
   | { type: 'pipe-rtcp'; pipeTransportId: string; roomId: string; packet: Buffer; producerId?: string; consumerId?: string }
   | { type: 'consumer-layer'; event: ConsumerLayerEvent }
   | { type: 'producer-dynacast'; event: ProducerDynacastEvent }
+  | { type: 'consumer-twcc'; state: ConsumerTwccObservationEvent }
   | { type: 'consumer-score'; state: ConsumerQualityState }
   | { type: 'producer-score'; state: ProducerQualityState }
   | { type: 'transport-quality'; state: TransportQualityState }

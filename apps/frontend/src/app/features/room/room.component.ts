@@ -95,7 +95,7 @@ import { WaitingRoomComponent } from './components/waiting-room/waiting-room.com
     } @else {
       <main class="empty">
         <h1>No active room</h1>
-        <button class="primary" type="button" (click)="router.navigate(['/'])">Open lobby</button>
+        <button class="primary" type="button" (click)="router.navigate(['/sfu-forms'])">Open SFU forms</button>
       </main>
     }
   `,
@@ -108,6 +108,9 @@ import { WaitingRoomComponent } from './components/waiting-room/waiting-room.com
         grid-template-rows: auto minmax(300px, 1fr) auto minmax(260px, 38vh);
         gap: 12px;
         padding: 16px;
+        background:
+          linear-gradient(180deg, var(--bg-start), var(--bg) 320px),
+          var(--bg);
       }
 
       .topbar,
@@ -174,10 +177,11 @@ import { WaitingRoomComponent } from './components/waiting-room/waiting-room.com
       .panel {
         min-height: 0;
         overflow: auto;
-        border: 1px solid var(--line);
+        border: 1px solid var(--line-soft);
         border-radius: var(--radius);
-        background: var(--panel-muted);
+        background: var(--panel-elevated);
         padding: 12px;
+        box-shadow: var(--shadow-sm);
       }
 
       .error {

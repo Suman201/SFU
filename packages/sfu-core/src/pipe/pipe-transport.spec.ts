@@ -1,6 +1,7 @@
-import { createPli, parsePli } from '../rtcp/rtcp-packet';
+import { createPli, createReceiverReport, createSenderReport, parsePli, parseReceiverReport, parseRtcpCompound, parseSenderReport } from '../rtcp/rtcp-packet';
 import { RtpPacket } from '../rtp/rtp-packet';
 import { connectPipeTransports, PipeTransport, PipeTransportManager } from './pipe-transport';
+import { createTransportWideCcFeedback, parseTransportWideCcFeedback } from '../twcc/twcc';
 
 describe('PipeTransport', () => {
   it('forwards RTP across two internal node transports with SSRC mapping and sequence continuity', async () => {
@@ -99,6 +100,60 @@ describe('PipeTransport', () => {
 
     expect(received.length).toBe(1);
     expect(parsePliFromBuffer(received[0]!)?.mediaSsrc).toBe(2222);
+  });
+
+  it('rewrites sender-report, receiver-report, and TWCC SSRCs across the pipe', async () => {
+    const owner = new PipeTransport({ id: 'pipe-owner', roomId: 'room-1', localNodeId: 'node-a', remoteNodeId: 'node-b' });
+    const remote = new PipeTransport({ id: 'pipe-remote', roomId: 'room-1', localNodeId: 'node-b', remoteNodeId: 'node-a' });
+    connectPipeTransports(owner, remote);
+    remote.createConsumer({
+      id: 'consumer-1',
+      producerId: 'producer-1',
+      participantId: 'viewer',
+      rtpParameters: rtpParameters(2222),
+      ssrcMappings: [{ sourceSsrc: 2222, targetSsrc: 1111 }]
+    });
+    const received: Buffer[] = [];
+    owner.on('rtcp', (event) => received.push(event.packet));
+
+    await remote.sendRtcp(
+      createSenderReport({
+        senderSsrc: 2222,
+        ntpTimestamp: 1n,
+        rtpTimestamp: 3333,
+        packetCount: 4,
+        octetCount: 5,
+        reports: [{ ssrc: 2222, fractionLost: 0, packetsLost: 0, highestSequence: 10, jitter: 2, lastSenderReport: 0, delaySinceLastSenderReport: 0 }]
+      }),
+      { consumerId: 'consumer-1' }
+    );
+    await remote.sendRtcp(
+      createReceiverReport({
+        reporterSsrc: 2222,
+        reports: [{ ssrc: 2222, fractionLost: 0, packetsLost: 0, highestSequence: 11, jitter: 3, lastSenderReport: 0, delaySinceLastSenderReport: 0 }]
+      }),
+      { consumerId: 'consumer-1' }
+    );
+    await remote.sendRtcp(
+      createTransportWideCcFeedback({
+        senderSsrc: 2222,
+        mediaSsrc: 2222,
+        feedbackPacketCount: 1,
+        arrivals: [{ sequenceNumber: 10, arrivalTimeMs: 1000, size: 1200 }]
+      }),
+      { consumerId: 'consumer-1' }
+    );
+
+    expect(received.length).toBe(3);
+    const senderReport = parseSenderReport(parseRtcpCompound(received[0]!)[0]!);
+    const receiverReport = parseReceiverReport(parseRtcpCompound(received[1]!)[0]!);
+    const twcc = parseTransportWideCcFeedback(parseRtcpCompound(received[2]!)[0]!);
+    expect(senderReport?.senderSsrc).toBe(1111);
+    expect(senderReport?.reports[0]?.ssrc).toBe(1111);
+    expect(receiverReport?.reporterSsrc).toBe(1111);
+    expect(receiverReport?.reports[0]?.ssrc).toBe(1111);
+    expect(twcc?.senderSsrc).toBe(1111);
+    expect(twcc?.mediaSsrc).toBe(1111);
   });
 
   it('reports backpressure instead of enqueueing beyond configured limits', async () => {

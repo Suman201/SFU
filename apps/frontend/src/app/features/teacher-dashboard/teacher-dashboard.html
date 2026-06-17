@@ -1,0 +1,217 @@
+<sfu-header />
+<main class="teacher-dashboard-shell">
+  <section class="dashboard-hero">
+    <div>
+      <p class="eyebrow">Teacher workspace</p>
+      <h1>Batch dashboard</h1>
+    </div>
+
+    <div class="hero-stats" aria-label="Teacher dashboard summary">
+      <article>
+        <span>{{ batches().length }}</span>
+        <p>Batches</p>
+      </article>
+      <article>
+        <span>{{ scheduledCount() }}</span>
+        <p>Scheduled</p>
+      </article>
+      <article>
+        <span>{{ completedCount() }}</span>
+        <p>Completed</p>
+      </article>
+    </div>
+  </section>
+
+  @if (liveSession(); as live) {
+    <section class="live-banner" aria-label="Live session">
+      <div>
+        <p class="eyebrow">Live now</p>
+        <h2>{{ live.title }}</h2>
+        @if (sessionBatch(live); as batch) {
+          <span>{{ batch.name }} - {{ batch.courseName }}</span>
+        }
+      </div>
+      <div class="live-actions">
+        <button class="primary" type="button" (click)="openSession(live)">Open classroom</button>
+        <button type="button" (click)="completeSession(live)">Mark complete</button>
+      </div>
+    </section>
+  }
+
+  <section class="dashboard-grid">
+    <form class="panel create-panel" [formRoot]="batchForm" (submit)="createBatch($event)">
+      <header>
+        <div>
+          <p class="eyebrow">Create</p>
+          <h2>New batch</h2>
+        </div>
+        <button class="primary" type="submit" [disabled]="batchForm().invalid()">Create batch</button>
+      </header>
+
+      <div class="form-grid">
+        <label>
+          Batch name
+          <input [formField]="batchForm.name" autocomplete="off" />
+        </label>
+        <label>
+          Course
+          <input [formField]="batchForm.courseName" autocomplete="off" />
+        </label>
+        <label>
+          Batch code
+          <input [formField]="batchForm.cohortCode" autocomplete="off" />
+        </label>
+        <label>
+          Capacity
+          <input type="number" [formField]="batchForm.capacity" />
+        </label>
+        <label>
+          Enrolled students
+          <input type="number" [formField]="batchForm.enrolledCount" />
+        </label>
+        <label>
+          First available date
+          <input type="date" [formField]="batchForm.startDate" />
+        </label>
+        <label>
+          Weekly day
+          <select [formField]="batchForm.weeklyDay">
+            @for (weekday of weekdays; track weekday.value) {
+              <option [value]="weekday.value">{{ weekday.label }}</option>
+            }
+          </select>
+        </label>
+        <label>
+          Start time
+          <input type="time" [formField]="batchForm.startTime" />
+        </label>
+        <label>
+          Duration
+          <select [formField]="batchForm.durationMinutes">
+            @for (duration of durations; track duration) {
+              <option [value]="duration">{{ duration }} minutes</option>
+            }
+          </select>
+        </label>
+        <label>
+          Total weeks
+          <input type="number" [formField]="batchForm.totalWeeks" />
+        </label>
+      </div>
+    </form>
+
+    <section class="panel batches-panel">
+      <header>
+        <div>
+          <p class="eyebrow">Manage</p>
+          <h2>Batches</h2>
+        </div>
+      </header>
+
+      @if (batches().length) {
+        <div class="batch-list">
+          @for (batch of batches(); track batch.id) {
+            <article class="batch-card" [class.active]="activeBatch()?.id === batch.id">
+              <button type="button" class="batch-select" (click)="selectBatch(batch.id)">
+                <strong>{{ batch.name }}</strong>
+                <span>{{ batch.courseName }}</span>
+              </button>
+              <div class="batch-meta">
+                <span>{{ batch.cohortCode }}</span>
+                <span>{{ batch.enrolledCount }}/{{ batch.capacity }} students</span>
+                <span>{{ weekdayLabel(batch.weeklyDay) }} - {{ batch.startTime }}</span>
+              </div>
+              <div class="progress-track" aria-label="Batch progress">
+                <span [style.width.%]="batchProgress(batch)"></span>
+              </div>
+              <div class="batch-actions">
+                <button type="button" (click)="startNextSession(batch)" [disabled]="!nextSession(batch)">Start next</button>
+                <button class="danger-text" type="button" (click)="deleteBatch(batch)">Remove</button>
+              </div>
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="empty-state">
+          <h3>No batches yet</h3>
+          <p>Create a batch to generate the weekly session schedule.</p>
+        </div>
+      }
+    </section>
+
+    <section class="panel schedule-panel">
+      <header>
+        <div>
+          <p class="eyebrow">Schedule</p>
+          <h2>{{ activeBatch()?.name ?? 'No batch selected' }}</h2>
+        </div>
+        @if (activeBatch(); as batch) {
+          <span class="schedule-chip">{{ batch.totalWeeks }} weeks</span>
+        }
+      </header>
+
+      @if (activeBatch(); as batch) {
+        <div class="selected-batch-summary">
+          <span>{{ batch.courseName }}</span>
+          <span>{{ batch.cohortCode }}</span>
+          <span>{{ weekdayLabel(batch.weeklyDay) }} at {{ batch.startTime }}</span>
+        </div>
+
+        <div class="session-list">
+          @for (session of activeBatchSessions(); track session.id) {
+            <article class="session-row" [class.live]="session.status === 'live'" [class.completed]="session.status === 'completed'">
+              <div class="session-index">{{ session.sessionNumber }}</div>
+              <div>
+                <strong>{{ session.title }}</strong>
+                <span>{{ formatDateTime(session.scheduledAt) }} - {{ session.durationMinutes }} minutes</span>
+              </div>
+              <span class="status-pill" [class.live]="session.status === 'live'" [class.completed]="session.status === 'completed'">
+                {{ statusLabel(session.status) }}
+              </span>
+              <div class="session-actions">
+                @if (session.status === 'live') {
+                  <button type="button" (click)="openSession(session)">Open</button>
+                  <button type="button" (click)="completeSession(session)">Complete</button>
+                } @else if (session.status === 'scheduled') {
+                  <button class="primary" type="button" (click)="startSession(session)">Start session</button>
+                }
+              </div>
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="empty-state">
+          <h3>Select a batch</h3>
+          <p>The weekly schedule will appear here.</p>
+        </div>
+      }
+    </section>
+
+    <aside class="panel upcoming-panel">
+      <header>
+        <div>
+          <p class="eyebrow">Next up</p>
+          <h2>Upcoming sessions</h2>
+        </div>
+      </header>
+
+      @if (upcomingSessions().length) {
+        <div class="upcoming-list">
+          @for (session of upcomingSessions(); track session.id) {
+            <article>
+              <strong>{{ session.title }}</strong>
+              <span>{{ formatDateTime(session.scheduledAt) }}</span>
+              <button type="button" (click)="startSession(session)">Start manually</button>
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="empty-state compact">
+          <h3>No scheduled sessions</h3>
+          <p>New weekly sessions appear after batch creation.</p>
+        </div>
+      }
+    </aside>
+  </section>
+</main>
+<sfu-footer />

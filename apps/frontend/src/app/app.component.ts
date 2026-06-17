@@ -1,5 +1,6 @@
-import { Component, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { ThemeService } from './core/services/theme.service';
 
 @Component({
   selector: 'sfu-root',
@@ -8,4 +9,8 @@ import { RouterOutlet } from '@angular/router';
   changeDetection: ChangeDetectionStrategy.Eager,
   template: '<router-outlet />'
 })
-export class AppComponent {}
+export class AppComponent {
+  constructor() {
+    inject(ThemeService);
+  }
+}

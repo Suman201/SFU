@@ -161,9 +161,17 @@ export function buildUnifiedPlanAnswer(options: UnifiedPlanAnswerOptions): strin
       return;
     }
     activeMids.push(mid);
-    const codecLines = section.filter((line) => /^(a=rtpmap:|a=rtcp-fb:|a=fmtp:|a=extmap:|a=extmap-allow-mixed)/.test(line));
+    const selectedPayloadTypes = answerPayloadTypes(section, options.rtpParameters);
+    const activePayloadTypes = selectedPayloadTypes.length > 0 ? selectedPayloadTypes.join(' ') : payloadTypes;
+    const codecLines = section.filter((line) => {
+      if (/^(a=extmap:|a=extmap-allow-mixed)/.test(line)) {
+        return true;
+      }
+      const payloadType = payloadTypeFromCodecLine(line);
+      return payloadType !== undefined && (selectedPayloadTypes.length === 0 || selectedPayloadTypes.includes(payloadType));
+    });
     const activeLines = [
-      `m=${mediaType} 9 UDP/TLS/RTP/SAVPF ${payloadTypes}`.trimEnd(),
+      `m=${mediaType} 9 UDP/TLS/RTP/SAVPF ${activePayloadTypes}`.trimEnd(),
       'c=IN IP4 0.0.0.0',
       `a=mid:${mid}`,
       `a=ice-ufrag:${options.transport.iceParameters.usernameFragment}`,
@@ -209,6 +217,17 @@ export function buildUnifiedPlanAnswer(options: UnifiedPlanAnswerOptions): strin
   return `${lines.join('\r\n')}\r\n`;
 }
 
+function answerPayloadTypes(section: string[], rtpParameters: RtpParameters | undefined): number[] {
+  if (!rtpParameters?.codecs?.length) {
+    return [];
+  }
+  const offeredPayloadTypes = ((section.find((line) => line.startsWith('m=')) ?? '').split(/\s+/).slice(3))
+    .map((value) => Number(value))
+    .filter(Number.isFinite);
+  const selectedPayloadTypes = new Set(rtpParameters.codecs.map((codec) => codec.payloadType));
+  return offeredPayloadTypes.filter((payloadType) => selectedPayloadTypes.has(payloadType));
+}
+
 function scopedLines(sdp: string, mediaKind?: 'audio' | 'video' | 'application'): string[] {
   const session = sessionLines(sdp);
   return mediaKind ? [...session, ...mediaSection(sdp, mediaKind)] : [...session, ...mediaSection(sdp)];
@@ -237,6 +256,15 @@ function mediaSections(sdp: string): string[][] {
 
 function findLineValue(lines: string[], prefix: string): string | undefined {
   return lines.find((line) => line.startsWith(prefix))?.slice(prefix.length).trim();
+}
+
+function payloadTypeFromCodecLine(line: string): number | undefined {
+  const match = line.match(/^a=(?:rtpmap|rtcp-fb|fmtp):(\d+)/);
+  if (!match) {
+    return undefined;
+  }
+  const payloadType = Number(match[1]);
+  return Number.isFinite(payloadType) ? payloadType : undefined;
 }
 
 function selectPrimaryPayloadType(section: string[], payloadTypes: number[], mediaKind: 'audio' | 'video'): number {

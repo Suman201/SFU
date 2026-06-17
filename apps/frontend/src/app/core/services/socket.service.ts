@@ -1,4 +1,4 @@
-import { Injectable, NgZone } from '@angular/core';
+import { Injectable } from '@angular/core';
 import type { AckResponse, ClientToServerEvents, ServerToClientEvents } from '@native-sfu/contracts';
 import { io, Socket } from 'socket.io-client';
 import { AuthService } from './auth.service';
@@ -8,10 +8,7 @@ import { SOCKET_URL } from './app-environment';
 export class SocketService {
   private socket?: Socket<ServerToClientEvents, ClientToServerEvents>;
 
-  constructor(
-    private readonly auth: AuthService,
-    private readonly zone: NgZone
-  ) {}
+  constructor(private readonly auth: AuthService) {}
 
   connect(): Socket<ServerToClientEvents, ClientToServerEvents> {
     if (this.socket?.connected) {
@@ -38,19 +35,17 @@ export class SocketService {
     const socket = this.connect();
     return new Promise((resolve, reject) => {
       (socket.emit as unknown as (name: K, body: unknown, ack: (response: AckResponse<unknown>) => void) => void)(event, payload, (response) => {
-        this.zone.run(() => {
-          if (response.ok) {
-            resolve(response.data as ExtractAckData<Parameters<ClientToServerEvents[K]>[1]>);
-          } else {
-            reject(new Error(response.error.message));
-          }
-        });
+        if (response.ok) {
+          resolve(response.data as ExtractAckData<Parameters<ClientToServerEvents[K]>[1]>);
+        } else {
+          reject(new Error(response.error.message));
+        }
       });
     });
   }
 
   on<K extends keyof ServerToClientEvents>(event: K, handler: (...args: Parameters<ServerToClientEvents[K]>) => void): void {
-    this.connect().on(event, ((...args: Parameters<ServerToClientEvents[K]>) => this.zone.run(() => handler(...args))) as never);
+    this.connect().on(event, handler as never);
   }
 }
 

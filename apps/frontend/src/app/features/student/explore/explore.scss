@@ -1,0 +1,201 @@
+.student-page-shell {
+  display: grid;
+  gap: 24px;
+  min-height: calc(100vh - 132px);
+  padding: 28px 32px 36px;
+}
+
+.page-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.page-heading p,
+.page-heading h1,
+.batch-card h2,
+.batch-card p {
+  margin: 0;
+}
+
+.page-heading h1 {
+  color: var(--text);
+  font-size: 36px;
+  line-height: 1.05;
+}
+
+.dashboard-link {
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--panel-elevated);
+  color: var(--accent);
+  padding: 11px 14px;
+  text-decoration: none;
+  font-weight: 850;
+  box-shadow: var(--shadow-sm);
+}
+
+.batch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 16px;
+}
+
+.batch-card {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.batch-card.enrolled {
+  border-color: var(--accent-border);
+  box-shadow: inset 0 0 0 1px var(--accent-border), var(--shadow-sm);
+}
+
+.batch-card header,
+.batch-card footer {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.batch-card h2 {
+  color: var(--text);
+  font-size: 23px;
+  line-height: 1.15;
+}
+
+.level,
+.eyebrow {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.capacity {
+  display: inline-grid;
+  min-width: 62px;
+  min-height: 34px;
+  place-items: center;
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 850;
+}
+
+.subject {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.teacher-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.teacher-row > span {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 900;
+}
+
+.teacher-row div {
+  display: grid;
+  min-width: 0;
+}
+
+.teacher-row strong,
+.teacher-row small,
+.batch-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teacher-row small {
+  color: var(--muted);
+}
+
+.batch-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.batch-meta span {
+  min-height: 32px;
+  padding: 7px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel-muted);
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.batch-card footer {
+  align-items: center;
+}
+
+.batch-card footer > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.batch-card footer a {
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 10px 12px;
+  text-decoration: none;
+  font-weight: 850;
+}
+
+@media (max-width: 700px) {
+  .student-page-shell {
+    padding: 20px 16px 28px;
+  }
+
+  .page-heading {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .page-heading h1 {
+    font-size: 32px;
+  }
+}

@@ -1,4 +1,5 @@
-import type { ProducerKind, ProducerStatus, RtpParameters } from './producers.js';
+import type { ConsumerStatus } from './consumers.js';
+import type { ProducerKind, ProducerStatus, RtpLayerSelection, RtpParameters, SvcLayerSelection } from './producers.js';
 
 export type PipeTransportProtocol = 'internal' | 'udp';
 
@@ -26,6 +27,8 @@ export type PipeCoordinationType =
   | 'pipe:producer:state'
   | 'pipe:producer:close'
   | 'pipe:consumer:create'
+  | 'pipe:consumer:state'
+  | 'pipe:consumer:feedback'
   | 'pipe:consumer:close'
   | 'pipe:rtcp'
   | 'pipe:stats'
@@ -99,7 +102,12 @@ export interface PipeFeedRequestMessage extends PipeMessageBase {
   ownerNodeId: string;
   remoteNodeId: string;
   producerId: string;
+  bindingEpoch?: string;
   protocol: PipeTransportProtocol;
+  status?: ConsumerStatus;
+  priority?: number;
+  preferredLayers?: RtpLayerSelection;
+  preferredSvcLayers?: SvcLayerSelection;
 }
 
 export interface PipePublishRequestMessage extends PipeMessageBase {
@@ -110,6 +118,7 @@ export interface PipePublishRequestMessage extends PipeMessageBase {
   participantId: string;
   kind: ProducerKind;
   rtpParameters: RtpParameters;
+  bindingEpoch?: string;
   protocol: PipeTransportProtocol;
   status?: ProducerStatus;
   priority?: number;
@@ -120,6 +129,7 @@ export interface PipePublishReleaseMessage extends PipeMessageBase {
   ownerNodeId: string;
   remoteNodeId: string;
   producerId: string;
+  bindingEpoch?: string;
   reason?: 'producer_closed' | 'participant_left' | 'room_closed' | 'manual' | 'error' | 'stale_ack';
 }
 
@@ -128,6 +138,7 @@ export interface PipeFeedReleaseMessage extends PipeMessageBase {
   ownerNodeId: string;
   remoteNodeId: string;
   producerId: string;
+  bindingEpoch?: string;
   reason?: 'consumer_closed' | 'participant_left' | 'room_closed' | 'manual' | 'error' | 'stale_ack';
 }
 
@@ -142,6 +153,7 @@ export interface PipeProducerCreateMessage extends PipeMessageBase {
   participantId: string;
   kind: ProducerKind;
   rtpParameters: RtpParameters;
+  bindingEpoch?: string;
   status?: ProducerStatus;
   priority?: number;
   ssrcMappings?: PipeSsrcMapping[];
@@ -152,6 +164,7 @@ export interface PipeProducerStateMessage extends PipeMessageBase {
   ownerNodeId: string;
   remoteNodeId: string;
   producerId: string;
+  bindingEpoch?: string;
   status?: ProducerStatus;
   priority?: number;
 }
@@ -159,6 +172,7 @@ export interface PipeProducerStateMessage extends PipeMessageBase {
 export interface PipeProducerCloseMessage extends PipeMessageBase {
   type: 'pipe:producer:close';
   producerId: string;
+  bindingEpoch?: string;
   reason?: 'producer_closed' | 'consumer_closed' | 'room_closed' | 'node_left' | 'manual' | 'error' | 'stale_ack';
 }
 
@@ -168,13 +182,56 @@ export interface PipeConsumerCreateMessage extends PipeMessageBase {
   producerId: string;
   participantId: string;
   rtpParameters: RtpParameters;
+  bindingEpoch?: string;
+  stateVersion?: number;
+  status?: ConsumerStatus;
+  priority?: number;
+  preferredLayers?: RtpLayerSelection;
+  preferredSvcLayers?: SvcLayerSelection;
   ssrcMappings?: PipeSsrcMapping[];
+}
+
+export interface PipeConsumerStateMessage extends PipeMessageBase {
+  type: 'pipe:consumer:state';
+  ownerNodeId: string;
+  remoteNodeId: string;
+  consumerId: string;
+  producerId: string;
+  bindingEpoch?: string;
+  stateVersion?: number;
+  status?: ConsumerStatus;
+  priority?: number;
+  preferredLayers?: RtpLayerSelection;
+  preferredSvcLayers?: SvcLayerSelection;
+}
+
+export interface PipeConsumerFeedbackObservation {
+  packetLoss: number;
+  delayVariationMs: number;
+  jitter?: number;
+  rtt?: number;
+  sendDeltaMs?: number;
+  receiveDeltaMs?: number;
+  timestamp?: number;
+}
+
+export interface PipeConsumerFeedbackMessage extends PipeMessageBase {
+  type: 'pipe:consumer:feedback';
+  ownerNodeId: string;
+  remoteNodeId: string;
+  consumerId: string;
+  producerId: string;
+  bindingEpoch?: string;
+  feedbackVersion?: number;
+  observation: PipeConsumerFeedbackObservation;
 }
 
 export interface PipeConsumerCloseMessage extends PipeMessageBase {
   type: 'pipe:consumer:close';
   consumerId: string;
   producerId: string;
+  bindingEpoch?: string;
+  stateVersion?: number;
   reason?: 'consumer_closed' | 'producer_closed' | 'room_closed' | 'node_left' | 'manual' | 'error' | 'stale_ack';
 }
 
@@ -220,6 +277,8 @@ export type PipeCoordinationMessage =
   | PipeProducerStateMessage
   | PipeProducerCloseMessage
   | PipeConsumerCreateMessage
+  | PipeConsumerStateMessage
+  | PipeConsumerFeedbackMessage
   | PipeConsumerCloseMessage
   | PipeRtcpMessage
   | PipeStatsMessage

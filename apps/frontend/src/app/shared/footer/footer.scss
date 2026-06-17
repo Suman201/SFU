@@ -1,0 +1,11 @@
+.site-footer {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid var(--line-soft);
+  background: var(--panel-glass);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}

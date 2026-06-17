@@ -79,16 +79,18 @@ describe('Phase 1 foundation integration (e2e)', () => {
   it('starts the Nest application and creates Swagger metadata', () => {
     expect(app.getHttpAdapter()).toBeDefined();
     expect(swaggerDocument.info.title).toBe('EduConnect Live Backend API');
-    expect(swaggerDocument.components?.securitySchemes).toHaveProperty('bearer');
+    expect(swaggerDocument.components?.securitySchemes?.bearer).toBeDefined();
   });
 
   it('keeps health and metrics routes outside the API prefix contract', () => {
     const health = new TestHealthController();
     const metrics = new TestMetricsController();
+    const dbHealth = health.db();
+    const redisHealth = health.redis();
 
     expect(health.health()).toEqual({ status: 'ok' });
-    expect(health.db()).toMatchObject({ info: { mongodb: { status: 'up' } } });
-    expect(health.redis()).toMatchObject({ info: { redis: { status: 'up' } } });
+    expect(dbHealth.info.mongodb.status).toBe('up');
+    expect(redisHealth.info.redis.status).toBe('up');
     expect(metrics.metrics()).toContain('nodejs_version_info');
   });
 
@@ -124,12 +126,11 @@ describe('Phase 1 foundation integration (e2e)', () => {
     } as never);
 
     expect(response.statusCode).toBe(400);
-    expect(response.body).toMatchObject({
-      success: false,
-      message: 'Validation failed',
-      statusCode: 400,
-      path: '/api/v1/auth/login',
-      requestId: 'test-request-id'
-    });
+    const body = response.body as any;
+    expect(body.success).toBe(false);
+    expect(body.message).toBe('Validation failed');
+    expect(body.statusCode).toBe(400);
+    expect(body.path).toBe('/api/v1/auth/login');
+    expect(body.requestId).toBe('test-request-id');
   });
 });

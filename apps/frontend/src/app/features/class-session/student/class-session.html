@@ -1,0 +1,64 @@
+<main class="student-session-shell">
+  <section class="video-stage" aria-label="Class video">
+    <div class="video-frame">
+      <span class="video-noise" aria-hidden="true"></span>
+      <div class="speaker-badge">
+        <span class="speaker-avatar">TR</span>
+        <div>
+          <strong>Teacher</strong>
+          <span>Live</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <button
+    class="participants-button"
+    type="button"
+    aria-controls="student-session-participants"
+    [attr.aria-expanded]="participantsOpen()"
+    title="Participants"
+    aria-label="Open participants"
+    (click)="toggleParticipants()"
+  >
+    <span class="list-icon" aria-hidden="true"></span>
+    <strong>{{ participants().length }}</strong>
+  </button>
+
+  @if (participantsOpen()) {
+    <button class="participants-backdrop" type="button" aria-label="Close participants" (click)="closeParticipants()"></button>
+  }
+
+  <aside
+    id="student-session-participants"
+    class="participants-sidebar"
+    [class.open]="participantsOpen()"
+    aria-label="Participants"
+  >
+    <header>
+      <div>
+        <p>Live class</p>
+        <h1>Participants</h1>
+      </div>
+      <button type="button" class="close-button" title="Close participants" aria-label="Close participants" (click)="closeParticipants()">
+        <span aria-hidden="true"></span>
+      </button>
+    </header>
+
+    <div class="participant-list">
+      @for (participant of participants(); track participant.id) {
+        <article class="participant-row" [class.speaking]="participant.speaking">
+          <span class="participant-avatar">{{ participant.initials }}</span>
+          <div>
+            <strong>{{ participant.name }}</strong>
+            <span>{{ participant.role }}</span>
+          </div>
+          @if (participant.speaking) {
+            <span class="speaking-dot" aria-label="Speaking"></span>
+          }
+        </article>
+      }
+    </div>
+  </aside>
+</main>
+<sfu-session-chat currentUser="Student" currentRole="Student" />

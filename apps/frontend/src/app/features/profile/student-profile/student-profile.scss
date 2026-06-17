@@ -1,0 +1,160 @@
+.profile-shell {
+  display: grid;
+  gap: 22px;
+  min-height: calc(100vh - 132px);
+  padding: 28px 32px 36px;
+}
+
+.profile-hero,
+.identity,
+.profile-panel header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.profile-hero {
+  justify-content: space-between;
+}
+
+.avatar {
+  display: inline-grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  border: 1px solid var(--accent-border);
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 20px;
+  font-weight: 900;
+  box-shadow: var(--shadow-sm);
+}
+
+.profile-hero p,
+.profile-hero h1,
+.profile-hero span,
+.metric-grid p,
+.profile-panel h2 {
+  margin: 0;
+}
+
+.profile-hero h1 {
+  color: var(--text);
+  font-size: 36px;
+  line-height: 1.05;
+}
+
+.profile-hero span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.profile-hero a {
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--panel-elevated);
+  color: var(--accent);
+  padding: 11px 14px;
+  text-decoration: none;
+  font-weight: 850;
+  box-shadow: var(--shadow-sm);
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.metric-grid article,
+.profile-panel,
+.detail-grid article {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.metric-grid article {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+}
+
+.metric-grid span {
+  color: var(--text);
+  font-size: 28px;
+  font-weight: 900;
+}
+
+.metric-grid p {
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.profile-panel {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.profile-panel header {
+  align-items: start;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-panel h2 {
+  color: var(--text);
+  font-size: 25px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.detail-grid article {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+}
+
+.detail-grid span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.detail-grid strong {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .profile-shell {
+    padding: 20px 16px 28px;
+  }
+
+  .profile-hero {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .metric-grid,
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+}

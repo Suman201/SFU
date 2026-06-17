@@ -1,6 +1,7 @@
 import type { Consumer, Producer, RtpParameters } from '@native-sfu/contracts';
 import { parseRtcpCompound } from '../rtcp/rtcp-packet';
 import { createTransportWideCcFeedback } from '../twcc/twcc';
+import { DeterministicPacketImpairmentHarness } from './packet-impairment-harness';
 import { RTP_HEADER_EXTENSION_URIS, parseRtpHeaderExtensions, serializeRtpHeaderExtensionElements } from './rtp-header-extension';
 import { RtpPacket } from './rtp-packet';
 import { RtpRouter } from './rtp-router';
@@ -75,6 +76,65 @@ describe('RtpRouter adaptive transport foundation', () => {
     expect(router.bandwidthEstimate(consumer.id).packetLoss).toBeGreaterThan(0);
   });
 
+  it('updates owner-side allocation from externally applied consumer TWCC observations', async () => {
+    const router = new RtpRouter({
+      enablePacing: false,
+      qualityUpdateIntervalMs: 0
+    });
+    const producer = createProducer(rtpParameters(1111, 96));
+    const consumer = createConsumer(producer, rtpParameters(2222, 120));
+    router.addProducer(producer);
+    router.addConsumer(consumer, async () => undefined);
+
+    const initial = router.consumerQualitySnapshot(consumer.id)!;
+    const updated = router.applyExternalConsumerTwccObservation(consumer.id, {
+      packetLoss: 0.22,
+      delayVariationMs: 95,
+      jitter: 80,
+      rtt: 140,
+      sendDeltaMs: 20,
+      receiveDeltaMs: 70,
+      timestamp: 2000
+    });
+
+    expect(updated).toBeDefined();
+    expect(router.bandwidthEstimate(consumer.id).packetLoss).toBeGreaterThan(initial.network.packetLoss);
+    expect(router.bandwidthEstimate(`transport:${consumer.transportId}`).packetLoss).toBeGreaterThan(0);
+    expect(updated?.network.packetLoss).toBeGreaterThan(initial.network.packetLoss);
+  });
+
+  it('ignores stale externally applied consumer TWCC observations', async () => {
+    const router = new RtpRouter({
+      enablePacing: false,
+      qualityUpdateIntervalMs: 0
+    });
+    const producer = createProducer(rtpParameters(1111, 96));
+    const consumer = createConsumer(producer, rtpParameters(2222, 120));
+    router.addProducer(producer);
+    router.addConsumer(consumer, async () => undefined);
+
+    const degraded = router.applyExternalConsumerTwccObservation(consumer.id, {
+      packetLoss: 0.28,
+      delayVariationMs: 110,
+      jitter: 70,
+      rtt: 160,
+      timestamp: 3000
+    });
+    const afterDegraded = router.bandwidthEstimate(consumer.id);
+    const stale = router.applyExternalConsumerTwccObservation(consumer.id, {
+      packetLoss: 0.01,
+      delayVariationMs: 10,
+      jitter: 4,
+      rtt: 20,
+      timestamp: 2000
+    });
+
+    expect(degraded).toBeDefined();
+    expect(stale?.network.packetLoss).toBeCloseTo(degraded!.network.packetLoss, 5);
+    expect(router.bandwidthEstimate(consumer.id).packetLoss).toBeCloseTo(afterDegraded.packetLoss, 5);
+    expect(router.bandwidthEstimate(consumer.id).delayVariationMs).toBeCloseTo(afterDegraded.delayVariationMs, 5);
+  });
+
   it('tracks transport-cc send history, probe results, and statistics API state', async () => {
     let now = 1000;
     const router = new RtpRouter({
@@ -123,6 +183,71 @@ describe('RtpRouter adaptive transport foundation', () => {
     expect(stats.layers[0]?.fractionLost).toBeGreaterThan(0);
     expect(stats.layers[0]?.rtt).toBeGreaterThan(0);
     expect(stats.layers[0]?.score.degradationReason).toBe('packet_loss');
+    expect(router.statistics().probes.length).toBeGreaterThan(0);
+  });
+
+  it('drives overuse, recovery, and probe visibility from deterministic external impairment observations', async () => {
+    let now = 1000;
+    const router = new RtpRouter({
+      enablePacing: false,
+      now: () => now,
+      sequenceNumberGenerator: () => 6000,
+      timestampGenerator: () => 210000,
+      qualityUpdateIntervalMs: 0,
+      probeClusterIntervalMs: 0,
+      probeBurstPackets: 2,
+      probeBitrateMultiplier: 1.1
+    });
+    const producer = createProducer(rtpParameters(1111, 96, [{ id: 4, uri: RTP_HEADER_EXTENSION_URIS.twcc }]));
+    const consumer = createConsumer(producer, rtpParameters(2222, 120, [{ id: 5, uri: RTP_HEADER_EXTENSION_URIS.twcc }]));
+    router.addProducer(producer);
+    router.addConsumer(consumer, async () => undefined);
+
+    for (let round = 0; round < 8; round += 1) {
+      await router.route(rawPacket(1111, 96, 10 + round, 1000 + round * 3000));
+      const observation = observationFromImpairment(
+        scenarioPackets(round * 10),
+        new DeterministicPacketImpairmentHarness<RtpPacket>({
+          lossPercentage: 20,
+          baseDelayMs: 80,
+          jitterMs: 25,
+          maxThroughputBps: 180_000,
+          seed: 91
+        }),
+        now
+      );
+      router.applyExternalConsumerTwccObservation(consumer.id, observation);
+      now += 120;
+    }
+
+    const congested = router.bandwidthEstimate(consumer.id);
+    const congestedRecommendedBitrate = congested.recommendedBitrate;
+    expect(congested.overuseState).toBe('overuse');
+    expect(congested.packetLoss).toBeGreaterThan(0);
+
+    for (let round = 0; round < 12; round += 1) {
+      await router.route(rawPacket(1111, 96, 40 + round, 20_000 + round * 3000));
+      const observation = observationFromImpairment(
+        scenarioPackets(100 + round * 10),
+        new DeterministicPacketImpairmentHarness<RtpPacket>({
+          lossPercentage: 0,
+          baseDelayMs: 2,
+          jitterMs: 0,
+          maxThroughputBps: 12_000_000,
+          seed: 17
+        }),
+        now
+      );
+      observation.receiveDeltaMs = Math.max(1, observation.sendDeltaMs - 4);
+      router.applyExternalConsumerTwccObservation(consumer.id, observation);
+      now += 120;
+    }
+
+    const recovered = router.bandwidthEstimate(consumer.id);
+    const stats = router.statistics().consumers[0]!;
+    expect(recovered.recommendedBitrate).toBeGreaterThan(congestedRecommendedBitrate);
+    expect(stats.bitrate.events.some((event) => event.type === 'overuse')).toBe(true);
+    expect(recovered.packetLoss).toBeLessThan(congested.packetLoss);
     expect(router.statistics().probes.length).toBeGreaterThan(0);
   });
 
@@ -215,4 +340,59 @@ function rawPacket(
     payload
   );
   return packet.serialize();
+}
+
+function scenarioPackets(offset: number): RtpPacket[] {
+  return [
+    new RtpPacket(2, false, false, false, 96, 100 + offset, 10_000 + offset * 3000, 1111, [], null, Buffer.alloc(1200, 0x11)),
+    new RtpPacket(2, false, false, false, 96, 101 + offset, 13_000 + offset * 3000, 1111, [], null, Buffer.alloc(1200, 0x11)),
+    new RtpPacket(2, false, false, false, 96, 102 + offset, 16_000 + offset * 3000, 1111, [], null, Buffer.alloc(1200, 0x11)),
+    new RtpPacket(2, false, false, false, 96, 103 + offset, 19_000 + offset * 3000, 1111, [], null, Buffer.alloc(1200, 0x11))
+  ];
+}
+
+function observationFromImpairment(
+  packets: RtpPacket[],
+  harness: DeterministicPacketImpairmentHarness<RtpPacket>,
+  startAt: number
+): {
+  packetLoss: number;
+  delayVariationMs: number;
+  jitter: number;
+  rtt: number;
+  sendDeltaMs: number;
+  receiveDeltaMs: number;
+  timestamp: number;
+} {
+  const sentAt = packets.map((_packet, index) => startAt + index * 20);
+  for (let index = 0; index < packets.length; index += 1) {
+    harness.enqueue(packets[index]!, sentAt[index]!);
+  }
+  const released = harness.flushAll();
+  const sendDeltaMs = averageDelta(sentAt);
+  const receiveDeltaMs = averageDelta(released.map((packet) => packet.releaseAt)) || sendDeltaMs;
+  const delays = released.map((packet) => packet.releaseAt - packet.sentAt);
+  const delayMean = delays.length === 0 ? 0 : delays.reduce((sum, value) => sum + value, 0) / delays.length;
+  const delayVariationMs =
+    delays.length === 0 ? 0 : delays.reduce((sum, value) => sum + Math.abs(value - delayMean), 0) / delays.length;
+  return {
+    packetLoss: 1 - released.length / packets.length,
+    delayVariationMs,
+    jitter: delayVariationMs,
+    rtt: delayMean * 2,
+    sendDeltaMs,
+    receiveDeltaMs,
+    timestamp: released[released.length - 1]?.releaseAt ?? startAt
+  };
+}
+
+function averageDelta(values: number[]): number {
+  if (values.length < 2) {
+    return 0;
+  }
+  let total = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    total += values[index]! - values[index - 1]!;
+  }
+  return total / (values.length - 1);
 }

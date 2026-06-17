@@ -5,6 +5,8 @@ import type {
   ConsumerLayerState,
   ConsumerQualityState,
   IceCandidate,
+  PipeNodeEndpoint,
+  PipeTransportProtocol,
   Producer,
   ProducerDynacastEvent,
   ProducerDynacastState,
@@ -17,13 +19,17 @@ import type {
   TransportOptions,
   TransportQualityState
 } from '@native-sfu/contracts';
-import type { RtcpFeedback } from '@native-sfu/sfu-core';
+import type { ConsumerTwccObservation, ConsumerTwccObservationEvent, RtcpFeedback } from '@native-sfu/sfu-core';
 import type { MediaPacketBridgeCounters } from '../media/media-packet-bridge';
 import { MediaService } from '../media.service';
 import type { NestSfuOptions } from '../nest-sfu.options';
 import { PipeTransportService } from '../pipe-transport.service';
 import { MediaWorkerPool } from './media-worker-pool';
-import type { MediaWorkerPoolSnapshot, MediaWorkerRoomFailureEvent } from './ipc';
+import type {
+  MediaWorkerPipeTransportSnapshot,
+  MediaWorkerPoolSnapshot,
+  MediaWorkerRoomFailureEvent
+} from './ipc';
 
 type AdaptiveMetricsSnapshot = ReturnType<MediaService['adaptiveTransportMetrics']>;
 
@@ -36,6 +42,9 @@ interface PipeTransportBinding {
   roomId: string;
   localNodeId: string;
   remoteNodeId: string;
+  protocol: PipeTransportProtocol;
+  localEndpoint?: PipeNodeEndpoint;
+  remoteEndpoint?: PipeNodeEndpoint;
 }
 
 @Injectable()
@@ -55,6 +64,7 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
   private readonly counterSnapshots = new Map<string, MediaPacketBridgeCounters>();
   private readonly layerEventListeners = new Set<(event: ConsumerLayerEvent) => void>();
   private readonly producerDynacastEventListeners = new Set<(event: ProducerDynacastEvent) => void>();
+  private readonly consumerTwccObservationListeners = new Set<(state: ConsumerTwccObservationEvent) => void>();
   private readonly consumerQualityEventListeners = new Set<(state: ConsumerQualityState) => void>();
   private readonly producerQualityEventListeners = new Set<(state: ProducerQualityState) => void>();
   private readonly transportQualityEventListeners = new Set<(state: TransportQualityState) => void>();
@@ -110,6 +120,11 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
   onProducerDynacastEvent(listener: (event: ProducerDynacastEvent) => void): () => void {
     this.producerDynacastEventListeners.add(listener);
     return () => this.producerDynacastEventListeners.delete(listener);
+  }
+
+  onConsumerTwccObservation(listener: (state: ConsumerTwccObservationEvent) => void): () => void {
+    this.consumerTwccObservationListeners.add(listener);
+    return () => this.consumerTwccObservationListeners.delete(listener);
   }
 
   onConsumerScoreUpdated(listener: (state: ConsumerQualityState) => void): () => void {
@@ -280,6 +295,55 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
     return (await this.pool.workerForTransport(transportId).request({ type: 'handleRtcp', transportId, participantId, packet })) as { feedback: RtcpFeedback; forwarded: number };
   }
 
+  async ensurePipeTransport(options: {
+    pipeTransportId: string;
+    roomId: string;
+    localNodeId: string;
+    remoteNodeId: string;
+    protocol: PipeTransportProtocol;
+    listenPort?: number;
+    advertisedIp?: string;
+    peerToken?: string;
+    remoteEndpoint?: PipeNodeEndpoint;
+  }): Promise<MediaWorkerPipeTransportSnapshot> {
+    const worker = this.pool.workerForRoom(options.roomId);
+    const snapshot = (await worker.request({
+      type: 'ensurePipeTransport',
+      ...options
+    })) as MediaWorkerPipeTransportSnapshot;
+    this.pipeTransports.set(options.pipeTransportId, {
+      roomId: snapshot.roomId,
+      localNodeId: snapshot.localNodeId,
+      remoteNodeId: snapshot.remoteNodeId,
+      protocol: snapshot.protocol,
+      localEndpoint: snapshot.localEndpoint,
+      remoteEndpoint: snapshot.remoteEndpoint
+    });
+    return snapshot;
+  }
+
+  async pipeTransportSnapshot(pipeTransportId: string): Promise<MediaWorkerPipeTransportSnapshot | undefined> {
+    const binding = this.pipeTransports.get(pipeTransportId);
+    if (!binding) {
+      return undefined;
+    }
+    const snapshot = (await this.pool.workerForRoom(binding.roomId).request({
+      type: 'pipeTransportSnapshot',
+      pipeTransportId
+    })) as MediaWorkerPipeTransportSnapshot | undefined;
+    if (snapshot) {
+      this.pipeTransports.set(pipeTransportId, {
+        roomId: snapshot.roomId,
+        localNodeId: snapshot.localNodeId,
+        remoteNodeId: snapshot.remoteNodeId,
+        protocol: snapshot.protocol,
+        localEndpoint: snapshot.localEndpoint,
+        remoteEndpoint: snapshot.remoteEndpoint
+      });
+    }
+    return snapshot;
+  }
+
   async handlePipeRtp(pipeTransportId: string, producerId: string | undefined, packet: Buffer): Promise<number> {
     const binding = await this.ensurePipeTransportBinding(pipeTransportId);
     return (await this.pool.workerForRoom(binding.roomId).request({
@@ -310,6 +374,23 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     await this.pool.workerForRoom(binding.roomId).request({ type: 'closePipeTransport', pipeTransportId });
+    for (const [producerId, producer] of this.producers) {
+      if (producer.transportId === pipeTransportId) {
+        this.producers.delete(producerId);
+        this.producerLayerStates.delete(producerId);
+        this.producerDynacastStates.delete(producerId);
+        this.producerQualityStates.delete(producerId);
+        this.pool.releaseProducer(producerId);
+      }
+    }
+    for (const [consumerId, consumer] of this.consumers) {
+      if (consumer.transportId === pipeTransportId) {
+        this.consumers.delete(consumerId);
+        this.consumerLayerStates.delete(consumerId);
+        this.consumerQualityStates.delete(consumerId);
+        this.pool.releaseConsumer(consumerId);
+      }
+    }
     this.pipeTransports.delete(pipeTransportId);
   }
 
@@ -349,6 +430,25 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
     }
     consumer.priority = priority;
     void this.pool.workerForConsumer(consumerId).request({ type: 'setConsumerPriority', consumerId, priority });
+  }
+
+  async applyConsumerTwccObservation(
+    consumerId: string,
+    observation: ConsumerTwccObservation
+  ): Promise<ConsumerQualityState | undefined> {
+    const state = (await this.pool.workerForConsumer(consumerId).request({
+      type: 'applyConsumerTwccObservation',
+      consumerId,
+      observation
+    })) as ConsumerQualityState | undefined;
+    if (state) {
+      this.consumerQualityStates.set(consumerId, state);
+      const consumer = this.consumers.get(consumerId);
+      if (consumer) {
+        consumer.quality = state;
+      }
+    }
+    return state;
   }
 
   consumerLayerState(consumerId: string): ConsumerLayerState | undefined {
@@ -512,6 +612,11 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
         this.pool.releaseConsumer(consumerId);
       }
     }
+    for (const [pipeTransportId, binding] of this.pipeTransports) {
+      if (binding.roomId === roomId) {
+        this.pipeTransports.delete(pipeTransportId);
+      }
+    }
     this.roomQualityStates.delete(roomId);
     this.pool.releaseRoom(roomId, { preserveFailure: true });
   }
@@ -532,6 +637,12 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
       }
       for (const listener of this.producerDynacastEventListeners) {
         listener(event.event);
+      }
+      return;
+    }
+    if (event.type === 'consumer-twcc') {
+      for (const listener of this.consumerTwccObservationListeners) {
+        listener(event.state);
       }
       return;
     }
@@ -683,7 +794,13 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async refreshAdaptiveMetrics(): Promise<void> {
-    const rooms = new Set([...this.transports.values()].map((transport) => transport.roomId));
+    const rooms = new Set<string>([
+      ...[...this.transports.values()].map((transport) => transport.roomId),
+      ...[...this.pipeTransports.values()].map((transport) => transport.roomId),
+      ...[...this.producers.values()].map((producer) => producer.roomId),
+      ...[...this.consumers.values()].map((consumer) => consumer.roomId),
+      ...this.roomQualityStates.keys()
+    ]);
     if (rooms.size === 0) {
       this.adaptiveMetricsSnapshot = emptyAdaptiveMetrics();
       return;
@@ -700,23 +817,28 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
       return existing;
     }
     const snapshot = this.pipe?.snapshot(pipeTransportId);
-    if (!snapshot) {
-      throw new ServiceUnavailableException(`Pipe transport ${pipeTransportId} is not registered in the parent process`);
+    const protocol = this.pipe?.transportProtocol(pipeTransportId);
+    if (!snapshot || !protocol) {
+      throw new ServiceUnavailableException(`Pipe transport ${pipeTransportId} must be explicitly provisioned before worker registration`);
     }
-    const binding: PipeTransportBinding = {
+    if (protocol === 'udp') {
+      throw new ServiceUnavailableException(`UDP pipe transport ${pipeTransportId} must be provisioned through ensurePipeTransport before worker registration`);
+    }
+    const ensured = await this.ensurePipeTransport({
+      pipeTransportId,
       roomId: roomId ?? snapshot.roomId,
       localNodeId: snapshot.localNodeId,
-      remoteNodeId: snapshot.remoteNodeId
-    };
-    await this.pool.workerForRoom(binding.roomId).request({
-      type: 'ensurePipeTransport',
-      pipeTransportId,
-      roomId: binding.roomId,
-      localNodeId: binding.localNodeId,
-      remoteNodeId: binding.remoteNodeId
+      remoteNodeId: snapshot.remoteNodeId,
+      protocol
     });
-    this.pipeTransports.set(pipeTransportId, binding);
-    return binding;
+    return {
+      roomId: ensured.roomId,
+      localNodeId: ensured.localNodeId,
+      remoteNodeId: ensured.remoteNodeId,
+      protocol: ensured.protocol,
+      localEndpoint: ensured.localEndpoint,
+      remoteEndpoint: ensured.remoteEndpoint
+    };
   }
 
 }
@@ -789,6 +911,9 @@ function emptyMediaCounters(): MediaPacketBridgeCounters {
     outboundErrors: 0,
     routedRtpPackets: 0,
     routedRtcpPackets: 0,
+    inboundRtpPaddingOnlyPackets: 0,
+    inboundRtpSsrcCounts: {},
+    inboundRtpPayloadTypeCounts: {},
     queueDepth: 0,
     maxQueueDepth: 0
   };

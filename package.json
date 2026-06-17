@@ -4,7 +4,7 @@
   "private": true,
   "description": "Production-oriented native WebRTC SFU platform scaffold with NestJS, Angular, Redis, MongoDB, Coturn, Prometheus, and Kubernetes manifests.",
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=22.22.3",
     "npm": ">=10.0.0"
   },
   "workspaces": [
@@ -19,6 +19,7 @@
     "test": "npm run test --workspaces --if-present",
     "test:browser": "node scripts/patch-playwright-loader.cjs && playwright test",
     "lint": "npm run lint --workspaces --if-present",
+    "seed:dummy-users": "npm run seed:dummy-users -w @native-sfu/backend",
     "dev:backend": "npm run start:dev -w @native-sfu/backend",
     "dev:frontend": "npm run start -w @native-sfu/frontend",
     "docker:up": "docker compose -f infra/docker-compose.yml up --build",

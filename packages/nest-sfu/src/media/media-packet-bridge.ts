@@ -27,6 +27,9 @@ export interface MediaPacketBridgeCounters {
   outboundErrors: number;
   routedRtpPackets: number;
   routedRtcpPackets: number;
+  inboundRtpPaddingOnlyPackets: number;
+  inboundRtpSsrcCounts: Record<string, number>;
+  inboundRtpPayloadTypeCounts: Record<string, number>;
   queueDepth: number;
   maxQueueDepth: number;
 }
@@ -63,6 +66,9 @@ export class MediaPacketBridge extends EventEmitter {
     outboundErrors: 0,
     routedRtpPackets: 0,
     routedRtcpPackets: 0,
+    inboundRtpPaddingOnlyPackets: 0,
+    inboundRtpSsrcCounts: {},
+    inboundRtpPayloadTypeCounts: {},
     queueDepth: 0,
     maxQueueDepth: 0
   };
@@ -141,7 +147,8 @@ export class MediaPacketBridge extends EventEmitter {
           return;
         }
         const decrypted = await session.unprotectRtp(packet);
-        RtpPacket.parse(decrypted);
+        const parsed = RtpPacket.parse(decrypted);
+        this.recordInboundRtpPacket(parsed);
         this.counters.inboundDecryptedRtpPackets += 1;
         this.counters.routedRtpPackets += await this.options.onRtp(decrypted);
         return;
@@ -156,7 +163,8 @@ export class MediaPacketBridge extends EventEmitter {
         return;
       }
       if (kind === 'rtp') {
-        RtpPacket.parse(packet);
+        const parsed = RtpPacket.parse(packet);
+        this.recordInboundRtpPacket(parsed);
         this.counters.routedRtpPackets += await this.options.onRtp(packet);
         return;
       }
@@ -231,4 +239,16 @@ export class MediaPacketBridge extends EventEmitter {
         break;
     }
   }
+
+  private recordInboundRtpPacket(packet: RtpPacket): void {
+    incrementCounter(this.counters.inboundRtpSsrcCounts, String(packet.ssrc));
+    incrementCounter(this.counters.inboundRtpPayloadTypeCounts, String(packet.payloadType));
+    if (packet.padding && packet.payload.length === 0) {
+      this.counters.inboundRtpPaddingOnlyPackets += 1;
+    }
+  }
+}
+
+function incrementCounter(target: Record<string, number>, key: string): void {
+  target[key] = (target[key] ?? 0) + 1;
 }

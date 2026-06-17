@@ -1,10 +1,10 @@
-import type { ConsumerLayerEvent, ProducerDynacastEvent, RoomFailureEvent } from '@native-sfu/contracts';
+import type { ConsumerLayerEvent, ProducerDynacastEvent, RoomFailureEvent, RoomQualityState, TransportQualityState } from '@native-sfu/contracts';
 import { RoomOwnerRedirectException } from '../cluster/node-registry.service';
 import { RoomsGateway } from './rooms.gateway';
 
 describe('RoomsGateway', () => {
   it('disconnects unauthorized sockets', async () => {
-    const gateway = new RoomsGateway({} as never, {} as never, {} as never);
+    const { gateway } = createGatewayHarness();
     const socket: { data: { requestId?: string }; handshake: { auth: Record<string, unknown>; headers: Record<string, unknown>; address: string }; disconnect: jest.Mock } = {
       data: {},
       handshake: { auth: {}, headers: {}, address: '127.0.0.1' },
@@ -113,6 +113,88 @@ describe('RoomsGateway', () => {
       expect(emissions).toEqual([{ target: 'room-1', event: 'room:failed', payload: event }]);
     });
 
+    it('publishes transport quality updates through the cross-node room signal path', async () => {
+      const { emitTransportQuality, emissions, signals } = createGatewayHarness();
+      const state: TransportQualityState = {
+        roomId: 'room-1',
+        participantId: 'subscriber',
+        transportId: 'transport-1',
+        score: {
+          score: 84,
+          level: 'good',
+          reasons: ['stable'],
+          breakdown: {
+            packetLossScore: 90,
+            rttScore: 88,
+            jitterScore: 86,
+            congestionScore: 80,
+            retransmissionScore: 84,
+            allocationScore: 92
+          },
+          updatedAt: '2026-06-17T00:00:00.000Z'
+        },
+        consumers: [],
+        producers: [],
+        targetBitrate: 900000,
+        allocatedBitrate: 820000,
+        actualBitrate: 780000,
+        pacingQueueDepth: 0,
+        updatedAt: '2026-06-17T00:00:00.000Z'
+      };
+
+      emitTransportQuality(state);
+      await flushPromises();
+
+      expect(
+        emissions.some(
+          (emission) =>
+            emission.target === 'room-1' &&
+            emission.event === 'transport:quality-updated' &&
+            emission.payload === state
+        )
+      ).toBe(true);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'transport:quality-updated', state);
+    });
+
+    it('publishes room quality updates through the cross-node room signal path', async () => {
+      const { emitRoomQuality, emissions, signals } = createGatewayHarness();
+      const state: RoomQualityState = {
+        roomId: 'room-1',
+        score: {
+          score: 76,
+          level: 'good',
+          reasons: ['stable'],
+          breakdown: {
+            packetLossScore: 82,
+            rttScore: 80,
+            jitterScore: 78,
+            congestionScore: 74,
+            retransmissionScore: 72,
+            allocationScore: 84
+          },
+          updatedAt: '2026-06-17T00:00:00.000Z'
+        },
+        consumers: [],
+        producers: [],
+        transports: [],
+        targetBitrate: 1_500_000,
+        allocatedBitrate: 1_300_000,
+        actualBitrate: 1_100_000,
+        congestionState: 'normal',
+        updatedAt: '2026-06-17T00:00:00.000Z'
+      };
+
+      emitRoomQuality(state);
+      await flushPromises();
+
+      expect(
+        emissions.some(
+          (emission) => emission.target === 'room-1' && emission.event === 'room:quality-updated' && emission.payload === state
+        )
+      ).toBe(true);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'room:quality-updated', state);
+    });
+
     it('returns room owner lookup over Socket.IO', async () => {
       const { gateway, rooms } = createGatewayHarness();
       const ack = jest.fn();
@@ -125,6 +207,26 @@ describe('RoomsGateway', () => {
       expect(response.data.roomId).toBe('room-1');
       expect(response.data.local).toBe(true);
       expect(response.data.available).toBe(true);
+    });
+
+    it('returns transport quality over Socket.IO', async () => {
+      const { gateway, rooms } = createGatewayHarness();
+      const ack = jest.fn();
+
+      await gateway.getTransportQuality(
+        {
+          data: {
+            participantId: 'participant-1'
+          }
+        } as never,
+        { transportId: 'transport-1' },
+        ack
+      );
+
+      expect(rooms.getTransportQualityState).toHaveBeenCalledWith('transport-1', 'participant-1');
+      const response = ack.mock.calls[0]![0] as any;
+      expect(response.ok).toBe(true);
+      expect(response.data.transportId).toBe('transport-1');
     });
 
     it('returns redirect details and does not join socket room on remote-owned join', async () => {
@@ -167,6 +269,7 @@ interface GatewayRoomsHarness {
   onRoomQualityUpdated: jest.Mock;
   onRoomFailed: jest.Mock;
   lookupRoomOwner: jest.Mock;
+  getTransportQualityState: jest.Mock;
   joinRoom: jest.Mock;
   producerDynacastSignalTarget: jest.Mock;
   recordDynacastSignalDelivery: jest.Mock;
@@ -177,14 +280,19 @@ interface GatewayRoomsHarness {
 function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
   gateway: RoomsGateway;
   rooms: GatewayRoomsHarness;
+  signals: { publish: jest.Mock };
   emitSignal: (signal: { sourceNodeId: string; roomId: string; event: string; payload: unknown[] }) => void;
   emitProducerDynacast: (event: ProducerDynacastEvent) => void;
   emitConsumerLayer: (event: ConsumerLayerEvent) => void;
+  emitTransportQuality: (state: TransportQualityState) => void;
+  emitRoomQuality: (state: RoomQualityState) => void;
   emitRoomFailure: (event: RoomFailureEvent) => void;
   emissions: Array<{ target: string; event: string; payload: unknown }>;
 } {
   let consumerLayerListener: ((event: ConsumerLayerEvent) => void) | undefined;
   let producerDynacastListener: ((event: ProducerDynacastEvent) => void) | undefined;
+  let transportQualityListener: ((state: TransportQualityState) => void) | undefined;
+  let roomQualityListener: ((state: RoomQualityState) => void) | undefined;
   let roomFailureListener: ((event: RoomFailureEvent) => void) | undefined;
   let signalListener:
     | ((signal: { sourceNodeId: string; roomId: string; event: string; payload: unknown[] }) => void)
@@ -200,8 +308,14 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
     }),
     onConsumerScoreUpdated: jest.fn(() => jest.fn()),
     onProducerScoreUpdated: jest.fn(() => jest.fn()),
-    onTransportQualityUpdated: jest.fn(() => jest.fn()),
-    onRoomQualityUpdated: jest.fn(() => jest.fn()),
+    onTransportQualityUpdated: jest.fn((listener: (state: TransportQualityState) => void) => {
+      transportQualityListener = listener;
+      return jest.fn();
+    }),
+    onRoomQualityUpdated: jest.fn((listener: (state: RoomQualityState) => void) => {
+      roomQualityListener = listener;
+      return jest.fn();
+    }),
     onRoomFailed: jest.fn((listener: (event: RoomFailureEvent) => void) => {
       roomFailureListener = listener;
       return jest.fn();
@@ -218,6 +332,32 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
         lastHeartbeatAt: '2026-06-16T00:00:00.000Z',
         expiresAt: '2026-06-16T00:00:30.000Z'
       }
+    })),
+    getTransportQualityState: jest.fn(async (transportId: string) => ({
+      roomId: 'room-1',
+      participantId: 'participant-1',
+      transportId,
+      score: {
+        score: 84,
+        level: 'good',
+        reasons: ['stable'],
+        breakdown: {
+          packetLossScore: 90,
+          rttScore: 88,
+          jitterScore: 86,
+          congestionScore: 80,
+          retransmissionScore: 84,
+          allocationScore: 92
+        },
+        updatedAt: '2026-06-17T00:00:00.000Z'
+      },
+      consumers: [],
+      producers: [],
+      targetBitrate: 900000,
+      allocatedBitrate: 820000,
+      actualBitrate: 780000,
+      pacingQueueDepth: 0,
+      updatedAt: '2026-06-17T00:00:00.000Z'
     })),
     joinRoom: jest.fn(),
     producerDynacastSignalTarget: jest.fn(async (_event: ProducerDynacastEvent, roomSocketCount: number) =>
@@ -254,6 +394,7 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
   return {
     gateway,
     rooms,
+    signals,
     emitSignal: (signal) => {
       if (!signalListener) {
         throw new Error('Room signal listener was not registered');
@@ -271,6 +412,18 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
         throw new Error('Consumer layer listener was not registered');
       }
       consumerLayerListener(event);
+    },
+    emitTransportQuality: (state: TransportQualityState) => {
+      if (!transportQualityListener) {
+        throw new Error('Transport quality listener was not registered');
+      }
+      transportQualityListener(state);
+    },
+    emitRoomQuality: (state: RoomQualityState) => {
+      if (!roomQualityListener) {
+        throw new Error('Room quality listener was not registered');
+      }
+      roomQualityListener(state);
     },
     emitRoomFailure: (event: RoomFailureEvent) => {
       if (!roomFailureListener) {

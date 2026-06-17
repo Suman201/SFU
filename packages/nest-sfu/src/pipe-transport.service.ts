@@ -4,11 +4,19 @@ import {
   PipeTransport,
   PipeTransportManager,
   UdpPipeTransport,
+  RTCP_PSFB,
+  RTCP_RR,
+  RTCP_RTPFB,
+  RTCP_SR,
+  parseRtcpCompound,
+  serializeRtcpPacket,
   type PipeConsumerOptions,
   type PipePacketEvent,
   type PipeProducerOptions,
+  type PipeSsrcMapping,
   type PipeTransportOptions,
   type PipeTransportSnapshot,
+  type RtcpPacket,
   type UdpPipeEndpoint,
   type UdpPipePacketEvent,
   type UdpPipeRemoteEndpoint,
@@ -19,8 +27,8 @@ import {
 @Injectable()
 export class PipeTransportService {
   private readonly udpTransports = new Map<string, UdpPipeTransport>();
-  private readonly udpProducers = new Map<string, Set<string>>();
-  private readonly udpConsumers = new Map<string, Set<string>>();
+  private readonly udpProducers = new Map<string, Map<string, PipeProducerOptions>>();
+  private readonly udpConsumers = new Map<string, Map<string, PipeConsumerOptions>>();
 
   constructor(private readonly manager: PipeTransportManager) {}
 
@@ -67,10 +75,13 @@ export class PipeTransportService {
     this.requireUdpTransport(transportId);
     let producers = this.udpProducers.get(transportId);
     if (!producers) {
-      producers = new Set<string>();
+      producers = new Map<string, PipeProducerOptions>();
       this.udpProducers.set(transportId, producers);
     }
-    producers.add(options.id);
+    producers.set(options.id, {
+      ...options,
+      ssrcMappings: options.ssrcMappings ? [...options.ssrcMappings] : undefined
+    });
   }
 
   closeProducer(transportId: string, producerId: string): void {
@@ -91,10 +102,13 @@ export class PipeTransportService {
     this.requireUdpTransport(transportId);
     let consumers = this.udpConsumers.get(transportId);
     if (!consumers) {
-      consumers = new Set<string>();
+      consumers = new Map<string, PipeConsumerOptions>();
       this.udpConsumers.set(transportId, consumers);
     }
-    consumers.add(options.id);
+    consumers.set(options.id, {
+      ...options,
+      ssrcMappings: options.ssrcMappings ? [...options.ssrcMappings] : undefined
+    });
   }
 
   closeConsumer(transportId: string, consumerId: string): void {
@@ -119,7 +133,7 @@ export class PipeTransportService {
     if (transport) {
       return transport.sendRtcp(packet, options);
     }
-    return this.requireUdpTransport(transportId).sendRtcp(packet, options);
+    return this.sendUdpRtcp(transportId, packet, options);
   }
 
   onRtp(transportId: string, listener: (event: PipePacketEvent) => void): () => void {
@@ -164,7 +178,9 @@ export class PipeTransportService {
     const transport = new UdpPipeTransport(options);
     this.udpTransports.set(transport.id, transport);
     transport.once('close', () => {
-      this.udpTransports.delete(transport.id);
+      if (this.udpTransports.get(transport.id) === transport) {
+        this.udpTransports.delete(transport.id);
+      }
     });
     return transport;
   }
@@ -186,7 +202,7 @@ export class PipeTransportService {
   }
 
   sendUdpRtcp(transportId: string, packet: Buffer, metadata: Parameters<UdpPipeTransport['sendRtcp']>[1] = {}): Promise<boolean> {
-    return this.requireUdpTransport(transportId).sendRtcp(packet, metadata);
+    return this.requireUdpTransport(transportId).sendRtcp(this.rewriteUdpRtcp(transportId, packet, metadata), metadata);
   }
 
   onUdpRtp(transportId: string, listener: (event: UdpPipePacketEvent) => void): () => void {
@@ -238,4 +254,77 @@ export class PipeTransportService {
     }
     return transport;
   }
+
+  private rewriteUdpRtcp(
+    transportId: string,
+    packet: Buffer,
+    options: { producerId?: string; consumerId?: string; ssrcMappings?: PipeSsrcMapping[] } = {}
+  ): Buffer {
+    const mappings = options.ssrcMappings ?? this.inferUdpRtcpMappings(transportId, options);
+    if (!mappings || mappings.length === 0) {
+      return packet;
+    }
+    const map = new Map(mappings.map((mapping) => [mapping.sourceSsrc >>> 0, mapping.targetSsrc >>> 0]));
+    try {
+      return Buffer.concat(parseRtcpCompound(packet).map((rtcp) => serializeRtcpPacket(rewriteRtcpPacketSsrcs(rtcp, map))));
+    } catch {
+      return packet;
+    }
+  }
+
+  private inferUdpRtcpMappings(
+    transportId: string,
+    options: { producerId?: string; consumerId?: string }
+  ): PipeSsrcMapping[] | undefined {
+    if (options.consumerId) {
+      const mappings = this.udpConsumers.get(transportId)?.get(options.consumerId)?.ssrcMappings;
+      if (mappings && mappings.length > 0) {
+        return mappings;
+      }
+    }
+    if (options.producerId) {
+      const mappings = this.udpProducers.get(transportId)?.get(options.producerId)?.ssrcMappings;
+      if (mappings && mappings.length > 0) {
+        return mappings;
+      }
+    }
+    return undefined;
+  }
+}
+
+function rewriteRtcpPacketSsrcs(packet: RtcpPacket, mappings: Map<number, number>): RtcpPacket {
+  const payload = Buffer.from(packet.payload);
+  const rewrite = (offset: number): void => {
+    if (offset + 4 <= payload.length) {
+      const mapped = mappings.get(payload.readUInt32BE(offset));
+      if (mapped !== undefined) {
+        payload.writeUInt32BE(mapped >>> 0, offset);
+      }
+    }
+  };
+  if (packet.type === RTCP_SR) {
+    rewrite(0);
+    for (let offset = 24; offset + 24 <= payload.length; offset += 24) {
+      rewrite(offset);
+    }
+  } else if (packet.type === RTCP_RR) {
+    rewrite(0);
+    for (let offset = 4; offset + 24 <= payload.length; offset += 24) {
+      rewrite(offset);
+    }
+  } else if (packet.type === RTCP_RTPFB || packet.type === RTCP_PSFB) {
+    rewrite(0);
+    rewrite(4);
+    if (packet.type === RTCP_PSFB && packet.count === 4) {
+      for (let offset = 8; offset + 8 <= payload.length; offset += 8) {
+        rewrite(offset);
+      }
+    }
+    if (packet.type === RTCP_PSFB && packet.count === 15 && payload.subarray(8, 12).toString('ascii') === 'REMB') {
+      for (let offset = 16; offset + 4 <= payload.length; offset += 4) {
+        rewrite(offset);
+      }
+    }
+  }
+  return { ...packet, payload };
 }

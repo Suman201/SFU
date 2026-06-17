@@ -1,0 +1,100 @@
+<main class="sfu-forms-shell">
+  <section class="brand-band">
+    <div>
+      <p class="eyebrow">Native WebRTC SFU</p>
+      <h1>Room console</h1>
+    </div>
+    <div class="brand-actions">
+      <button
+        class="theme-toggle"
+        type="button"
+        [class.dark]="theme.isDark()"
+        [title]="theme.label()"
+        [attr.aria-label]="theme.label()"
+        [attr.aria-pressed]="theme.isDark()"
+        (click)="toggleTheme()"
+      >
+        <span class="theme-toggle-track" aria-hidden="true">
+          <span class="theme-toggle-thumb"></span>
+        </span>
+      </button>
+      <button type="button" (click)="logout()" [disabled]="!auth.authenticated()">Sign out</button>
+    </div>
+  </section>
+
+  <section class="workspace">
+    <form class="panel" [formRoot]="authForm" (submit)="submitAuth($event)">
+      <header>
+        <h2>{{ authMode() === 'login' ? 'Sign in' : 'Create account' }}</h2>
+        <button type="button" (click)="toggleAuthMode()">{{ authMode() === 'login' ? 'Register' : 'Use login' }}</button>
+      </header>
+      @if (authMode() === 'register') {
+        <label>
+          Display name
+          <input [formField]="authForm.displayName" autocomplete="name">
+        </label>
+      }
+      <label>
+        Email
+        <input [formField]="authForm.email" autocomplete="email">
+      </label>
+      <label>
+        Password
+        <input type="password" [formField]="authForm.password" autocomplete="current-password">
+      </label>
+      <button class="primary" type="submit" [disabled]="authForm().invalid() || busy()">
+        {{ authMode() === 'login' ? 'Sign in' : 'Register' }}
+      </button>
+    </form>
+
+    <form class="panel" [formRoot]="roomForm" (submit)="createRoom($event)">
+      <header>
+        <h2>Create room</h2>
+        <span class="status" [class.ready]="auth.authenticated()">{{ auth.authenticated() ? 'Authenticated' : 'Auth required' }}</span>
+      </header>
+      <label>
+        Room name
+        <input [formField]="roomForm.name">
+      </label>
+      <div class="grid-two">
+        <label>
+          Visibility
+          <select [formField]="roomForm.visibility">
+            <option value="public">Public</option>
+            <option value="private">Private</option>
+            <option value="invite-only">Invite only</option>
+          </select>
+        </label>
+        <label>
+          Capacity
+          <input type="number" [formField]="roomForm.maxParticipants">
+        </label>
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" [formField]="roomForm.waitingRoomEnabled"> Waiting room</label>
+        <label><input type="checkbox" [formField]="roomForm.joinApprovalRequired"> Join approval</label>
+      </div>
+      <button class="primary" type="submit" [disabled]="roomForm().invalid() || !auth.authenticated() || busy()">Create</button>
+    </form>
+
+    <form class="panel" [formRoot]="joinForm" (submit)="joinRoom($event)">
+      <header>
+        <h2>Join room</h2>
+      </header>
+      <label>
+        Room ID
+        <input [formField]="joinForm.roomId">
+      </label>
+      <label>
+        Display name
+        <input [formField]="joinForm.displayName" autocomplete="name">
+      </label>
+      <label class="toggle-row"><input type="checkbox" [formField]="joinForm.asViewer"> Join as viewer</label>
+      <button class="primary" type="submit" [disabled]="joinForm().invalid() || !auth.authenticated() || busy()">Join</button>
+    </form>
+  </section>
+
+  @if (error()) {
+    <p class="error">{{ error() }}</p>
+  }
+</main>

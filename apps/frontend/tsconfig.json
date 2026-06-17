@@ -4,8 +4,6 @@
     "module": "ES2022",
     "moduleResolution": "Bundler",
     "target": "ES2022",
-    "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
     "paths": {
       "@native-sfu/contracts": [
         "../../packages/contracts/dist/index.d.ts"

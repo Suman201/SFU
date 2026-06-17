@@ -1,0 +1,46 @@
+<sfu-header />
+<main class="profile-shell">
+  <section class="profile-hero">
+    <div class="identity">
+      <span class="avatar">SL</span>
+      <div>
+        <p class="eyebrow">Student profile</p>
+        <h1>Student Learner</h1>
+        <span>Realtime classroom systems</span>
+      </div>
+    </div>
+    <a routerLink="/student/dashboard">Student dashboard</a>
+  </section>
+
+  <section class="metric-grid" aria-label="Student profile summary">
+    <article>
+      <span>{{ enrolledCount() }}</span>
+      <p>Enrolled batches</p>
+    </article>
+    <article>
+      <span>{{ activeTeachers() }}</span>
+      <p>Active teachers</p>
+    </article>
+    <article>
+      <span>{{ enrollment.availableBatches().length }}</span>
+      <p>Available batches</p>
+    </article>
+  </section>
+
+  <section class="profile-panel">
+    <header>
+      <p class="eyebrow">Account</p>
+      <h2>Profile details</h2>
+    </header>
+
+    <div class="detail-grid">
+      @for (detail of details; track detail.label) {
+        <article>
+          <span>{{ detail.label }}</span>
+          <strong>{{ detail.value }}</strong>
+        </article>
+      }
+    </div>
+  </section>
+</main>
+<sfu-footer />

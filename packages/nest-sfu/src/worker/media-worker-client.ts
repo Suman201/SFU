@@ -111,6 +111,7 @@ export class MediaWorkerClient extends EventEmitter {
         }
         reject(new Error(`Media worker ${this.workerId} did not become ready within ${this.config.startupTimeoutMs}ms`));
       }, this.config.startupTimeoutMs);
+      startupTimeout.unref?.();
       const child = fork(entry, [], {
         env: {
           ...process.env,
@@ -229,6 +230,7 @@ export class MediaWorkerClient extends EventEmitter {
         this.emit('ipc', { workerId: this.workerId, operation: command.type, status: 'timeout', durationMs });
         reject(new Error(`Media worker ${this.workerId} request ${command.type} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
+      timeout.unref?.();
       this.pending.set(id, {
         commandType: command.type,
         createdAt,
@@ -273,11 +275,20 @@ export class MediaWorkerClient extends EventEmitter {
     }
     this.ready = false;
     this.draining = false;
+    if (child.connected) {
+      child.disconnect();
+    }
     if (!child.killed) {
       child.kill('SIGTERM');
     }
     this.failPending(new Error(`Media worker ${this.workerId} stopped: ${reason}`));
-    await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 1000))]);
+    if (await waitForExit(exited, 1000)) {
+      return;
+    }
+    if (!child.killed || child.exitCode === null) {
+      child.kill('SIGKILL');
+    }
+    await waitForExit(exited, 500);
   }
 
   snapshot(): MediaWorkerHealth {
@@ -399,4 +410,21 @@ function errorFromShape(error: MediaWorkerErrorShape | undefined): Error {
   normalized.stack = error.stack;
   Object.assign(normalized, { status: error.status, code: error.code });
   return normalized;
+}
+
+async function waitForExit(exited: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      exited.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+        timer.unref?.();
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }

@@ -1,9 +1,7 @@
 import { EventEmitter } from 'events';
 import type { Producer } from '@native-sfu/contracts';
-import { PipeTransportManager } from '@native-sfu/sfu-core';
 import { MediaWorkerClient } from './media-worker-client';
 import { MediaWorkerPool } from './media-worker-pool';
-import { PipeTransportService } from '../pipe-transport.service';
 import { WorkerMediaService } from './worker-media.service';
 import type { NestSfuOptions } from '../nest-sfu.options';
 import type { MediaWorkerHealth } from './ipc';
@@ -61,12 +59,20 @@ describe('media worker runtime', () => {
     }
   });
 
-  it('registers pipe producers through worker IPC when a parent pipe transport exists', async () => {
-    const pipe = new PipeTransportService(new PipeTransportManager());
-    pipe.createTransport({ id: 'pipe-1', roomId: 'room-1', localNodeId: 'node-a', remoteNodeId: 'node-b' });
-    const service = new WorkerMediaService(workerOptions, pipe);
+  it('provisions worker-owned UDP pipe transports and registers pipe producers through worker IPC', async () => {
+    const service = new WorkerMediaService(workerOptions);
     await service.onModuleInit();
     try {
+      const snapshot = await service.ensurePipeTransport({
+        pipeTransportId: 'pipe-1',
+        roomId: 'room-1',
+        localNodeId: 'node-a',
+        remoteNodeId: 'node-b',
+        protocol: 'udp',
+        listenPort: 0,
+        advertisedIp: '127.0.0.1',
+        peerToken: 'worker-pipe-token'
+      });
       const producer: Producer = {
         id: 'producer-1',
         roomId: 'room-1',
@@ -81,9 +87,33 @@ describe('media worker runtime', () => {
         status: 'live',
         createdAt: new Date().toISOString()
       };
+      const consumer = {
+        id: 'consumer-1',
+        producerId: 'producer-1',
+        participantId: 'subscriber',
+        roomId: 'room-1',
+        transportId: 'pipe-1',
+        rtpParameters: producer.rtpParameters,
+        status: 'live' as const,
+        createdAt: new Date().toISOString()
+      };
 
       await service.registerPipeProducer(producer, 'pipe-1');
+      await service.registerPipeConsumer(consumer, 'pipe-1');
+      service.adaptiveTransportMetrics();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      const adaptiveMetrics = service.adaptiveTransportMetrics();
+      expect(snapshot.localEndpoint?.advertiseIp).toBe('127.0.0.1');
+      expect(snapshot.listening).toBe(true);
       expect(service.getProducer('producer-1')?.transportId).toBe('pipe-1');
+      expect(adaptiveMetrics.quality.transports.map((state) => state.transportId)).toContain('pipe-1');
+      expect(adaptiveMetrics.quality.rooms.map((state) => state.roomId)).toContain('room-1');
+      expect((await service.pipeTransportSnapshot('pipe-1'))?.active).toBe(true);
+      await service.closePipeTransport('pipe-1');
+      expect(await service.pipeTransportSnapshot('pipe-1')).toBeUndefined();
+      expect(service.getProducer('producer-1')).toBeUndefined();
+      expect(() => (service as any).pool.workerForProducer('producer-1')).toThrow('producer producer-1 is not assigned');
+      expect(() => (service as any).pool.workerForConsumer('consumer-1')).toThrow('consumer consumer-1 is not assigned');
     } finally {
       await service.onModuleDestroy();
     }
@@ -234,6 +264,43 @@ describe('media worker runtime', () => {
     expect(snapshot.failedRooms.sort()).toEqual(['room-crash', 'room-other']);
     await pool.stop();
   });
+
+  it('restarts a crashed worker and admits fresh rooms once replacement is ready', async () => {
+    const workers = new Map<string, FakeWorkerClient>();
+    const restartEvents: Array<{ workerId: string; reason: string }> = [];
+    const pool = new MediaWorkerPool({
+      options: workerOptions,
+      workerCount: 1,
+      requestTimeoutMs: 1000,
+      startupTimeoutMs: 1000,
+      heartbeatTimeoutMs: 1000,
+      restartBackoffMs: 5,
+      maxRoomsPerWorker: 10,
+      maxTransportsPerWorker: 10,
+      maxInFlightRequestsPerWorker: 10,
+      softIpcLatencyMs: 100,
+      hardIpcLatencyMs: 1000,
+      drainTimeoutMs: 1000,
+      workerFactory: (workerId) => {
+        const worker = new FakeWorkerClient(workerId);
+        workers.set(workerId, worker);
+        return worker as unknown as MediaWorkerClient;
+      }
+    });
+    pool.on('restart', (event) => restartEvents.push(event));
+    await pool.start();
+    pool.bindTransport('room-crash', 'transport-crash', 'media-worker-1');
+
+    workers.get('media-worker-1')!.crash();
+    await waitFor(() => restartEvents.length > 0 && pool.snapshot().workers[0]?.restarts === 1);
+
+    const selected = pool.workerForRoom('room-recovered');
+
+    expect(restartEvents).toEqual([{ workerId: 'media-worker-1', reason: 'crash' }]);
+    expect(selected.workerId).toBe('media-worker-1');
+    expect(pool.snapshot().workers[0]?.status).toBe('ready');
+    await pool.stop();
+  });
 });
 
 class FakeWorkerClient extends EventEmitter {
@@ -286,5 +353,15 @@ class FakeWorkerClient extends EventEmitter {
 
   crash(): void {
     this.emit('crash', { workerId: this.workerId, code: 1, signal: null });
+  }
+}
+
+async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error('Timed out waiting for worker recovery state');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }

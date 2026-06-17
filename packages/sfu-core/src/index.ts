@@ -13,6 +13,7 @@ export * from './rtcp/rtcp-packet';
 export * from './rtcp/rtcp-processor';
 export * from './rtp/rtp-header-extension';
 export * from './rtp/rtp-packet';
+export * from './rtp/packet-impairment-harness';
 export * from './rtp/packet-loss-harness';
 export * from './rtp/retransmission-cache';
 export * from './rtp/rtp-rewriter';

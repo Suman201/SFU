@@ -206,8 +206,8 @@ export class ProducerDocument {
   @Prop({ required: true, index: true })
   transportId!: string;
 
-  @Prop({ required: true, index: true })
-  nodeId!: string;
+  @Prop({ index: true })
+  nodeId?: string;
 
   @Prop({ min: 0.1, max: 10, default: 1 })
   priority!: number;

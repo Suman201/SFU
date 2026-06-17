@@ -1,13 +1,15 @@
 import 'reflect-metadata';
 import helmet from 'helmet';
-import { BadRequestException, RequestMethod, ValidationPipe, VersioningType } from '@nestjs/common';
+import { BadRequestException, ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpAdapterHost } from '@nestjs/core';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import { buildPublicRouteExclusions } from './bootstrap/public-routes';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { MetricsController } from './metrics/metrics.controller';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
@@ -23,13 +25,9 @@ async function bootstrap(): Promise<void> {
     origin: allowedOrigins,
     credentials: true
   });
+  const metricsPath = config.get<string>('metrics.path', 'metrics');
   app.setGlobalPrefix('api', {
-    exclude: [
-      { path: config.get<string>('metrics.path', 'metrics'), method: RequestMethod.GET },
-      { path: 'health', method: RequestMethod.GET },
-      { path: 'health/db', method: RequestMethod.GET },
-      { path: 'health/redis', method: RequestMethod.GET }
-    ]
+    exclude: buildPublicRouteExclusions(metricsPath)
   });
   app.enableVersioning({
     type: VersioningType.URI,
@@ -61,7 +59,19 @@ async function bootstrap(): Promise<void> {
   SwaggerModule.setup(config.get<string>('swagger.path', 'api/docs'), app, document);
 
   const port = config.get<number>('app.port', 3000);
+  if (normalizeOperationalPath(metricsPath) !== 'metrics') {
+    const metricsController = app.get(MetricsController, { strict: false });
+    app.getHttpAdapter().getInstance().get(`/${normalizeOperationalPath(metricsPath)}`, async (_req: unknown, res: { setHeader: (name: string, value: string) => void; send: (body: string) => void }) => {
+      res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+      res.send(await metricsController.prometheus());
+    });
+  }
   await app.listen(port, '0.0.0.0');
 }
 
 void bootstrap();
+
+function normalizeOperationalPath(path: string): string {
+  const normalized = path.trim().replace(/^\/+/, '').replace(/\/+$/, '');
+  return normalized.length > 0 ? normalized : 'metrics';
+}

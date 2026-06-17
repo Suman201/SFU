@@ -88,6 +88,18 @@ describe('SDP helpers', () => {
     expect(rtp.codecs[1]?.mimeType).toBe('video/rtx');
     expect(rtp.codecs[1]?.parameters?.apt).toBe(98);
   });
+
+  it('narrows the answer to the selected codec payload types', () => {
+    const offer = chromeVp9Offer();
+    const rtp = parseSdpRtpParameters('video', offer);
+    const answer = buildUnifiedPlanAnswer({ transport: transportFixture(), offer, direction: 'recvonly', mediaKind: 'video', rtpParameters: rtp });
+
+    expect(answer).toContain('m=video 9 UDP/TLS/RTP/SAVPF 98 99');
+    expect(answer).toContain('a=rtpmap:98 VP9/90000');
+    expect(answer).toContain('a=rtpmap:99 rtx/90000');
+    expect(answer).not.toContain('a=rtpmap:96 VP8/90000');
+    expect(answer).not.toContain('a=rtpmap:97 rtx/90000');
+  });
 });
 
 function transportFixture(): TransportOptions {

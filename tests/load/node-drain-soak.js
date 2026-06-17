@@ -18,9 +18,14 @@ export default function () {
     return;
   }
 
-  const healthBefore = http.get(`${baseUrl}/api/v1/health`);
-  check(healthBefore, {
-    'health endpoint reachable before drain': (response) => response.status === 200
+  const liveBefore = http.get(`${baseUrl}/health/live`);
+  check(liveBefore, {
+    'live endpoint reachable before drain': (response) => response.status === 200
+  });
+
+  const readyBefore = http.get(`${baseUrl}/health/ready`);
+  check(readyBefore, {
+    'ready endpoint reachable before drain': (response) => response.status === 200
   });
 
   if (!applyDrain) {
@@ -39,16 +44,31 @@ export default function () {
     'node health is draining': (response) => response.json('health') === 'draining'
   });
 
-  const healthDuringDrain = http.get(`${baseUrl}/api/v1/health`);
-  check(healthDuringDrain, {
-    'health endpoint reachable during drain': (response) => response.status === 200,
-    'health exposes draining local node': (response) => response.body.includes('"draining":true')
+  const liveDuringDrain = http.get(`${baseUrl}/health/live`);
+  check(liveDuringDrain, {
+    'live endpoint reachable during drain': (response) => response.status === 200
+  });
+
+  const readyDuringDrain = http.get(`${baseUrl}/health/ready`);
+  check(readyDuringDrain, {
+    'ready endpoint rejects new traffic during drain': (response) => response.status >= 500
+  });
+
+  const nodeDiagnosticsDuringDrain = http.get(`${baseUrl}/api/v1/media/diagnostics/node`, { headers });
+  check(nodeDiagnosticsDuringDrain, {
+    'node diagnostics remain reachable during drain': (response) => response.status === 200,
+    'node diagnostics expose traffic pause during drain': (response) => response.json('trafficReady') === false
   });
 
   const undrain = http.post(`${baseUrl}/api/v1/media/node/undrain`, null, { headers });
   check(undrain, {
     'node undrain accepted': (response) => response.status === 201 || response.status === 200,
     'node marked ready after undrain': (response) => response.json('draining') === false
+  });
+
+  const readyAfterUndrain = http.get(`${baseUrl}/health/ready`);
+  check(readyAfterUndrain, {
+    'ready endpoint recovers after undrain': (response) => response.status === 200
   });
 
   sleep(1);

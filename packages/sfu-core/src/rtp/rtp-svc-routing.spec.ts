@@ -70,6 +70,55 @@ describe('RtpRouter SVC routing', () => {
     expect(writes.length).toBe(4);
     expect(router.consumerLayerSnapshot(consumer.id)?.currentSvcLayers?.spatialLayerId).toBe(0);
   });
+
+  it('tracks pipe-backed SVC quality and layer accounting from external congestion observations', async () => {
+    const router = new RtpRouter({
+      enablePacing: false,
+      qualityUpdateIntervalMs: 0,
+      sequenceNumberGenerator: () => 34000,
+      timestampGenerator: () => 900000
+    });
+    const producer = createVp9Producer();
+    const consumer = {
+      ...createConsumer(producer, { spatialLayerId: 0, temporalLayerId: 0 }),
+      id: 'pipe-consumer-1',
+      participantId: 'pipe:node-b'
+    };
+    router.addProducer(producer);
+    router.addConsumer(consumer, async () => undefined);
+
+    expect(await router.route(rawPacket(7777, 98, 10, 1000, vp9Payload(0, 0, true)))).toBe(1);
+    expect(router.consumerLayerSnapshot(consumer.id)?.currentSvcLayers?.spatialLayerId).toBe(0);
+
+    const degraded = router.applyExternalConsumerTwccObservation(consumer.id, {
+      packetLoss: 0.2,
+      delayVariationMs: 110,
+      jitter: 80,
+      rtt: 150,
+      sendDeltaMs: 20,
+      receiveDeltaMs: 85,
+      timestamp: 2000
+    });
+    expect(degraded?.score.reasons).toContain('packet_loss');
+
+    expect(await router.route(rawPacket(7777, 98, 11, 2000, vp9Payload(0, 0, true)))).toBe(1);
+    expect(router.consumerLayerSnapshot(consumer.id)?.currentSvcLayers?.spatialLayerId).toBe(0);
+    expect(router.statistics().consumers[0]?.svcLayers.length).toBeGreaterThan(0);
+    expect(router.consumerQualitySnapshot(consumer.id)?.score.reasons).toContain('packet_loss');
+
+    const recovered = router.applyExternalConsumerTwccObservation(consumer.id, {
+      packetLoss: 0,
+      delayVariationMs: 5,
+      jitter: 3,
+      rtt: 30,
+      sendDeltaMs: 20,
+      receiveDeltaMs: 20,
+      timestamp: 3000
+    });
+    expect((recovered?.network.packetLoss ?? 1)).toBeLessThan(degraded?.network.packetLoss ?? 1);
+    expect(await router.route(rawPacket(7777, 98, 12, 3000, vp9Payload(0, 0, true)))).toBe(1);
+    expect((router.consumerQualitySnapshot(consumer.id)?.network.packetLoss ?? 1)).toBeLessThanOrEqual(degraded?.network.packetLoss ?? 1);
+  });
 });
 
 function createVp9Producer(): Producer {

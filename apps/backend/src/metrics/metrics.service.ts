@@ -1,9 +1,15 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
+import type { ClusterNodeInfo } from '@native-sfu/contracts';
+import type { MediaWorkerPoolSnapshot } from '@native-sfu/nest-sfu';
 import client, { Counter, Gauge, Histogram, Registry } from 'prom-client';
+import type { PipeCoordinatorHealthSnapshot, PipeCoordinatorSnapshot } from '../cluster/pipe-coordinator.service';
 
 @Injectable()
 export class MetricsService implements OnModuleInit {
   readonly registry = new Registry();
+  private readonly trackedMediaWorkerIds = new Set<string>();
+  private readonly trackedMediaWorkerDropReasons = new Set<string>();
+  private readonly trackedPipeTransportIds = new Set<string>();
   readonly activeRooms = new Gauge({ name: 'sfu_active_rooms', help: 'Current active rooms' });
   readonly activeParticipants = new Gauge({ name: 'sfu_active_participants', help: 'Current active participants', labelNames: ['roomId'] });
   readonly activeTransports = new Gauge({ name: 'sfu_active_transports', help: 'Current active media transports' });
@@ -170,6 +176,41 @@ export class MetricsService implements OnModuleInit {
     help: 'Allocated bitrate in bits per second',
     labelNames: ['roomId', 'participantId', 'scope']
   });
+  readonly transportTargetBitrate = new Gauge({
+    name: 'sfu_transport_target_bitrate_bps',
+    help: 'Transport target bitrate in bits per second',
+    labelNames: ['roomId', 'participantId', 'transportId']
+  });
+  readonly transportAllocatedBitrate = new Gauge({
+    name: 'sfu_transport_allocated_bitrate_bps',
+    help: 'Transport allocated bitrate in bits per second',
+    labelNames: ['roomId', 'participantId', 'transportId']
+  });
+  readonly transportActualBitrate = new Gauge({
+    name: 'sfu_transport_actual_bitrate_bps',
+    help: 'Transport actual bitrate in bits per second',
+    labelNames: ['roomId', 'participantId', 'transportId']
+  });
+  readonly roomTargetBitrate = new Gauge({
+    name: 'sfu_room_target_bitrate_bps',
+    help: 'Room target bitrate in bits per second',
+    labelNames: ['roomId']
+  });
+  readonly roomAllocatedBitrate = new Gauge({
+    name: 'sfu_room_allocated_bitrate_bps',
+    help: 'Room allocated bitrate in bits per second',
+    labelNames: ['roomId']
+  });
+  readonly roomActualBitrate = new Gauge({
+    name: 'sfu_room_actual_bitrate_bps',
+    help: 'Room actual bitrate in bits per second',
+    labelNames: ['roomId']
+  });
+  readonly roomCongestionState = new Gauge({
+    name: 'sfu_room_congestion_state',
+    help: 'Room congestion state as a one-hot gauge',
+    labelNames: ['roomId', 'state']
+  });
   readonly mediaWorkerModeInfo = new Gauge({
     name: 'sfu_media_worker_mode_info',
     help: 'Media worker mode. Value is 1 for the active mode.',
@@ -323,10 +364,35 @@ export class MetricsService implements OnModuleInit {
     help: 'Media worker RTCP packets per second',
     labelNames: ['workerId']
   });
+  readonly mediaWorkerDroppedRtpPackets = new Gauge({
+    name: 'sfu_media_worker_dropped_rtp_packets',
+    help: 'Media worker RTP packets dropped before forwarding',
+    labelNames: ['workerId']
+  });
+  readonly mediaWorkerDroppedRtpReasons = new Gauge({
+    name: 'sfu_media_worker_dropped_rtp_reasons',
+    help: 'Media worker RTP packet drops by reason',
+    labelNames: ['workerId', 'reason']
+  });
+  readonly mediaWorkerHeartbeatAgeMs = new Gauge({
+    name: 'sfu_media_worker_heartbeat_age_ms',
+    help: 'Milliseconds since the last media worker heartbeat',
+    labelNames: ['workerId']
+  });
   readonly roomAdmissionRejections = new Counter({
     name: 'sfu_room_admission_rejections_total',
     help: 'Room admission or media allocation rejections',
     labelNames: ['reason']
+  });
+  readonly producerNodeIdFallbacks = new Counter({
+    name: 'sfu_producer_node_id_fallbacks_total',
+    help: 'Legacy producer node-id compatibility fallbacks by resolution path',
+    labelNames: ['resolution']
+  });
+  readonly producerNodeIdBackfills = new Counter({
+    name: 'sfu_producer_node_id_backfills_total',
+    help: 'Legacy producer node-id backfills persisted by resolution path',
+    labelNames: ['resolution']
   });
   readonly clusterNodeInfo = new Gauge({
     name: 'sfu_cluster_node_info',
@@ -459,6 +525,11 @@ export class MetricsService implements OnModuleInit {
     help: 'Pipe transport or coordination errors',
     labelNames: ['code']
   });
+  readonly pipeCleanupFailures = new Counter({
+    name: 'sfu_pipe_cleanup_failures_total',
+    help: 'Pipe cleanup or release failures by operation stage',
+    labelNames: ['stage']
+  });
   readonly pipeBackpressureEvents = new Counter({
     name: 'sfu_pipe_backpressure_events_total',
     help: 'Pipe transport backpressure events',
@@ -513,6 +584,15 @@ export class MetricsService implements OnModuleInit {
     help: 'RTCP packets forwarded into media routing from pipe coordination',
     labelNames: ['direction']
   });
+  readonly pipeRejectedRequests = new Gauge({
+    name: 'sfu_pipe_rejected_requests',
+    help: 'Pipe coordination requests currently tracked as rejected by the local node'
+  });
+  readonly pipeRuntimeInfo = new Gauge({
+    name: 'sfu_pipe_runtime_info',
+    help: 'Current local pipe runtime configuration and support state. Value is always 1.',
+    labelNames: ['enabled', 'durable', 'supported', 'mediaWorkerMode', 'defaultProtocol', 'advertiseIpConfigured', 'reason']
+  });
   readonly controlPlaneMessagesPublished = new Counter({
     name: 'sfu_control_plane_messages_published_total',
     help: 'Durable control-plane messages published by stream',
@@ -546,6 +626,16 @@ export class MetricsService implements OnModuleInit {
   readonly crossNodeSubscribers = new Gauge({
     name: 'sfu_cross_node_subscribers',
     help: 'Active subscribers served through cross-node pipe forwarding'
+  });
+  readonly metricsRefreshFailures = new Counter({
+    name: 'sfu_metrics_refresh_failures_total',
+    help: 'Runtime metric refresh failures before a Prometheus scrape',
+    labelNames: ['component']
+  });
+  readonly metricsRefreshStatus = new Gauge({
+    name: 'sfu_metrics_refresh_status',
+    help: 'Last runtime metric refresh status before a Prometheus scrape',
+    labelNames: ['component']
   });
 
   onModuleInit(): void {
@@ -594,6 +684,13 @@ export class MetricsService implements OnModuleInit {
       this.recommendedBitrate,
       this.availableBitrate,
       this.allocatedBitrate,
+      this.transportTargetBitrate,
+      this.transportAllocatedBitrate,
+      this.transportActualBitrate,
+      this.roomTargetBitrate,
+      this.roomAllocatedBitrate,
+      this.roomActualBitrate,
+      this.roomCongestionState,
       this.mediaWorkerModeInfo,
       this.mediaWorkersConfigured,
       this.mediaWorkersReady,
@@ -625,7 +722,12 @@ export class MetricsService implements OnModuleInit {
       this.mediaWorkerCpuSystemMicros,
       this.mediaWorkerRtpPacketRate,
       this.mediaWorkerRtcpPacketRate,
+      this.mediaWorkerDroppedRtpPackets,
+      this.mediaWorkerDroppedRtpReasons,
+      this.mediaWorkerHeartbeatAgeMs,
       this.roomAdmissionRejections,
+      this.producerNodeIdFallbacks,
+      this.producerNodeIdBackfills,
       this.clusterNodeInfo,
       this.clusterRegisteredNodes,
       this.clusterHealthyNodes,
@@ -654,6 +756,7 @@ export class MetricsService implements OnModuleInit {
       this.pipeSetupLatency,
       this.pipeTeardowns,
       this.pipeErrors,
+      this.pipeCleanupFailures,
       this.pipeBackpressureEvents,
       this.pipeCoordinationRetries,
       this.pipeCoordinationTimeouts,
@@ -665,17 +768,205 @@ export class MetricsService implements OnModuleInit {
       this.pipePeerAdmissionFailures,
       this.pipeSignalingReroutes,
       this.pipeRtcpForwarded,
+      this.pipeRejectedRequests,
+      this.pipeRuntimeInfo,
       this.controlPlaneMessagesPublished,
       this.controlPlanePublishFailures,
       this.controlPlaneMessagesDelivered,
       this.controlPlaneConsumeFailures,
       this.controlPlaneReplayMessages,
       this.controlPlaneDuplicateSuppressions,
-      this.crossNodeSubscribers
+      this.crossNodeSubscribers,
+      this.metricsRefreshFailures,
+      this.metricsRefreshStatus
     ].forEach((metric) => this.registry.registerMetric(metric as never));
+  }
+
+  refreshMediaWorkerSnapshot(snapshot: MediaWorkerPoolSnapshot): void {
+    const currentWorkerIds = new Set<string>();
+    const currentDropReasons = new Set<string>();
+    this.mediaWorkerModeInfo.labels('in-process').set(snapshot.mode === 'in-process' ? 1 : 0);
+    this.mediaWorkerModeInfo.labels('worker').set(snapshot.mode === 'worker' ? 1 : 0);
+    this.mediaWorkersConfigured.set(snapshot.workerCount);
+    this.mediaWorkersReady.set(snapshot.readyWorkers);
+    this.mediaWorkerFailedRooms.set(snapshot.failedRooms.length);
+    for (const workerId of this.trackedMediaWorkerIds) {
+      if (!snapshot.workers.some((worker) => worker.workerId === workerId)) {
+        this.clearMediaWorkerMetrics(workerId);
+      }
+    }
+    for (const worker of snapshot.workers) {
+      currentWorkerIds.add(worker.workerId);
+      this.mediaWorkerUp.labels(worker.workerId).set(worker.healthy ? 1 : 0);
+      this.mediaWorkerDraining.labels(worker.workerId).set(worker.draining ? 1 : 0);
+      this.mediaWorkerOverloaded.labels(worker.workerId).set(worker.overloaded ? 1 : 0);
+      this.mediaWorkerCapacityScore.labels(worker.workerId).set(worker.capacityScore ?? 0);
+      if (worker.pid) {
+        this.mediaWorkerPid.labels(worker.workerId).set(worker.pid);
+      } else {
+        this.mediaWorkerPid.remove(worker.workerId);
+      }
+      this.mediaWorkerUptimeMs.labels(worker.workerId).set(worker.uptimeMs ?? 0);
+      this.mediaWorkerRooms.labels(worker.workerId).set(worker.activeRooms);
+      this.mediaWorkerTransports.labels(worker.workerId).set(worker.activeTransports);
+      this.mediaWorkerProducers.labels(worker.workerId).set(worker.activeProducers);
+      this.mediaWorkerConsumers.labels(worker.workerId).set(worker.activeConsumers);
+      this.mediaWorkerRtpPackets.labels(worker.workerId).set(worker.rtpPackets);
+      this.mediaWorkerRtcpPackets.labels(worker.workerId).set(worker.rtcpPackets);
+      this.mediaWorkerRtpPacketRate.labels(worker.workerId).set(worker.rtpPacketRate ?? 0);
+      this.mediaWorkerRtcpPacketRate.labels(worker.workerId).set(worker.rtcpPacketRate ?? 0);
+      this.mediaWorkerDroppedRtpPackets.labels(worker.workerId).set(worker.droppedRtpPackets ?? 0);
+      this.mediaWorkerIpcInflight.labels(worker.workerId).set(worker.inflightRequests);
+      this.mediaWorkerIpcQueueDepth.labels(worker.workerId).set(worker.queueDepth);
+      this.mediaWorkerIpcTimeouts.labels(worker.workerId).set(worker.ipcTimeouts);
+      this.mediaWorkerRssBytes.labels(worker.workerId).set(worker.memory?.rss ?? 0);
+      this.mediaWorkerHeapUsedBytes.labels(worker.workerId).set(worker.memory?.heapUsed ?? 0);
+      this.mediaWorkerCpuUserMicros.labels(worker.workerId).set(worker.cpu?.user ?? 0);
+      this.mediaWorkerCpuSystemMicros.labels(worker.workerId).set(worker.cpu?.system ?? 0);
+      this.mediaWorkerHeartbeatAgeMs.labels(worker.workerId).set(heartbeatAgeMs(worker.lastHeartbeatAt));
+      for (const [reason, count] of Object.entries(worker.droppedRtpReasons ?? {})) {
+        currentDropReasons.add(`${worker.workerId}:${reason}`);
+        this.mediaWorkerDroppedRtpReasons.labels(worker.workerId, reason).set(count ?? 0);
+      }
+    }
+    for (const key of this.trackedMediaWorkerDropReasons) {
+      if (!currentDropReasons.has(key)) {
+        const [workerId, reason] = splitTrackedMetricKey(key);
+        this.mediaWorkerDroppedRtpReasons.remove(workerId, reason);
+      }
+    }
+    this.trackedMediaWorkerIds.clear();
+    for (const workerId of currentWorkerIds) {
+      this.trackedMediaWorkerIds.add(workerId);
+    }
+    this.trackedMediaWorkerDropReasons.clear();
+    for (const key of currentDropReasons) {
+      this.trackedMediaWorkerDropReasons.add(key);
+    }
+  }
+
+  refreshClusterSnapshot(snapshot: {
+    localNode: ClusterNodeInfo;
+    nodes: ClusterNodeInfo[];
+    ownedRoomCount: number;
+  }): void {
+    this.clusterNodeInfo.labels(snapshot.localNode.nodeId, snapshot.localNode.region ?? 'unknown', snapshot.localNode.zone ?? 'unknown').set(1);
+    this.clusterRegisteredNodes.set(snapshot.nodes.length);
+    this.clusterHealthyNodes.set(snapshot.nodes.filter((node) => node.health === 'healthy').length);
+    this.clusterDrainingNodes.set(snapshot.nodes.filter((node) => node.draining).length);
+    this.clusterOwnedRooms.set(snapshot.ownedRoomCount);
+    this.clusterNodeCapacityScore.labels(snapshot.localNode.nodeId).set(snapshot.localNode.capacity.capacityScore);
+  }
+
+  refreshPipeSnapshot(summary: PipeCoordinatorSnapshot, health: PipeCoordinatorHealthSnapshot): void {
+    this.activePipeTransports.set(summary.activePipeTransports);
+    this.pipeProducers.set(summary.pipeProducers);
+    this.pipeConsumers.set(summary.pipeConsumers);
+    this.pipeRejectedRequests.set(summary.rejectedRequests);
+    this.pipeRuntimeInfo.reset();
+    this.pipeRuntimeInfo
+      .labels(
+        String(health.enabled),
+        String(health.durable),
+        String(health.supported),
+        health.mediaWorkerMode,
+        health.defaultProtocol,
+        String(health.advertiseIpConfigured),
+        health.reason ?? 'none'
+      )
+      .set(1);
+  }
+
+  refreshPipeTransportMetrics(snapshots: Array<{ id: string; rtpPackets: number; droppedPackets: number }>): void {
+    const currentTransportIds = new Set<string>();
+    for (const snapshot of snapshots) {
+      currentTransportIds.add(snapshot.id);
+      this.trackedPipeTransportIds.add(snapshot.id);
+      this.pipePacketLoss.labels(snapshot.id).set(snapshot.rtpPackets > 0 ? snapshot.droppedPackets / snapshot.rtpPackets : 0);
+    }
+    for (const pipeTransportId of [...this.trackedPipeTransportIds]) {
+      if (!currentTransportIds.has(pipeTransportId)) {
+        this.clearPipeTransportMetrics(pipeTransportId);
+      }
+    }
+  }
+
+  updatePipeTransportMetrics(pipeTransportId: string, stats: { packetLoss?: number; jitterMs?: number; rttMs?: number }): void {
+    this.trackedPipeTransportIds.add(pipeTransportId);
+    this.pipePacketLoss.labels(pipeTransportId).set(stats.packetLoss ?? 0);
+    this.pipeJitter.labels(pipeTransportId).set(stats.jitterMs ?? 0);
+    this.pipeRtt.labels(pipeTransportId).set(stats.rttMs ?? 0);
+  }
+
+  clearPipeTransportMetrics(pipeTransportId: string): void {
+    this.pipePacketLoss.remove(pipeTransportId);
+    this.pipeJitter.remove(pipeTransportId);
+    this.pipeRtt.remove(pipeTransportId);
+    this.trackedPipeTransportIds.delete(pipeTransportId);
+  }
+
+  markRefreshStatus(component: 'cluster' | 'pipe' | 'media_workers', ok: boolean): void {
+    this.metricsRefreshStatus.labels(component).set(ok ? 1 : 0);
+    if (!ok) {
+      this.metricsRefreshFailures.labels(component).inc();
+    }
   }
 
   async text(): Promise<string> {
     return this.registry.metrics();
   }
+
+  private clearMediaWorkerMetrics(workerId: string): void {
+    this.mediaWorkerUp.remove(workerId);
+    this.mediaWorkerDraining.remove(workerId);
+    this.mediaWorkerOverloaded.remove(workerId);
+    this.mediaWorkerCapacityScore.remove(workerId);
+    this.mediaWorkerPid.remove(workerId);
+    this.mediaWorkerUptimeMs.remove(workerId);
+    this.mediaWorkerRooms.remove(workerId);
+    this.mediaWorkerTransports.remove(workerId);
+    this.mediaWorkerProducers.remove(workerId);
+    this.mediaWorkerConsumers.remove(workerId);
+    this.mediaWorkerRtpPackets.remove(workerId);
+    this.mediaWorkerRtcpPackets.remove(workerId);
+    this.mediaWorkerRtpPacketRate.remove(workerId);
+    this.mediaWorkerRtcpPacketRate.remove(workerId);
+    this.mediaWorkerDroppedRtpPackets.remove(workerId);
+    this.mediaWorkerIpcInflight.remove(workerId);
+    this.mediaWorkerIpcQueueDepth.remove(workerId);
+    this.mediaWorkerIpcTimeouts.remove(workerId);
+    this.mediaWorkerRssBytes.remove(workerId);
+    this.mediaWorkerHeapUsedBytes.remove(workerId);
+    this.mediaWorkerCpuUserMicros.remove(workerId);
+    this.mediaWorkerCpuSystemMicros.remove(workerId);
+    this.mediaWorkerHeartbeatAgeMs.remove(workerId);
+    this.trackedMediaWorkerIds.delete(workerId);
+    for (const key of [...this.trackedMediaWorkerDropReasons]) {
+      const [trackedWorkerId, reason] = splitTrackedMetricKey(key);
+      if (trackedWorkerId !== workerId) {
+        continue;
+      }
+      this.mediaWorkerDroppedRtpReasons.remove(trackedWorkerId, reason);
+      this.trackedMediaWorkerDropReasons.delete(key);
+    }
+  }
+}
+
+function heartbeatAgeMs(lastHeartbeatAt?: string): number {
+  if (!lastHeartbeatAt) {
+    return 0;
+  }
+  const heartbeatAt = Date.parse(lastHeartbeatAt);
+  if (Number.isNaN(heartbeatAt)) {
+    return 0;
+  }
+  return Math.max(0, Date.now() - heartbeatAt);
+}
+
+function splitTrackedMetricKey(key: string): [string, string] {
+  const separator = key.indexOf(':');
+  if (separator === -1) {
+    return [key, 'unknown'];
+  }
+  return [key.slice(0, separator), key.slice(separator + 1)];
 }

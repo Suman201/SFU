@@ -13,6 +13,7 @@ import type {
   GetConsumerQualityRequest,
   GetProducerQualityRequest,
   GetRoomQualityRequest,
+  GetTransportQualityRequest,
   ProducerQualityState,
   RoomQualityState,
   SetProducerPriorityRequest,
@@ -57,6 +58,7 @@ export interface ClientToServerEvents {
   'consumer:get-quality': (request: GetConsumerQualityRequest, ack: Ack<ConsumerQualityState>) => void;
   'producer:get-quality': (request: GetProducerQualityRequest, ack: Ack<ProducerQualityState>) => void;
   'room:get-quality': (request: GetRoomQualityRequest, ack: Ack<RoomQualityState>) => void;
+  'transport:get-quality': (request: GetTransportQualityRequest, ack: Ack<TransportQualityState>) => void;
   'consumer:close': (request: { consumerId: string }, ack: Ack<void>) => void;
   'permission:update': (request: { roomId: string; participantId: string; permissions: Partial<Permissions> }, ack: Ack<void>) => void;
   'participant:kick': (request: { roomId: string; participantId: string; reason?: string }, ack: Ack<void>) => void;

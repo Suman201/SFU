@@ -1,0 +1,55 @@
+<sfu-header />
+<main class="student-page-shell">
+  <section class="page-heading">
+    <div>
+      <p class="eyebrow">Student explore</p>
+      <h1>Find a batch</h1>
+    </div>
+    <a class="dashboard-link" routerLink="/student/dashboard">Dashboard · {{ enrolledCount() }}</a>
+  </section>
+
+  <section class="batch-grid" aria-label="Available batches">
+    @for (batch of batches(); track batch.id) {
+      <article class="batch-card" [class.enrolled]="isEnrolled(batch)">
+        <header>
+          <div>
+            <p class="level">{{ batch.level }}</p>
+            <h2>{{ batch.title }}</h2>
+          </div>
+          <span class="capacity">{{ enrollment.enrollmentCount(batch) }}/{{ batch.capacity }}</span>
+        </header>
+
+        <p class="subject">{{ batch.subject }}</p>
+
+        <div class="teacher-row">
+          <span>{{ batch.teacherName[0] }}</span>
+          <div>
+            <strong>{{ batch.teacherName }}</strong>
+            <small>{{ batch.teacherTitle }}</small>
+          </div>
+        </div>
+
+        <div class="batch-meta">
+          <span>{{ batch.schedule }}</span>
+          <span>{{ batch.durationMinutes }} min</span>
+          <span>{{ batch.totalWeeks }} weeks</span>
+          <span>Starts {{ formatStart(batch.startsAt) }}</span>
+        </div>
+
+        <div class="progress-track" aria-label="Batch enrollment">
+          <span [style.width.%]="enrollmentPercent(batch)"></span>
+        </div>
+
+        <footer>
+          <span>{{ seatsLabel(batch) }}</span>
+          @if (isEnrolled(batch)) {
+            <a routerLink="/student/dashboard">Enrolled</a>
+          } @else {
+            <button type="button" class="primary" (click)="enroll(batch)">Enroll</button>
+          }
+        </footer>
+      </article>
+    }
+  </section>
+</main>
+<sfu-footer />

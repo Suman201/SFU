@@ -1,0 +1,68 @@
+<sfu-header />
+<main class="student-dashboard-shell">
+  <section class="dashboard-heading">
+    <div>
+      <p class="eyebrow">Student workspace</p>
+      <h1>Dashboard</h1>
+    </div>
+    <a routerLink="/student/explore">Explore batches</a>
+  </section>
+
+  <section class="summary-grid" aria-label="Student dashboard summary">
+    <article>
+      <span>{{ enrolledBatches().length }}</span>
+      <p>Enrolled batches</p>
+    </article>
+    <article>
+      <span>{{ totalWeeks() }}</span>
+      <p>Total weeks</p>
+    </article>
+    <article>
+      <span>{{ nextBatch()?.teacherName ?? 'None' }}</span>
+      <p>Next teacher</p>
+    </article>
+  </section>
+
+  <section class="enrolled-panel">
+    <header>
+      <div>
+        <p class="eyebrow">Enrolled</p>
+        <h2>My batches</h2>
+      </div>
+    </header>
+
+    @if (enrolledBatches().length) {
+      <div class="enrolled-list">
+        @for (batch of enrolledBatches(); track batch.id) {
+          <article class="enrolled-row">
+            <div class="batch-main">
+              <span>{{ batch.teacherName[0] }}</span>
+              <div>
+                <strong>{{ batch.title }}</strong>
+                <small>{{ batch.teacherName }} · {{ batch.subject }}</small>
+              </div>
+            </div>
+
+            <div class="batch-details">
+              <span>{{ batch.schedule }}</span>
+              <span>{{ batch.durationMinutes }} min</span>
+              <span>Starts {{ formatStart(batch.startsAt) }}</span>
+            </div>
+
+            <div class="batch-actions">
+              <button class="primary" type="button" (click)="openClass(batch)">Open class</button>
+              <button type="button" (click)="leave(batch)">Leave</button>
+            </div>
+          </article>
+        }
+      </div>
+    } @else {
+      <div class="empty-state">
+        <h3>No enrolled batches</h3>
+        <p>Explore batches and enroll to see them here.</p>
+        <a routerLink="/student/explore">Browse batches</a>
+      </div>
+    }
+  </section>
+</main>
+<sfu-footer />

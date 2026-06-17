@@ -3,10 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import type {
   Consumer,
+  ConsumerStatus,
   PipeAckMessage,
   PipeCloseMessage,
+  PipeConsumerFeedbackMessage,
+  PipeConsumerFeedbackObservation,
   PipeConsumerCloseMessage,
   PipeConsumerCreateMessage,
+  PipeConsumerStateMessage,
   PipeCoordinationEnvelope,
   PipeCoordinationMessage,
   PipeCreateMessage,
@@ -25,6 +29,8 @@ import type {
   PipeStatsMessage,
   Producer,
   ProducerStatus,
+  RtpLayerSelection,
+  SvcLayerSelection,
   RtpParameters
 } from '@native-sfu/contracts';
 import { MediaService, PipeTransportManager, PipeTransportService } from '@native-sfu/nest-sfu';
@@ -37,6 +43,7 @@ const PIPE_PROTOCOL_VERSION = 1;
 const PROCESSED_COMMAND_CACHE_LIMIT = 5000;
 const SETTLED_REQUEST_CACHE_LIMIT = 5000;
 const PROCESSED_COMMAND_TTL_SECONDS = 300;
+const REMOTE_CONSUMER_FEEDBACK_INTERVAL_MS = 100;
 
 type PipeCommandMessage = Exclude<PipeCoordinationMessage, PipeAckMessage>;
 type PipeCommandEnvelope = PipeCoordinationEnvelope<PipeCommandMessage>;
@@ -68,15 +75,41 @@ interface SettledPipeRequest {
 
 interface PipeRtcpMediaHandler {
   getProducer?: (producerId: string) => Producer | undefined;
+  ensurePipeTransport?: (options: {
+    pipeTransportId: string;
+    roomId: string;
+    localNodeId: string;
+    remoteNodeId: string;
+    protocol: PipeTransportProtocol;
+    listenPort?: number;
+    advertisedIp?: string;
+    peerToken?: string;
+    remoteEndpoint?: PipeNodeEndpoint;
+  }) => Promise<{ localEndpoint?: PipeNodeEndpoint }> | { localEndpoint?: PipeNodeEndpoint };
   registerPipeProducer?: (producer: Producer, pipeTransportId?: string) => Promise<void> | void;
   registerPipeConsumer?: (consumer: Consumer, pipeTransportId?: string) => Promise<void> | void;
   unregisterProducer?: (producerId: string) => Promise<void> | void;
   unregisterConsumer?: (consumerId: string) => Promise<void> | void;
   setProducerPaused?: (producerId: string, paused: boolean) => Promise<void> | void;
   setProducerPriority?: (producerId: string, priority: number) => void;
+  setConsumerPaused?: (consumerId: string, paused: boolean) => Promise<void> | void;
+  setConsumerPreferredLayers?: (consumerId: string, preferredLayers: RtpLayerSelection) => Promise<unknown> | unknown;
+  setConsumerPreferredSvcLayers?: (consumerId: string, preferredSvcLayers: SvcLayerSelection) => Promise<unknown> | unknown;
+  setConsumerPriority?: (consumerId: string, priority: number) => void;
+  applyConsumerTwccObservation?: (consumerId: string, observation: PipeConsumerFeedbackObservation) => Promise<unknown> | unknown;
   handlePipeRtp?: (pipeTransportId: string, producerId: string | undefined, packet: Buffer) => Promise<number> | number;
   handlePipeRtcp?: (pipeTransportId: string, packet: Buffer, options?: { roomId?: string; sourceParticipantId?: string }) => Promise<unknown> | unknown;
   closePipeTransport?: (pipeTransportId: string) => Promise<void> | void;
+  onConsumerTwccObservation?: (
+    listener: (state: {
+      roomId: string;
+      participantId: string;
+      consumerId: string;
+      producerId: string;
+      transportId: string;
+      observation: PipeConsumerFeedbackObservation;
+    }) => void
+  ) => (() => void) | void;
 }
 
 interface PipeTransportState {
@@ -97,10 +130,13 @@ interface RemoteFeedState {
   ownerClaimedAt: string;
   remoteNodeId: string;
   producerId: string;
+  bindingEpoch: string;
   proxyProducerId: string;
   pipeConsumerId: string;
   protocol: PipeTransportProtocol;
   references: number;
+  nextStateVersion: number;
+  nextFeedbackVersion: number;
   createdAt: string;
 }
 
@@ -111,6 +147,7 @@ interface RemotePublishedProducerState {
   ownerClaimedAt: string;
   remoteNodeId: string;
   producerId: string;
+  bindingEpoch: string;
   participantId: string;
   kind: Producer['kind'];
   priority?: number;
@@ -118,7 +155,21 @@ interface RemotePublishedProducerState {
   pipeConsumerId: string;
   proxyProducerId: string;
   protocol: PipeTransportProtocol;
+  nextStateVersion: number;
   createdAt: string;
+}
+
+interface PipeConsumerDemandState {
+  status?: ConsumerStatus;
+  priority?: number;
+  preferredLayers?: RtpLayerSelection;
+  preferredSvcLayers?: SvcLayerSelection;
+}
+
+interface RemoteConsumerFeedbackState {
+  consumerId: string;
+  feedbackVersion: number;
+  observation: PipeConsumerFeedbackObservation;
 }
 
 export interface PipeCoordinatorSnapshot {
@@ -157,6 +208,9 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
   private readonly ownerFeeds = new Map<string, RemoteFeedState>();
   private readonly remoteFeeds = new Map<string, RemoteFeedState>();
   private readonly remoteConsumerFeeds = new Map<string, string>();
+  private readonly remoteConsumerFeedback = new Map<string, RemoteConsumerFeedbackState>();
+  private readonly consumerFeedbackVersions = new Map<string, number>();
+  private readonly pendingRemoteConsumerFeedbackFlushes = new Map<string, NodeJS.Timeout>();
   private readonly ownerPublishedProducers = new Map<string, RemotePublishedProducerState>();
   private readonly remotePublishedProducers = new Map<string, RemotePublishedProducerState>();
   private readonly pendingRequests = new Map<string, PendingPipeRequest>();
@@ -186,6 +240,9 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     this.pipePortRange = config.get<{ min: number; max: number }>('pipe.portRange', { min: 41000, max: 41100 });
     this.nextUdpPort = this.pipePortRange.min;
     this.pipe = pipe ?? new PipeTransportService(new PipeTransportManager());
+    this.media?.onConsumerTwccObservation?.((state) => {
+      void this.handleRemoteConsumerTwccObservation(state);
+    });
   }
 
   async onModuleInit(): Promise<void> {
@@ -212,6 +269,10 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
+    for (const timer of this.pendingRemoteConsumerFeedbackFlushes.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingRemoteConsumerFeedbackFlushes.clear();
     for (const pending of [...this.pendingRequests.values()]) {
       this.settlePendingRequest(
         pending,
@@ -292,7 +353,9 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async ensureRemoteConsumerFeed(request: { roomId: string; producerId: string; consumerId: string }): Promise<{ pipeTransportId: string; proxyProducerId: string }> {
+  async ensureRemoteConsumerFeed(
+    request: { roomId: string; producerId: string; consumerId: string } & PipeConsumerDemandState
+  ): Promise<{ pipeTransportId: string; proxyProducerId: string }> {
     this.assertEnabled();
     this.assertPipeMediaSupported('pipe:feed:request');
     const lookup = await this.registry.lookupRoomOwner(request.roomId);
@@ -314,6 +377,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     }
     const protocol = this.preferredPipeProtocol();
     const pipeTransportId = transportIdFor(request.roomId, lookup.owner.nodeId, this.registry.localNodeId(), protocol);
+    const bindingEpoch = randomUUID();
     const message: PipeFeedRequestMessage = {
       type: 'pipe:feed:request',
       roomId: request.roomId,
@@ -322,7 +386,12 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       ownerNodeId: lookup.owner.nodeId,
       remoteNodeId: this.registry.localNodeId(),
       producerId: request.producerId,
-      protocol
+      bindingEpoch,
+      protocol,
+      status: request.status,
+      priority: request.priority,
+      preferredLayers: request.preferredLayers,
+      preferredSvcLayers: request.preferredSvcLayers
     };
     try {
       await this.publish(lookup.owner.nodeId, message);
@@ -337,10 +406,13 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       ownerClaimedAt: lookup.owner.claimedAt,
       remoteNodeId: this.registry.localNodeId(),
       producerId: request.producerId,
+      bindingEpoch,
       proxyProducerId: request.producerId,
       pipeConsumerId: ownerPipeConsumerId(request.producerId, this.registry.localNodeId()),
       protocol,
       references: 1,
+      nextStateVersion: 2,
+      nextFeedbackVersion: 1,
       createdAt: new Date().toISOString()
     };
     this.remoteFeeds.set(feedKey, state);
@@ -348,11 +420,133 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     return { pipeTransportId, proxyProducerId: state.proxyProducerId };
   }
 
+  async syncRemoteConsumerState(
+    request: { roomId: string; producerId: string; consumerId?: string } & PipeConsumerDemandState
+  ): Promise<void> {
+    const state =
+      (request.consumerId ? this.remoteFeeds.get(this.remoteConsumerFeeds.get(request.consumerId) ?? '') : undefined)
+      ?? this.findRemoteFeedState(request.roomId, request.producerId);
+    if (!state) {
+      return;
+    }
+    try {
+      await this.publish(state.ownerNodeId, {
+        type: 'pipe:consumer:state',
+        roomId: request.roomId,
+        pipeTransportId: state.pipeTransportId,
+        ownerClaimedAt: state.ownerClaimedAt,
+        ownerNodeId: state.ownerNodeId,
+        remoteNodeId: state.remoteNodeId,
+        consumerId: state.pipeConsumerId,
+        producerId: state.producerId,
+        bindingEpoch: state.bindingEpoch,
+        stateVersion: state.nextStateVersion++,
+        status: request.status,
+        priority: request.priority,
+        preferredLayers: request.preferredLayers,
+        preferredSvcLayers: request.preferredSvcLayers
+      });
+    } catch (error) {
+      this.metrics.pipeRemoteAttachFailures.labels('consumer_state').inc();
+      throw error;
+    }
+  }
+
+  private async handleRemoteConsumerTwccObservation(state: {
+    roomId: string;
+    participantId: string;
+    consumerId: string;
+    producerId: string;
+    transportId: string;
+    observation: PipeConsumerFeedbackObservation;
+  }): Promise<void> {
+    const feedKey = this.remoteConsumerFeeds.get(state.consumerId);
+    if (!feedKey) {
+      return;
+    }
+    const feed = this.remoteFeeds.get(feedKey);
+    if (!feed || feed.roomId !== state.roomId || feed.producerId !== state.producerId) {
+      return;
+    }
+    const feedbackKey = consumerKey(feed.pipeTransportId, feed.pipeConsumerId);
+    const timestamp = state.observation.timestamp ?? Date.now();
+    const existing = this.remoteConsumerFeedback.get(state.consumerId);
+    if (existing && (existing.observation.timestamp ?? 0) > timestamp) {
+      return;
+    }
+    this.remoteConsumerFeedback.set(state.consumerId, {
+      consumerId: state.consumerId,
+      feedbackVersion: feed.nextFeedbackVersion,
+      observation: {
+        ...state.observation,
+        timestamp
+      }
+    });
+    this.scheduleRemoteConsumerFeedbackFlush(feedKey);
+  }
+
+  private scheduleRemoteConsumerFeedbackFlush(feedKey: string): void {
+    if (this.pendingRemoteConsumerFeedbackFlushes.has(feedKey)) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      this.pendingRemoteConsumerFeedbackFlushes.delete(feedKey);
+      void this.flushRemoteConsumerFeedback(feedKey);
+    }, REMOTE_CONSUMER_FEEDBACK_INTERVAL_MS);
+    timer.unref?.();
+    this.pendingRemoteConsumerFeedbackFlushes.set(feedKey, timer);
+  }
+
+  private clearRemoteConsumerFeedbackFlush(feedKey: string): void {
+    const timer = this.pendingRemoteConsumerFeedbackFlushes.get(feedKey);
+    if (!timer) {
+      return;
+    }
+    clearTimeout(timer);
+    this.pendingRemoteConsumerFeedbackFlushes.delete(feedKey);
+  }
+
+  private async flushRemoteConsumerFeedback(feedKey: string): Promise<void> {
+    const state = this.remoteFeeds.get(feedKey);
+    if (!state) {
+      return;
+    }
+    const feedback = [...this.remoteConsumerFeeds.entries()]
+      .filter(([, value]) => value === feedKey)
+      .map(([consumerId]) => this.remoteConsumerFeedback.get(consumerId))
+      .filter((entry): entry is RemoteConsumerFeedbackState => Boolean(entry));
+    if (feedback.length === 0) {
+      return;
+    }
+    const observation = aggregateRemoteConsumerFeedback(feedback);
+    const feedbackVersion = state.nextFeedbackVersion;
+    try {
+      await this.publish(state.ownerNodeId, {
+        type: 'pipe:consumer:feedback',
+        roomId: state.roomId,
+        pipeTransportId: state.pipeTransportId,
+        ownerClaimedAt: state.ownerClaimedAt,
+        ownerNodeId: state.ownerNodeId,
+        remoteNodeId: state.remoteNodeId,
+        consumerId: state.pipeConsumerId,
+        producerId: state.producerId,
+        bindingEpoch: state.bindingEpoch,
+        feedbackVersion,
+        observation
+      });
+      state.nextFeedbackVersion = feedbackVersion + 1;
+    } catch (error) {
+      this.metrics.pipeRemoteAttachFailures.labels('consumer_feedback').inc();
+      this.logger.warn(`Pipe coordination consumer feedback sync failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   async releaseRemoteConsumerFeed(consumerId: string, reason: PipeFeedReleaseMessage['reason'] = 'consumer_closed'): Promise<void> {
     const feedKey = this.remoteConsumerFeeds.get(consumerId);
     if (!feedKey) {
       return;
     }
+    this.remoteConsumerFeedback.delete(consumerId);
     this.remoteConsumerFeeds.delete(consumerId);
     const state = this.remoteFeeds.get(feedKey);
     if (!state) {
@@ -362,6 +556,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     if (state.references > 0) {
       return;
     }
+    this.clearRemoteConsumerFeedbackFlush(feedKey);
     this.remoteFeeds.delete(feedKey);
     try {
       await this.publish(state.ownerNodeId, {
@@ -372,6 +567,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
         ownerNodeId: state.ownerNodeId,
         remoteNodeId: state.remoteNodeId,
         producerId: state.producerId,
+        bindingEpoch: state.bindingEpoch,
         reason
       });
     } catch (error) {
@@ -400,6 +596,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     }
     const protocol = this.preferredPipeProtocol();
     const pipeTransportId = transportIdFor(request.roomId, lookup.owner.nodeId, this.registry.localNodeId(), protocol);
+    const bindingEpoch = randomUUID();
     const message: PipePublishRequestMessage = {
       type: 'pipe:publish:request',
       roomId: request.roomId,
@@ -411,6 +608,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       participantId: request.producer.participantId,
       kind: request.producer.kind,
       rtpParameters: request.producer.rtpParameters,
+      bindingEpoch,
       protocol,
       status: request.producer.status,
       priority: request.producer.priority
@@ -428,6 +626,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       ownerClaimedAt: lookup.owner.claimedAt,
       remoteNodeId: this.registry.localNodeId(),
       producerId: request.producer.id,
+      bindingEpoch,
       participantId: request.producer.participantId,
       kind: request.producer.kind,
       priority: request.producer.priority,
@@ -435,6 +634,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       pipeConsumerId: remotePublishPipeConsumerId(request.producer.id, this.registry.localNodeId()),
       proxyProducerId: request.producer.id,
       protocol,
+      nextStateVersion: 1,
       createdAt: new Date().toISOString()
     };
     this.remotePublishedProducers.set(request.producer.id, state);
@@ -459,6 +659,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
         ownerNodeId: state.ownerNodeId,
         remoteNodeId: state.remoteNodeId,
         producerId: state.producerId,
+        bindingEpoch: state.bindingEpoch,
         reason
       });
     } catch (error) {
@@ -472,8 +673,10 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     if (!state) {
       return;
     }
-    state.status = request.status ?? state.status;
-    state.priority = request.priority ?? state.priority;
+    this.updatePublishedProducerState(request.roomId, request.producerId, {
+      status: request.status,
+      priority: request.priority
+    });
     try {
       await this.publish(state.ownerNodeId, {
         type: 'pipe:producer:state',
@@ -483,11 +686,98 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
         ownerNodeId: state.ownerNodeId,
         remoteNodeId: state.remoteNodeId,
         producerId: request.producerId,
+        bindingEpoch: state.bindingEpoch,
         status: request.status,
         priority: request.priority
       });
     } catch (error) {
       this.metrics.pipeRemotePublishFailures.labels('publish_state').inc();
+      throw error;
+    }
+  }
+
+  async syncOriginProducerState(request: { roomId: string; producerId: string; status?: ProducerStatus; priority?: number }): Promise<boolean> {
+    const state = this.findOwnerPublishedProducerState(request.roomId, request.producerId);
+    if (!state) {
+      return false;
+    }
+    this.updatePublishedProducerState(request.roomId, request.producerId, {
+      status: request.status,
+      priority: request.priority
+    });
+    try {
+      await this.publish(state.remoteNodeId, {
+        type: 'pipe:producer:state',
+        roomId: request.roomId,
+        pipeTransportId: state.pipeTransportId,
+        ownerClaimedAt: state.ownerClaimedAt,
+        ownerNodeId: state.ownerNodeId,
+        remoteNodeId: state.remoteNodeId,
+        producerId: request.producerId,
+        bindingEpoch: state.bindingEpoch,
+        status: request.status,
+        priority: request.priority
+      });
+      return true;
+    } catch (error) {
+      this.metrics.pipeRemotePublishFailures.labels('publish_state').inc();
+      throw error;
+    }
+  }
+
+  async syncOriginConsumerState(request: { roomId: string; producerId: string } & PipeConsumerDemandState): Promise<boolean> {
+    const state = this.findOwnerPublishedProducerState(request.roomId, request.producerId);
+    if (!state) {
+      return false;
+    }
+    try {
+      await this.publish(state.remoteNodeId, {
+        type: 'pipe:consumer:state',
+        roomId: request.roomId,
+        pipeTransportId: state.pipeTransportId,
+        ownerClaimedAt: state.ownerClaimedAt,
+        ownerNodeId: state.ownerNodeId,
+        remoteNodeId: state.remoteNodeId,
+        consumerId: state.pipeConsumerId,
+        producerId: state.producerId,
+        bindingEpoch: state.bindingEpoch,
+        stateVersion: state.nextStateVersion++,
+        status: request.status,
+        priority: request.priority,
+        preferredLayers: request.preferredLayers,
+        preferredSvcLayers: request.preferredSvcLayers
+      });
+      return true;
+    } catch (error) {
+      this.metrics.pipeRemotePublishFailures.labels('consumer_state').inc();
+      throw error;
+    }
+  }
+
+  async closeOriginProducer(
+    request: {
+      roomId: string;
+      producerId: string;
+      reason?: PipeProducerCloseMessage['reason'];
+    }
+  ): Promise<boolean> {
+    const state = this.findOwnerPublishedProducerState(request.roomId, request.producerId);
+    if (!state) {
+      return false;
+    }
+    try {
+      await this.publish(state.remoteNodeId, {
+        type: 'pipe:producer:close',
+        roomId: request.roomId,
+        pipeTransportId: state.pipeTransportId,
+        ownerClaimedAt: state.ownerClaimedAt,
+        producerId: request.producerId,
+        bindingEpoch: state.bindingEpoch,
+        reason: request.reason
+      });
+      return true;
+    } catch (error) {
+      this.metrics.pipeRemotePublishFailures.labels('publish_close').inc();
       throw error;
     }
   }
@@ -553,14 +843,18 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
 
   snapshot(): PipeCoordinatorSnapshot {
     const pipeSnapshots = [...this.pipe.snapshots(), ...this.pipe.udpSnapshots()];
-    const activePipeTransports = pipeSnapshots.filter((snapshot) => snapshot.active).length;
+    const activePipeTransportIds = new Set(pipeSnapshots.filter((snapshot) => snapshot.active).map((snapshot) => snapshot.id));
+    for (const [pipeTransportId, state] of this.pipeStates) {
+      if (state.protocol === 'udp' && this.mediaWorkerMode === 'worker') {
+        activePipeTransportIds.add(pipeTransportId);
+      }
+    }
+    const activePipeTransports = activePipeTransportIds.size;
     this.metrics.activePipeTransports.set(activePipeTransports);
     this.metrics.pipeProducers.set(this.pipeProducers.size);
     this.metrics.pipeConsumers.set(this.pipeConsumers.size);
     this.metrics.crossNodeSubscribers.set(this.pipeConsumers.size);
-    for (const snapshot of pipeSnapshots) {
-      this.metrics.pipePacketLoss.labels(snapshot.id).set(snapshot.rtpPackets > 0 ? snapshot.droppedPackets / snapshot.rtpPackets : 0);
-    }
+    this.metrics.refreshPipeTransportMetrics(pipeSnapshots);
     return {
       enabled: this.enabled,
       localNodeId: this.registry.localNodeId(),
@@ -608,10 +902,14 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       await this.handleProducerClose(message);
     } else if (message.type === 'pipe:consumer:create') {
       await this.handleConsumerCreate(message);
+    } else if (message.type === 'pipe:consumer:state') {
+      await this.handleConsumerState(message);
+    } else if (message.type === 'pipe:consumer:feedback') {
+      await this.handleConsumerFeedback(message);
     } else if (message.type === 'pipe:consumer:close') {
       await this.handleConsumerClose(message);
     } else if (message.type === 'pipe:close') {
-      this.handleClose(message);
+      await this.handleClose(message);
     } else if (message.type === 'pipe:rtcp') {
       await this.handleRtcp(message);
     } else if (message.type === 'pipe:stats') {
@@ -640,7 +938,9 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     this.assertPipeMediaSupported('pipe:publish:request');
     this.assertPeerAllowed(message.remoteNodeId);
     const publicationKey = remotePublishedProducerKey(message.roomId, message.ownerNodeId, message.remoteNodeId, message.producerId);
-    if (this.ownerPublishedProducers.has(publicationKey)) {
+    const currentBindingEpoch = message.bindingEpoch ?? publicationKey;
+    const existingPublication = this.ownerPublishedProducers.get(publicationKey);
+    if (existingPublication?.bindingEpoch === currentBindingEpoch) {
       return;
     }
     if (!this.pipeStates.get(message.pipeTransportId)?.remoteEndpoint) {
@@ -658,6 +958,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       pipeTransportId: message.pipeTransportId,
       ownerClaimedAt: message.ownerClaimedAt,
       producerId: message.producerId,
+      bindingEpoch: currentBindingEpoch,
       participantId: message.participantId,
       kind: message.kind,
       rtpParameters: message.rtpParameters,
@@ -672,8 +973,11 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       ownerClaimedAt: message.ownerClaimedAt,
       consumerId: pipeConsumerId,
       producerId: message.producerId,
+      bindingEpoch: currentBindingEpoch,
+      stateVersion: 1,
       participantId: `pipe:${message.ownerNodeId}`,
-      rtpParameters: message.rtpParameters
+      rtpParameters: message.rtpParameters,
+      status: 'paused'
     });
     this.ownerPublishedProducers.set(publicationKey, {
       roomId: message.roomId,
@@ -682,6 +986,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       ownerClaimedAt: message.ownerClaimedAt ?? '',
       remoteNodeId: message.remoteNodeId,
       producerId: message.producerId,
+      bindingEpoch: currentBindingEpoch,
       participantId: message.participantId,
       kind: message.kind,
       priority: message.priority,
@@ -689,6 +994,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       pipeConsumerId,
       proxyProducerId: message.producerId,
       protocol: message.protocol,
+      nextStateVersion: 2,
       createdAt: new Date().toISOString()
     });
   }
@@ -702,7 +1008,8 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     }
     const feedKey = remoteFeedKey(message.roomId, message.ownerNodeId, message.remoteNodeId, message.producerId);
     const existing = this.ownerFeeds.get(feedKey);
-    if (existing) {
+    const currentBindingEpoch = message.bindingEpoch ?? feedKey;
+    if (existing?.bindingEpoch === currentBindingEpoch) {
       existing.references += 1;
       return;
     }
@@ -725,8 +1032,14 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       ownerClaimedAt: message.ownerClaimedAt,
       consumerId: pipeConsumerId,
       producerId: message.producerId,
+      bindingEpoch: currentBindingEpoch,
+      stateVersion: 1,
       participantId: `pipe:${message.remoteNodeId}`,
-      rtpParameters: producer.rtpParameters
+      rtpParameters: producer.rtpParameters,
+      status: message.status,
+      priority: message.priority,
+      preferredLayers: message.preferredLayers,
+      preferredSvcLayers: message.preferredSvcLayers
     };
     await this.handleConsumerCreate(pipeConsumerMessage);
     await this.publish(message.remoteNodeId, {
@@ -735,6 +1048,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       pipeTransportId,
       ownerClaimedAt: message.ownerClaimedAt,
       producerId: message.producerId,
+      bindingEpoch: currentBindingEpoch,
       participantId: producer.participantId,
       kind: producer.kind,
       rtpParameters: producer.rtpParameters
@@ -746,10 +1060,13 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       ownerClaimedAt: message.ownerClaimedAt ?? '',
       remoteNodeId: message.remoteNodeId,
       producerId: message.producerId,
+      bindingEpoch: currentBindingEpoch,
       proxyProducerId: message.producerId,
       pipeConsumerId,
       protocol,
       references: 1,
+      nextStateVersion: 2,
+      nextFeedbackVersion: 1,
       createdAt: new Date().toISOString()
     });
   }
@@ -757,7 +1074,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
   private async handlePublishRelease(message: PipePublishReleaseMessage): Promise<void> {
     const publicationKey = remotePublishedProducerKey(message.roomId, message.ownerNodeId, message.remoteNodeId, message.producerId);
     const state = this.ownerPublishedProducers.get(publicationKey);
-    if (!state) {
+    if (!state || !matchesBindingEpoch(message.bindingEpoch, state.bindingEpoch)) {
       return;
     }
     this.ownerPublishedProducers.delete(publicationKey);
@@ -768,6 +1085,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       pipeTransportId: state.pipeTransportId,
       ownerClaimedAt: state.ownerClaimedAt,
       producerId: state.proxyProducerId,
+      bindingEpoch: state.bindingEpoch,
       reason: 'producer_closed'
     });
     await this.publish(state.remoteNodeId, {
@@ -777,10 +1095,13 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       ownerClaimedAt: state.ownerClaimedAt,
       consumerId: state.pipeConsumerId,
       producerId: state.producerId,
+      bindingEpoch: state.bindingEpoch,
+      stateVersion: state.nextStateVersion++,
       reason: 'producer_closed'
     });
     for (const [feedKey, feed] of dependentFeeds) {
       this.ownerFeeds.delete(feedKey);
+      this.consumerFeedbackVersions.delete(consumerKey(feed.pipeTransportId, feed.pipeConsumerId));
       await this.handleConsumerClose({
         type: 'pipe:consumer:close',
         roomId: feed.roomId,
@@ -788,6 +1109,8 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
         ownerClaimedAt: feed.ownerClaimedAt,
         consumerId: feed.pipeConsumerId,
         producerId: feed.producerId,
+        bindingEpoch: feed.bindingEpoch,
+        stateVersion: feed.nextStateVersion++,
         reason: 'producer_closed'
       });
       await this.publish(feed.remoteNodeId, {
@@ -796,6 +1119,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
         pipeTransportId: feed.pipeTransportId,
         ownerClaimedAt: feed.ownerClaimedAt,
         producerId: feed.proxyProducerId,
+        bindingEpoch: feed.bindingEpoch,
         reason: 'producer_closed'
       });
     }
@@ -804,7 +1128,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
   private async handleFeedRelease(message: PipeFeedReleaseMessage): Promise<void> {
     const feedKey = remoteFeedKey(message.roomId, message.ownerNodeId, message.remoteNodeId, message.producerId);
     const state = this.ownerFeeds.get(feedKey);
-    if (!state) {
+    if (!state || !matchesBindingEpoch(message.bindingEpoch, state.bindingEpoch)) {
       return;
     }
     state.references = Math.max(0, state.references - 1);
@@ -812,6 +1136,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     this.ownerFeeds.delete(feedKey);
+    this.consumerFeedbackVersions.delete(consumerKey(state.pipeTransportId, state.pipeConsumerId));
     await this.handleConsumerClose({
       type: 'pipe:consumer:close',
       roomId: state.roomId,
@@ -819,6 +1144,8 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       ownerClaimedAt: state.ownerClaimedAt,
       consumerId: state.pipeConsumerId,
       producerId: state.producerId,
+      bindingEpoch: state.bindingEpoch,
+      stateVersion: state.nextStateVersion++,
       reason: 'consumer_closed'
     });
     await this.publish(state.remoteNodeId, {
@@ -827,19 +1154,26 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       pipeTransportId: state.pipeTransportId,
       ownerClaimedAt: state.ownerClaimedAt,
       producerId: state.proxyProducerId,
+      bindingEpoch: state.bindingEpoch,
       reason: 'consumer_closed'
     });
   }
 
   private async handleProducerCreate(message: PipeProducerCreateMessage): Promise<void> {
     await this.ensureImplicitPipeTransport(message);
-    this.pipe.createProducer(message.pipeTransportId, {
-      id: message.producerId,
-      participantId: message.participantId,
-      rtpParameters: message.rtpParameters,
-      ssrcMappings: message.ssrcMappings
+    const currentBindingEpoch = message.bindingEpoch ?? producerKey(message.pipeTransportId, message.producerId);
+    if (this.pipe.hasTransport(message.pipeTransportId)) {
+      this.pipe.createProducer(message.pipeTransportId, {
+        id: message.producerId,
+        participantId: message.participantId,
+        rtpParameters: message.rtpParameters,
+        ssrcMappings: message.ssrcMappings
+      });
+    }
+    this.pipeProducers.set(producerKey(message.pipeTransportId, message.producerId), {
+      ...message,
+      bindingEpoch: currentBindingEpoch
     });
-    this.pipeProducers.set(producerKey(message.pipeTransportId, message.producerId), message);
     await this.media?.registerPipeProducer?.(
       {
         id: message.producerId,
@@ -863,6 +1197,14 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleProducerState(message: PipeProducerStateMessage): Promise<void> {
+    const current = this.pipeProducers.get(producerKey(message.pipeTransportId, message.producerId));
+    if (current && !matchesBindingEpoch(message.bindingEpoch, current.bindingEpoch)) {
+      return;
+    }
+    this.updatePublishedProducerState(message.roomId, message.producerId, {
+      status: message.status,
+      priority: message.priority
+    });
     if (message.status) {
       await this.media?.setProducerPaused?.(message.producerId, message.status === 'paused');
     }
@@ -872,21 +1214,47 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleProducerClose(message: PipeProducerCloseMessage): Promise<void> {
-    this.pipe.closeProducer(message.pipeTransportId, message.producerId);
+    const publishedState = this.remotePublishedProducers.get(message.producerId);
+    if (
+      publishedState &&
+      publishedState.roomId === message.roomId &&
+      publishedState.pipeTransportId === message.pipeTransportId &&
+      matchesBindingEpoch(message.bindingEpoch, publishedState.bindingEpoch)
+    ) {
+      await this.media?.unregisterProducer?.(message.producerId);
+      await this.releaseRemoteProducerPublication(message.producerId, toPublishReleaseReason(message.reason));
+      return;
+    }
+    const current = this.pipeProducers.get(producerKey(message.pipeTransportId, message.producerId));
+    if (current && !matchesBindingEpoch(message.bindingEpoch, current.bindingEpoch)) {
+      return;
+    }
+    if (this.pipe.hasTransport(message.pipeTransportId)) {
+      this.pipe.closeProducer(message.pipeTransportId, message.producerId);
+    }
     this.pipeProducers.delete(producerKey(message.pipeTransportId, message.producerId));
     await this.media?.unregisterProducer?.(message.producerId);
   }
 
   private async handleConsumerCreate(message: PipeConsumerCreateMessage): Promise<void> {
     await this.ensureImplicitPipeTransport(message);
-    this.pipe.createConsumer(message.pipeTransportId, {
-      id: message.consumerId,
-      producerId: message.producerId,
-      participantId: message.participantId,
-      rtpParameters: message.rtpParameters,
-      ssrcMappings: message.ssrcMappings
+    const stateKey = consumerKey(message.pipeTransportId, message.consumerId);
+    const currentBindingEpoch = message.bindingEpoch ?? stateKey;
+    if (this.pipe.hasTransport(message.pipeTransportId)) {
+      this.pipe.createConsumer(message.pipeTransportId, {
+        id: message.consumerId,
+        producerId: message.producerId,
+        participantId: message.participantId,
+        rtpParameters: message.rtpParameters,
+        ssrcMappings: message.ssrcMappings
+      });
+    }
+    this.pipeConsumers.set(stateKey, {
+      ...message,
+      bindingEpoch: currentBindingEpoch,
+      stateVersion: message.stateVersion ?? 1
     });
-    this.pipeConsumers.set(consumerKey(message.pipeTransportId, message.consumerId), message);
+    this.consumerFeedbackVersions.delete(stateKey);
     await this.media?.registerPipeConsumer?.(
       {
         id: message.consumerId,
@@ -895,22 +1263,89 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
         roomId: message.roomId,
         transportId: message.pipeTransportId,
         rtpParameters: message.rtpParameters,
-        status: 'live',
+        priority: message.priority,
+        status: message.status ?? 'live',
         createdAt: new Date().toISOString()
       },
       message.pipeTransportId
     );
+    await this.applyConsumerState(message.pipeTransportId, message.consumerId, {
+      status: message.status,
+      priority: message.priority,
+      preferredLayers: message.preferredLayers,
+      preferredSvcLayers: message.preferredSvcLayers
+    });
+  }
+
+  private async handleConsumerState(message: PipeConsumerStateMessage): Promise<void> {
+    const stateKey = consumerKey(message.pipeTransportId, message.consumerId);
+    const current = this.pipeConsumers.get(stateKey);
+    if (!current) {
+      return;
+    }
+    if (!matchesBindingEpoch(message.bindingEpoch, current.bindingEpoch)) {
+      return;
+    }
+    if (typeof message.stateVersion === 'number' && typeof current.stateVersion === 'number' && message.stateVersion <= current.stateVersion) {
+      return;
+    }
+    await this.applyConsumerState(message.pipeTransportId, message.consumerId, {
+      status: message.status,
+      priority: message.priority,
+      preferredLayers: message.preferredLayers,
+      preferredSvcLayers: message.preferredSvcLayers
+    });
+    this.pipeConsumers.set(stateKey, {
+      ...current,
+      status: message.status ?? current.status,
+      priority: message.priority ?? current.priority,
+      preferredLayers: message.preferredLayers ?? current.preferredLayers,
+      preferredSvcLayers: message.preferredSvcLayers ?? current.preferredSvcLayers,
+      stateVersion: message.stateVersion ?? current.stateVersion
+    });
+  }
+
+  private async handleConsumerFeedback(message: PipeConsumerFeedbackMessage): Promise<void> {
+    const stateKey = consumerKey(message.pipeTransportId, message.consumerId);
+    const current = this.pipeConsumers.get(stateKey);
+    if (!current) {
+      return;
+    }
+    if (!matchesBindingEpoch(message.bindingEpoch, current.bindingEpoch)) {
+      return;
+    }
+    const lastFeedbackVersion = this.consumerFeedbackVersions.get(stateKey) ?? 0;
+    if (typeof message.feedbackVersion === 'number' && message.feedbackVersion <= lastFeedbackVersion) {
+      return;
+    }
+    await this.media?.applyConsumerTwccObservation?.(message.consumerId, message.observation);
+    if (typeof message.feedbackVersion === 'number') {
+      this.consumerFeedbackVersions.set(stateKey, message.feedbackVersion);
+    }
   }
 
   private async handleConsumerClose(message: PipeConsumerCloseMessage): Promise<void> {
-    this.pipe.closeConsumer(message.pipeTransportId, message.consumerId);
-    this.pipeConsumers.delete(consumerKey(message.pipeTransportId, message.consumerId));
+    const stateKey = consumerKey(message.pipeTransportId, message.consumerId);
+    const current = this.pipeConsumers.get(stateKey);
+    if (current) {
+      if (!matchesBindingEpoch(message.bindingEpoch, current.bindingEpoch)) {
+        return;
+      }
+      if (typeof message.stateVersion === 'number' && typeof current.stateVersion === 'number' && message.stateVersion < current.stateVersion) {
+        return;
+      }
+    }
+    if (this.pipe.hasTransport(message.pipeTransportId)) {
+      this.pipe.closeConsumer(message.pipeTransportId, message.consumerId);
+    }
+    this.pipeConsumers.delete(stateKey);
+    this.consumerFeedbackVersions.delete(stateKey);
     await this.media?.unregisterConsumer?.(message.consumerId);
   }
 
-  private handleClose(message: PipeCloseMessage): void {
+  private async handleClose(message: PipeCloseMessage): Promise<void> {
     this.pipe.closeTransport(message.pipeTransportId, message.reason ?? 'manual');
-    void this.media?.closePipeTransport?.(message.pipeTransportId);
+    await this.media?.closePipeTransport?.(message.pipeTransportId);
     this.pipeStates.delete(message.pipeTransportId);
     for (const key of [...this.pipeProducers.keys()]) {
       if (key.startsWith(`${message.pipeTransportId}:`)) {
@@ -920,8 +1355,10 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     for (const key of [...this.pipeConsumers.keys()]) {
       if (key.startsWith(`${message.pipeTransportId}:`)) {
         this.pipeConsumers.delete(key);
+        this.consumerFeedbackVersions.delete(key);
       }
     }
+    const remoteFeedKeys = new Set<string>();
     for (const [key, state] of this.ownerFeeds) {
       if (state.pipeTransportId === message.pipeTransportId) {
         this.ownerFeeds.delete(key);
@@ -929,8 +1366,18 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     }
     for (const [key, state] of this.remoteFeeds) {
       if (state.pipeTransportId === message.pipeTransportId) {
+        remoteFeedKeys.add(key);
         this.remoteFeeds.delete(key);
       }
+    }
+    for (const [consumerId, feedKey] of this.remoteConsumerFeeds) {
+      if (remoteFeedKeys.has(feedKey)) {
+        this.remoteConsumerFeeds.delete(consumerId);
+        this.remoteConsumerFeedback.delete(consumerId);
+      }
+    }
+    for (const feedKey of remoteFeedKeys) {
+      this.clearRemoteConsumerFeedbackFlush(feedKey);
     }
     for (const [key, state] of this.ownerPublishedProducers) {
       if (state.pipeTransportId === message.pipeTransportId) {
@@ -942,6 +1389,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
         this.remotePublishedProducers.delete(producerId);
       }
     }
+    this.metrics.clearPipeTransportMetrics(message.pipeTransportId);
     this.metrics.pipeTeardowns.labels(message.reason ?? 'manual').inc();
   }
 
@@ -959,9 +1407,48 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
   }
 
   private handleStats(message: PipeStatsMessage): void {
-    this.metrics.pipePacketLoss.labels(message.pipeTransportId).set(message.packetLoss ?? 0);
-    this.metrics.pipeJitter.labels(message.pipeTransportId).set(message.jitterMs ?? 0);
-    this.metrics.pipeRtt.labels(message.pipeTransportId).set(message.rttMs ?? 0);
+    if (!this.pipeStates.has(message.pipeTransportId)) {
+      return;
+    }
+    this.metrics.updatePipeTransportMetrics(message.pipeTransportId, {
+      packetLoss: message.packetLoss,
+      jitterMs: message.jitterMs,
+      rttMs: message.rttMs
+    });
+  }
+
+  private async applyConsumerState(
+    pipeTransportId: string,
+    consumerId: string,
+    state: PipeConsumerDemandState
+  ): Promise<void> {
+    const record = this.pipeConsumers.get(consumerKey(pipeTransportId, consumerId));
+    if (record) {
+      if (state.status !== undefined) {
+        record.status = state.status;
+      }
+      if (state.priority !== undefined) {
+        record.priority = state.priority;
+      }
+      if (state.preferredLayers !== undefined) {
+        record.preferredLayers = state.preferredLayers;
+      }
+      if (state.preferredSvcLayers !== undefined) {
+        record.preferredSvcLayers = state.preferredSvcLayers;
+      }
+    }
+    if (state.status !== undefined) {
+      await this.media?.setConsumerPaused?.(consumerId, state.status === 'paused');
+    }
+    if (state.preferredLayers) {
+      await this.media?.setConsumerPreferredLayers?.(consumerId, state.preferredLayers);
+    }
+    if (state.preferredSvcLayers) {
+      await this.media?.setConsumerPreferredSvcLayers?.(consumerId, state.preferredSvcLayers);
+    }
+    if (typeof state.priority === 'number') {
+      this.media?.setConsumerPriority?.(consumerId, state.priority);
+    }
   }
 
   private handleAck(envelope: PipeCoordinationEnvelope<PipeAckMessage>): void {
@@ -1053,8 +1540,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     }
     if (
       envelope.payload.type === 'pipe:publish:request' ||
-      envelope.payload.type === 'pipe:publish:release' ||
-      envelope.payload.type === 'pipe:producer:state'
+      envelope.payload.type === 'pipe:publish:release'
     ) {
       if (envelope.targetNodeId !== ownerNodeId) {
         return { ok: false, code: 'owner_mismatch', message: 'Remote publish command must target the current room owner', reply: true, countRejection: true };
@@ -1064,6 +1550,52 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       }
       if (envelope.payload.remoteNodeId !== envelope.sourceNodeId) {
         return { ok: false, code: 'owner_mismatch', message: 'Remote publish command source node does not match its declared remote node', reply: true, countRejection: true };
+      }
+      return { ok: true };
+    }
+    if (envelope.payload.type === 'pipe:producer:state') {
+      if (envelope.payload.ownerNodeId !== ownerNodeId) {
+        return { ok: false, code: 'owner_mismatch', message: 'Remote producer state owner does not match the current room owner', reply: true, countRejection: true };
+      }
+      const ownerToRemote = envelope.sourceNodeId === ownerNodeId && envelope.targetNodeId === envelope.payload.remoteNodeId;
+      const remoteToOwner = envelope.targetNodeId === ownerNodeId && envelope.payload.remoteNodeId === envelope.sourceNodeId;
+      if (!ownerToRemote && !remoteToOwner) {
+        return {
+          ok: false,
+          code: 'owner_mismatch',
+          message: 'Remote producer state must flow between the current room owner and the declared remote node',
+          reply: true,
+          countRejection: true
+        };
+      }
+      return { ok: true };
+    }
+    if (envelope.payload.type === 'pipe:consumer:state' || envelope.payload.type === 'pipe:consumer:feedback') {
+      if (envelope.payload.ownerNodeId !== ownerNodeId) {
+        return {
+          ok: false,
+          code: 'owner_mismatch',
+          message:
+            envelope.payload.type === 'pipe:consumer:feedback'
+              ? 'Remote consumer feedback owner does not match the current room owner'
+              : 'Remote consumer state owner does not match the current room owner',
+          reply: true,
+          countRejection: true
+        };
+      }
+      const ownerToRemote = envelope.sourceNodeId === ownerNodeId && envelope.targetNodeId === envelope.payload.remoteNodeId;
+      const remoteToOwner = envelope.targetNodeId === ownerNodeId && envelope.payload.remoteNodeId === envelope.sourceNodeId;
+      if (!ownerToRemote && !remoteToOwner) {
+        return {
+          ok: false,
+          code: 'owner_mismatch',
+          message:
+            envelope.payload.type === 'pipe:consumer:feedback'
+              ? 'Remote consumer feedback must flow between the current room owner and the declared remote node'
+              : 'Remote consumer state must flow between the current room owner and the declared remote node',
+          reply: true,
+          countRejection: true
+        };
       }
       return { ok: true };
     }
@@ -1319,15 +1851,24 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const payload = envelope.payload;
     if (payload.type === 'pipe:create') {
-      this.pipe.closeTransport(payload.pipeTransportId, 'stale_ack');
-      this.pipeStates.delete(payload.pipeTransportId);
+      await this.handleClose({
+        type: 'pipe:close',
+        roomId: payload.roomId,
+        pipeTransportId: payload.pipeTransportId,
+        ownerClaimedAt: payload.ownerClaimedAt,
+        reason: 'stale_ack'
+      }).catch(() => {
+        this.metrics.pipeCleanupFailures.labels('stale_ack_pipe_close').inc();
+      });
       await this.publish(sourceNodeId, {
         type: 'pipe:close',
         roomId: payload.roomId,
         pipeTransportId: payload.pipeTransportId,
         ownerClaimedAt: payload.ownerClaimedAt,
         reason: 'stale_ack'
-      }).catch(() => undefined);
+      }).catch(() => {
+        this.metrics.pipeCleanupFailures.labels('stale_ack_pipe_close').inc();
+      });
       return;
     }
     if (payload.type === 'pipe:producer:create') {
@@ -1337,8 +1878,11 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
         pipeTransportId: payload.pipeTransportId,
         ownerClaimedAt: payload.ownerClaimedAt,
         producerId: payload.producerId,
+        bindingEpoch: payload.bindingEpoch,
         reason: 'stale_ack'
-      }).catch(() => undefined);
+      }).catch(() => {
+        this.metrics.pipeCleanupFailures.labels('stale_ack_producer_close').inc();
+      });
       return;
     }
     if (payload.type === 'pipe:consumer:create') {
@@ -1349,8 +1893,12 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
         ownerClaimedAt: payload.ownerClaimedAt,
         consumerId: payload.consumerId,
         producerId: payload.producerId,
+        bindingEpoch: payload.bindingEpoch,
+        stateVersion: payload.stateVersion,
         reason: 'stale_ack'
-      }).catch(() => undefined);
+      }).catch(() => {
+        this.metrics.pipeCleanupFailures.labels('stale_ack_consumer_close').inc();
+      });
       return;
     }
     if (payload.type === 'pipe:feed:request') {
@@ -1362,8 +1910,11 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
         ownerNodeId: payload.ownerNodeId,
         remoteNodeId: payload.remoteNodeId,
         producerId: payload.producerId,
+        bindingEpoch: payload.bindingEpoch,
         reason: 'stale_ack'
-      }).catch(() => undefined);
+      }).catch(() => {
+        this.metrics.pipeCleanupFailures.labels('stale_ack_feed_release').inc();
+      });
       return;
     }
     if (payload.type === 'pipe:publish:request') {
@@ -1375,8 +1926,11 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
         ownerNodeId: payload.ownerNodeId,
         remoteNodeId: payload.remoteNodeId,
         producerId: payload.producerId,
+        bindingEpoch: payload.bindingEpoch,
         reason: 'stale_ack'
-      }).catch(() => undefined);
+      }).catch(() => {
+        this.metrics.pipeCleanupFailures.labels('stale_ack_publish_release').inc();
+      });
     }
   }
 
@@ -1406,22 +1960,67 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     remoteEndpoint?: PipeNodeEndpoint;
     peerToken?: string;
   }): Promise<PipeTransportState> {
+    const localNodeId = this.registry.localNodeId();
+    const remoteNodeId = options.ownerNodeId === localNodeId ? options.remoteNodeId : options.ownerNodeId;
     const existing = this.pipeStates.get(options.pipeTransportId);
     if (existing) {
       if (options.remoteEndpoint) {
         existing.remoteEndpoint = options.remoteEndpoint;
-        if (existing.protocol === 'udp') {
+        if (existing.protocol === 'udp' && !(this.mediaWorkerMode === 'worker' && this.media?.ensurePipeTransport)) {
           this.pipe.connectUdpTransport(options.pipeTransportId, toUdpRemoteEndpoint(options.remoteEndpoint));
+        }
+        if (existing.protocol === 'udp' && this.mediaWorkerMode === 'worker' && this.media?.ensurePipeTransport) {
+          await this.media.ensurePipeTransport({
+            pipeTransportId: options.pipeTransportId,
+            roomId: existing.roomId,
+            localNodeId,
+            remoteNodeId,
+            protocol: 'udp',
+            listenPort: existing.localEndpoint?.port,
+            advertisedIp: this.config.get<string>('pipe.advertiseIp'),
+            peerToken: existing.peerToken,
+            remoteEndpoint: options.remoteEndpoint
+          });
         }
       }
       return existing;
     }
     if (options.protocol === 'udp') {
+      if (this.mediaWorkerMode === 'worker') {
+        if (!this.media?.ensurePipeTransport) {
+          this.metrics.pipeUdpSetupFailures.labels('worker_delegate_missing').inc();
+          throw new ServiceUnavailableException('Worker media service cannot provision UDP pipe transports');
+        }
+        const snapshot = await this.media.ensurePipeTransport({
+          pipeTransportId: options.pipeTransportId,
+          roomId: options.roomId,
+          localNodeId,
+          remoteNodeId,
+          protocol: 'udp',
+          listenPort: this.allocateUdpPort(),
+          advertisedIp: this.config.get<string>('pipe.advertiseIp'),
+          peerToken: options.peerToken,
+          remoteEndpoint: options.remoteEndpoint
+        });
+        const state: PipeTransportState = {
+          roomId: options.roomId,
+          ownerNodeId: options.ownerNodeId,
+          remoteNodeId: options.remoteNodeId,
+          protocol: options.protocol,
+          peerToken: options.peerToken,
+          localEndpoint: snapshot.localEndpoint,
+          remoteEndpoint: options.remoteEndpoint,
+          listenersAttached: false
+        };
+        this.pipeStates.set(options.pipeTransportId, state);
+        this.metrics.pipeTransportsCreated.labels('udp').inc();
+        return state;
+      }
       const transport = this.pipe.createUdpTransport({
         id: options.pipeTransportId,
         roomId: options.roomId,
-        localNodeId: this.registry.localNodeId(),
-        remoteNodeId: options.ownerNodeId === this.registry.localNodeId() ? options.remoteNodeId : options.ownerNodeId,
+        localNodeId,
+        remoteNodeId,
         listenPort: this.allocateUdpPort(),
         advertisedIp: this.config.get<string>('pipe.advertiseIp'),
         peerToken: options.peerToken,
@@ -1460,8 +2059,8 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     this.pipe.createTransport({
       id: options.pipeTransportId,
       roomId: options.roomId,
-      localNodeId: this.registry.localNodeId(),
-      remoteNodeId: options.ownerNodeId === this.registry.localNodeId() ? options.remoteNodeId : options.ownerNodeId
+      localNodeId,
+      remoteNodeId
     });
     const state: PipeTransportState = {
       roomId: options.roomId,
@@ -1493,7 +2092,21 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       throw new ServiceUnavailableException('UDP pipe setup local state was not found');
     }
     state.remoteEndpoint = remoteEndpoint;
-    this.pipe.connectUdpTransport(message.pipeTransportId, toUdpRemoteEndpoint(remoteEndpoint));
+    if (this.mediaWorkerMode === 'worker' && this.media?.ensurePipeTransport) {
+      await this.media.ensurePipeTransport({
+        pipeTransportId: message.pipeTransportId,
+        roomId: state.roomId,
+        localNodeId: this.registry.localNodeId(),
+        remoteNodeId: message.ownerNodeId === this.registry.localNodeId() ? message.remoteNodeId : message.ownerNodeId,
+        protocol: 'udp',
+        listenPort: state.localEndpoint?.port,
+        advertisedIp: this.config.get<string>('pipe.advertiseIp'),
+        peerToken: state.peerToken,
+        remoteEndpoint
+      });
+    } else {
+      this.pipe.connectUdpTransport(message.pipeTransportId, toUdpRemoteEndpoint(remoteEndpoint));
+    }
     this.metrics.pipeUdpSetupSuccess.inc();
   }
 
@@ -1517,6 +2130,9 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
   private async ensureImplicitPipeTransport(message: PipeProducerCreateMessage | PipeConsumerCreateMessage): Promise<void> {
     if (this.pipeStates.has(message.pipeTransportId) || this.pipe.hasTransport(message.pipeTransportId)) {
       return;
+    }
+    if (this.mediaWorkerMode === 'worker') {
+      throw new ServiceUnavailableException(`Worker pipe transport ${message.pipeTransportId} must be provisioned before ${message.type}`);
     }
     await this.ensureLocalPipeTransport({
       roomId: message.roomId,
@@ -1576,6 +2192,47 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     this.rejectedRequests += 1;
     this.metrics.pipeErrors.labels(code).inc();
   }
+
+  private findOwnerPublishedProducerState(roomId: string, producerId: string): RemotePublishedProducerState | undefined {
+    for (const state of this.ownerPublishedProducers.values()) {
+      if (state.roomId === roomId && (state.producerId === producerId || state.proxyProducerId === producerId)) {
+        return state;
+      }
+    }
+    return undefined;
+  }
+
+  private findRemoteFeedState(roomId: string, producerId: string): RemoteFeedState | undefined {
+    for (const state of this.remoteFeeds.values()) {
+      if (state.roomId === roomId && (state.producerId === producerId || state.proxyProducerId === producerId)) {
+        return state;
+      }
+    }
+    return undefined;
+  }
+
+  private updatePublishedProducerState(
+    roomId: string,
+    producerId: string,
+    patch: { status?: ProducerStatus; priority?: number }
+  ): void {
+    const applyPatch = (state: RemotePublishedProducerState | undefined) => {
+      if (!state) {
+        return;
+      }
+      if (patch.status !== undefined) {
+        state.status = patch.status;
+      }
+      if (patch.priority !== undefined) {
+        state.priority = patch.priority;
+      }
+    };
+    const remoteState = this.remotePublishedProducers.get(producerId);
+    if (remoteState?.roomId === roomId) {
+      applyPatch(remoteState);
+    }
+    applyPatch(this.findOwnerPublishedProducerState(roomId, producerId));
+  }
 }
 
 function isPipeEnvelope(value: unknown): value is PipeCoordinationEnvelope {
@@ -1634,6 +2291,19 @@ function isOwnerIssuedMessage(message: PipeCommandMessage): boolean {
   );
 }
 
+function toPublishReleaseReason(reason: PipeProducerCloseMessage['reason']): PipePublishReleaseMessage['reason'] {
+  switch (reason) {
+    case 'room_closed':
+    case 'manual':
+    case 'error':
+    case 'stale_ack':
+    case 'producer_closed':
+      return reason;
+    default:
+      return 'producer_closed';
+  }
+}
+
 function commandKey(envelope: Pick<PipeCoordinationEnvelope, 'correlationId' | 'idempotencyKey'>): string {
   return envelope.idempotencyKey ?? envelope.correlationId;
 }
@@ -1677,6 +2347,60 @@ function remotePublishPipeConsumerId(producerId: string, remoteNodeId: string): 
 
 function randomPipeToken(): string {
   return randomBytes(24).toString('hex');
+}
+
+function matchesBindingEpoch(messageEpoch: string | undefined, currentEpoch: string | undefined): boolean {
+  if (!messageEpoch || !currentEpoch) {
+    return true;
+  }
+  return messageEpoch === currentEpoch;
+}
+
+function aggregateRemoteConsumerFeedback(feedback: RemoteConsumerFeedbackState[]): PipeConsumerFeedbackObservation {
+  if (feedback.length === 1) {
+    return { ...feedback[0]!.observation };
+  }
+  const observations = feedback.map((entry) => entry.observation);
+  return {
+    packetLoss: clamp01(percentile75(observations.map((observation) => observation.packetLoss))),
+    delayVariationMs: Math.max(0, percentile75(observations.map((observation) => observation.delayVariationMs))),
+    jitter: optionalPercentile75(observations.map((observation) => observation.jitter)),
+    rtt: optionalPercentile75(observations.map((observation) => observation.rtt)),
+    sendDeltaMs: optionalPercentile75(observations.map((observation) => observation.sendDeltaMs)),
+    receiveDeltaMs: optionalPercentile75(observations.map((observation) => observation.receiveDeltaMs)),
+    timestamp: observations.reduce((latest, observation) => Math.max(latest, observation.timestamp ?? 0), 0) || Date.now()
+  };
+}
+
+function optionalPercentile75(values: Array<number | undefined>): number | undefined {
+  const filtered = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (filtered.length === 0) {
+    return undefined;
+  }
+  return percentile75(filtered);
+}
+
+function percentile75(values: number[]): number {
+  const ordered = [...values].sort((left, right) => left - right);
+  if (ordered.length === 0) {
+    return 0;
+  }
+  if (ordered.length === 1) {
+    return ordered[0]!;
+  }
+  const position = (ordered.length - 1) * 0.75;
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.ceil(position);
+  if (lowerIndex === upperIndex) {
+    return ordered[lowerIndex]!;
+  }
+  const lower = ordered[lowerIndex]!;
+  const upper = ordered[upperIndex]!;
+  return lower + (upper - lower) * (position - lowerIndex);
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
 function toUdpRemoteEndpoint(endpoint: PipeNodeEndpoint): { address: string; port: number; nodeId?: string } {

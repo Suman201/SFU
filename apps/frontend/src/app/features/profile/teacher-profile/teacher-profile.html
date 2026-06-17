@@ -1,0 +1,40 @@
+<sfu-header />
+<main class="profile-shell">
+  <section class="profile-hero">
+    <div class="identity">
+      <span class="avatar">TH</span>
+      <div>
+        <p class="eyebrow">Teacher profile</p>
+        <h1>Teacher Host</h1>
+        <span>Realtime WebRTC classrooms</span>
+      </div>
+    </div>
+    <a routerLink="/teacher-dashboard">Teacher dashboard</a>
+  </section>
+
+  <section class="metric-grid" aria-label="Teacher profile summary">
+    @for (metric of metrics; track metric.label) {
+      <article>
+        <span>{{ metric.value }}</span>
+        <p>{{ metric.label }}</p>
+      </article>
+    }
+  </section>
+
+  <section class="profile-panel">
+    <header>
+      <p class="eyebrow">Account</p>
+      <h2>Profile details</h2>
+    </header>
+
+    <div class="detail-grid">
+      @for (detail of details; track detail.label) {
+        <article>
+          <span>{{ detail.label }}</span>
+          <strong>{{ detail.value }}</strong>
+        </article>
+      }
+    </div>
+  </section>
+</main>
+<sfu-footer />

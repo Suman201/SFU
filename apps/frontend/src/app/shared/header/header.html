@@ -1,0 +1,34 @@
+<header class="site-header">
+  <a class="brand" routerLink="/">
+    <span class="eyebrow">Native WebRTC SFU</span>
+    <span>Room console</span>
+  </a>
+
+  <nav aria-label="Primary">
+    <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Home</a>
+    <a routerLink="/teacher-dashboard" routerLinkActive="active">Teacher</a>
+    <a routerLink="/student/explore" routerLinkActive="active">Explore</a>
+    <a routerLink="/student/dashboard" routerLinkActive="active">Dashboard</a>
+    <a routerLink="/student/profile" routerLinkActive="active">Profile</a>
+    <a routerLink="/sfu-forms" routerLinkActive="active">SFU forms</a>
+    <button
+      class="theme-toggle"
+      type="button"
+      [class.dark]="theme.isDark()"
+      [title]="theme.label()"
+      [attr.aria-label]="theme.label()"
+      [attr.aria-pressed]="theme.isDark()"
+      (click)="toggleTheme()"
+    >
+      <span class="theme-toggle-track" aria-hidden="true">
+        <span class="theme-toggle-thumb"></span>
+      </span>
+    </button>
+    @if (!auth.authenticated()) {
+      <a routerLink="/login" routerLinkActive="active">Login</a>
+      <a routerLink="/register" routerLinkActive="active">Register</a>
+    } @else {
+      <button type="button" (click)="logout()">Sign out</button>
+    }
+  </nav>
+</header>

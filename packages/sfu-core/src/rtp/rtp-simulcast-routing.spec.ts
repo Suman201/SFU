@@ -123,6 +123,59 @@ describe('RtpRouter simulcast routing', () => {
     expect(router.consumerLayerSnapshot(consumer.id)?.currentLayers).toEqual({ spatialLayer: 2, temporalLayer: undefined });
   });
 
+  it('tracks pipe-backed simulcast quality and dynacast demand from external congestion observations', async () => {
+    const router = new RtpRouter({
+      enablePacing: false,
+      qualityUpdateIntervalMs: 0,
+      sequenceNumberGenerator: () => 32000,
+      timestampGenerator: () => 900000
+    });
+    const producer = createProducer(simulcastProducerRtp());
+    const consumer = {
+      ...createConsumer(producer, singleConsumerRtp(9000), { spatialLayer: 2 }, 'pipe-consumer-1', 'pipe:node-b')
+    };
+    router.addProducer(producer);
+    router.addConsumer(consumer, async () => undefined);
+
+    expect(await router.route(rawPacket(3333, 96, 1, 1000, Buffer.from([0x10, 0x00])))).toBe(1);
+    expect(router.consumerLayerSnapshot(consumer.id)?.currentLayers).toEqual({ spatialLayer: 2, temporalLayer: undefined });
+
+    let degraded = router.consumerQualitySnapshot(consumer.id);
+    for (let round = 0; round < 6; round += 1) {
+      degraded = router.applyExternalConsumerTwccObservation(consumer.id, {
+        packetLoss: 0.24,
+        delayVariationMs: 130,
+        jitter: 95,
+        rtt: 180,
+        sendDeltaMs: 20,
+        receiveDeltaMs: 92,
+        timestamp: 2000 + round * 20
+      });
+    }
+    expect(degraded?.score.reasons).toContain('packet_loss');
+
+    expect(await router.route(rawPacket(3333, 96, 2, 4000, Buffer.from([0x10, 0x01])))).toBe(1);
+    expect(await router.route(rawPacket(1111, 96, 3, 7000, Buffer.from([0x10, 0x00])))).toBe(1);
+    expect(router.consumerLayerSnapshot(consumer.id)?.currentLayers).toEqual({ spatialLayer: 0, temporalLayer: undefined });
+    expect(router.producerDynacastSnapshot(producer.id)?.desiredLayers.some((layer) => layer.spatialLayer === 0)).toBe(true);
+    expect(router.consumerQualitySnapshot(consumer.id)?.bitrate.recommendedBitrate).toBeLessThan(router.consumerQualitySnapshot(consumer.id)?.bitrate.availableBitrate ?? Infinity);
+
+    let recovered = router.consumerQualitySnapshot(consumer.id);
+    for (let round = 0; round < 8; round += 1) {
+      recovered = router.applyExternalConsumerTwccObservation(consumer.id, {
+        packetLoss: 0,
+        delayVariationMs: 4,
+        jitter: 2,
+        rtt: 24,
+        sendDeltaMs: 20,
+        receiveDeltaMs: 16,
+        timestamp: 3000 + round * 20
+      });
+    }
+    expect(recovered?.score.reasons).not.toContain('packet_loss');
+    expect(router.producerDynacastSnapshot(producer.id)?.desiredLayers.some((layer) => layer.spatialLayer === 2)).toBe(true);
+  });
+
   it('combines Dynacast allocation with consumer priority and upgrade hysteresis', async () => {
     let now = 1000;
     let estimate = bandwidthEstimate(1_000_000);
