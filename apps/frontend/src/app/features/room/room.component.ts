@@ -1,4 +1,4 @@
-import { Component, computed, OnInit, signal } from '@angular/core';
+import { Component, computed, OnInit, signal, ChangeDetectionStrategy } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import type { ChatMessage, Participant, Producer, Role } from '@native-sfu/contracts';
@@ -99,6 +99,7 @@ import { WaitingRoomComponent } from './components/waiting-room/waiting-room.com
       </main>
     }
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .room-shell {

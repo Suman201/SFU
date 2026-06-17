@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, ChangeDetectionStrategy } from '@angular/core';
 import type { Participant } from '@native-sfu/contracts';
 
 @Component({
@@ -20,6 +20,7 @@ import type { Participant } from '@native-sfu/contracts';
       </section>
     }
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .waiting,

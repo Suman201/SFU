@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, signal, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { ChatMessage, Participant } from '@native-sfu/contracts';
 
@@ -25,6 +25,7 @@ import type { ChatMessage, Participant } from '@native-sfu/contracts';
       </form>
     </aside>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .chat {

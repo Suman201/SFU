@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, ChangeDetectionStrategy } from '@angular/core';
 
 @Component({
   selector: 'sfu-host-controls',
@@ -10,6 +10,7 @@ import { Component, EventEmitter, Input, Output } from '@angular/core';
       <button type="button" class="danger" (click)="close.emit()" [disabled]="!isHost">End</button>
     </section>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .host {

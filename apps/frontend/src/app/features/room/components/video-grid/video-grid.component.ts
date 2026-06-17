@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, Input, OnChanges, SimpleChanges, ViewChild } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, Input, OnChanges, SimpleChanges, ViewChild, ChangeDetectionStrategy } from '@angular/core';
 import type { Participant, Producer } from '@native-sfu/contracts';
 
 @Component({
@@ -26,6 +26,7 @@ import type { Participant, Producer } from '@native-sfu/contracts';
       }
     </section>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .grid {

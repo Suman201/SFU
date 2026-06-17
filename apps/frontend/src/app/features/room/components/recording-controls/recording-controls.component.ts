@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, ChangeDetectionStrategy } from '@angular/core';
 
 @Component({
   selector: 'sfu-recording-controls',
@@ -9,6 +9,7 @@ import { Component, EventEmitter, Input, Output } from '@angular/core';
       <button type="button" (click)="stop.emit()" [disabled]="!recording || !isHost">Stop</button>
     </section>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .recording {
