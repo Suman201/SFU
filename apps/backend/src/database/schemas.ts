@@ -37,7 +37,6 @@ export class UserDocument {
 }
 
 export const UserSchema = SchemaFactory.createForClass(UserDocument);
-UserSchema.index({ email: 1 }, { unique: true });
 UserSchema.index({ disabled: 1 });
 
 @Schema({ _id: false })
@@ -235,7 +234,6 @@ export class ProducerDocument {
 export const ProducerSchema = SchemaFactory.createForClass(ProducerDocument);
 ProducerSchema.index({ roomId: 1, kind: 1, status: 1 });
 ProducerSchema.index({ participantId: 1, status: 1 });
-ProducerSchema.index({ transportId: 1 });
 ProducerSchema.index({ roomId: 1, nodeId: 1, status: 1 });
 
 @Schema({ collection: 'consumers', timestamps: true })
@@ -298,7 +296,6 @@ export class ConsumerDocument {
 export const ConsumerSchema = SchemaFactory.createForClass(ConsumerDocument);
 ConsumerSchema.index({ roomId: 1, participantId: 1, status: 1 });
 ConsumerSchema.index({ producerId: 1, status: 1 });
-ConsumerSchema.index({ transportId: 1 });
 
 @Schema({ collection: 'moderation', timestamps: true })
 export class ModerationDocument {

@@ -23,7 +23,14 @@ import { ClusterModule } from './cluster/cluster.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [`.env.${process.env.NODE_ENV ?? 'development'}`, '.env'],
+      envFilePath: [
+        `.env.${process.env.NODE_ENV ?? 'development'}.local`,
+        `.env.${process.env.NODE_ENV ?? 'development'}`,
+        '.env.local',
+        '.env',
+        `../../.env.${process.env.NODE_ENV ?? 'development'}`,
+        '../../.env'
+      ],
       load: [appConfig],
       validate: validateConfig
     }),

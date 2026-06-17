@@ -44,8 +44,8 @@ const schema = Joi.object({
   MEDIA_WORKER_MODE: Joi.string().valid('in-process', 'worker').default('in-process'),
   MEDIA_WORKER_COUNT: Joi.number().integer().min(1).default(1),
   ENABLE_PIPE_TRANSPORT: Joi.boolean().truthy('true').falsy('false').default(false),
-  PIPE_CLUSTER_SECRET: Joi.string().min(24).when('ENABLE_PIPE_TRANSPORT', { is: true, then: Joi.required() }),
-  PIPE_ADVERTISE_IP: Joi.string().when('ENABLE_PIPE_TRANSPORT', { is: true, then: Joi.required() }),
+  PIPE_CLUSTER_SECRET: Joi.string().min(24).allow('').when('ENABLE_PIPE_TRANSPORT', { is: true, then: Joi.required().invalid('') }),
+  PIPE_ADVERTISE_IP: Joi.string().allow('').when('ENABLE_PIPE_TRANSPORT', { is: true, then: Joi.required().invalid('') }),
   PIPE_PORT_RANGE: Joi.string().pattern(/^\d{2,5}-\d{2,5}$/).default('41000-41100')
 }).unknown(true);
 
