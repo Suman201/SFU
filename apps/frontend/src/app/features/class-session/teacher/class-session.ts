@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
-import { Header } from '../../../shared/header/header';
 import { Whiteboard, type WhiteboardCursor } from '../../../shared/whiteboard/whiteboard';
 import { SessionChat } from '../session-chat/session-chat';
 
@@ -14,7 +13,7 @@ interface SessionParticipant {
 @Component({
   selector: 'sfu-teacher-class-session',
   standalone: true,
-  imports: [ Header, SessionChat, Whiteboard],
+  imports: [  SessionChat, Whiteboard],
   templateUrl: './class-session.html',
   styleUrl: './class-session.scss',
   changeDetection: ChangeDetectionStrategy.Eager
