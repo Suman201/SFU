@@ -18,8 +18,8 @@
             "assets": [
               {
                 "glob": "**/*",
-                "input": "src/assets",
-                "output": "assets"
+                "input": "public",
+                "output": "/"
               }
             ],
             "styles": [

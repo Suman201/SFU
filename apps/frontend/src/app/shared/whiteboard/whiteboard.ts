@@ -157,6 +157,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   @ViewChild('fileInput') private readonly fileInput?: ElementRef<HTMLInputElement>;
 
   protected readonly activeTool = signal<WhiteboardTool>('select');
+  protected readonly activeShapeTool = signal<WhiteboardShapeTool>('rectangle');
+  protected readonly shapeMenuOpen = signal(false);
+  protected readonly colorMenuOpen = signal(false);
+  protected readonly brushMenuOpen = signal(false);
+  protected readonly menuOpen = signal(false);
   protected readonly strokeColor = signal('#17201b');
   protected readonly fillEnabled = signal(false);
   protected readonly strokeWidth = signal(4);
@@ -269,6 +274,20 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       return;
     }
     this.activeTool.set(tool);
+    if (!this.isShapeTool(tool)) {
+      this.shapeMenuOpen.set(false);
+    }
+  }
+
+  protected toggleShapeMenu(event: MouseEvent): void {
+    event.stopPropagation();
+    this.shapeMenuOpen.update((open) => !open);
+  }
+
+  protected selectShapeTool(tool: WhiteboardShapeTool): void {
+    this.activeShapeTool.set(tool);
+    this.activeTool.set(tool);
+    this.shapeMenuOpen.set(false);
   }
 
   protected selectColor(color: string): void {
@@ -276,6 +295,22 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       return;
     }
     this.strokeColor.set(color);
+    this.colorMenuOpen.set(false);
+  }
+
+  protected toggleColorMenu(event: MouseEvent): void {
+    event.stopPropagation();
+    this.colorMenuOpen.update((open) => !open);
+  }
+
+  protected toggleBrushMenu(event: MouseEvent): void {
+    event.stopPropagation();
+    this.brushMenuOpen.update((open) => !open);
+  }
+
+  protected toggleMenu(event: MouseEvent): void {
+    event.stopPropagation();
+    this.menuOpen.update((open) => !open);
   }
 
   protected toggleFill(): void {
@@ -1504,7 +1539,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return value || fallback;
   }
 
-  private isShapeTool(tool: WhiteboardTool): boolean {
+  protected isShapeTool(tool: WhiteboardTool): boolean {
     return tool === 'line' || tool === 'arrow' || tool === 'rectangle' || tool === 'ellipse' || tool === 'star';
   }
 
