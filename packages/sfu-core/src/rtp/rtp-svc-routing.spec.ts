@@ -119,6 +119,36 @@ describe('RtpRouter SVC routing', () => {
     expect(await router.route(rawPacket(7777, 98, 12, 3000, vp9Payload(0, 0, true)))).toBe(1);
     expect((router.consumerQualitySnapshot(consumer.id)?.network.packetLoss ?? 1)).toBeLessThanOrEqual(degraded?.network.packetLoss ?? 1);
   });
+
+  it('re-evaluates a stale higher SVC layer without BWE when only a lower spatial layer remains active', async () => {
+    let now = 1000;
+    const events: ConsumerLayerEvent[] = [];
+    const router = new RtpRouter({
+      enablePacing: false,
+      enableAdaptiveLayerSelection: false,
+      activeLayerTimeoutMs: 50,
+      now: () => now,
+      sequenceNumberGenerator: () => 35000,
+      timestampGenerator: () => 950000
+    });
+    const producer = createVp9Producer();
+    const consumer = createConsumer(producer, { spatialLayerId: 2, temporalLayerId: 2 });
+    const writes: RtpPacket[] = [];
+    router.addProducer(producer);
+    router.addConsumer(consumer, async (packet) => {
+      writes.push(packet);
+    });
+    router.onConsumerLayerEvent((event) => events.push(event));
+
+    expect(await router.route(rawPacket(7777, 98, 10, 1000, vp9Payload(2, 2, true)))).toBe(1);
+
+    now = 1100;
+    expect(await router.route(rawPacket(7777, 98, 11, 2000, vp9Payload(0, 0, true)))).toBe(1);
+
+    expect(writes.length).toBe(2);
+    expect(router.consumerLayerSnapshot(consumer.id)?.currentSvcLayers).toEqual({ spatialLayerId: 0, temporalLayerId: 0, qualityLayerId: 0 });
+    expect(events.some((event) => event.type === 'changed' && event.currentSvcLayers?.spatialLayerId === 0)).toBe(true);
+  });
 });
 
 function createVp9Producer(): Producer {

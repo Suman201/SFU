@@ -16,7 +16,11 @@ export class ProducerSimulcastState {
   private readonly activeTemporalLayers = new Map<number, Set<number>>();
   private readonly knownSsrcs = new Set<number>();
 
-  constructor(private readonly producer: Producer, private readonly now: () => number = () => Date.now()) {
+  constructor(
+    private readonly producer: Producer,
+    private readonly now: () => number = () => Date.now(),
+    private readonly activityTimeoutMs = 4000
+  ) {
     for (const encoding of producer.rtpParameters.encodings) {
       if (isKnownSsrc(encoding.ssrc)) {
         this.knownSsrcs.add(encoding.ssrc);
@@ -123,6 +127,9 @@ export class ProducerSimulcastState {
   }
 
   availableLayers(): RtpLayerInfo[] {
+    if (this.pruneStaleActivity()) {
+      this.publishSnapshots();
+    }
     return this.producer.rtpParameters.encodings
       .flatMap((encoding, index) => {
         const temporalLayers = isKnownSsrc(encoding.ssrc) ? this.activeTemporalLayers.get(encoding.ssrc) : undefined;
@@ -135,6 +142,9 @@ export class ProducerSimulcastState {
   }
 
   currentLayers(): RtpLayerSelection | undefined {
+    if (this.pruneStaleActivity()) {
+      this.publishSnapshots();
+    }
     const active = this.availableLayers()
       .filter((layer) => layer.active)
       .sort(compareLayers);
@@ -143,6 +153,9 @@ export class ProducerSimulcastState {
   }
 
   selectLayer(estimate?: BandwidthEstimate, preferred?: RtpLayerSelection, enableAdaptive = true): LayerSelectionResult {
+    if (this.pruneStaleActivity()) {
+      this.publishSnapshots();
+    }
     const knownLayers = this.availableLayers().filter((layer) => layer.active || isKnownSsrc(layer.ssrc));
     const activeLayers = knownLayers.filter((layer) => layer.active);
     const layers = activeLayers.length > 0 ? activeLayers : knownLayers;
@@ -172,13 +185,30 @@ export class ProducerSimulcastState {
       rtxSsrc: encoding.rtx?.ssrc,
       maxBitrate: encoding.maxBitrate,
       scaleResolutionDownBy: encoding.scaleResolutionDownBy,
-      active: Boolean(encoding.active || (isKnownSsrc(encoding.ssrc) && this.activeSsrcs.has(encoding.ssrc)))
+      active: Boolean(isKnownSsrc(encoding.ssrc) && this.activeSsrcs.has(encoding.ssrc))
     };
   }
 
   private publishSnapshots(): void {
     this.producer.availableLayers = this.availableLayers();
     this.producer.currentLayers = this.currentLayers();
+  }
+
+  private pruneStaleActivity(): boolean {
+    if (this.activityTimeoutMs <= 0) {
+      return false;
+    }
+    const now = this.now();
+    let pruned = false;
+    for (const [ssrc, state] of [...this.activeSsrcs.entries()]) {
+      if (now - state.lastSeenAt <= this.activityTimeoutMs) {
+        continue;
+      }
+      this.activeSsrcs.delete(ssrc);
+      this.activeTemporalLayers.delete(ssrc);
+      pruned = true;
+    }
+    return pruned;
   }
 }
 

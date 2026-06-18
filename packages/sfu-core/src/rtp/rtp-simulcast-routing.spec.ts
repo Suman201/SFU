@@ -475,6 +475,36 @@ describe('RtpRouter simulcast routing', () => {
 
     expect(events.some((event) => event.type === 'unavailable' && event.targetLayers?.spatialLayer === 2)).toBe(true);
   });
+
+  it('re-evaluates a stale higher simulcast layer without BWE instead of freezing on a dead target', async () => {
+    let now = 1000;
+    const events: ConsumerLayerEvent[] = [];
+    const router = new RtpRouter({
+      enablePacing: false,
+      enableAdaptiveLayerSelection: false,
+      activeLayerTimeoutMs: 50,
+      now: () => now,
+      sequenceNumberGenerator: () => 70000,
+      timestampGenerator: () => 1_200_000
+    });
+    const producer = createProducer(simulcastProducerRtp());
+    const consumer = createConsumer(producer, singleConsumerRtp(9000), { spatialLayer: 2 });
+    const writes: RtpPacket[] = [];
+    router.addProducer(producer);
+    router.addConsumer(consumer, async (packet) => {
+      writes.push(packet);
+    });
+    router.onConsumerLayerEvent((event) => events.push(event));
+
+    expect(await router.route(rawPacket(3333, 96, 10, 1000, Buffer.from([0x10, 0x00])))).toBe(1);
+
+    now = 1100;
+    expect(await router.route(rawPacket(1111, 96, 11, 4000, Buffer.from([0x10, 0x00])))).toBe(1);
+
+    expect(writes.length).toBe(2);
+    expect(router.consumerLayerSnapshot(consumer.id)?.currentLayers).toEqual({ spatialLayer: 0, temporalLayer: undefined });
+    expect(events.some((event) => event.type === 'changed' && event.currentLayers?.spatialLayer === 0)).toBe(true);
+  });
 });
 
 function createProducer(rtp: RtpParameters, id = 'producer-1', participantId = 'publisher'): Producer {

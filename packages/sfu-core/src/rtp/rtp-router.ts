@@ -147,6 +147,7 @@ export interface RtpRouterOptions {
   keyframeRequestIntervalMs?: number;
   maxReorderPackets?: number;
   maxReorderDelayMs?: number;
+  activeLayerTimeoutMs?: number;
   restartSequenceGap?: number;
   duplicateWindowSize?: number;
   enableTwcc?: boolean;
@@ -410,8 +411,8 @@ export class RtpRouter {
 
   addProducer(producer: Producer, rtcpWriter?: RtcpWriter): void {
     producer.priority = normalizeConsumerPriority(producer.priority);
-    const simulcast = new ProducerSimulcastState(producer, this.now);
-    const svc = new ProducerSvcStateTracker(producer, this.now);
+    const simulcast = new ProducerSimulcastState(producer, this.now, this.options.activeLayerTimeoutMs);
+    const svc = new ProducerSvcStateTracker(producer, this.now, this.options.activeLayerTimeoutMs);
     const dynacast = new ProducerDynacastDemandState(producer, {
       enabled: this.options.enableDynacast !== false,
       now: this.now
@@ -1243,6 +1244,14 @@ export class RtpRouter {
       return true;
     }
     if (sameSvcLayer(consumerRoute.currentSvcLayers, targetSvc)) {
+      if (
+        producerRoute.svc.hasSeen(targetSvc)
+        && !producerRoute.svc.isActive(targetSvc)
+        && !sameSvcLayer(consumerRoute.currentSvcLayers, packetSvcLayer)
+        && this.packetMatchesSvcTarget(packetSvcLayer, consumerRoute.currentSvcLayers)
+      ) {
+        this.setCurrentSvcLayers(consumerRoute, producerRoute, packetSvcLayer, consumerRoute.switchReason ?? 'unavailable');
+      }
       return this.packetMatchesSvcTarget(packetSvcLayer, consumerRoute.currentSvcLayers);
     }
     if (this.sameSvcSpatialLayer(consumerRoute.currentSvcLayers, targetSvc)) {

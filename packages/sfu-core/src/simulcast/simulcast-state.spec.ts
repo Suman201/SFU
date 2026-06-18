@@ -50,6 +50,23 @@ describe('ProducerSimulcastState', () => {
     expect(state.knownMediaSsrcs()).toEqual([4444]);
     expect(state.layerSelectionForSsrc(4444)).toEqual({ spatialLayer: 1, temporalLayer: undefined });
   });
+
+  it('ages out stale active layers before selecting a fallback layer', () => {
+    let now = 1000;
+    const producer = createProducer();
+    const state = new ProducerSimulcastState(producer, () => now, 50);
+
+    state.markPacket(1111);
+    state.markPacket(3333);
+    expect(state.currentLayers()).toEqual({ spatialLayer: 2, temporalLayer: undefined });
+
+    now = 1100;
+    state.markPacket(1111);
+
+    expect(state.currentLayers()).toEqual({ spatialLayer: 0, temporalLayer: undefined });
+    expect(state.selectLayer(undefined, preferredLayerNameToSelection('high')).selection).toEqual({ spatialLayer: 0, temporalLayer: undefined });
+    expect(producer.availableLayers?.find((layer) => layer.rid === 'high')?.active).toBe(false);
+  });
 });
 
 function createProducer(firstSsrc: number | null = 1111): Producer {

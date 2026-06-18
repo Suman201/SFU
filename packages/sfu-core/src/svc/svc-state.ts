@@ -21,9 +21,14 @@ export interface SvcLayerActivityResult {
 
 export class ProducerSvcStateTracker {
   private readonly activeLayers = new Map<string, { layer: SvcLayerInfo; lastSeenAt: number; packets: number }>();
+  private readonly seenLayers = new Set<string>();
   private readonly capabilities: SvcCapabilities;
 
-  constructor(private readonly producer: Producer, private readonly now: () => number = () => Date.now()) {
+  constructor(
+    private readonly producer: Producer,
+    private readonly now: () => number = () => Date.now(),
+    private readonly activityTimeoutMs = 4000
+  ) {
     this.capabilities = detectSvcCapabilities(producer.rtpParameters);
     this.publishSnapshot();
   }
@@ -59,6 +64,7 @@ export class ProducerSvcStateTracker {
     const key = svcLayerKey(selection);
     const existed = this.activeLayers.has(key);
     const current = this.activeLayers.get(key);
+    this.seenLayers.add(key);
     const layer: SvcLayerInfo = {
       codec: detection.codec,
       spatialLayerId: selection.spatialLayerId,
@@ -95,6 +101,9 @@ export class ProducerSvcStateTracker {
   }
 
   availableLayers(): SvcLayerInfo[] {
+    if (this.pruneStaleActivity()) {
+      this.publishSnapshot();
+    }
     const active = [...this.activeLayers.values()].map((entry) => entry.layer);
     const planned = expectedLayers(this.capabilities, this.producer.rtpParameters.encodings[0]?.maxBitrate).map((layer) => {
       const activeLayer = active.find((candidate) => sameSvcLayer(candidate, layer));
@@ -105,6 +114,9 @@ export class ProducerSvcStateTracker {
   }
 
   currentLayers(): SvcLayerSelection | undefined {
+    if (this.pruneStaleActivity()) {
+      this.publishSnapshot();
+    }
     const highest = [...this.activeLayers.values()]
       .map((entry) => entry.layer)
       .sort(compareSvcLayers)
@@ -113,6 +125,9 @@ export class ProducerSvcStateTracker {
   }
 
   selectLayer(estimate?: BandwidthEstimate, preferred?: SvcLayerSelection, enableAdaptive = true): SvcSelectionResult {
+    if (this.pruneStaleActivity()) {
+      this.publishSnapshot();
+    }
     if (this.producer.kind === 'audio') {
       return { reason: 'audio' };
     }
@@ -156,6 +171,39 @@ export class ProducerSvcStateTracker {
 
   private publishSnapshot(): void {
     this.producer.svc = this.snapshot();
+  }
+
+  private pruneStaleActivity(): boolean {
+    if (this.activityTimeoutMs <= 0) {
+      return false;
+    }
+    const now = this.now();
+    let pruned = false;
+    for (const [key, state] of [...this.activeLayers.entries()]) {
+      if (now - state.lastSeenAt <= this.activityTimeoutMs) {
+        continue;
+      }
+      this.activeLayers.delete(key);
+      pruned = true;
+    }
+    return pruned;
+  }
+
+  isActive(selection: SvcLayerSelection | undefined): boolean {
+    if (!selection) {
+      return false;
+    }
+    if (this.pruneStaleActivity()) {
+      this.publishSnapshot();
+    }
+    return this.activeLayers.has(svcLayerKey(selection));
+  }
+
+  hasSeen(selection: SvcLayerSelection | undefined): boolean {
+    if (!selection) {
+      return false;
+    }
+    return this.seenLayers.has(svcLayerKey(selection));
   }
 }
 

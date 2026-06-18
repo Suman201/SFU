@@ -37,6 +37,21 @@ describe('ProducerSvcStateTracker', () => {
 
     expect(new ProducerSvcStateTracker(producer).enabled()).toBe(false);
   });
+
+  it('ages out stale top SVC layers and reselects an active lower layer without BWE', () => {
+    let now = 1000;
+    const producer = createVp9Producer();
+    const state = new ProducerSvcStateTracker(producer, () => now, 50);
+
+    state.markPacket(7777, detectSvcLayer(packet(vp9Payload(2, 2, true)), 'video/VP9'));
+    expect(state.currentLayers()).toEqual({ spatialLayerId: 2, temporalLayerId: 2, qualityLayerId: 2 });
+
+    now = 1100;
+    state.markPacket(7777, detectSvcLayer(packet(vp9Payload(0, 0, true)), 'video/VP9'));
+
+    expect(state.currentLayers()).toEqual({ spatialLayerId: 0, temporalLayerId: 0, qualityLayerId: 0 });
+    expect(state.isActive({ spatialLayerId: 2, temporalLayerId: 2, qualityLayerId: 2 })).toBe(false);
+  });
 });
 
 function createVp9Producer(): Producer {
