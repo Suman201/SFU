@@ -59,6 +59,7 @@ export interface IceAgentOptions {
   taMs?: number;
   stunServers?: string[];
   turnServers?: TurnServerOptions[];
+  announcedAddress?: string;
 }
 
 export interface TurnServerOptions {

@@ -36,8 +36,26 @@ The Kubernetes manifests are a control-plane baseline, not a complete media-plan
 - Configure sticky Socket.IO routing or an equivalent owner-aware ingress strategy.
 - Deploy Coturn externally or fully wire Coturn with public IP, TLS, `TURN_SECRET`, `TURN_REALM`, and the advertised TURN URIs.
 - Keep `ENABLE_PIPE_TRANSPORT=false` until the environment has been explicitly validated for distributed media.
-- Verify `PUBLIC_URL`, `NODE_PUBLIC_URL`, `PIPE_ADVERTISE_IP`, and TURN public/announced addresses match the addresses remote browsers and peer nodes really use.
+- Verify `PUBLIC_URL`, `NODE_PUBLIC_URL`, `PIPE_ADVERTISE_IP`, `ICE_STUN_SERVERS`, `ICE_TURN_SERVERS`, `ICE_ANNOUNCED_ADDRESS`, and TURN public/announced addresses match the addresses remote browsers and peer nodes really use.
 - Verify the frontend resolves the real backend origin in staging. Non-local frontend builds now default to same-origin `/api/v1` and `/sfu`; if the frontend is served from a different host than the backend ingress, override `/env.js` with `apiBaseUrl` and `socketUrl`.
+
+### Server-Side Runtime Config
+
+Treat these values as the minimum deployment-facing config surface that must be correct before any staged signoff means much:
+
+| Key | What it must describe | How to verify it at runtime |
+| --- | --- | --- |
+| `PUBLIC_URL` | The shared control-plane URL operators and clients are meant to reach. In production it must not be localhost or a wildcard address. | `GET /api/v1/media/diagnostics/node` -> `addressing.publicUrl` |
+| `NODE_PUBLIC_URL` | The externally reachable URL for this specific node. In single-host staging it may match `PUBLIC_URL`; in multi-node staging it should identify the real node entrypoint. | `GET /api/v1/media/diagnostics/node` -> `addressing.nodePublicUrl` |
+| `TURN_URIS` | Comma-separated public TURN URIs returned by `GET /api/v1/media/turn-credentials`. Current RC support is UDP TURN only. | `GET /api/v1/media/diagnostics/node` -> `turn.*`; staged browser proof via `npm run test:browser:staging-turn` |
+| `ICE_STUN_SERVERS` | Optional comma-separated STUN servers used by the SFU itself to gather server-reflexive candidates. Keep them on UDP and point them at real reachable infrastructure. | `GET /api/v1/media/diagnostics/node` -> `ice.stun*` |
+| `ICE_TURN_SERVERS` | Optional comma-separated TURN URIs used by the SFU itself to gather relay candidates. Current RC support is UDP `turn:` only and the backend derives shared-secret credentials from `TURN_SECRET`. | `GET /api/v1/media/diagnostics/node` -> `ice.turn*` |
+| `ICE_ANNOUNCED_ADDRESS` | Optional host-candidate public address rewrite for the SFU media plane. Use it when the node binds privately but must advertise a different public host candidate. | `GET /api/v1/media/diagnostics/node` -> `ice.announcedAddress`, `ice.hostCandidateMode` |
+| `OPERATIONS_TOKEN` | Operator credential for `/metrics` and `/api/v1/media/*` control routes. Production requires a non-empty value. | `npm run test:staging:preflight` checks token enforcement |
+| `PIPE_ADVERTISE_IP` | Stable inter-node address other SFU nodes actually dial when `ENABLE_PIPE_TRANSPORT=true`. It must not be localhost or a pod-only address. | `GET /api/v1/media/diagnostics/node` -> `addressing.pipeAdvertiseIp` and pipe health |
+| `METRICS_PATH` | Optional extra scrape alias when an environment needs a non-default metrics path. | Probe the configured alias if you use one; `/metrics` remains the canonical endpoint |
+
+The node diagnostics endpoint is the most honest runtime source for this surface. It shows what the process actually booted with, not just what the manifest intended to set.
 
 ### Kubernetes UDP Media Plane
 
@@ -73,6 +91,8 @@ HTTP ingress is part of the control plane only. For stable signaling and media o
 - Keep media UDP exposure outside the HTTP ingress path; L7 ingress readiness does not prove the media plane is reachable.
 - When running more than one backend replica, validate reconnect, host handoff, and node-drain behavior through the real ingress path before calling the deployment GA-ready.
 
+For the checked-in staged signoff path, use direct per-node URLs for `NODE_A_URL` and `NODE_B_URL` during the server-side preflight, then use the shared ingress hostname for `STAGING_BASE_URL` during the browser TURN proof. That split is intentional: it lets the preflight catch per-node config mistakes while the browser step uses the same public hostname real clients use.
+
 The shipped ingress routes `/api` to the backend and `/` to the frontend. That same-origin path layout is what the production frontend expects by default. If your staging or production topology splits frontend and backend across different hosts, publish a custom `/env.js` with explicit runtime endpoints instead of rebuilding the Angular bundle with localhost defaults.
 
 ## Health, Readiness, and Shutdown
@@ -98,9 +118,11 @@ Do not use a blind sleep as the primary shutdown mechanism. If you add a `preSto
 ## Metrics and Diagnostics
 
 - `/metrics` stays outside the API prefix for Prometheus scraping.
+- If `METRICS_PATH` is set to a non-default value, the server also exposes that alias outside the API prefix. Keep `/metrics` as the canonical path in docs, dashboards, and operator habits unless the environment has a strong reason to prefer the alias.
 - When `OPERATIONS_TOKEN` is empty, `/metrics` can be scraped without extra headers.
 - When `OPERATIONS_TOKEN` is configured, send it as `X-Operations-Token` for `/metrics` and `/api/v1/media/*` operator endpoints.
 - Treat `/api/v1/media/*` diagnostics and drain routes as operator-only even though some health routes stay public for orchestrators.
+- `GET /api/v1/media/diagnostics/node` is the main runtime truth source for staged rollout checks. Use it to confirm `trafficReady`, derived rollout alerts, TURN URI hygiene, public URL shape, and pipe advertise IP shape before blaming browsers or ingress.
 - Keep Swagger disabled in production unless you have an explicit operational reason to expose it.
 
 ## Observability

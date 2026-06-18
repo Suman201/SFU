@@ -10,9 +10,13 @@ The repository now includes the end-to-end transport, forwarding, adaptive media
 
 The remaining work is operational, not architectural: production TURN deployment, explicit UDP exposure strategy, environment-specific capacity validation, and final release gating in the target runtime.
 
-Production operators should publish only UDP TURN URIs in the current release candidate and must ensure `PUBLIC_URL`, `NODE_PUBLIC_URL`, `PIPE_ADVERTISE_IP`, and TURN public addresses resolve to the real paths used by browsers and peer nodes.
+If the goal is to make this platform more useful than a raw mediasoup deployment, the recommended strategy is to compete on operator experience, policy, diagnostics, and workflow depth rather than only on low-level SFU mechanics. See [docs/beyond-mediasoup-roadmap.md](/Volumes/Extarnal/RND/SFU/docs/beyond-mediasoup-roadmap.md).
+
+Production operators should publish only UDP TURN URIs in the current release candidate and must ensure `PUBLIC_URL`, `NODE_PUBLIC_URL`, `PIPE_ADVERTISE_IP`, `ICE_STUN_SERVERS`, `ICE_TURN_SERVERS`, `ICE_ANNOUNCED_ADDRESS`, and TURN public addresses resolve to the real paths used by browsers and peer nodes.
 
 Outside local development, the frontend now defaults to same-origin `/api/v1` and `/sfu` so staged ingress can exercise real backend and TURN behavior. Split-host deployments can override those runtime endpoints through `/env.js`.
+
+The server now also validates and exposes the deployment-facing config surface more explicitly: production requires a non-empty `OPERATIONS_TOKEN`, `TURN_URIS` must be explicit UDP `turn:` URIs, `PUBLIC_URL` and `NODE_PUBLIC_URL` must not point at localhost, `ICE_STUN_SERVERS` and `ICE_TURN_SERVERS` must stay on supported UDP transports, `ICE_ANNOUNCED_ADDRESS` must not collapse back to localhost, and `PIPE_ADVERTISE_IP` must be a real inter-node address whenever pipe transport is enabled. Operators can confirm the effective runtime values and rollout alerts through `GET /api/v1/media/diagnostics/node`.
 
 ## Structure
 

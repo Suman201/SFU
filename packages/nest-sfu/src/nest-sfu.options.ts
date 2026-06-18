@@ -95,6 +95,7 @@ export interface NestSfuOptions {
   mediaWorkerExecArgv?: string[];
   stunServers?: string[];
   turnServers?: TurnServerOptions[];
+  announcedAddress?: string;
   hostCandidatePort?: number;
   hostCandidatePortRange?: {
     min: number;

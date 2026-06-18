@@ -8,6 +8,14 @@ import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-use
 import { OperationsTokenGuard } from '../common/guards/operations-token.guard';
 import { NodeRegistryService } from '../cluster/node-registry.service';
 import { PipeCoordinatorService, type PipeCoordinatorHealthSnapshot, type PipeCoordinatorSnapshot } from '../cluster/pipe-coordinator.service';
+import {
+  isLocalOrWildcardHost,
+  isSupportedStunUri,
+  isSupportedTurnUri,
+  parseIceServerUrl,
+  parseTurnUriHost,
+  parseUrlHost
+} from '../config/media.config';
 
 interface MediaNodeDiagnostics {
   observedAt: string;
@@ -15,12 +23,26 @@ interface MediaNodeDiagnostics {
   trafficReady: boolean;
   alerts: string[];
   turn: TurnRuntimeDiagnostics;
+  ice: ServerIceRuntimeDiagnostics;
+  addressing: AddressingRuntimeDiagnostics;
   cluster: Awaited<ReturnType<NodeRegistryService['snapshot']>>;
   workers: MediaWorkerPoolSnapshot;
   pipe: {
     summary: PipeCoordinatorSnapshot;
     health: PipeCoordinatorHealthSnapshot;
   };
+}
+
+interface AddressingRuntimeDiagnostics {
+  publicUrl: string;
+  publicUrlHost?: string;
+  publicUrlIsLocalOrWildcard: boolean;
+  nodePublicUrl: string;
+  nodePublicUrlHost?: string;
+  nodePublicUrlIsLocalOrWildcard: boolean;
+  pipeAdvertiseIp?: string;
+  pipeAdvertiseIpIsLocalOrWildcard: boolean;
+  turnUriHosts: string[];
 }
 
 interface TurnRuntimeDiagnostics {
@@ -31,6 +53,19 @@ interface TurnRuntimeDiagnostics {
   supportedUriCount: number;
   localhostUriCount: number;
   udpOnly: boolean;
+}
+
+interface ServerIceRuntimeDiagnostics {
+  announcedAddress?: string;
+  announcedAddressIsLocalOrWildcard: boolean;
+  hostCandidateMode: 'bound-address' | 'announced-address';
+  stunServerCount: number;
+  supportedStunServerCount: number;
+  stunServerHosts: string[];
+  turnServerCount: number;
+  supportedTurnServerCount: number;
+  turnServerHosts: string[];
+  usesSharedSecretTurnCredentials: boolean;
 }
 
 interface MediaWorkerDiagnostics {
@@ -126,12 +161,16 @@ export class MediaController {
     const pipeSummary = this.pipeCoordinator.snapshot();
     const pipeHealth = this.pipeCoordinator.healthSnapshot();
     const turn = buildTurnDiagnostics(this.config);
+    const ice = buildServerIceDiagnostics(this.config);
+    const addressing = buildAddressingDiagnostics(this.config);
     return {
       observedAt: new Date().toISOString(),
       localNodeId: cluster.localNode.nodeId,
       trafficReady: cluster.localNode.health === 'healthy' && !cluster.localNode.draining && cluster.localNode.capacity.capacityScore < 1,
-      alerts: collectNodeAlerts(cluster, workers, pipeSummary, pipeHealth, turn),
+      alerts: collectNodeAlerts(cluster, workers, pipeSummary, pipeHealth, turn, ice),
       turn,
+      ice,
+      addressing,
       cluster,
       workers,
       pipe: {
@@ -194,7 +233,8 @@ function collectNodeAlerts(
   workers: MediaWorkerPoolSnapshot,
   pipeSummary: PipeCoordinatorSnapshot,
   pipeHealth: PipeCoordinatorHealthSnapshot,
-  turn: TurnRuntimeDiagnostics
+  turn: TurnRuntimeDiagnostics,
+  ice: ServerIceRuntimeDiagnostics
 ): string[] {
   const alerts = new Set<string>();
   if (cluster.localNode.draining) {
@@ -226,6 +266,18 @@ function collectNodeAlerts(
   }
   if (turn.uriCount > 0 && !turn.udpOnly) {
     alerts.add('turn_unsupported_transport');
+  }
+  if (ice.announcedAddressIsLocalOrWildcard) {
+    alerts.add('ice_announced_address_localhost');
+  }
+  if (ice.stunServerCount > ice.supportedStunServerCount || ice.turnServerCount > ice.supportedTurnServerCount) {
+    alerts.add('ice_unsupported_transport');
+  }
+  if (
+    ice.stunServerHosts.some((host) => isLocalOrWildcardHost(host)) ||
+    ice.turnServerHosts.some((host) => isLocalOrWildcardHost(host))
+  ) {
+    alerts.add('ice_localhost_servers');
   }
   return [...alerts];
 }
@@ -285,32 +337,47 @@ function buildTurnDiagnostics(config: ConfigService): TurnRuntimeDiagnostics {
   };
 }
 
-function isSupportedTurnUri(uri: string): boolean {
-  const normalized = uri.trim().toLowerCase();
-  return normalized.startsWith('turn:') && normalized.includes('transport=udp') && !normalized.startsWith('turns:') && !normalized.includes('transport=tcp');
+function buildServerIceDiagnostics(config: ConfigService): ServerIceRuntimeDiagnostics {
+  const announcedAddress = config.get<string | undefined>('mediaWorker.ice.announcedAddress')?.trim() || undefined;
+  const stunServers = config.get<string[]>('mediaWorker.ice.stunServers', []).map((value) => value.trim()).filter(Boolean);
+  const turnServers = config
+    .get<Array<{ url: string }>>('mediaWorker.ice.turnServers', [])
+    .map((entry) => entry?.url?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  return {
+    announcedAddress,
+    announcedAddressIsLocalOrWildcard: announcedAddress ? isLocalOrWildcardHost(announcedAddress) : false,
+    hostCandidateMode: announcedAddress ? 'announced-address' : 'bound-address',
+    stunServerCount: stunServers.length,
+    supportedStunServerCount: stunServers.filter(isSupportedStunUri).length,
+    stunServerHosts: stunServers.map((value) => parseIceServerUrl(value)?.host).filter((value): value is string => Boolean(value)),
+    turnServerCount: turnServers.length,
+    supportedTurnServerCount: turnServers.filter(isSupportedTurnUri).length,
+    turnServerHosts: turnServers.map((value) => parseTurnUriHost(value)).filter((value): value is string => Boolean(value)),
+    usesSharedSecretTurnCredentials: turnServers.length > 0
+  };
 }
 
-function parseTurnUriHost(uri: string): string | undefined {
-  const withoutScheme = uri.replace(/^turns?:/i, '').trim();
-  const authority = withoutScheme.split('?')[0]?.split('/')[0]?.trim();
-  if (!authority) {
-    return undefined;
-  }
-  const hostPort = authority.split('@').pop()?.trim() ?? authority;
-  if (!hostPort) {
-    return undefined;
-  }
-  if (hostPort.startsWith('[')) {
-    const closingBracket = hostPort.indexOf(']');
-    return closingBracket > 1 ? hostPort.slice(1, closingBracket).toLowerCase() : undefined;
-  }
-  const segments = hostPort.split(':');
-  if (segments.length <= 2) {
-    return segments[0]?.toLowerCase();
-  }
-  return hostPort.toLowerCase();
-}
-
-function isLocalOrWildcardHost(host: string): boolean {
-  return ['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'].includes(host.toLowerCase());
+function buildAddressingDiagnostics(config: ConfigService): AddressingRuntimeDiagnostics {
+  const publicUrl = config.get<string>('app.publicUrl', 'http://localhost:3000');
+  const nodePublicUrl = config.get<string>('cluster.publicUrl', publicUrl);
+  const pipeAdvertiseIp = config.get<string | undefined>('pipe.advertiseIp');
+  const turnUriHosts = config
+    .get<string[]>('turn.uris', [])
+    .map((value) => parseTurnUriHost(value))
+    .filter((value): value is string => Boolean(value));
+  const publicUrlHost = parseUrlHost(publicUrl);
+  const nodePublicUrlHost = parseUrlHost(nodePublicUrl);
+  return {
+    publicUrl,
+    publicUrlHost,
+    publicUrlIsLocalOrWildcard: publicUrlHost ? isLocalOrWildcardHost(publicUrlHost) : false,
+    nodePublicUrl,
+    nodePublicUrlHost,
+    nodePublicUrlIsLocalOrWildcard: nodePublicUrlHost ? isLocalOrWildcardHost(nodePublicUrlHost) : false,
+    pipeAdvertiseIp: pipeAdvertiseIp?.trim() || undefined,
+    pipeAdvertiseIpIsLocalOrWildcard: pipeAdvertiseIp ? isLocalOrWildcardHost(pipeAdvertiseIp.trim()) : false,
+    turnUriHosts
+  };
 }

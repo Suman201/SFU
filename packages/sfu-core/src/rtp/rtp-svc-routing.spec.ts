@@ -35,12 +35,49 @@ describe('RtpRouter SVC routing', () => {
 
     expect(writes.map((packet) => packet.sequenceNumber)).toEqual([30000, 30001, 30002, 30003, 30004]);
     expect(router.consumerLayerSnapshot(consumer.id)?.currentSvcLayers).toEqual({ spatialLayerId: 2, temporalLayerId: 0, qualityLayerId: 2 });
-    expect(events.filter((event) => event.currentSvcLayers).map((event) => event.type)).toEqual(['changed', 'switching', 'switch-failed', 'changed', 'switching', 'changed']);
-    expect(events.some((event) => event.reason === 'missing_keyframe' && event.targetSvcLayers?.spatialLayerId === 2)).toBe(true);
+    expect(events.filter((event) => event.currentSvcLayers).map((event) => event.type)).toEqual([
+      'changed',
+      'switching',
+      'changed',
+      'switching',
+      'changed',
+      'switching',
+      'changed'
+    ]);
 
     const stats = router.statistics();
     expect(stats.producers[0]?.svc?.capabilities.scalabilityMode).toBe('L3T3_KEY');
     expect(stats.consumers[0]?.svcLayers.find((layer) => layer.layer.spatialLayer === 2 && layer.layer.temporalLayer === 0)?.packets).toBe(1);
+  });
+
+  it('keeps forwarding the current VP9 SVC chain during repeated preferred-layer churn until a higher decodable keyframe chain arrives', async () => {
+    const router = new RtpRouter({
+      enablePacing: false,
+      enableAdaptiveLayerSelection: false,
+      sequenceNumberGenerator: () => 32000,
+      timestampGenerator: () => 920000
+    });
+    const producer = createVp9Producer();
+    const consumer = createConsumer(producer, { spatialLayerId: 0, temporalLayerId: 0 });
+    const writes: RtpPacket[] = [];
+    router.addProducer(producer);
+    router.addConsumer(consumer, async (packet) => {
+      writes.push(packet);
+    });
+
+    expect(await router.route(rawPacket(7777, 98, 10, 1000, vp9Payload(0, 0, true)))).toBe(1);
+
+    router.setConsumerPreferredSvcLayers(consumer.id, { spatialLayerId: 2, temporalLayerId: 1 });
+    router.setConsumerPreferredSvcLayers(consumer.id, { spatialLayerId: 1, temporalLayerId: 0 });
+    router.setConsumerPreferredSvcLayers(consumer.id, { spatialLayerId: 2, temporalLayerId: 1 });
+
+    expect(await router.route(rawPacket(7777, 98, 11, 2000, vp9Payload(0, 0)))).toBe(1);
+    expect(await router.route(rawPacket(7777, 98, 12, 3000, vp9Payload(1, 0, true)))).toBe(1);
+    expect(await router.route(rawPacket(7777, 98, 13, 4000, vp9Payload(1, 0)))).toBe(1);
+    expect(await router.route(rawPacket(7777, 98, 14, 5000, vp9Payload(2, 1, true)))).toBe(1);
+
+    expect(writes.map((packet) => packet.sequenceNumber)).toEqual([32000, 32001, 32002, 32003, 32004]);
+    expect(router.consumerLayerSnapshot(consumer.id)?.currentSvcLayers).toEqual({ spatialLayerId: 2, temporalLayerId: 1, qualityLayerId: 2 });
   });
 
   it('adapts SVC layer targets from bandwidth estimates while preserving dependency forwarding', async () => {

@@ -18,7 +18,7 @@ import {
   UdpPortAllocator,
   WorkerMediaService
 } from '@native-sfu/nest-sfu';
-import { DeterministicPacketImpairmentHarness, RtpPacket, RtpRouter } from '@native-sfu/sfu-core';
+import { detectTemporalLayer, DeterministicPacketImpairmentHarness, RtpPacket, RtpRouter } from '@native-sfu/sfu-core';
 
 test.describe('browser cross-node pipe transport interoperability', () => {
   test('owner-node publisher reaches a remote-node subscriber over UDP pipe transport and returns RTCP upstream', async ({ page, browserName }) => {
@@ -362,6 +362,238 @@ test.describe('browser cross-node pipe transport interoperability', () => {
         }
         return desiredLayers.some((layer) => (layer.spatialLayer ?? -1) >= highestActiveSpatial);
       }, { timeout: 20_000 }).toBe(true);
+      if (!singleSpatialActive) {
+        await expect.poll(async () => {
+          const stats = await publisherVideoFeedbackStats(page);
+          return stats.pliCount > recoveryBaseline.pliCount || stats.keyFramesEncoded > recoveryBaseline.keyFramesEncoded;
+        }, { timeout: 10_000 }).toBe(true);
+      }
+
+      const finalFrames = await waitForInboundVideoFrames(page, framesDuringImpairment + 2);
+      expect(finalFrames).toBeGreaterThan(framesDuringImpairment);
+      expect(stack.asyncErrors).toEqual([]);
+    } finally {
+      if (impairmentFeedbackTimer) {
+        clearInterval(impairmentFeedbackTimer);
+      }
+      if (recoveryFeedbackTimer) {
+        clearInterval(recoveryFeedbackTimer);
+      }
+      unsubscribeRemoteTwcc?.();
+      stack.setRemotePipeRtpHandler(directRemotePipeForwarder);
+      await impairedForwarder.close();
+      await closeBrowserPeers(page);
+      await stack.dispose(roomId);
+    }
+  });
+
+  test('live distributed VP9 multi-layer impairment downgrades and recovers over the UDP pipe path when supported', async ({ page, browserName }) => {
+    test.skip(
+      browserName !== 'chromium',
+      'Live distributed VP9 impairment signoff currently depends on stable Chromium VP9 simulcast sender stats and TWCC-driven recovery in Playwright; Firefox and WebKit remain covered by green cross-node media and RTCP flow tests.'
+    );
+    const roomId = 'room-cross-node-pipe-impairment-vp9';
+    const ownerPipeId = 'pipe-owner-impairment-vp9';
+    const remotePipeId = 'pipe-remote-impairment-vp9';
+    const stack = createCrossNodeStack();
+    const forwardedPackets: RtpPacket[] = [];
+    const directRemotePipeForwarder = async (event: { roomId: string; producerId: string | undefined; packet: Buffer }) => {
+      forwardedPackets.push(RtpPacket.parse(event.packet));
+      await stack.remote.media.handlePipeRtp(remotePipeId, event.producerId, event.packet);
+    };
+    const impairedForwarder = createImpairedPipeForwarder(directRemotePipeForwarder, {
+      lossPercentage: 35,
+      baseDelayMs: 120,
+      jitterMs: 40,
+      maxThroughputBps: 250_000,
+      seed: 0x45ab67cd
+    });
+    let unsubscribeRemoteTwcc: (() => void) | undefined;
+    let impairmentFeedbackTimer: NodeJS.Timeout | undefined;
+    let recoveryFeedbackTimer: NodeJS.Timeout | undefined;
+
+    try {
+      try {
+        await stack.setupUdpPipePair({ roomId, ownerPipeId, remotePipeId });
+      } catch (error) {
+        test.skip(true, `UDP pipe loopback transport is unavailable in this environment: ${errorMessage(error)}`);
+        return;
+      }
+
+      const publisherTransport = await stack.owner.media.createWebRtcTransport(roomId, 'publisher');
+      const publisherOffer = await createLiveSimulcastPublisherOffer(page, 'video/VP9');
+      test.skip(!publisherOffer.supported, 'Browser does not support live VP9 simulcast sender setup in Playwright');
+      await applyRemoteTransport(stack.owner.media, publisherTransport, 'publisher', publisherOffer.sdp);
+      const sourceRtp = parseSdpRtpParameters('video', publisherOffer.sdp);
+      const primaryCodec = sourceRtp.codecs.find((codec) => !/\/rtx$/i.test(codec.mimeType));
+      test.skip(primaryCodec?.mimeType.toLowerCase() !== 'video/vp9', 'Browser did not negotiate VP9 as the primary live impairment codec');
+      test.skip((sourceRtp.simulcast?.rids?.length ?? 0) < 3, 'Browser did not negotiate three simulcast RIDs for the live VP9 impairment proof');
+      const pipeRtp = remapRtpParameters(sourceRtp, 720_000, 820_000);
+      const reversePipeMappings = buildSsrcMappings(pipeRtp, sourceRtp);
+      const ownerProducer = videoProducer('producer-cross-node-impairment-vp9', roomId, 'publisher', publisherTransport.id, sourceRtp);
+      const ownerPipeConsumerId = 'pipe-consumer-cross-node-impairment-vp9';
+
+      await stack.owner.media.bindProducer(publisherTransport.id, 'publisher', sourceRtp);
+      await stack.owner.media.registerProducer(ownerProducer);
+      stack.pipe.createProducer(ownerPipeId, {
+        id: ownerProducer.id,
+        participantId: ownerProducer.participantId,
+        rtpParameters: pipeRtp
+      });
+      stack.pipe.createProducer(remotePipeId, {
+        id: ownerProducer.id,
+        participantId: ownerProducer.participantId,
+        rtpParameters: pipeRtp,
+        ssrcMappings: reversePipeMappings
+      });
+      await stack.owner.media.registerPipeConsumer(
+        {
+          id: ownerPipeConsumerId,
+          roomId,
+          producerId: ownerProducer.id,
+          participantId: 'pipe:node-b',
+          transportId: ownerPipeId,
+          rtpParameters: pipeRtp,
+          status: 'live',
+          createdAt: new Date().toISOString()
+        },
+        ownerPipeId
+      );
+      await stack.remote.media.registerPipeProducer(videoProducer(ownerProducer.id, roomId, 'publisher', remotePipeId, pipeRtp), remotePipeId);
+
+      const subscriberTransport = await stack.remote.media.createWebRtcTransport(roomId, 'subscriber');
+      const subscriberOffer = await createVideoSubscriberOffer(page);
+      await applyRemoteTransport(stack.remote.media, subscriberTransport, 'subscriber', subscriberOffer);
+      const remoteConsumer = browserSimulcastConsumer(videoProducer(ownerProducer.id, roomId, 'publisher', remotePipeId, pipeRtp), 'consumer-cross-node-impairment-vp9');
+      remoteConsumer.transportId = subscriberTransport.id;
+      await stack.remote.media.registerConsumer(remoteConsumer);
+      if (remoteConsumer.preferredLayers) {
+        await stack.owner.media.setConsumerPreferredLayers(ownerPipeConsumerId, remoteConsumer.preferredLayers);
+      }
+      unsubscribeRemoteTwcc = stack.remote.media.onConsumerTwccObservation((event) => {
+        if (event.consumerId !== remoteConsumer.id) {
+          return;
+        }
+        stack.owner.media.applyConsumerTwccObservation(ownerPipeConsumerId, event.observation);
+      });
+      const pushOwnerObservation = (packetLoss: number, delayVariationMs: number, jitter: number, receiveDeltaMs: number) => {
+        stack.owner.media.applyConsumerTwccObservation(ownerPipeConsumerId, {
+          packetLoss,
+          delayVariationMs,
+          jitter,
+          receiveDeltaMs,
+          timestamp: Date.now()
+        });
+      };
+      const startOwnerObservationTimer = (packetLoss: number, delayVariationMs: number, jitter: number, receiveDeltaMs: number) => {
+        pushOwnerObservation(packetLoss, delayVariationMs, jitter, receiveDeltaMs);
+        const timer = setInterval(() => {
+          pushOwnerObservation(packetLoss, delayVariationMs, jitter, receiveDeltaMs);
+        }, 250);
+        timer.unref?.();
+        return timer;
+      };
+
+      await setSubscriberAnswer(
+        page,
+        buildUnifiedPlanAnswer({
+          transport: subscriberTransport,
+          offer: subscriberOffer,
+          direction: 'sendonly',
+          rtpParameters: remoteConsumer.rtpParameters
+        })
+      );
+      await setPublisherAnswer(
+        page,
+        buildUnifiedPlanAnswer({
+          transport: publisherTransport,
+          offer: publisherOffer.sdp,
+          direction: 'recvonly',
+          mediaKind: 'video',
+          rtpParameters: sourceRtp
+        })
+      );
+
+      const initialFrames = await waitForInboundVideoFrames(page, 1);
+      const initialProducerState = await sampledProducerLayerState(stack.owner.media, ownerProducer.id);
+      const initialActiveLayers = initialProducerState?.availableLayers.filter((layer) => layer.active) ?? [];
+      test.skip(initialActiveLayers.length === 0, 'Browser did not expose any active producer layers for the live VP9 impairment proof');
+      const highestActiveSpatial = Math.max(...initialActiveLayers.map((layer) => layer.spatialLayer ?? 0));
+      const highestActiveTemporal = Math.max(
+        ...initialActiveLayers
+          .filter((layer) => (layer.spatialLayer ?? 0) === highestActiveSpatial)
+          .map((layer) => layer.temporalLayer ?? 0)
+      );
+      const singleSpatialActive = initialActiveLayers.every((layer) => (layer.spatialLayer ?? 0) === highestActiveSpatial);
+      test.skip(
+        singleSpatialActive && highestActiveTemporal <= 0,
+        'Chromium Playwright loopback only activated a single VP9 layer for this synthetic publisher, so live VP9 multi-layer impairment signoff is unavailable in this environment.'
+      );
+
+      await expect
+        .poll(
+          async () => {
+            const current = (await sampledConsumerLayerState(stack.owner.media, ownerPipeConsumerId))?.currentLayers;
+            return {
+              spatialLayer: current?.spatialLayer ?? -1,
+              temporalLayer: current?.temporalLayer ?? -1
+            };
+          },
+          { timeout: 15_000 }
+        )
+        .toEqual({
+          spatialLayer: highestActiveSpatial,
+          temporalLayer: highestActiveTemporal
+        })
+        .catch(async (error) => {
+          throw new Error(
+            [
+              `Owner pipe consumer never reached the highest live VP9 layer: ${errorMessage(error)}`,
+              `publisherOutbound=${JSON.stringify(await publisherOutboundVideoStats(page))}`,
+              `publisherFeedback=${JSON.stringify(await publisherVideoFeedbackStats(page))}`,
+              `sourceRtp=${JSON.stringify(sourceRtp)}`,
+              `pipeRtp=${JSON.stringify(pipeRtp)}`,
+              `ownerProducerState=${JSON.stringify(await sampledProducerLayerState(stack.owner.media, ownerProducer.id))}`,
+              `ownerPipeConsumerState=${JSON.stringify(await sampledConsumerLayerState(stack.owner.media, ownerPipeConsumerId))}`,
+              `remoteSubscriberState=${JSON.stringify(await sampledConsumerLayerState(stack.remote.media, remoteConsumer.id))}`,
+              `adaptiveStats=${JSON.stringify(await sampledAdaptiveStats(stack.owner.media))}`
+            ].join('\n')
+          );
+        });
+
+      await expect.poll(() => vp9ForwardedTemporalLayers(forwardedPackets, primaryCodec!).size, { timeout: 10_000 }).toBeGreaterThan(0);
+      expect((await sampledProducerLayerState(stack.owner.media, ownerProducer.id))?.dynacast).toBeDefined();
+
+      stack.setRemotePipeRtpHandler(impairedForwarder.handle);
+      impairmentFeedbackTimer = startOwnerObservationTimer(0.35, 160, 40, 160);
+
+      await expect.poll(async () => {
+        const current = (await sampledConsumerLayerState(stack.owner.media, ownerPipeConsumerId))?.currentLayers;
+        const spatialLayer = current?.spatialLayer ?? highestActiveSpatial;
+        const temporalLayer = current?.temporalLayer ?? highestActiveTemporal;
+        return singleSpatialActive ? temporalLayer < highestActiveTemporal : spatialLayer < highestActiveSpatial;
+      }, { timeout: 20_000 }).toBe(true);
+      const framesDuringImpairment = await waitForInboundVideoFrames(page, initialFrames + 2);
+
+      stack.setRemotePipeRtpHandler(directRemotePipeForwarder);
+      if (impairmentFeedbackTimer) {
+        clearInterval(impairmentFeedbackTimer);
+        impairmentFeedbackTimer = undefined;
+      }
+      await impairedForwarder.flushAll();
+      const recoveryBaseline = await publisherVideoFeedbackStats(page);
+      recoveryFeedbackTimer = startOwnerObservationTimer(0.005, 5, 1, 5);
+
+      await expect.poll(async () => {
+        const current = (await sampledConsumerLayerState(stack.owner.media, ownerPipeConsumerId))?.currentLayers;
+        return {
+          spatialLayer: current?.spatialLayer ?? -1,
+          temporalLayer: current?.temporalLayer ?? -1
+        };
+      }, { timeout: 20_000 }).toEqual({
+        spatialLayer: highestActiveSpatial,
+        temporalLayer: highestActiveTemporal
+      });
       if (!singleSpatialActive) {
         await expect.poll(async () => {
           const stats = await publisherVideoFeedbackStats(page);
@@ -943,6 +1175,17 @@ async function publisherOutboundVideoStats(page: Page): Promise<Array<Record<str
     }
     return results;
   });
+}
+
+function vp9ForwardedTemporalLayers(
+  packets: RtpPacket[],
+  codec: NonNullable<RtpParameters['codecs'][number]>
+): Set<number> {
+  return new Set(
+    packets
+      .map((packet) => detectTemporalLayer(packet, codec)?.temporalLayer)
+      .filter((layer): layer is number => layer !== undefined)
+  );
 }
 
 async function sampledMediaCounters(

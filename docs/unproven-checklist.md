@@ -28,7 +28,9 @@ These items were not fully proven in the current local pass.
 These items block a truthful controlled-rollout signoff until they are executed against a real staging environment.
 
 - [ ] Run the staging preflight against real node URLs and a real operations token
-- [ ] Run the Chromium TURN relay proof against a real staged frontend/backend
+- [ ] Re-run the staging preflight with `STAGING_EMAIL` and `STAGING_PASSWORD` so `/api/v1/media/turn-credentials` is checked with a real user session
+- [ ] Run the Chromium TURN relay proof against the real shared staging ingress hostname
+- [ ] Run the Chromium shared-ingress browser publish/subscribe proof against real staging credentials
 - [ ] Prove public Coturn UDP reachability behind the advertised TURN URI
 - [ ] Prove real UDP media-plane exposure for `HOST_CANDIDATE_PORT_RANGE`
 - [ ] Prove real UDP media-plane exposure for `PIPE_PORT_RANGE` when pipe transport is enabled
@@ -36,12 +38,22 @@ These items block a truthful controlled-rollout signoff until they are executed 
 - [ ] Prove drain and recovery behavior in the real staging deployment shape
 - [ ] Prove that the deployment has a working `preStop` drain-hook path or equivalent rollout-safe drain mechanism
 
+## Still Unproven Even After The Browser Ingress Proof
+
+If the preflight, Chromium relay-gathering proof, and Chromium shared-ingress publish/subscribe proof all pass, keep these items open until they have separate evidence:
+
+- [ ] Real browser media on the public `HOST_CANDIDATE_PORT_RANGE`
+- [ ] Real browser-visible multi-node owner routing, reconnect, and host handoff behavior
+- [ ] Real `PIPE_PORT_RANGE` media movement between nodes when pipe transport is enabled
+- [ ] Real ingress/load-balancer drain plus recovery behavior during rollout
+- [ ] Firefox and WebKit staged behavior beyond local-only regression coverage
+
 ## Post-Staging Follow-Ups
 
 These are useful follow-ups after staging even if staging goes green.
 
 - [ ] Add a staging-only Kubernetes overlay for real UDP exposure and drain-hook wiring
-- [ ] Extend the staging browser proof from relay gathering to full publish/subscribe over ingress
+- [ ] Broaden the shared-ingress browser proof beyond Chromium and single-flow video coverage
 - [ ] Add explicit frontend handling for owner redirects if multi-node non-pipe routing is meant to be first-class
 - [ ] Package alert rules or dashboard guidance for TURN, drain, worker, and pipe incidents
 - [ ] Decide whether `/metrics` should remain canonical with alias behavior documented, or become fully path-configurable

@@ -43,6 +43,15 @@ describe('MediaController', () => {
       },
       configValues: {
         'app.nodeEnv': 'production',
+        'app.publicUrl': 'https://sfu.example.com',
+        'cluster.publicUrl': 'https://node-a.sfu.example.com',
+        'pipe.advertiseIp': '127.0.0.1',
+        'mediaWorker.ice.announcedAddress': '127.0.0.1',
+        'mediaWorker.ice.stunServers': ['stun:127.0.0.1:3478', 'stuns:stun.example.com:5349'],
+        'mediaWorker.ice.turnServers': [
+          { url: 'turn:127.0.0.1:3478?transport=udp' },
+          { url: 'turns:turn.example.com:5349?transport=tcp' }
+        ],
         'turn.realm': 'turn.example.com',
         'turn.secret': '',
         'turn.uris': ['turn:127.0.0.1:3478?transport=udp']
@@ -61,6 +70,29 @@ describe('MediaController', () => {
       localhostUriCount: 1,
       udpOnly: true
     });
+    expect(diagnostics.ice).toEqual({
+      announcedAddress: '127.0.0.1',
+      announcedAddressIsLocalOrWildcard: true,
+      hostCandidateMode: 'announced-address',
+      stunServerCount: 2,
+      supportedStunServerCount: 1,
+      stunServerHosts: ['127.0.0.1', 'stun.example.com'],
+      turnServerCount: 2,
+      supportedTurnServerCount: 1,
+      turnServerHosts: ['127.0.0.1', 'turn.example.com'],
+      usesSharedSecretTurnCredentials: true
+    });
+    expect(diagnostics.addressing).toEqual({
+      publicUrl: 'https://sfu.example.com',
+      publicUrlHost: 'sfu.example.com',
+      publicUrlIsLocalOrWildcard: false,
+      nodePublicUrl: 'https://node-a.sfu.example.com',
+      nodePublicUrlHost: 'node-a.sfu.example.com',
+      nodePublicUrlIsLocalOrWildcard: false,
+      pipeAdvertiseIp: '127.0.0.1',
+      pipeAdvertiseIpIsLocalOrWildcard: true,
+      turnUriHosts: ['127.0.0.1']
+    });
     for (const alert of [
       'local_node_draining',
       'media_workers_not_ready',
@@ -69,7 +101,10 @@ describe('MediaController', () => {
       'pipe_runtime_unsupported',
       'pipe_requests_rejected',
       'turn_not_ready',
-      'turn_localhost_uris'
+      'turn_localhost_uris',
+      'ice_announced_address_localhost',
+      'ice_unsupported_transport',
+      'ice_localhost_servers'
     ]) {
       expect(diagnostics.alerts).toContain(alert);
     }
@@ -125,6 +160,12 @@ describe('MediaController', () => {
       },
       configValues: {
         'app.nodeEnv': 'development',
+        'app.publicUrl': 'http://localhost:3000',
+        'cluster.publicUrl': 'http://localhost:3000',
+        'pipe.advertiseIp': '127.0.0.1',
+        'mediaWorker.ice.announcedAddress': undefined,
+        'mediaWorker.ice.stunServers': [],
+        'mediaWorker.ice.turnServers': [],
         'turn.realm': 'native-sfu.local',
         'turn.secret': 'turn-secret-valid-length-32',
         'turn.uris': ['turn:sfu.example.com:3478?transport=udp']
@@ -186,6 +227,12 @@ describe('MediaController', () => {
       },
       configValues: {
         'app.nodeEnv': 'development',
+        'app.publicUrl': 'http://localhost:3000',
+        'cluster.publicUrl': 'http://localhost:3000',
+        'pipe.advertiseIp': '127.0.0.1',
+        'mediaWorker.ice.announcedAddress': undefined,
+        'mediaWorker.ice.stunServers': [],
+        'mediaWorker.ice.turnServers': [],
         'turn.realm': 'native-sfu.local',
         'turn.secret': 'turn-secret-valid-length-32',
         'turn.uris': ['turn:sfu.example.com:3478?transport=udp']

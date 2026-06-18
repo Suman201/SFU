@@ -19,6 +19,8 @@ describe('validateConfig', () => {
     expect(validated.NODE_ENV).toBe('test');
     expect(validated.PORT).toBe(3000);
     expect(validated.HOST_CANDIDATE_PORT_RANGE).toBe('40000-40100');
+    expect(validated.ICE_STUN_SERVERS).toBe('');
+    expect(validated.ICE_TURN_SERVERS).toBe('');
   });
 
   it('accepts an explicit host candidate port range for multi-node local validation', () => {
@@ -150,5 +152,58 @@ describe('validateConfig', () => {
         TURN_URIS: 'turn:sfu.example.com:3478'
       })
     ).toThrow(/transport=udp/);
+  });
+
+  it('accepts explicit server-side ICE STUN, TURN, and announced candidate config', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        ICE_STUN_SERVERS: 'stun:stun.example.com:3478',
+        ICE_TURN_SERVERS: 'turn:turn.example.com:3478?transport=udp',
+        ICE_ANNOUNCED_ADDRESS: '203.0.113.10'
+      })
+    ).not.toThrow();
+  });
+
+  it('rejects unsupported TCP/TLS STUN server entries', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        ICE_STUN_SERVERS: 'stuns:stun.example.com:5349'
+      })
+    ).toThrow(/unsupported TCP\/TLS STUN transport/);
+  });
+
+  it('rejects server-side TURN URIs without an explicit UDP transport', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        ICE_TURN_SERVERS: 'turn:turn.example.com:3478'
+      })
+    ).toThrow(/ICE_TURN_SERVERS entry "turn:turn.example.com:3478" must explicitly request transport=udp/);
+  });
+
+  it('rejects mismatched announced and public candidate aliases', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        ICE_ANNOUNCED_ADDRESS: '203.0.113.10',
+        ICE_PUBLIC_CANDIDATE_ADDRESS: '203.0.113.20'
+      })
+    ).toThrow(/ICE_ANNOUNCED_ADDRESS and ICE_PUBLIC_CANDIDATE_ADDRESS must match/);
+  });
+
+  it('rejects localhost announced candidate addresses in production', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        NODE_ENV: 'production',
+        PUBLIC_URL: 'https://sfu.example.com',
+        NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
+        TURN_URIS: 'turn:sfu.example.com:3478?transport=udp',
+        OPERATIONS_TOKEN: 'operations-token-valid-length-32',
+        ICE_ANNOUNCED_ADDRESS: '127.0.0.1'
+      })
+    ).toThrow(/ICE_ANNOUNCED_ADDRESS must not use localhost or wildcard hosts in production/);
   });
 });

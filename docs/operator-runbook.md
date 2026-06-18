@@ -19,12 +19,21 @@ Notes:
 
 ## Staging Rollout Guardrails
 
-Before a controlled production rollout, run the staging preflight and browser TURN proof from [docs/testing.md](/Volumes/Extarnal/RND/SFU/docs/testing.md).
+Before a controlled production rollout, run the staging preflight and browser TURN proof from [docs/testing.md](/Volumes/Extarnal/RND/SFU/docs/testing.md). Treat them as necessary rollout checks, not as a substitute for a real staged browser publish/subscribe proof over the deployment ingress.
+
+In practice that staged proof has two halves:
+
+- direct-node preflight to confirm the deployed server-side config surface and diagnostics behavior
+- shared-ingress Chromium relay gathering to confirm real TURN credential use through the public hostname
+
+A green result means the environment is configured coherently enough for cautious rollout work. It does not mean full room join, publish, subscribe, reconnect, or ingress ownership behavior has been proven end to end.
 
 Treat these conditions as rollout blockers:
 
 - `turn_not_ready`, `turn_localhost_uris`, or `turn_unsupported_transport` in `/api/v1/media/diagnostics/node`
+- `addressing.publicUrlIsLocalOrWildcard=true`, `addressing.nodePublicUrlIsLocalOrWildcard=true`, or `addressing.pipeAdvertiseIpIsLocalOrWildcard=true` in non-local staging
 - `/metrics` still reachable without `X-Operations-Token` when `OPERATIONS_TOKEN` is supposed to be enabled
+- `/api/v1/media/turn-credentials` returning zero URIs or non-UDP TURN URIs during staged validation
 - `sfu_metrics_refresh_status{component="cluster|pipe|media_workers"} != 1`
 - `sfu_media_worker_failed_rooms > 0`
 - `readyWorkers < workerCount` or sustained worker overload during a steady-state soak

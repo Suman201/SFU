@@ -4,7 +4,7 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { NestSfuModule } from '@native-sfu/nest-sfu';
+import { NestSfuModule, type TurnServerOptions } from '@native-sfu/nest-sfu';
 import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
@@ -70,8 +70,11 @@ import { ClusterModule } from './cluster/cluster.module';
       imports: [ConfigModule, MetricsModule],
       inject: [ConfigService, MetricsService],
       useFactory: (config: ConfigService, metrics: MetricsService) => ({
-        turnSecret: config.getOrThrow<string>('TURN_SECRET'),
+        turnSecret: config.getOrThrow<string>('turn.secret'),
         turnUris: config.get<string[]>('turn.uris') ?? [],
+        stunServers: config.get<string[]>('mediaWorker.ice.stunServers') ?? [],
+        turnServers: config.get<TurnServerOptions[]>('mediaWorker.ice.turnServers') ?? [],
+        announcedAddress: config.get<string | undefined>('mediaWorker.ice.announcedAddress'),
         mediaWorkerMode: config.get<'in-process' | 'worker'>('mediaWorker.mode', 'in-process'),
         mediaWorkerCount: config.get<number>('mediaWorker.count', 1),
         mediaWorkerRequestTimeoutMs: config.get<number>('mediaWorker.requestTimeoutMs', 5000),

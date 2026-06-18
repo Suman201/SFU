@@ -57,6 +57,22 @@ describe('RtpSourceStreamState', () => {
     expect(restarted.packets.map((item) => item.sequenceNumber)).toEqual([1000]);
     expect(state.snapshot().restartCount).toBe(1);
   });
+
+  it('treats 16-bit sequence wrap as in-order traffic instead of a restart or late packet', () => {
+    const state = new RtpSourceStreamState({ ssrc: 1111, allowedPayloadTypes: [96], restartSequenceGap: 100 });
+
+    expect(state.accept(packet(1111, 96, 65534)).packets.map((item) => item.sequenceNumber)).toEqual([65534]);
+    expect(state.accept(packet(1111, 96, 65535)).packets.map((item) => item.sequenceNumber)).toEqual([65535]);
+
+    const wrapped = state.accept(packet(1111, 96, 0));
+    const next = state.accept(packet(1111, 96, 1));
+
+    expect(wrapped.restarted).toBe(false);
+    expect(wrapped.dropReason).toBeUndefined();
+    expect(wrapped.packets.map((item) => item.sequenceNumber)).toEqual([0]);
+    expect(next.packets.map((item) => item.sequenceNumber)).toEqual([1]);
+    expect(state.snapshot().restartCount).toBe(0);
+  });
 });
 
 function packet(ssrc: number, payloadType: number, sequenceNumber: number): RtpPacket {

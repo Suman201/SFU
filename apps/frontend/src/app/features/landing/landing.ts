@@ -13,41 +13,41 @@ import { Header } from '../../shared/header/header';
 })
 export class Landing {
   protected readonly heroStats = [
-    { value: '48ms', label: 'median room join' },
-    { value: '12k', label: 'class minutes/week' },
-    { value: '99.9%', label: 'session continuity' }
+    { value: '1:1', label: 'teacher-student connection' },
+    { value: '24/7', label: 'classes across time zones' },
+    { value: 'Any', label: 'subject, skill, or language' }
   ];
 
-  protected readonly roomSignals = ['Live SFU', 'Board saved', 'Chat synced', '24 enrolled'];
+  protected readonly roomSignals = ['Live class', 'Board saved', 'Chat synced', '18 enrolled'];
 
   protected readonly quickFeatures = [
-    { label: 'Adaptive video routing', detail: 'Teacher video, student tiles, and board state stay in one low-latency room.' },
-    { label: 'Cohort operations', detail: 'Batch schedules, enrollment signals, and session history live beside the classroom.' },
-    { label: 'Learning continuity', detail: 'Whiteboard context, chat, and attendance cues carry from one session to the next.' }
+    { label: 'Teacher storefronts', detail: 'Educators can publish subjects, batches, availability, pricing, and class formats from one profile.' },
+    { label: 'Student discovery', detail: 'Learners compare teachers, timings, seats, and upcoming sessions before joining a class.' },
+    { label: 'Live learning tools', detail: 'Video, chat, whiteboard, attendance, and session context stay attached to every class.' }
   ];
 
   protected readonly valueBlocks = [
     {
       eyebrow: 'For teachers',
-      title: 'Run the cohort from one calm console.',
-      body: 'Open live rooms, track capacity, message batches, and keep every session artifact attached to the right class.',
+      title: 'Turn what you know into a live class.',
+      body: 'Create public batches, manage students, run sessions, and grow a teaching presence without needing a separate operations stack.',
       route: '/teacher-dashboard',
       cta: 'Teacher dashboard',
-      points: ['Session schedule at a glance', 'Batch health and hand raises', 'Whiteboard-first live delivery']
+      points: ['Create classes for any subject', 'Manage enrollments and schedules', 'Teach with video, chat, and whiteboard']
     },
     {
       eyebrow: 'For students',
-      title: 'Find the next live batch without friction.',
-      body: 'Browse active cohorts, understand seats and timing, and jump into a classroom that keeps chat, video, and board work together.',
+      title: 'Find the right teacher for your goal.',
+      body: 'Explore teachers across subjects, compare live batches, and join classes that match your schedule and learning style.',
       route: '/student/explore',
-      cta: 'Explore batches',
-      points: ['Clear cohort discovery', 'Upcoming session cues', 'Persistent learning context']
+      cta: 'Explore classes',
+      points: ['Browse teachers by skill', 'Review timing and available seats', 'Keep class history in one place']
     }
   ];
 
   protected readonly featuredBatches = [
     {
-      title: 'Applied AI Product Lab',
+      title: 'Spoken English Confidence',
       teacher: 'Meera Shah',
       schedule: 'Tue/Thu - 7:00 PM',
       seats: '18/24 seats',
@@ -55,15 +55,15 @@ export class Landing {
       tone: 'rose'
     },
     {
-      title: 'Realtime Systems Studio',
+      title: 'Maths for Competitive Exams',
       teacher: 'Arjun Menon',
       schedule: 'Sat - 10:30 AM',
       seats: '21/28 seats',
-      status: 'Live cohort',
+      status: 'Live class',
       tone: 'green'
     },
     {
-      title: 'Design Critique Circle',
+      title: 'Beginner Guitar Weekend',
       teacher: 'Nisha Rao',
       schedule: 'Mon/Wed - 6:30 PM',
       seats: '12/16 seats',
@@ -73,9 +73,9 @@ export class Landing {
   ];
 
   protected readonly platformStats = [
-    { value: '6', label: 'active teaching surfaces' },
-    { value: '4', label: 'cohort workflows' },
-    { value: '1', label: 'native SFU room core' },
+    { value: '2', label: 'clear journeys: teach and learn' },
+    { value: 'Any', label: 'teacher can publish a class' },
+    { value: 'Any', label: 'student can discover a teacher' },
     { value: '0', label: 'external class links required' }
   ];
 }

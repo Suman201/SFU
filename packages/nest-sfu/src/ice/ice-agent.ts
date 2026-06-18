@@ -294,14 +294,15 @@ export class IceAgent extends EventEmitter {
       socket.close();
       return;
     }
+    const announcedAddress = this.options.announcedAddress?.trim() || address;
     const candidate: LocalIceCandidate = {
       transportId: this.transportId,
       socketId: `${address}:${bound.port}`,
-      foundation: computeCandidateFoundation({ type: 'host', protocol: 'udp', ip: address }),
+      foundation: computeCandidateFoundation({ type: 'host', protocol: 'udp', ip: announcedAddress }),
       component: 1,
       protocol: 'udp',
       priority: computeCandidatePriority({ type: 'host', component: 1 }),
-      ip: address,
+      ip: announcedAddress,
       port: bound.port,
       type: 'host',
       baseAddress: address,
@@ -478,7 +479,10 @@ export class IceAgent extends EventEmitter {
 
   private scheduleNextCheck(delay = this.options.taMs ?? 50): void {
     this.stopCheckTimer();
-    if (this.state === 'closed' || this.state === 'completed') {
+    if (this.state === 'closed') {
+      return;
+    }
+    if (this.state === 'completed' && !this.hasPendingConnectivityChecks()) {
       return;
     }
     this.checkTimer = setTimeout(() => {
@@ -650,9 +654,10 @@ export class IceAgent extends EventEmitter {
     if (localCandidate.relay) {
       await this.ensureTurnPermission(socketContext, localCandidate.relay, remoteCandidate);
       await this.sendTurnIndication(socketContext, localCandidate.relay, remoteCandidate, response);
-      return;
+    } else {
+      await sendUdp(socketContext.socket, response, remote.port, remote.address);
     }
-    await sendUdp(socketContext.socket, response, remote.port, remote.address);
+    this.queueTriggeredConnectivityCheck(pair, hasUseCandidate(request));
   }
 
   private handleBindingSuccess(raw: Buffer, response: ReturnType<typeof parseStunMessage>): void {
@@ -796,6 +801,26 @@ export class IceAgent extends EventEmitter {
     const pair = createCandidatePair(local, remote, this.role === 'controlling');
     this.pairs.set(id, pair);
     return pair;
+  }
+
+  private hasPendingConnectivityChecks(): boolean {
+    return [...this.pairs.values()].some((pair) => pair.state === 'waiting');
+  }
+
+  private queueTriggeredConnectivityCheck(pair: IceCandidatePair, requestHadUseCandidate: boolean): void {
+    if (!this.shouldTriggerConnectivityCheck(pair, requestHadUseCandidate)) {
+      return;
+    }
+    pair.state = 'waiting';
+    this.scheduleNextCheck(0);
+  }
+
+  private shouldTriggerConnectivityCheck(pair: IceCandidatePair, requestHadUseCandidate: boolean): boolean {
+    return this.role === 'controlling'
+      && Boolean(this.remoteParameters)
+      && !requestHadUseCandidate
+      && pair.state !== 'in-progress'
+      && this.selectedPair?.id !== pair.id;
   }
 
   private setState(state: IceAgentState): void {

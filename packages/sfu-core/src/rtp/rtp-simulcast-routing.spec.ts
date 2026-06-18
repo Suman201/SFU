@@ -94,6 +94,39 @@ describe('RtpRouter simulcast routing', () => {
     expect(snapshot?.switchReason).toBe('preferred');
   });
 
+  it('keeps forwarding the current simulcast layer during repeated spatial preference churn until a fallback keyframe arrives', async () => {
+    const router = new RtpRouter({
+      enablePacing: false,
+      enableAdaptiveLayerSelection: false,
+      sequenceNumberGenerator: () => 31000,
+      timestampGenerator: () => 910000
+    });
+    const producer = createProducer(simulcastProducerRtp());
+    const consumer = createConsumer(producer, singleConsumerRtp(9000), { spatialLayer: 0 });
+    const writes: RtpPacket[] = [];
+    router.addProducer(producer);
+    router.addConsumer(consumer, async (packet) => {
+      writes.push(packet);
+    });
+
+    expect(await router.route(rawPacket(1111, 96, 10, 1000, Buffer.from([0x10, 0x00])))).toBe(1);
+
+    router.setConsumerPreferredLayers(consumer.id, { spatialLayer: 2 });
+    router.setConsumerPreferredLayers(consumer.id, { spatialLayer: 1 });
+    router.setConsumerPreferredLayers(consumer.id, { spatialLayer: 2 });
+
+    expect(await router.route(rawPacket(1111, 96, 11, 4000, Buffer.from([0x10, 0x01])))).toBe(1);
+    expect(await router.route(rawPacket(2222, 96, 1, 7000, Buffer.from([0x10, 0x00])))).toBe(1);
+
+    router.setConsumerPreferredLayers(consumer.id, { spatialLayer: 2 });
+    expect(await router.route(rawPacket(2222, 96, 2, 10_000, Buffer.from([0x10, 0x01])))).toBe(1);
+    expect(await router.route(rawPacket(3333, 96, 1, 13_000, Buffer.from([0x10, 0x00])))).toBe(1);
+
+    expect(writes.map((packet) => packet.sequenceNumber)).toEqual([31000, 31001, 31002, 31003, 31004]);
+    expect(writes.map((packet) => packet.timestamp)).toEqual([910000, 913000, 916000, 919000, 922000]);
+    expect(router.consumerLayerSnapshot(consumer.id)?.currentLayers).toEqual({ spatialLayer: 2, temporalLayer: undefined });
+  });
+
   it('uses bandwidth estimates for automatic downgrade and upgrade', async () => {
     let estimate = bandwidthEstimate(3_000_000);
     const estimator = {

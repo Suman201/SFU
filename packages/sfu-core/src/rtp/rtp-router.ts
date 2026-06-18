@@ -339,6 +339,7 @@ interface ConsumerRoute {
   preferredSvcLayers?: SvcLayerSelection;
   currentSvcLayers?: SvcLayerSelection;
   targetSvcLayers?: SvcLayerSelection;
+  svcSpatialUpgradePrimed: boolean;
   lastDynacastAllocationAt?: number;
   lastDynacastAllocation?: RtpLayerSelection;
   lastSvcAllocationAt?: number;
@@ -366,6 +367,7 @@ interface SourceEncoding {
 interface ConsumerDeliveryStateSnapshot {
   awaitingKeyframe: boolean;
   keyframeRequested: boolean;
+  svcSpatialUpgradePrimed: boolean;
   currentLayers?: RtpLayerSelection;
   currentSvcLayers?: SvcLayerSelection;
   switchStartedAt?: number;
@@ -519,7 +521,8 @@ export class RtpRouter {
       targetLayers: preferredLayers,
       preferredSvcLayers,
       currentSvcLayers: normalizeOptionalSvcLayer(consumer.currentSvcLayers),
-      targetSvcLayers: preferredSvcLayers
+      targetSvcLayers: preferredSvcLayers,
+      svcSpatialUpgradePrimed: false
     };
     consumer.priority = consumerRoute.priority;
     consumer.preferredLayers = preferredLayers;
@@ -630,6 +633,7 @@ export class RtpRouter {
     }
     route.preferredSvcLayers = normalizeSvcLayer(preferredSvcLayers);
     route.targetSvcLayers = route.preferredSvcLayers;
+    route.svcSpatialUpgradePrimed = false;
     route.consumer.preferredSvcLayers = route.preferredSvcLayers;
     route.consumer.targetSvcLayers = route.targetSvcLayers;
     const producerRoute = this.producers.get(route.consumer.producerId);
@@ -1227,6 +1231,30 @@ export class RtpRouter {
       }
       return this.packetMatchesSvcTarget(packetSvcLayer, consumerRoute.currentSvcLayers);
     }
+    const spatialUpgradePending = consumerRoute.currentSvcLayers
+      && (consumerRoute.currentSvcLayers.spatialLayerId ?? 0) < (targetSvc.spatialLayerId ?? 0);
+    if (
+      spatialUpgradePending
+      && (packetSvcLayer.spatialLayerId ?? 0) === (consumerRoute.currentSvcLayers?.spatialLayerId ?? 0)
+    ) {
+      const forwardCurrent = this.packetMatchesSvcTarget(packetSvcLayer, consumerRoute.currentSvcLayers);
+      if (forwardCurrent && this.packetIsKeyframe(producerRoute, packet)) {
+        consumerRoute.svcSpatialUpgradePrimed = true;
+      }
+      return forwardCurrent;
+    }
+    if (
+      spatialUpgradePending
+      && (packetSvcLayer.spatialLayerId ?? 0) > (consumerRoute.currentSvcLayers?.spatialLayerId ?? 0)
+      && (packetSvcLayer.spatialLayerId ?? 0) <= (targetSvc.spatialLayerId ?? 0)
+    ) {
+      if (!consumerRoute.svcSpatialUpgradePrimed && !this.packetIsKeyframe(producerRoute, packet)) {
+        return false;
+      }
+      consumerRoute.svcSpatialUpgradePrimed = true;
+      this.setCurrentSvcLayers(consumerRoute, producerRoute, packetSvcLayer, consumerRoute.switchReason ?? targetResult.reason);
+      return true;
+    }
     if (!consumerRoute.currentSvcLayers) {
       if (consumerRoute.awaitingKeyframe && !this.packetIsKeyframe(producerRoute, packet)) {
         this.options.onKeyframeGateDropped?.(consumerRoute.consumer.id, producerRoute.producer.id);
@@ -1672,6 +1700,9 @@ export class RtpRouter {
     consumerRoute.consumer.layerState = this.buildConsumerLayerState(consumerRoute, now, reason);
     consumerRoute.awaitingKeyframe = false;
     consumerRoute.keyframeRequested = false;
+    if (!consumerRoute.targetSvcLayers || (normalized.spatialLayerId ?? 0) >= (consumerRoute.targetSvcLayers.spatialLayerId ?? 0)) {
+      consumerRoute.svcSpatialUpgradePrimed = false;
+    }
     if (!sameSvcLayer(previous, normalized)) {
       const switchDurationMs = consumerRoute.switchStartedAt === undefined ? undefined : Math.max(0, now - consumerRoute.switchStartedAt);
       this.options.onConsumerSvcLayersChanged?.(consumerRoute.consumer.id, normalized);
@@ -3344,6 +3375,7 @@ function captureConsumerDeliveryState(consumerRoute: ConsumerRoute): ConsumerDel
   return {
     awaitingKeyframe: consumerRoute.awaitingKeyframe,
     keyframeRequested: consumerRoute.keyframeRequested,
+    svcSpatialUpgradePrimed: consumerRoute.svcSpatialUpgradePrimed,
     currentLayers: normalizeLayerSelection(consumerRoute.currentLayers),
     currentSvcLayers: normalizeOptionalSvcLayer(consumerRoute.currentSvcLayers),
     switchStartedAt: consumerRoute.switchStartedAt,
@@ -3359,6 +3391,7 @@ function captureConsumerDeliveryState(consumerRoute: ConsumerRoute): ConsumerDel
 function restoreConsumerDeliveryState(consumerRoute: ConsumerRoute, snapshot: ConsumerDeliveryStateSnapshot): void {
   consumerRoute.awaitingKeyframe = snapshot.awaitingKeyframe;
   consumerRoute.keyframeRequested = snapshot.keyframeRequested;
+  consumerRoute.svcSpatialUpgradePrimed = snapshot.svcSpatialUpgradePrimed;
   consumerRoute.currentLayers = snapshot.currentLayers;
   consumerRoute.currentSvcLayers = snapshot.currentSvcLayers;
   consumerRoute.switchStartedAt = snapshot.switchStartedAt;

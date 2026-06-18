@@ -48,7 +48,8 @@ export class IceService {
         transactionTimeoutMs: this.options.iceTransactionTimeoutMs,
         taMs: this.options.iceTaMs,
         stunServers: this.options.stunServers,
-        turnServers: this.options.turnServers
+        turnServers: this.options.turnServers,
+        announcedAddress: this.options.announcedAddress
       },
       this.portAllocator
     );
@@ -77,7 +78,8 @@ export class IceService {
         transactionTimeoutMs: this.options.iceTransactionTimeoutMs,
         taMs: this.options.iceTaMs,
         stunServers: this.options.stunServers,
-        turnServers: this.options.turnServers
+        turnServers: this.options.turnServers,
+        announcedAddress: this.options.announcedAddress
       },
       this.portAllocator
     );

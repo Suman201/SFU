@@ -1,4 +1,13 @@
 import Joi from 'joi';
+import {
+  isLocalOrWildcardHost,
+  isSupportedStunUri,
+  isSupportedTurnUri,
+  parseIceServerUrl,
+  parseTurnUriHost,
+  resolveAnnouncedAddress,
+  splitConfigList
+} from './media.config';
 
 const forbiddenSecretValues = [
   'changeme',
@@ -41,6 +50,10 @@ const schema = Joi.object({
   TURN_REALM: Joi.string().default('native-sfu.local'),
   TURN_SECRET: secretSchema.required(),
   TURN_URIS: Joi.string().allow('').default(''),
+  ICE_STUN_SERVERS: Joi.string().allow('').default(''),
+  ICE_TURN_SERVERS: Joi.string().allow('').default(''),
+  ICE_ANNOUNCED_ADDRESS: Joi.string().allow('').default(''),
+  ICE_PUBLIC_CANDIDATE_ADDRESS: Joi.string().allow('').default(''),
   RECORDING_STORAGE_DRIVER: Joi.string().valid('local', 's3').default('local'),
   RECORDING_LOCAL_PATH: Joi.string().default('/app/recordings'),
   S3_ENDPOINT: Joi.string().allow('').optional(),
@@ -97,10 +110,7 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
     validatePublicUrl(validated.PUBLIC_URL, 'PUBLIC_URL', semanticErrors);
     validatePublicUrl(validated.NODE_PUBLIC_URL, 'NODE_PUBLIC_URL', semanticErrors);
 
-    const turnUris = String(validated.TURN_URIS ?? '')
-      .split(',')
-      .map((entry) => entry.trim())
-      .filter(Boolean);
+    const turnUris = splitConfigList(validated.TURN_URIS);
     if (turnUris.length === 0) {
       semanticErrors.push('TURN_URIS must include at least one TURN URI in production');
     }
@@ -111,6 +121,14 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
   }
 
   validateTurnUris(validated.TURN_URIS, semanticErrors, { rejectLocalHosts: nodeEnv === 'production' });
+  validateStunServerUris(validated.ICE_STUN_SERVERS, semanticErrors, { rejectLocalHosts: nodeEnv === 'production' });
+  validateIceTurnServerUris(validated.ICE_TURN_SERVERS, semanticErrors, { rejectLocalHosts: nodeEnv === 'production' });
+  validateAnnouncedAddress(
+    validated.ICE_ANNOUNCED_ADDRESS,
+    validated.ICE_PUBLIC_CANDIDATE_ADDRESS,
+    semanticErrors,
+    { rejectLocalHosts: nodeEnv === 'production' }
+  );
 
   if (nodeEnv === 'production' && validated.ENABLE_PIPE_TRANSPORT === true) {
     validatePipeAdvertiseIp(validated.PIPE_ADVERTISE_IP, semanticErrors);
@@ -152,21 +170,17 @@ function validatePublicUrl(value: unknown, key: string, errors: string[]): void 
 }
 
 function validateTurnUris(value: unknown, errors: string[], options: { rejectLocalHosts: boolean }): void {
-  const uris = String(value ?? '')
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+  const uris = splitConfigList(value);
 
   for (const uri of uris) {
-    const normalized = uri.toLowerCase();
-    if (!normalized.startsWith('turn:')) {
+    if (!parseIceServerUrl(uri) || !uri.trim().toLowerCase().startsWith('turn:')) {
       errors.push(`TURN_URIS entry "${uri}" must use the turn: scheme`);
       continue;
     }
-    if (!normalized.includes('transport=udp')) {
+    if (!uri.trim().toLowerCase().includes('transport=udp')) {
       errors.push(`TURN_URIS entry "${uri}" must explicitly request transport=udp`);
     }
-    if (normalized.includes('transport=tcp') || normalized.startsWith('turns:')) {
+    if (!isSupportedTurnUri(uri)) {
       errors.push(`TURN_URIS entry "${uri}" uses an unsupported TCP/TLS TURN transport`);
     }
     if (options.rejectLocalHosts) {
@@ -174,6 +188,45 @@ function validateTurnUris(value: unknown, errors: string[], options: { rejectLoc
       if (host && isLocalOrWildcardHost(host)) {
         errors.push(`TURN_URIS entry "${uri}" must not advertise localhost or wildcard hosts in production`);
       }
+    }
+  }
+}
+
+function validateStunServerUris(value: unknown, errors: string[], options: { rejectLocalHosts: boolean }): void {
+  const uris = splitConfigList(value);
+
+  for (const uri of uris) {
+    const parsed = parseIceServerUrl(uri);
+    if (!parsed || parsed.scheme !== 'stun') {
+      errors.push(`ICE_STUN_SERVERS entry "${uri}" must use the stun: scheme`);
+      continue;
+    }
+    if (!isSupportedStunUri(uri)) {
+      errors.push(`ICE_STUN_SERVERS entry "${uri}" uses an unsupported TCP/TLS STUN transport`);
+    }
+    if (options.rejectLocalHosts && isLocalOrWildcardHost(parsed.host)) {
+      errors.push(`ICE_STUN_SERVERS entry "${uri}" must not advertise localhost or wildcard hosts in production`);
+    }
+  }
+}
+
+function validateIceTurnServerUris(value: unknown, errors: string[], options: { rejectLocalHosts: boolean }): void {
+  const uris = splitConfigList(value);
+
+  for (const uri of uris) {
+    const parsed = parseIceServerUrl(uri);
+    if (!parsed || parsed.scheme !== 'turn') {
+      errors.push(`ICE_TURN_SERVERS entry "${uri}" must use the turn: scheme`);
+      continue;
+    }
+    if (!uri.trim().toLowerCase().includes('transport=udp')) {
+      errors.push(`ICE_TURN_SERVERS entry "${uri}" must explicitly request transport=udp`);
+    }
+    if (!isSupportedTurnUri(uri)) {
+      errors.push(`ICE_TURN_SERVERS entry "${uri}" uses an unsupported TCP/TLS TURN transport`);
+    }
+    if (options.rejectLocalHosts && isLocalOrWildcardHost(parsed.host)) {
+      errors.push(`ICE_TURN_SERVERS entry "${uri}" must not advertise localhost or wildcard hosts in production`);
     }
   }
 }
@@ -188,27 +241,24 @@ function validatePipeAdvertiseIp(value: unknown, errors: string[]): void {
   }
 }
 
-function parseTurnUriHost(uri: string): string | undefined {
-  const withoutScheme = uri.replace(/^turns?:/i, '').trim();
-  const authority = withoutScheme.split('?')[0]?.split('/')[0]?.trim();
-  if (!authority) {
-    return undefined;
+function validateAnnouncedAddress(
+  primary: unknown,
+  alias: unknown,
+  errors: string[],
+  options: { rejectLocalHosts: boolean }
+): void {
+  const primaryValue = String(primary ?? '').trim();
+  const aliasValue = String(alias ?? '').trim();
+  if (primaryValue && aliasValue && primaryValue !== aliasValue) {
+    errors.push('ICE_ANNOUNCED_ADDRESS and ICE_PUBLIC_CANDIDATE_ADDRESS must match when both are set');
+    return;
   }
-  const hostPort = authority.split('@').pop()?.trim() ?? authority;
-  if (!hostPort) {
-    return undefined;
-  }
-  if (hostPort.startsWith('[')) {
-    const closingBracket = hostPort.indexOf(']');
-    return closingBracket > 1 ? hostPort.slice(1, closingBracket).toLowerCase() : undefined;
-  }
-  const segments = hostPort.split(':');
-  if (segments.length <= 2) {
-    return segments[0]?.toLowerCase();
-  }
-  return hostPort.toLowerCase();
-}
 
-function isLocalOrWildcardHost(host: string): boolean {
-  return ['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'].includes(host.toLowerCase());
+  const announcedAddress = resolveAnnouncedAddress(primary, alias);
+  if (!announcedAddress) {
+    return;
+  }
+  if (options.rejectLocalHosts && isLocalOrWildcardHost(announcedAddress)) {
+    errors.push('ICE_ANNOUNCED_ADDRESS must not use localhost or wildcard hosts in production');
+  }
 }

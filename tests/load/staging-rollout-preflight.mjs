@@ -101,6 +101,27 @@ async function inspectNode(baseUrl, failedChecks) {
   if (diagnostics.turn?.uriCount > 0 && !diagnostics.turn?.udpOnly) {
     failedChecks.push(`${baseUrl} TURN diagnostics still advertise unsupported TURN transports`);
   }
+  if (!isLocalOrWildcardUrl(baseUrl) && diagnostics.addressing?.publicUrlIsLocalOrWildcard) {
+    failedChecks.push(`${baseUrl} diagnostics still advertise a localhost/wildcard PUBLIC_URL (${diagnostics.addressing.publicUrl})`);
+  }
+  if (!isLocalOrWildcardUrl(baseUrl) && diagnostics.addressing?.nodePublicUrlIsLocalOrWildcard) {
+    failedChecks.push(`${baseUrl} diagnostics still advertise a localhost/wildcard NODE_PUBLIC_URL (${diagnostics.addressing.nodePublicUrl})`);
+  }
+  if (diagnostics.ice?.announcedAddressIsLocalOrWildcard) {
+    failedChecks.push(`${baseUrl} diagnostics still advertise a localhost/wildcard ICE announced address (${diagnostics.ice.announcedAddress})`);
+  }
+  if ((diagnostics.ice?.stunServerHosts ?? []).some((host) => isLocalOrWildcardHost(host))) {
+    failedChecks.push(`${baseUrl} diagnostics still point ICE_STUN_SERVERS at localhost or wildcard hosts`);
+  }
+  if ((diagnostics.ice?.turnServerHosts ?? []).some((host) => isLocalOrWildcardHost(host))) {
+    failedChecks.push(`${baseUrl} diagnostics still point ICE_TURN_SERVERS at localhost or wildcard hosts`);
+  }
+  if ((diagnostics.ice?.stunServerCount ?? 0) > (diagnostics.ice?.supportedStunServerCount ?? 0)) {
+    failedChecks.push(`${baseUrl} diagnostics still advertise unsupported STUN server transports`);
+  }
+  if ((diagnostics.ice?.turnServerCount ?? 0) > (diagnostics.ice?.supportedTurnServerCount ?? 0)) {
+    failedChecks.push(`${baseUrl} diagnostics still advertise unsupported server-side TURN transports`);
+  }
 
   const refreshStatus = {
     cluster: metricLabelValue(metricsText, 'sfu_metrics_refresh_status', { component: 'cluster' }),
@@ -164,7 +185,9 @@ async function inspectNode(baseUrl, failedChecks) {
       clusterHealth: diagnostics.cluster?.localNode?.health,
       draining: diagnostics.cluster?.localNode?.draining,
       capacity: diagnostics.cluster?.localNode?.capacity,
-      turn: diagnostics.turn
+      turn: diagnostics.turn,
+      ice: diagnostics.ice,
+      addressing: diagnostics.addressing
     },
     pipe: {
       enabled: diagnostics.pipe?.health?.enabled,
@@ -317,6 +340,19 @@ function escapeForRegex(value) {
 function isSupportedTurnUri(uri) {
   const normalized = String(uri).trim().toLowerCase();
   return normalized.startsWith('turn:') && normalized.includes('transport=udp') && !normalized.startsWith('turns:') && !normalized.includes('transport=tcp');
+}
+
+function isLocalOrWildcardUrl(value) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return ['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'].includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isLocalOrWildcardHost(host) {
+  return ['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'].includes(String(host).trim().toLowerCase());
 }
 
 main().catch((error) => {

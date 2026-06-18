@@ -3,7 +3,8 @@ export const RTCP_RR = 201;
 export const RTCP_RTPFB = 205;
 export const RTCP_PSFB = 206;
 
-export type RtcpPacketType = typeof RTCP_SR | typeof RTCP_RR | typeof RTCP_RTPFB | typeof RTCP_PSFB;
+export type KnownRtcpPacketType = typeof RTCP_SR | typeof RTCP_RR | typeof RTCP_RTPFB | typeof RTCP_PSFB;
+export type RtcpPacketType = number;
 
 export interface RtcpPacket {
   version: number;
@@ -12,6 +13,7 @@ export interface RtcpPacket {
   type: RtcpPacketType;
   length: number;
   payload: Buffer;
+  paddingBytes?: Buffer;
 }
 
 export interface ReceiverReport {
@@ -118,11 +120,13 @@ export function parseRtcpCompound(buffer: Buffer): RtcpPacket[] {
       throw new Error('Truncated RTCP packet');
     }
     let payloadEnd = offset + byteLength;
+    let paddingBytes: Buffer | undefined;
     if (padding) {
       const paddingLength = buffer[payloadEnd - 1]!;
       if (paddingLength === 0 || paddingLength > byteLength - 4) {
         throw new Error('Invalid RTCP padding length');
       }
+      paddingBytes = buffer.subarray(payloadEnd - paddingLength, payloadEnd);
       payloadEnd -= paddingLength;
     }
     packets.push({
@@ -131,7 +135,8 @@ export function parseRtcpCompound(buffer: Buffer): RtcpPacket[] {
       count,
       type,
       length,
-      payload: buffer.subarray(offset + 4, payloadEnd)
+      payload: buffer.subarray(offset + 4, payloadEnd),
+      paddingBytes
     });
     offset += byteLength;
   }
@@ -142,14 +147,25 @@ export function parseRtcpCompound(buffer: Buffer): RtcpPacket[] {
 }
 
 export function serializeRtcpPacket(packet: RtcpPacket): Buffer {
-  if (packet.payload.length % 4 !== 0) {
+  const paddingBytes = packet.paddingBytes ?? Buffer.alloc(0);
+  if (paddingBytes.length > 0) {
+    if (paddingBytes[paddingBytes.length - 1] !== paddingBytes.length) {
+      throw new Error('Invalid RTCP padding bytes');
+    }
+  } else if (packet.padding) {
+    throw new Error('RTCP padding flag set without padding bytes');
+  }
+  const payloadLength = packet.payload.length + paddingBytes.length;
+  if (payloadLength % 4 !== 0) {
     throw new Error('RTCP payload must be 32-bit aligned');
   }
-  const buffer = Buffer.alloc(packet.payload.length + 4);
-  buffer[0] = (packet.version << 6) | (packet.padding ? 0x20 : 0) | (packet.count & 0x1f);
+  const buffer = Buffer.alloc(payloadLength + 4);
+  const padding = paddingBytes.length > 0;
+  buffer[0] = (packet.version << 6) | (padding ? 0x20 : 0) | (packet.count & 0x1f);
   buffer[1] = packet.type;
   buffer.writeUInt16BE(buffer.length / 4 - 1, 2);
   packet.payload.copy(buffer, 4);
+  paddingBytes.copy(buffer, 4 + packet.payload.length);
   return buffer;
 }
 
@@ -346,7 +362,7 @@ export function parseRemb(packet: RtcpPacket): ReceiverEstimatedMaximumBitrate |
   };
 }
 
-function createRtcpPacket(type: RtcpPacketType, count: number, payload: Buffer): Buffer {
+function createRtcpPacket(type: KnownRtcpPacketType, count: number, payload: Buffer): Buffer {
   if (payload.length % 4 !== 0) {
     throw new Error('RTCP payload must be 32-bit aligned');
   }

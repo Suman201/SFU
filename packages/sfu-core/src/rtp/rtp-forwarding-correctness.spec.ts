@@ -3,6 +3,7 @@ import { createNack, createReceiverReport, createSenderReport, parseReceiverRepo
 import { DeterministicPacketLossHarness } from './packet-loss-harness';
 import { RtpPacket } from './rtp-packet';
 import { RtpRouter } from './rtp-router';
+import { addSequenceNumber } from './rtp-sequence';
 import { originalSequenceNumberFromRtx } from './rtx';
 
 describe('RtpRouter forwarding correctness', () => {
@@ -295,6 +296,46 @@ describe('RtpRouter forwarding correctness', () => {
 
     expect(restarts).toEqual(['producer-1:1111']);
     expect(writes.map((packet) => packet.sequenceNumber)).toEqual([1000, 5000]);
+  });
+
+  it('preserves reverse NACK mapping across consumer sequence wrap', async () => {
+    let nextSequenceBase = 65534;
+    const router = new RtpRouter({
+      retransmissionCacheSize: 16,
+      sequenceNumberGenerator: () => nextSequenceBase++,
+      timestampGenerator: () => 500000
+    });
+    const producer = createProducer('producer-1', 'publisher', 'transport-pub', rtpParameters(1111, 96));
+    const consumer = createConsumer('consumer-1', producer, 'viewer', 'transport-sub', rtpParameters(2222, 120));
+    const writes: RtpPacket[] = [];
+    router.addProducer(producer);
+    router.addConsumer(consumer, async (packet) => {
+      writes.push(packet);
+    });
+
+    await router.route(rawPacket(1111, 96, 65534, 1000));
+    await router.route(rawPacket(1111, 96, 65535, 4000));
+    await router.route(rawPacket(1111, 96, 0, 7000));
+
+    const deliveredSequences = writes.map((packet) => packet.sequenceNumber);
+    expect(deliveredSequences).toEqual([
+      deliveredSequences[0]!,
+      addSequenceNumber(deliveredSequences[0]!, 1),
+      addSequenceNumber(deliveredSequences[0]!, 2)
+    ]);
+    const wrappedTargetSequence = deliveredSequences[2]!;
+
+    const repaired = await router.routeRtcp(
+      createNack({ senderSsrc: 9999, mediaSsrc: 2222, lostPacketIds: [wrappedTargetSequence] }),
+      {
+        sourceTransportId: consumer.transportId,
+        sourceParticipantId: consumer.participantId
+      }
+    );
+
+    expect(repaired).toBe(1);
+    expect(writes.at(-1)?.sequenceNumber).toBe(wrappedTargetSequence);
+    expect(writes.at(-1)?.payload.toString()).toBe('forwarding');
   });
 
   it('maps RTX SSRC and payload type when both producer and consumer advertise RTX', async () => {

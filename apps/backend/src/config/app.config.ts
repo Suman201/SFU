@@ -1,3 +1,5 @@
+import { buildIceTurnServers, resolveAnnouncedAddress, splitConfigList } from './media.config';
+
 export const appConfig = () => ({
   app: {
     nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -43,10 +45,7 @@ export const appConfig = () => ({
   turn: {
     realm: process.env.TURN_REALM ?? 'native-sfu.local',
     secret: process.env.TURN_SECRET,
-    uris: (process.env.TURN_URIS ?? '')
-      .split(',')
-      .map((entry) => entry.trim())
-      .filter(Boolean)
+    uris: splitConfigList(process.env.TURN_URIS)
   },
   mediaWorker: {
     mode: process.env.MEDIA_WORKER_MODE ?? 'in-process',
@@ -67,6 +66,17 @@ export const appConfig = () => ({
     hardMemoryLimitBytes: process.env.MEDIA_WORKER_HARD_MEMORY_LIMIT_BYTES ? Number(process.env.MEDIA_WORKER_HARD_MEMORY_LIMIT_BYTES) : undefined,
     softRtpPacketRate: Number(process.env.MEDIA_WORKER_SOFT_RTP_PACKET_RATE ?? 50000),
     softRtcpPacketRate: Number(process.env.MEDIA_WORKER_SOFT_RTCP_PACKET_RATE ?? 5000)
+  },
+  media: {
+    ice: {
+      stunServers: splitConfigList(process.env.ICE_STUN_SERVERS),
+      turnServers: buildIceTurnServers(splitConfigList(process.env.ICE_TURN_SERVERS), {
+        turnSecret: process.env.TURN_SECRET,
+        turnRealm: process.env.TURN_REALM,
+        usernameSubject: process.env.NODE_ID ?? 'media-node'
+      }),
+      announcedAddress: resolveAnnouncedAddress(process.env.ICE_ANNOUNCED_ADDRESS, process.env.ICE_PUBLIC_CANDIDATE_ADDRESS)
+    }
   },
   cluster: {
     nodeId: process.env.NODE_ID,

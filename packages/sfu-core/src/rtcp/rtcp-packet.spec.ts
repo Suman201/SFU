@@ -11,10 +11,46 @@ import {
   parseReceiverReport,
   parseRemb,
   parseRtcpCompound,
-  parseSenderReport
+  parseSenderReport,
+  serializeRtcpPacket
 } from './rtcp-packet';
 
 describe('RTCP parsing', () => {
+  it('preserves unknown padded packets inside a compound RTCP frame', () => {
+    const receiverReport = createReceiverReport({
+      reporterSsrc: 333,
+      reports: [
+        {
+          ssrc: 444,
+          fractionLost: 0.5,
+          packetsLost: 8,
+          highestSequence: 12345,
+          jitter: 42,
+          lastSenderReport: 7,
+          delaySinceLastSenderReport: 9
+        }
+      ]
+    });
+    const unknownPacket = createUnknownRtcpPacketWithPadding(207, 7, Buffer.from([0xde, 0xad, 0xbe]));
+    const nack = createNack({
+      senderSsrc: 111,
+      mediaSsrc: 222,
+      lostPacketIds: [10, 11, 12]
+    });
+    const compound = Buffer.concat([receiverReport, unknownPacket, nack]);
+
+    const packets = parseRtcpCompound(compound);
+    const roundTrip = Buffer.concat(packets.map((packet) => serializeRtcpPacket(packet)));
+
+    expect(roundTrip.equals(compound)).toBe(true);
+    expect(packets[1]?.version).toBe(2);
+    expect(packets[1]?.padding).toBe(true);
+    expect(packets[1]?.count).toBe(7);
+    expect(packets[1]?.type).toBe(207);
+    expect(packets[1]?.payload.equals(Buffer.from([0xde, 0xad, 0xbe]))).toBe(true);
+    expect(packets[1]?.paddingBytes?.equals(Buffer.from([0x01]))).toBe(true);
+  });
+
   it('creates and parses Sender Reports', () => {
     const raw = createSenderReport({
       senderSsrc: 111,
@@ -143,3 +179,14 @@ describe('RTCP parsing', () => {
     });
   });
 });
+
+function createUnknownRtcpPacketWithPadding(type: number, count: number, payload: Buffer): Buffer {
+  const paddingLength = (4 - ((payload.length + 1) % 4)) % 4 + 1;
+  const buffer = Buffer.alloc(4 + payload.length + paddingLength);
+  buffer[0] = 0xa0 | (count & 0x1f);
+  buffer[1] = type & 0xff;
+  buffer.writeUInt16BE(buffer.length / 4 - 1, 2);
+  payload.copy(buffer, 4);
+  buffer[buffer.length - 1] = paddingLength;
+  return buffer;
+}

@@ -31,9 +31,11 @@ export class RtpRetransmissionCache {
       return;
     }
     const key = cacheKey(packet.ssrc, packet.sequenceNumber);
-    if (!this.packets.has(key)) {
-      this.insertionOrder.push(key);
+    const existingIndex = this.insertionOrder.indexOf(key);
+    if (existingIndex >= 0) {
+      this.insertionOrder.splice(existingIndex, 1);
     }
+    this.insertionOrder.push(key);
     this.packets.set(key, {
       ssrc: packet.ssrc,
       sequenceNumber: packet.sequenceNumber,
@@ -58,12 +60,15 @@ export class RtpRetransmissionCache {
 
   snapshot(): RtpRetransmissionCacheSnapshot {
     const sequencesBySsrc: Record<number, number[]> = {};
-    for (const packet of this.packets.values()) {
+    const orderedPackets = [...this.packets.values()].sort((left, right) => {
+      if (left.storedAt !== right.storedAt) {
+        return left.storedAt - right.storedAt;
+      }
+      return left.sequenceNumber - right.sequenceNumber;
+    });
+    for (const packet of orderedPackets) {
       sequencesBySsrc[packet.ssrc] ??= [];
       sequencesBySsrc[packet.ssrc]!.push(packet.sequenceNumber);
-    }
-    for (const sequences of Object.values(sequencesBySsrc)) {
-      sequences.sort((left, right) => left - right);
     }
     return {
       size: this.packets.size,

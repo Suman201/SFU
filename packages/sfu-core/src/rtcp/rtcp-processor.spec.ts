@@ -57,4 +57,39 @@ describe('RtcpProcessor', () => {
     expect(firs).toEqual([222]);
     expect(rembs).toEqual([800_000]);
   });
+
+  it('skips unknown padded packets and continues parsing known packets in the same compound frame', () => {
+    const processor = new RtcpProcessor();
+    const receiverReportBlock = {
+      ssrc: 222,
+      fractionLost: 0.25,
+      packetsLost: 4,
+      highestSequence: 90,
+      jitter: 7,
+      lastSenderReport: 11,
+      delaySinceLastSenderReport: 12
+    };
+    const compound = Buffer.concat([
+      createReceiverReport({ reporterSsrc: 333, reports: [receiverReportBlock] }),
+      createUnknownRtcpPacketWithPadding(207, 2, Buffer.from([0xfa, 0xce, 0xb0])),
+      createNack({ senderSsrc: 333, mediaSsrc: 222, lostPacketIds: [10, 11] })
+    ]);
+
+    const feedback = processor.process('room-1', 'viewer', compound);
+
+    expect(feedback.receiverReportPackets.map((report) => report.reporterSsrc)).toEqual([333]);
+    expect(feedback.receiverReports).toEqual([receiverReportBlock]);
+    expect(feedback.nackPacketIds).toEqual([10, 11]);
+  });
 });
+
+function createUnknownRtcpPacketWithPadding(type: number, count: number, payload: Buffer): Buffer {
+  const paddingLength = (4 - ((payload.length + 1) % 4)) % 4 + 1;
+  const buffer = Buffer.alloc(4 + payload.length + paddingLength);
+  buffer[0] = 0xa0 | (count & 0x1f);
+  buffer[1] = type & 0xff;
+  buffer.writeUInt16BE(buffer.length / 4 - 1, 2);
+  payload.copy(buffer, 4);
+  buffer[buffer.length - 1] = paddingLength;
+  return buffer;
+}

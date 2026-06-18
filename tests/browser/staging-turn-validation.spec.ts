@@ -84,9 +84,18 @@ test.describe('staging TURN validation', () => {
 
     expect(result.gatheredCandidates.length).toBeGreaterThan(0);
     expect(result.relayCount).toBeGreaterThan(0);
+    expect(
+      result.gatheredCandidates
+        .filter((candidate) => candidate.type === 'relay')
+        .every((candidate) => !isLocalOrWildcardHost(candidate.address))
+    ).toBeTruthy();
 
     await page.evaluate(() => {
       (window as unknown as { __stagingTurnPc?: RTCPeerConnection }).__stagingTurnPc?.close();
     });
   });
 });
+
+function isLocalOrWildcardHost(host: string): boolean {
+  return ['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'].includes(host.trim().toLowerCase());
+}
