@@ -13,6 +13,7 @@
 - Host-only actions include closing, locking, unlocking, and recording.
 - Host/co-host actions include admitting, rejecting, permission updates, mute, kick, ban, and unban.
 - Permission changes are persisted and broadcast immediately.
+- Operational node and worker endpoints are protected separately from room roles through `X-Operations-Token`.
 
 ## Input Protection
 
@@ -24,15 +25,19 @@
 
 ## Replay and Transport Protection
 
-JWT expiry limits replay windows for REST and WebSocket connection setup. Media replay protection belongs in the SRTP implementation and must include per-SSRC rollover counters and replay windows before browser media is accepted.
+JWT expiry limits replay windows for REST and WebSocket connection setup. Media replay protection is enforced in the SRTP/SRTCP transport implementation with per-SSRC replay windows and rollover-aware sequence handling.
 
 ## Secrets
 
 Use Kubernetes secrets or an external secret manager for:
 
+- `MONGODB_URI`
+- `REDIS_URL`
 - `JWT_ACCESS_SECRET`
 - `JWT_REFRESH_SECRET`
+- `OPERATIONS_TOKEN`
 - `TURN_SECRET`
+- `PIPE_CLUSTER_SECRET`
 - S3 credentials
 
-Never deploy the example Coturn secret.
+`infra/k8s/secret.example.yaml` is a placeholder schema, not a deployable production secret. Copy the keys into your secret manager or a private manifest, replace every value, and keep the rendered secret out of version control.

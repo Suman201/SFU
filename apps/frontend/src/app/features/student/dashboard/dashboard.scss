@@ -76,6 +76,19 @@
   line-height: 1;
 }
 
+.summary-link {
+  color: var(--text);
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.summary-link:hover,
+.batch-main small a:hover {
+  color: var(--accent);
+}
+
 .summary-grid p {
   color: var(--muted);
   font-weight: 750;
@@ -150,6 +163,11 @@
 .batch-details span {
   color: var(--muted);
   font-size: 13px;
+}
+
+.batch-main small a {
+  color: inherit;
+  text-decoration: none;
 }
 
 .batch-details {

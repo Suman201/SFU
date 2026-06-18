@@ -39,7 +39,7 @@ describe('MetricsController', () => {
     const cluster = {
       snapshot: jest.fn(async () => clusterSnapshot)
     };
-    const controller = new MetricsController(metrics as never, media as never, pipe as never, cluster as never);
+    const controller = new MetricsController(metrics as never, media as never, pipe as never, cluster as never, createConfigService());
 
     const output = await controller.prometheus();
 
@@ -83,7 +83,7 @@ describe('MetricsController', () => {
     const cluster = {
       snapshot: jest.fn(async () => ({ localNode: { nodeId: 'node-a', region: 'ap-south-1', zone: 'ap-south-1a', capacity: { capacityScore: 0.3 } }, nodes: [], ownedRoomCount: 0 }))
     };
-    const controller = new MetricsController(metrics as never, media as never, pipe as never, cluster as never);
+    const controller = new MetricsController(metrics as never, media as never, pipe as never, cluster as never, createConfigService());
 
     const output = await controller.prometheus();
 
@@ -92,4 +92,28 @@ describe('MetricsController', () => {
     expect(metrics.markRefreshStatus).toHaveBeenCalledWith('pipe', true);
     expect(metrics.markRefreshStatus).toHaveBeenCalledWith('media_workers', false);
   });
+
+  it('returns not found when metrics are disabled', async () => {
+    const controller = new MetricsController(
+      { text: jest.fn() } as never,
+      { workerPoolSnapshot: jest.fn() } as never,
+      { snapshot: jest.fn(), healthSnapshot: jest.fn() } as never,
+      { snapshot: jest.fn() } as never,
+      createConfigService(false)
+    );
+
+    try {
+      await controller.prometheus();
+      fail('expected metrics endpoint to reject when disabled');
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe('Not Found');
+    }
+  });
 });
+
+function createConfigService(enabled = true) {
+  return {
+    get: jest.fn((key: string, fallback?: unknown) => (key === 'metrics.enabled' ? enabled : fallback))
+  } as never;
+}

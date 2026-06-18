@@ -47,21 +47,32 @@ async function bootstrap(): Promise<void> {
   );
   app.useGlobalFilters(new GlobalExceptionFilter(app.get(HttpAdapterHost)));
 
-  const document = SwaggerModule.createDocument(
-    app,
-    new DocumentBuilder()
-      .setTitle(config.get<string>('swagger.title', 'EduConnect Live Backend API'))
-      .setDescription('REST API for rooms, auth, recordings, and metrics.')
-      .setVersion(config.get<string>('swagger.version', '0.1.0'))
-      .addBearerAuth()
-      .build()
-  );
-  SwaggerModule.setup(config.get<string>('swagger.path', 'api/docs'), app, document);
+  if (config.get<boolean>('swagger.enabled', true)) {
+    const document = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder()
+        .setTitle(config.get<string>('swagger.title', 'EduConnect Live Backend API'))
+        .setDescription('REST API for rooms, auth, recordings, and metrics.')
+        .setVersion(config.get<string>('swagger.version', '0.1.0'))
+        .addBearerAuth()
+        .build()
+    );
+    SwaggerModule.setup(config.get<string>('swagger.path', 'api/docs'), app, document);
+  }
 
   const port = config.get<number>('app.port', 3000);
-  if (normalizeOperationalPath(metricsPath) !== 'metrics') {
+  if (config.get<boolean>('metrics.enabled', true) && normalizeOperationalPath(metricsPath) !== 'metrics') {
     const metricsController = app.get(MetricsController, { strict: false });
-    app.getHttpAdapter().getInstance().get(`/${normalizeOperationalPath(metricsPath)}`, async (_req: unknown, res: { setHeader: (name: string, value: string) => void; send: (body: string) => void }) => {
+    app.getHttpAdapter().getInstance().get(`/${normalizeOperationalPath(metricsPath)}`, async (
+      req: { headers?: Record<string, string | string[] | undefined> },
+      res: { status: (code: number) => { send: (body: string) => void }; setHeader: (name: string, value: string) => void; send: (body: string) => void }
+    ) => {
+      const configuredOperationsToken = config.get<string | undefined>('security.operationsToken')?.trim();
+      const requestOperationsToken = normalizeHeaderValue(req.headers?.['x-operations-token']);
+      if (configuredOperationsToken && requestOperationsToken !== configuredOperationsToken) {
+        res.status(401).send('Missing or invalid operations token');
+        return;
+      }
       res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
       res.send(await metricsController.prometheus());
     });
@@ -74,4 +85,11 @@ void bootstrap();
 function normalizeOperationalPath(path: string): string {
   const normalized = path.trim().replace(/^\/+/, '').replace(/\/+$/, '');
   return normalized.length > 0 ? normalized : 'metrics';
+}
+
+function normalizeHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) {
+    return value[0]?.trim();
+  }
+  return value?.trim();
 }

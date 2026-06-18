@@ -47,7 +47,7 @@ describe('RoomsGateway Socket.IO ack integration (e2e)', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
-    await app.listen(0);
+    await app.listen(0, '127.0.0.1');
     const port = (app.getHttpServer().address() as AddressInfo).port;
 
     socket = io(`http://127.0.0.1:${port}/sfu`, {
@@ -80,7 +80,7 @@ describe('RoomsGateway Socket.IO ack integration (e2e)', () => {
       socket.emit(
         'room:create',
         {
-          name: 'Phase 14 Ack Validation',
+          name: 'Release Gate Ack Validation',
           maxParticipants: 4,
           waitingRoomEnabled: false,
           joinApprovalRequired: false
@@ -102,7 +102,7 @@ describe('RoomsGateway Socket.IO ack integration (e2e)', () => {
       roles: [Role.HOST]
     });
     expect(typeof socketId).toBe('string');
-    expect(request.name).toBe('Phase 14 Ack Validation');
+    expect(request.name).toBe('Release Gate Ack Validation');
     expect(request.maxParticipants).toBe(4);
   });
 });

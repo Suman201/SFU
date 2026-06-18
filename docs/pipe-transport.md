@@ -19,7 +19,6 @@ Phase 11 adds a feature-flagged cross-node RTP/RTCP pipe foundation. It is disab
 - `PIPE_COORDINATION_TIMEOUT_MS` limits stale Redis coordination messages.
 - `PIPE_COORDINATION_MAX_ATTEMPTS` controls acknowledgement retry attempts.
 - `PIPE_MAX_SETUP_REQUESTS_PER_MINUTE` rate-limits setup commands per process.
-- `ENABLE_PIPE_TRANSPORT=true` is rejected at boot when `MEDIA_WORKER_MODE=worker` because Phase 11 still lacks worker pipe IPC.
 - `ENABLE_PIPE_TRANSPORT=true` is rejected at boot outside `NODE_ENV=test` unless `PIPE_ADVERTISE_IP` is configured, so production/staging cannot silently fall back to internal-only simulation.
 
 ## Current Scope
@@ -36,9 +35,32 @@ Implemented:
 - Owner-orchestrated remote feed setup so a non-owner subscriber node can request a producer feed, establish a pipe, and register a remote proxy producer while keeping WebRTC transport local to the subscriber node.
 - Cross-node room event fanout for room-scoped participant, producer, room-close, room-failure, permission, and chat updates.
 - Prometheus metrics for pipe transport state, durable control-plane delivery, replay, duplicate suppression, and worker rejection.
+- Worker-mode distributed pipe transport for controlled cross-node publish/subscribe validation.
 
 Not production-ready yet:
 
 - Remote publishing on non-owner nodes.
 - Multi-node RTP forwarding as a default path.
-- Worker-mode pipe IPC. Pipe transport is now rejected at boot when worker mode is enabled.
+
+## Troubleshooting
+
+If distributed pipe setup is enabled, start with:
+
+1. `/api/v1/media/diagnostics/pipe`
+2. `/api/v1/media/diagnostics/node`
+3. `/metrics`
+
+The first metrics worth checking are:
+
+- `sfu_pipe_transports_active`
+- `sfu_pipe_rejected_requests`
+- `sfu_pipe_errors_total`
+- `sfu_pipe_rtp_packets_total`
+- `sfu_pipe_rtcp_packets_total`
+
+Common misconfigurations:
+
+- `PIPE_ADVERTISE_IP` missing or wrong for the deployed node
+- UDP range exposed only partially
+- `PIPE_CLUSTER_SECRET` mismatch across nodes
+- `ENABLE_PIPE_TRANSPORT=true` without sticky owner-aware signaling

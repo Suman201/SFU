@@ -1,5 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { DEFAULT_PARTICIPANT_PERMISSIONS, Role, type RoomQualityState } from '@native-sfu/contracts';
+import { DEFAULT_PARTICIPANT_PERMISSIONS, Role, type ConsumerLayerEvent, type RoomQualityState } from '@native-sfu/contracts';
 import { RoomsService } from './rooms.service';
 
 describe('RoomsService', () => {
@@ -376,7 +376,7 @@ describe('RoomsService', () => {
   });
 
   it('surfaces owner-authoritative room diagnostics from distributed quality cache on non-owner nodes', async () => {
-    const { service, participants, producers, consumers, emitSignal, media } = createService();
+    const { service, participants, emitSignal, media } = createService();
     const state: RoomQualityState = {
       roomId: 'room-1',
       score: {
@@ -501,7 +501,7 @@ describe('RoomsService', () => {
   });
 
   it('rejects stale distributed quality updates and keeps the newer cached state', async () => {
-    const { service, participants, consumers, producers, emitSignal, media } = createService();
+    const { service, participants, consumers, emitSignal, media } = createService();
     participants.findOne.mockResolvedValue({ id: 'participant-1', roomId: 'room-1' });
     media.consumerQualityState.mockReturnValue(undefined);
     jest.spyOn(service as any, 'requireRoomOwnerLookup').mockResolvedValue(ownerLookup(false));
@@ -527,7 +527,7 @@ describe('RoomsService', () => {
   });
 
   it('expires stale distributed consumer quality cache entries on read', async () => {
-    const { service, participants, consumers, producers, emitSignal, media } = createService();
+    const { service, participants, consumers, emitSignal, media } = createService();
     participants.findOne.mockResolvedValue({ id: 'participant-1', roomId: 'room-1' });
     media.consumerQualityState.mockReturnValue(undefined);
     jest.spyOn(service as any, 'requireRoomOwnerLookup').mockResolvedValue(ownerLookup(false));
@@ -556,7 +556,7 @@ describe('RoomsService', () => {
   });
 
   it('clears distributed quality caches when a remote room closes', async () => {
-    const { service, participants, consumers, producers, emitSignal, media } = createService();
+    const { service, participants, consumers, emitSignal, media } = createService();
     participants.findOne.mockResolvedValue({ id: 'participant-1', roomId: 'room-1' });
     media.roomQualityState.mockReturnValue(undefined);
     media.consumerQualityState.mockReturnValue(undefined);
@@ -845,14 +845,86 @@ describe('RoomsService', () => {
     expect(media.producerQualityState).not.toHaveBeenCalled();
   });
 
+  it('falls back to persisted consumer state while a worker mapping is not available yet', () => {
+    const { service, media } = createService();
+    media.consumerLayerState.mockImplementation(() => {
+      throw new Error('Media consumer consumer-1 is not assigned to a worker');
+    });
+    media.consumerQualityState.mockImplementation(() => {
+      throw new Error('Media consumer consumer-1 is not assigned to a worker');
+    });
+
+    const consumer = (service as any).toConsumer(
+      fakeConsumerDoc({
+        preferredLayers: { spatialLayer: 2, temporalLayer: 1 },
+        currentLayers: { spatialLayer: 1, temporalLayer: 0 },
+        targetLayers: { spatialLayer: 2, temporalLayer: 1 },
+        preferredSvcLayers: { spatialLayerId: 0, temporalLayerId: 1, qualityLayerId: 0 }
+      })
+    );
+
+    expect(consumer.layerState.currentLayers?.spatialLayer).toBe(1);
+    expect(consumer.layerState.targetLayers?.spatialLayer).toBe(2);
+    expect(consumer.quality).toBeUndefined();
+  });
+
+  it('skips Mongo consumer-layer persistence for internal pipe consumers', async () => {
+    const { consumers, media } = createService();
+    const listener = media.onConsumerLayerEvent.mock.calls[0]?.[0] as ((event: ConsumerLayerEvent) => Promise<void>) | undefined;
+
+    expect(listener).toBeDefined();
+    await listener?.({
+      type: 'switching',
+      roomId: 'room-1',
+      consumerId: 'pipe-consumer:producer-1:node-b',
+      participantId: 'pipe:node-b',
+      producerId: 'producer-1',
+      reason: 'bandwidth',
+      timestamp: '2026-06-18T06:20:00.000Z',
+      currentLayers: { spatialLayer: 1, temporalLayer: 0 },
+      targetLayers: { spatialLayer: 2, temporalLayer: 0 },
+      preferredLayers: { spatialLayer: 2, temporalLayer: 0 }
+    });
+
+    expect(consumers.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('cleans up distributed local room state when a room is closed on another node', async () => {
+    const { media, pipeCoordinator, metrics, emitSignal } = createService();
+    media.closeRoom.mockResolvedValue({
+      participantIds: ['participant-local-1'],
+      transportCount: 1,
+      consumerCount: 1,
+      producerCounts: { video: 1 },
+      pipeTransportCount: 1
+    });
+
+    emitSignal({
+      sourceNodeId: 'node-a',
+      roomId: 'room-1',
+      event: 'room:closed',
+      payload: ['room-1']
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(pipeCoordinator.closeRoomBindings).toHaveBeenCalledWith('room-1');
+    expect(media.closeRoom).toHaveBeenCalledWith('room-1');
+    expect(metrics.activeParticipants.labels).toHaveBeenCalledWith('room-1');
+    expect(metrics.activeTransports.dec).toHaveBeenCalledTimes(1);
+    expect(metrics.activeConsumers.dec).toHaveBeenCalledTimes(1);
+    expect(metrics.activeProducers.labels).toHaveBeenCalledWith('video');
+  });
+
   it('decrements active room entity gauges when a room is explicitly closed', async () => {
-    const { service, participants, producers, consumers, media, nodeRegistry, metrics } = createService();
-    participants.find.mockResolvedValue([{ id: 'participant-1' }, { id: 'participant-2' }]);
-    producers.find.mockResolvedValue([
-      fakeProducerDoc({ id: 'producer-a', kind: 'video' }),
-      fakeProducerDoc({ id: 'producer-b', kind: 'audio' })
-    ]);
-    consumers.find.mockResolvedValue([fakeConsumerDoc({ id: 'consumer-a' }), fakeConsumerDoc({ id: 'consumer-b' })]);
+    const { service, participants, producers, consumers, media, nodeRegistry, metrics, pipeCoordinator } = createService();
+    participants.find.mockResolvedValue([{ id: 'participant-1', nodeId: 'node-a' }, { id: 'participant-remote', nodeId: 'node-b' }]);
+    media.closeRoom.mockResolvedValue({
+      participantIds: ['participant-1'],
+      transportCount: 1,
+      consumerCount: 2,
+      producerCounts: { video: 1, audio: 1 },
+      pipeTransportCount: 1
+    });
     nodeRegistry.assertLocalRoomOwner.mockResolvedValue(undefined);
     jest.spyOn(service as any, 'assertModerator').mockResolvedValue(undefined);
 
@@ -866,10 +938,55 @@ describe('RoomsService', () => {
     expect(consumers.updateMany.mock.calls[0]?.[0]).toEqual({ roomId: 'room-1', status: { $ne: 'closed' } });
     expect(consumers.updateMany.mock.calls[0]?.[1]?.status).toBe('closed');
     expect(consumers.updateMany.mock.calls[0]?.[1]?.closedAt).toBeInstanceOf(Date);
+    expect(pipeCoordinator.closeRoomBindings).toHaveBeenCalledWith('room-1');
     expect(media.closeRoom).toHaveBeenCalledWith('room-1');
+    expect(metrics.activeTransports.dec).toHaveBeenCalledTimes(1);
     expect(metrics.activeParticipants.labels).toHaveBeenCalledWith('room-1');
+    expect(metrics.activeParticipants.labels.mock.results[0]?.value.dec).toHaveBeenCalledTimes(1);
     expect(metrics.activeConsumers.dec).toHaveBeenCalledTimes(2);
     expect(metrics.activeRooms.dec).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears worker-room quarantine after room failure cleanup completes', async () => {
+    const { service, rooms, participants, producers, consumers, redis, media, nodeRegistry, pipeCoordinator, metrics } = createService();
+    const room = {
+      id: 'room-1',
+      mediaState: { status: 'active' },
+      closedAt: undefined,
+      set: jest.fn(),
+      save: jest.fn(async () => undefined)
+    };
+    rooms.findById.mockResolvedValue(room);
+    participants.find.mockResolvedValue([{ id: 'participant-1' }, { id: 'participant-remote', nodeId: 'node-b' }]);
+    producers.find.mockResolvedValue([
+      { id: 'producer-1', kind: 'video', nodeId: 'node-a', participantId: 'participant-1' },
+      { id: 'producer-remote', kind: 'video', nodeId: 'node-b', participantId: 'participant-remote' }
+    ]);
+    consumers.find.mockResolvedValue([{ id: 'consumer-1', participantId: 'participant-1' }, { id: 'consumer-2', participantId: 'participant-remote' }]);
+    media.workerPoolSnapshot = jest.fn(() => ({ failedRooms: [], workers: [], workerCount: 1, readyWorkers: 1, healthyWorkers: 1, drainingWorkers: 0, overloadedWorkers: 0, activeRooms: 0, failures: [], mode: 'worker' }));
+
+    await service.handleMediaRoomFailure({
+      roomId: 'room-1',
+      workerId: 'media-worker-1',
+      reason: 'worker_crashed',
+      message: 'Media worker media-worker-1 crashed',
+      failedAt: '2026-06-18T08:52:17.149Z',
+      affectedTransports: ['transport-1'],
+      affectedProducers: ['producer-1'],
+      affectedConsumers: ['consumer-1'],
+      recoverable: false
+    });
+
+    expect(pipeCoordinator.closeRoomBindings).toHaveBeenCalledWith('room-1');
+    expect(media.acknowledgeRoomFailure).toHaveBeenCalledWith('room-1');
+    expect(nodeRegistry.releaseRoom).toHaveBeenCalledWith('room-1');
+    expect(redis.removePresence).toHaveBeenCalledWith('room-1', 'participant-1');
+    expect(metrics.activeProducers.labels).toHaveBeenCalledWith('video');
+    expect(metrics.activeProducers.labels.mock.results[0]?.value.dec).toHaveBeenCalledTimes(1);
+    expect(metrics.activeParticipants.labels.mock.results[0]?.value.dec).toHaveBeenCalledTimes(1);
+    expect(metrics.activeConsumers.dec).toHaveBeenCalledTimes(1);
+    expect(metrics.activeTransports.dec).toHaveBeenCalledTimes(1);
+    expect(metrics.mediaWorkerFailedRooms.set).toHaveBeenCalledWith(0);
   });
 });
 
@@ -878,7 +995,7 @@ function createService(): {
   rooms: { findById: jest.Mock; updateOne: jest.Mock };
   participants: { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   producers: { findById: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
-  consumers: { findById: jest.Mock; find: jest.Mock; updateMany: jest.Mock };
+  consumers: { findById: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   redis: { removePresence: jest.Mock };
   media: {
     onConsumerLayerEvent: jest.Mock;
@@ -888,6 +1005,8 @@ function createService(): {
     onTransportQualityUpdated: jest.Mock;
     onRoomQualityUpdated: jest.Mock;
     onMediaWorkerRoomFailed: jest.Mock;
+    acknowledgeRoomFailure: jest.Mock;
+    workerPoolSnapshot: jest.Mock;
     getProducer: jest.Mock;
     producerLayerState: jest.Mock;
     producerQualityState: jest.Mock;
@@ -924,18 +1043,22 @@ function createService(): {
     releaseRemoteConsumerFeed: jest.Mock;
     releaseRemoteProducerPublication: jest.Mock;
     closeOriginProducer: jest.Mock;
+    closeRoomBindings: jest.Mock;
   };
   emitSignal: (signal: { sourceNodeId: string; roomId: string; event: string; payload: unknown[] }) => void;
   signals: { onSignal: jest.Mock; publish: jest.Mock };
   metrics: {
     activeRooms: { dec: jest.Mock };
     activeParticipants: { labels: jest.Mock };
+    activeTransports: { inc: jest.Mock; dec: jest.Mock };
     activeProducers: { labels: jest.Mock };
     activeConsumers: { inc: jest.Mock; dec: jest.Mock };
     producerPriorityUpdates: { labels: jest.Mock };
     producerNodeIdFallbacks: { labels: jest.Mock };
     producerNodeIdBackfills: { labels: jest.Mock };
     pipeCleanupFailures: { labels: jest.Mock };
+    mediaWorkerFailedRooms: { set: jest.Mock };
+    mediaWorkerRoomFailures: { labels: jest.Mock };
   };
 } {
   const rooms = {
@@ -958,6 +1081,7 @@ function createService(): {
   const consumers = {
     findById: jest.fn(),
     find: jest.fn(async () => []),
+    updateOne: jest.fn(async () => ({ modifiedCount: 0 })),
     updateMany: jest.fn()
   };
   const redis = {
@@ -972,6 +1096,8 @@ function createService(): {
     onTransportQualityUpdated: jest.fn(),
     onRoomQualityUpdated: jest.fn(),
     onMediaWorkerRoomFailed: jest.fn(),
+    acknowledgeRoomFailure: jest.fn(),
+    workerPoolSnapshot: jest.fn(() => ({ failedRooms: [], workers: [], workerCount: 1, readyWorkers: 1, healthyWorkers: 1, drainingWorkers: 0, overloadedWorkers: 0, activeRooms: 0, failures: [], mode: 'worker' })),
     getProducer: jest.fn(() => undefined),
     producerLayerState: jest.fn(() => undefined),
     producerQualityState: jest.fn(() => undefined),
@@ -981,7 +1107,13 @@ function createService(): {
     transportQualityState: jest.fn(() => undefined),
     assertTransportOwner: jest.fn(),
     registerConsumer: jest.fn(),
-    closeRoom: jest.fn(),
+    closeRoom: jest.fn(async () => ({
+      participantIds: [],
+      transportCount: 0,
+      consumerCount: 0,
+      producerCounts: {},
+      pipeTransportCount: 0
+    })),
     closeParticipantTransports: jest.fn(),
     unregisterConsumer: jest.fn(),
     setConsumerPaused: jest.fn(),
@@ -1007,7 +1139,8 @@ function createService(): {
     syncOriginConsumerState: jest.fn(async () => true),
     releaseRemoteConsumerFeed: jest.fn(async () => undefined),
     releaseRemoteProducerPublication: jest.fn(async () => undefined),
-    closeOriginProducer: jest.fn(async () => true)
+    closeOriginProducer: jest.fn(async () => true),
+    closeRoomBindings: jest.fn(async () => undefined)
   };
   const signals = {
     onSignal: jest.fn((listener: (signal: { sourceNodeId: string; roomId: string; event: string; payload: unknown[] }) => void) => {
@@ -1017,6 +1150,7 @@ function createService(): {
     publish: jest.fn(async () => undefined)
   };
   const activeParticipantsMetric = { inc: jest.fn(), dec: jest.fn() };
+  const activeTransports = { inc: jest.fn(), dec: jest.fn() };
   const activeProducersMetric = { inc: jest.fn(), dec: jest.fn() };
   const activeConsumers = { inc: jest.fn(), dec: jest.fn() };
   const activeRooms = { dec: jest.fn() };
@@ -1024,11 +1158,14 @@ function createService(): {
   const producerNodeIdFallbackMetric = { inc: jest.fn() };
   const producerNodeIdBackfillMetric = { inc: jest.fn() };
   const pipeCleanupFailureMetric = { inc: jest.fn() };
+  const mediaWorkerRoomFailureMetric = { inc: jest.fn() };
+  const mediaWorkerFailedRooms = { set: jest.fn() };
   const metrics = {
     activeRooms,
     activeParticipants: {
       labels: jest.fn(() => activeParticipantsMetric)
     },
+    activeTransports,
     activeProducers: {
       labels: jest.fn(() => activeProducersMetric)
     },
@@ -1044,6 +1181,10 @@ function createService(): {
     },
     pipeCleanupFailures: {
       labels: jest.fn(() => pipeCleanupFailureMetric)
+    },
+    mediaWorkerFailedRooms,
+    mediaWorkerRoomFailures: {
+      labels: jest.fn(() => mediaWorkerRoomFailureMetric)
     }
   };
 

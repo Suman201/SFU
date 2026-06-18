@@ -229,6 +229,11 @@ export class MediaWorkerPool extends EventEmitter {
     }
   }
 
+  clearRoomFailure(roomId: string): void {
+    this.failedRooms.delete(roomId);
+    this.failures.delete(roomId);
+  }
+
   async drainWorker(workerId: string, forceAfterMs = this.config.drainTimeoutMs): Promise<void> {
     const worker = this.requireWorker(workerId);
     const binding = this.bindings.get(workerId);

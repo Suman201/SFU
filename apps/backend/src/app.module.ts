@@ -66,7 +66,6 @@ import { ClusterModule } from './cluster/cluster.module';
     DatabaseModule,
     RedisModule,
     MetricsModule,
-    ClusterModule,
     NestSfuModule.forRootAsync({
       imports: [ConfigModule, MetricsModule],
       inject: [ConfigService, MetricsService],
@@ -128,6 +127,7 @@ import { ClusterModule } from './cluster/cluster.module';
         }
       })
     }),
+    ClusterModule,
     AuthModule,
     RoomsModule,
     MediaApiModule,

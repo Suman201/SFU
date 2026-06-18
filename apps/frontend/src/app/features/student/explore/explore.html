@@ -21,13 +21,13 @@
 
         <p class="subject">{{ batch.subject }}</p>
 
-        <div class="teacher-row">
+        <a class="teacher-row" [routerLink]="['/teachers', batch.teacherId]">
           <span>{{ batch.teacherName[0] }}</span>
           <div>
             <strong>{{ batch.teacherName }}</strong>
             <small>{{ batch.teacherTitle }}</small>
           </div>
-        </div>
+        </a>
 
         <div class="batch-meta">
           <span>{{ batch.schedule }}</span>

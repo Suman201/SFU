@@ -59,6 +59,19 @@ describe('media worker runtime', () => {
     }
   });
 
+  it('returns cached-or-undefined consumer state without touching worker mappings before registration', async () => {
+    const service = new WorkerMediaService(workerOptions);
+    await service.onModuleInit();
+    try {
+      expect(service.consumerLayerState('missing-consumer')).toBeUndefined();
+      expect(service.consumerQualityState('missing-consumer')).toBeUndefined();
+      expect(service.producerLayerState('missing-producer')).toBeUndefined();
+      expect(service.transportQualityState('missing-transport')).toBeUndefined();
+    } finally {
+      await service.onModuleDestroy();
+    }
+  });
+
   it('provisions worker-owned UDP pipe transports and registers pipe producers through worker IPC', async () => {
     const service = new WorkerMediaService(workerOptions);
     await service.onModuleInit();
@@ -262,6 +275,40 @@ describe('media worker runtime', () => {
     expect(failures.get('room-crash')).toEqual(['transport-crash']);
     expect(failures.get('room-other')).toEqual(['transport-other']);
     expect(snapshot.failedRooms.sort()).toEqual(['room-crash', 'room-other']);
+    await pool.stop();
+  });
+
+  it('clears failed room quarantine once the failure is acknowledged', async () => {
+    const workers = new Map<string, FakeWorkerClient>();
+    const pool = new MediaWorkerPool({
+      options: workerOptions,
+      workerCount: 1,
+      requestTimeoutMs: 1000,
+      startupTimeoutMs: 1000,
+      heartbeatTimeoutMs: 1000,
+      restartBackoffMs: 1,
+      maxRoomsPerWorker: 10,
+      maxTransportsPerWorker: 10,
+      maxInFlightRequestsPerWorker: 10,
+      softIpcLatencyMs: 100,
+      hardIpcLatencyMs: 1000,
+      drainTimeoutMs: 1000,
+      workerFactory: (workerId) => {
+        const worker = new FakeWorkerClient(workerId);
+        workers.set(workerId, worker);
+        return worker as unknown as MediaWorkerClient;
+      }
+    });
+    await pool.start();
+    pool.bindTransport('room-crash', 'transport-crash', 'media-worker-1');
+
+    workers.get('media-worker-1')!.crash();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(pool.snapshot().failedRooms).toEqual(['room-crash']);
+
+    pool.clearRoomFailure('room-crash');
+
+    expect(pool.snapshot().failedRooms).toEqual([]);
     await pool.stop();
   });
 

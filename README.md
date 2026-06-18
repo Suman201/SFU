@@ -4,11 +4,15 @@ This repository is a production-oriented monorepo for a WebRTC SFU platform usin
 
 The media-plane code is intentionally written behind native interfaces and contains RTP/RTCP routing primitives instead of depending on mediasoup, Janus, LiveKit, Jitsi, Kurento, ion-sfu, Pion-SFU, or another SFU.
 
-## Important Media-Plane Boundary
+## Current Release-Candidate Scope
 
-The signaling, room state, authorization, metrics, schemas, documentation, and frontend workflow are implemented as normal application code. Real WebRTC interoperability still requires a hardened DTLS-SRTP transport implementation. Node.js does not expose a production DTLS-SRTP stack in core, so the repository defines explicit `DtlsTransport` and `SrtpSession` boundaries and fails closed where cryptographic media transport is unavailable.
+The repository now includes the end-to-end transport, forwarding, adaptive media, distributed pipe, observability, and shutdown foundations needed for a production release candidate on a controlled single-node or two-node deployment.
 
-That boundary is deliberate: pretending to implement DTLS/SRTP with a toy cipher would be less production-ready than refusing unsafe media transport.
+The remaining work is operational, not architectural: production TURN deployment, explicit UDP exposure strategy, environment-specific capacity validation, and final release gating in the target runtime.
+
+Production operators should publish only UDP TURN URIs in the current release candidate and must ensure `PUBLIC_URL`, `NODE_PUBLIC_URL`, `PIPE_ADVERTISE_IP`, and TURN public addresses resolve to the real paths used by browsers and peer nodes.
+
+Outside local development, the frontend now defaults to same-origin `/api/v1` and `/sfu` so staged ingress can exercise real backend and TURN behavior. Split-host deployments can override those runtime endpoints through `/env.js`.
 
 ## Structure
 
@@ -16,7 +20,7 @@ That boundary is deliberate: pretending to implement DTLS/SRTP with a toy cipher
 - `apps/frontend`: Angular application with lobby, waiting room, room view, media controls, chat, participants, host controls, and WebRTC client service.
 - `packages/contracts`: Shared TypeScript contracts for roles, rooms, participants, producers, consumers, chat, metrics, and signaling events.
 - `packages/sfu-core`: Framework-free RTP/RTCP routing primitives, simulcast selection, bandwidth estimation, and audio-level observation.
-- `packages/nest-sfu`: Reusable NestJS module wrapping `sfu-core` with ICE/TURN, DTLS/SRTP fail-closed boundaries, and media transport lifecycle services.
+- `packages/nest-sfu`: Reusable NestJS module wrapping `sfu-core` with ICE/TURN, DTLS/SRTP, media transport lifecycle services, worker mode, and distributed pipe hooks.
 - `infra`: Docker Compose, Coturn, Prometheus, Grafana, and Kubernetes manifests.
 - `docs`: Architecture, API, WebSocket, deployment, security, and media-plane notes.
 - `tests/load`: k6 load test scaffold.
@@ -45,6 +49,8 @@ npm run docker:up
 npm run dev:backend
 npm run dev:frontend
 ```
+
+The checked-in local `.env` values use `127.0.0.1` for MongoDB and Redis because `npm run dev:backend` runs on the host, not inside the Docker network. The Compose backend service overrides those addresses back to `mongo` / `redis` internally.
 
 Frontend: `http://localhost:4200`
 

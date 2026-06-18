@@ -1,0 +1,215 @@
+<sfu-header />
+<main class="public-teacher-shell">
+  <a class="back-link" routerLink="/student/explore">Back to explore</a>
+
+  @if (teacher(); as teacher) {
+    <section class="teacher-cover">
+      <img [src]="coverImage(teacher)" [alt]="teacher.name + ' cover image'" />
+      <div class="cover-content">
+        <span>Public teacher profile</span>
+        <strong>{{ teacher.specialization }}</strong>
+      </div>
+    </section>
+
+    <section class="teacher-identity-panel">
+      <img class="profile-image" [src]="profileImage(teacher)" [alt]="teacher.name + ' profile image'" />
+      <div class="identity-copy">
+        <p class="eyebrow">Teacher profile</p>
+        <h1>{{ teacher.name }}</h1>
+        <span>{{ teacher.title }}</span>
+        <p>{{ teacher.location }}</p>
+      </div>
+      <a class="primary-link" [href]="'mailto:' + teacher.email">Contact teacher</a>
+    </section>
+
+    <section class="metric-grid" aria-label="Teacher public profile summary">
+      <article>
+        <span>{{ teacher.rating }}</span>
+        <p>Rating</p>
+      </article>
+      <article>
+        <span>{{ teacher.studentsTaught }}</span>
+        <p>Students taught</p>
+      </article>
+      <article>
+        <span>{{ teacher.yearsExperience }}</span>
+        <p>Years experience</p>
+      </article>
+      <article>
+        <span>{{ totalEnrolled() }}/{{ totalCapacity() }}</span>
+        <p>Current enrollment</p>
+      </article>
+    </section>
+
+    <section class="profile-grid">
+      <article class="profile-panel about-panel">
+        <p class="eyebrow">About</p>
+        <h2>{{ teacher.specialization }}</h2>
+        <p>{{ teacher.bio }}</p>
+      </article>
+
+      <article class="profile-panel">
+        <p class="eyebrow">Education</p>
+        <h2>Academic background</h2>
+        <div class="timeline-list">
+          @for (education of teacher.education; track education.degree) {
+            <div>
+              <strong>{{ education.degree }}</strong>
+              <span>{{ education.institution }}</span>
+              <small>{{ education.year }}</small>
+            </div>
+          }
+        </div>
+      </article>
+
+      <article class="profile-panel experience-panel">
+        <p class="eyebrow">Experience</p>
+        <h2>Professional journey</h2>
+        <div class="timeline-list">
+          @for (experience of teacher.experiences; track experience.role) {
+            <div>
+              <strong>{{ experience.role }}</strong>
+              <span>{{ experience.organization }} - {{ experience.period }}</span>
+              <p>{{ experience.summary }}</p>
+            </div>
+          }
+        </div>
+      </article>
+
+      <article class="profile-panel">
+        <p class="eyebrow">Availability</p>
+        <h2>Office hours</h2>
+        <div class="detail-list">
+          <span>Email</span>
+          <strong>{{ teacher.email }}</strong>
+          <span>Office hours</span>
+          <strong>{{ teacher.officeHours }}</strong>
+        </div>
+      </article>
+    </section>
+
+    <section class="profile-panel tab-panel">
+      <header class="tab-panel-header">
+        <div>
+          <p class="eyebrow">Profile details</p>
+          <h2>Explore {{ teacher.name }}</h2>
+        </div>
+        <nav class="profile-tabs" aria-label="Teacher profile sections">
+          @for (tab of tabs; track tab.id) {
+            <button
+              type="button"
+              [class.is-active]="activeTab() === tab.id"
+              [attr.aria-selected]="activeTab() === tab.id"
+              (click)="selectTab(tab.id)"
+            >
+              <span>{{ tab.label }}</span>
+              <strong>{{ tabCount(teacher, tab.id) }}</strong>
+            </button>
+          }
+        </nav>
+      </header>
+
+      <div class="tab-content">
+        @switch (activeTab()) {
+          @case ('gallery') {
+            <div class="gallery-grid">
+              @for (item of teacher.gallery; track item.id) {
+                <article class="gallery-card">
+                  <div class="gallery-visual">
+                    <span>{{ $index + 1 }}</span>
+                  </div>
+                  <strong>{{ item.title }}</strong>
+                  <p>{{ item.caption }}</p>
+                </article>
+              }
+            </div>
+          }
+
+          @case ('demo') {
+            <div class="demo-list">
+              @for (demoClass of teacher.demoClasses; track demoClass.id) {
+                <article class="demo-card">
+                  <div>
+                    <span>{{ demoClass.level }}</span>
+                    <h3>{{ demoClass.title }}</h3>
+                    <p>{{ demoClass.summary }}</p>
+                  </div>
+                  <strong>{{ demoClass.duration }}</strong>
+                </article>
+              }
+            </div>
+          }
+
+          @case ('reviews') {
+            <div class="review-grid">
+              @for (review of teacher.reviews; track review.id) {
+                <article class="review-card">
+                  <header>
+                    <strong>{{ review.student }}</strong>
+                    <span>{{ review.rating }}</span>
+                  </header>
+                  <p>{{ review.comment }}</p>
+                </article>
+              }
+            </div>
+          }
+
+          @case ('awards') {
+            <div class="award-list">
+              @for (award of teacher.awards; track award.id) {
+                <article>
+                  <span>{{ award.year }}</span>
+                  <div>
+                    <strong>{{ award.title }}</strong>
+                    <p>{{ award.issuer }}</p>
+                  </div>
+                </article>
+              }
+            </div>
+          }
+
+          @case ('batches') {
+            @if (batches().length) {
+              <div class="batch-list">
+                @for (batch of batches(); track batch.id) {
+                  <article class="batch-row">
+                    <div>
+                      <strong>{{ batch.title }}</strong>
+                      <span>{{ batch.subject }}</span>
+                    </div>
+                    <div class="batch-meta">
+                      <span>{{ batch.level }}</span>
+                      <span>{{ batch.schedule }}</span>
+                      <span>{{ batch.durationMinutes }} min</span>
+                      <span>Starts {{ formatStart(batch.startsAt) }}</span>
+                    </div>
+                    <footer>
+                      <span>{{ seatsLabel(batch) }}</span>
+                      @if (isEnrolled(batch)) {
+                        <a routerLink="/student/dashboard">Enrolled</a>
+                      } @else {
+                        <button class="primary" type="button" (click)="enroll(batch)">Enroll</button>
+                      }
+                    </footer>
+                  </article>
+                }
+              </div>
+            } @else {
+              <div class="empty-state">
+                <h3>No public batches</h3>
+                <p>This teacher does not have public batches listed right now.</p>
+              </div>
+            }
+          }
+        }
+      </div>
+    </section>
+  } @else {
+    <section class="empty-state not-found">
+      <h1>Teacher not found</h1>
+      <p>This public teacher profile is not available.</p>
+      <a class="primary-link" routerLink="/student/explore">Back to explore</a>
+    </section>
+  }
+</main>
+<sfu-footer />

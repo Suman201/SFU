@@ -1,7 +1,9 @@
-import { Controller, Get, Header, VERSION_NEUTRAL } from '@nestjs/common';
+import { Controller, Get, Header, NotFoundException, UseGuards, VERSION_NEUTRAL } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { MediaService } from '@native-sfu/nest-sfu';
 import { PipeCoordinatorService } from '../cluster/pipe-coordinator.service';
 import { NodeRegistryService } from '../cluster/node-registry.service';
+import { OperationsTokenGuard } from '../common/guards/operations-token.guard';
 import { MetricsService } from './metrics.service';
 
 @Controller({ version: VERSION_NEUTRAL })
@@ -10,12 +12,17 @@ export class MetricsController {
     private readonly metrics: MetricsService,
     private readonly media: MediaService,
     private readonly pipe: PipeCoordinatorService,
-    private readonly cluster: NodeRegistryService
+    private readonly cluster: NodeRegistryService,
+    private readonly config: ConfigService
   ) {}
 
+  @UseGuards(OperationsTokenGuard)
   @Get('/metrics')
   @Header('Content-Type', 'text/plain; version=0.0.4; charset=utf-8')
   async prometheus(): Promise<string> {
+    if (!this.config.get<boolean>('metrics.enabled', true)) {
+      throw new NotFoundException();
+    }
     await this.safeRefresh('cluster', async () => {
       const clusterSnapshot = await this.cluster.snapshot();
       this.metrics.refreshClusterSnapshot(clusterSnapshot);

@@ -1,7 +1,8 @@
 <section
   #chatElement
   class="session-chat"
-  [class.collapsed]="collapsed()"
+  [class.collapsed]="isCollapsed()"
+  [class.docked]="docked()"
   [class.dragging]="dragging()"
   [style.transform]="dragTransform()"
   aria-label="Class chat"
@@ -12,8 +13,8 @@
   <button
     class="chat-toggle drag-handle"
     type="button"
-    [attr.aria-expanded]="!collapsed()"
-    [title]="collapsed() ? 'Open class chat' : 'Collapse class chat'"
+    [attr.aria-expanded]="!isCollapsed()"
+    [title]="isCollapsed() ? 'Open class chat' : 'Collapse class chat'"
     (pointerdown)="startDrag($event, chatElement)"
     (click)="toggleCollapsed($event)"
   >
@@ -25,7 +26,7 @@
     }
   </button>
 
-  @if (!collapsed()) {
+  @if (!isCollapsed()) {
     <div class="chat-panel">
       <header class="chat-header drag-handle" (pointerdown)="startDrag($event, chatElement)">
         <span class="drag-grip" aria-hidden="true"></span>

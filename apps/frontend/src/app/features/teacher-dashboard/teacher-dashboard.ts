@@ -1,14 +1,13 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormField, FormRoot, form as signalForm, max, maxLength, min, required } from '@angular/forms/signals';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { Footer } from '../../shared/footer/footer';
 import { Header } from '../../shared/header/header';
 import {
   TeacherDashboardStore,
   type CreateTeacherBatchInput,
   type TeacherBatch,
-  type TeacherSession,
-  type TeacherSessionStatus
+  type TeacherSession
 } from './teacher-dashboard.store';
 
 interface WeekdayOption {
@@ -32,7 +31,7 @@ interface BatchFormModel {
 @Component({
   selector: 'sfu-teacher-dashboard',
   standalone: true,
-  imports: [Footer, FormField, FormRoot, Header],
+  imports: [Footer, FormField, FormRoot, Header, RouterLink],
   templateUrl: './teacher-dashboard.html',
   styleUrl: './teacher-dashboard.scss',
   changeDetection: ChangeDetectionStrategy.Eager
@@ -41,7 +40,7 @@ export class TeacherDashboard {
   private readonly router = inject(Router);
   protected readonly dashboard = inject(TeacherDashboardStore);
 
-  protected readonly selectedBatchId = signal<string | null>(null);
+  protected readonly createDrawerOpen = signal(false);
   protected readonly weekdays: WeekdayOption[] = [
     { value: 1, label: 'Monday' },
     { value: 2, label: 'Tuesday' },
@@ -53,29 +52,8 @@ export class TeacherDashboard {
   ];
   protected readonly durations = [45, 60, 75, 90, 120];
   protected readonly batches = this.dashboard.batches;
-  protected readonly sessions = this.dashboard.sessions;
-  protected readonly upcomingSessions = this.dashboard.upcomingSessions;
-  protected readonly liveSession = this.dashboard.liveSession;
-  protected readonly activeBatch = computed(() => {
-    const batches = this.batches();
-    return batches.find((batch) => batch.id === this.selectedBatchId()) ?? batches[0] ?? null;
-  });
-  protected readonly activeBatchSessions = computed(() => this.activeBatch()?.sessions ?? []);
-  protected readonly scheduledCount = computed(() => this.sessions().filter((session) => session.status === 'scheduled').length);
-  protected readonly completedCount = computed(() => this.sessions().filter((session) => session.status === 'completed').length);
 
-  protected readonly batchModel = signal<BatchFormModel>({
-    name: 'Foundation Batch',
-    courseName: 'Native WebRTC SFU',
-    cohortCode: 'SFU-WEEKLY-01',
-    capacity: 24,
-    enrolledCount: 18,
-    startDate: this.todayInputValue(),
-    weeklyDay: String(this.defaultWeekday()),
-    startTime: '18:00',
-    durationMinutes: '60',
-    totalWeeks: 8
-  });
+  protected readonly batchModel = signal<BatchFormModel>(this.initialBatchModel());
   protected readonly batchForm = signalForm(this.batchModel, (path) => {
     required(path.name);
     maxLength(path.name, 80);
@@ -106,78 +84,61 @@ export class TeacherDashboard {
       return;
     }
     const value = this.normalizedBatchFormValue();
-    const batch = this.dashboard.createBatch({
+    this.dashboard.createBatch({
       ...value,
       enrolledCount: Math.min(value.enrolledCount, value.capacity)
     });
-    this.selectedBatchId.set(batch.id);
-  }
-
-  protected selectBatch(batchId: string): void {
-    this.selectedBatchId.set(batchId);
-  }
-
-  protected async startSession(session: TeacherSession): Promise<void> {
-    const startedSession = this.dashboard.startSession(session.id);
-    if (!startedSession) {
-      return;
-    }
-    await this.router.navigate(['/class-session/teacher'], {
-      queryParams: {
-        batchId: session.batchId,
-        sessionId: session.id
-      }
-    });
-  }
-
-  protected async openSession(session: TeacherSession): Promise<void> {
-    await this.router.navigate(['/class-session/teacher'], {
-      queryParams: {
-        batchId: session.batchId,
-        sessionId: session.id
-      }
-    });
-  }
-
-  protected startNextSession(batch: TeacherBatch): void {
-    const nextSession = this.dashboard.nextSession(batch);
-    if (nextSession) {
-      void this.startSession(nextSession);
-    }
-  }
-
-  protected completeSession(session: TeacherSession): void {
-    this.dashboard.completeSession(session.id);
+    this.batchModel.set(this.initialBatchModel());
+    this.batchForm().reset();
+    this.createDrawerOpen.set(false);
   }
 
   protected deleteBatch(batch: TeacherBatch): void {
     this.dashboard.deleteBatch(batch.id);
-    if (this.selectedBatchId() === batch.id) {
-      this.selectedBatchId.set(null);
-    }
-  }
-
-  protected batchProgress(batch: TeacherBatch): number {
-    if (!batch.sessions.length) {
-      return 0;
-    }
-    const completed = batch.sessions.filter((session) => session.status === 'completed').length;
-    return Math.round((completed / batch.sessions.length) * 100);
   }
 
   protected nextSession(batch: TeacherBatch): TeacherSession | null {
     return this.dashboard.nextSession(batch);
   }
 
-  protected sessionBatch(session: TeacherSession | null): TeacherBatch | null {
-    return session ? this.dashboard.sessionBatch(session.id) : null;
+  protected averageAttendanceLabel(batch: TeacherBatch): string {
+    const averageAttendance = this.dashboard.averageAttendance(batch);
+    return averageAttendance === null ? 'N/A' : `${averageAttendance}%`;
   }
 
-  protected statusLabel(status: TeacherSessionStatus): string {
-    if (status === 'live') {
-      return 'Live now';
+  protected sessionActionLabel(batch: TeacherBatch): string {
+    return this.nextSession(batch)?.status === 'live' ? 'Open session' : 'Start session';
+  }
+
+  protected async runSessionAction(batch: TeacherBatch): Promise<void> {
+    const session = this.nextSession(batch);
+    if (!session) {
+      return;
     }
-    return status[0]!.toUpperCase() + status.slice(1);
+
+    if (session.status === 'live') {
+      await this.openSession(session);
+      return;
+    }
+
+    await this.startSession(session);
+  }
+
+  private async startSession(session: TeacherSession): Promise<void> {
+    const startedSession = this.dashboard.startSession(session.id);
+    if (!startedSession) {
+      return;
+    }
+    await this.openSession(startedSession);
+  }
+
+  private async openSession(session: TeacherSession): Promise<void> {
+    await this.router.navigate(['/class-session/teacher'], {
+      queryParams: {
+        batchId: session.batchId,
+        sessionId: session.id
+      }
+    });
   }
 
   protected weekdayLabel(value: number): string {
@@ -194,20 +155,12 @@ export class TeacherDashboard {
     }).format(new Date(value));
   }
 
-  protected formatDate(value: string): string {
-    return new Intl.DateTimeFormat(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    }).format(new Date(value));
+  protected openCreateDrawer(): void {
+    this.createDrawerOpen.set(true);
   }
 
-  protected trackBatch(_index: number, batch: TeacherBatch): string {
-    return batch.id;
-  }
-
-  protected trackSession(_index: number, session: TeacherSession): string {
-    return session.id;
+  protected closeCreateDrawer(): void {
+    this.createDrawerOpen.set(false);
   }
 
   private todayInputValue(): string {
@@ -220,6 +173,21 @@ export class TeacherDashboard {
   private defaultWeekday(): number {
     const day = new Date().getDay();
     return day === 0 ? 1 : day;
+  }
+
+  private initialBatchModel(): BatchFormModel {
+    return {
+      name: 'Foundation Batch',
+      courseName: 'Native WebRTC SFU',
+      cohortCode: 'SFU-WEEKLY-01',
+      capacity: 24,
+      enrolledCount: 18,
+      startDate: this.todayInputValue(),
+      weeklyDay: String(this.defaultWeekday()),
+      startTime: '18:00',
+      durationMinutes: '60',
+      totalWeeks: 8
+    };
   }
 
   private normalizedBatchFormValue(): CreateTeacherBatchInput {

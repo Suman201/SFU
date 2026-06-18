@@ -104,6 +104,12 @@
   grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.teacher-row:hover strong {
+  color: var(--accent);
 }
 
 .teacher-row > span {

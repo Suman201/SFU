@@ -10,8 +10,17 @@ export const routes: Routes = [
     loadComponent: () => import('./features/teacher-dashboard/teacher-dashboard').then((route) => route.TeacherDashboard)
   },
   {
+    path: 'teacher-dashboard/batches/:batchId',
+    loadComponent: () => import('./features/teacher-dashboard/batch-details/batch-details').then((route) => route.BatchDetails)
+  },
+  {
     path: 'teacher/profile',
     loadComponent: () => import('./features/profile/teacher-profile/teacher-profile').then((route) => route.TeacherProfile)
+  },
+  {
+    path: 'teachers/:teacherId',
+    loadComponent: () =>
+      import('./features/profile/public-teacher-profile/public-teacher-profile').then((route) => route.PublicTeacherProfile)
   },
   {
     path: 'profile',

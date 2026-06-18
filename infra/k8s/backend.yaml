@@ -13,6 +13,8 @@ spec:
       labels:
         app: backend
     spec:
+      # Keep this long enough for an explicit drain request, readiness withdrawal,
+      # and any external load balancer deregistration before SIGKILL.
       terminationGracePeriodSeconds: 45
       containers:
         - name: backend
@@ -31,28 +33,31 @@ spec:
           ports:
             - name: http
               containerPort: 3000
-            - name: media-udp
-              containerPort: 40000
-              protocol: UDP
-            - name: pipe-udp
-              containerPort: 41000
-              protocol: UDP
+          # Media UDP exposure must cover the full configured host/pipe ranges.
+          # This example deployment intentionally leaves transport exposure to the
+          # operator so it does not pretend that a single UDP service port is enough.
+          # Planned rollouts should drain the node first and wait for /health/ready
+          # to fail before allowing the pod to terminate.
           readinessProbe:
             httpGet:
-              path: /api/v1/health
+              path: /health/ready
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /api/v1/health/live
+              path: /health/live
               port: http
             initialDelaySeconds: 20
             periodSeconds: 20
-          lifecycle:
-            preStop:
-              exec:
-                command: ["sh", "-c", "sleep 30"]
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+          # If you add a preStop hook in your environment, make it trigger the
+          # drain workflow and observe readiness withdrawal instead of sleeping.
           resources:
             requests:
               cpu: 250m
@@ -73,11 +78,3 @@ spec:
     - name: http
       port: 3000
       targetPort: http
-    - name: media-udp
-      port: 40000
-      targetPort: media-udp
-      protocol: UDP
-    - name: pipe-udp
-      port: 41000
-      targetPort: pipe-udp
-      protocol: UDP

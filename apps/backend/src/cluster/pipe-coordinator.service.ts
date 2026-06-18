@@ -15,7 +15,6 @@ import type {
   PipeCoordinationMessage,
   PipeCreateMessage,
   PipeErrorCode,
-  PipeErrorMessage,
   PipeFeedReleaseMessage,
   PipeFeedRequestMessage,
   PipeNodeEndpoint,
@@ -30,10 +29,9 @@ import type {
   Producer,
   ProducerStatus,
   RtpLayerSelection,
-  SvcLayerSelection,
-  RtpParameters
+  SvcLayerSelection
 } from '@native-sfu/contracts';
-import { MediaService, PipeTransportManager, PipeTransportService } from '@native-sfu/nest-sfu';
+import { MediaService, PipeTransportService } from '@native-sfu/nest-sfu';
 import { MetricsService } from '../metrics/metrics.service';
 import { RedisService } from '../redis/redis.service';
 import { NodeRegistryService } from './node-registry.service';
@@ -226,7 +224,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
     private readonly registry: NodeRegistryService,
     private readonly redis: RedisService,
-    @Optional() pipe: PipeTransportService | undefined,
+    pipe: PipeTransportService,
     private readonly metrics: MetricsService,
     @Optional() @Inject(MediaService) private readonly media?: PipeRtcpMediaHandler
   ) {
@@ -239,7 +237,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     this.allowedNodeIds = new Set(config.get<string[]>('pipe.allowedNodeIds', []));
     this.pipePortRange = config.get<{ min: number; max: number }>('pipe.portRange', { min: 41000, max: 41100 });
     this.nextUdpPort = this.pipePortRange.min;
-    this.pipe = pipe ?? new PipeTransportService(new PipeTransportManager());
+    this.pipe = pipe;
     this.media?.onConsumerTwccObservation?.((state) => {
       void this.handleRemoteConsumerTwccObservation(state);
     });
@@ -250,22 +248,32 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     this.assertClusterSecret();
-    await this.redis.consumeDurable<PipeCoordinationEnvelope>(
-      PIPE_STREAM,
-      `pipe-coordinator:${this.registry.localNodeId()}`,
-      async (envelope, meta) => {
-        if (meta.replayed) {
-          this.metrics.controlPlaneReplayMessages.labels('pipe_coordination').inc();
+    const localNodeId = this.registry.localNodeId();
+    const registerConsumer = async (consumerKey: string, predicate: (envelope: PipeCoordinationEnvelope) => boolean) => {
+      await this.redis.consumeDurable<PipeCoordinationEnvelope>(
+        PIPE_STREAM,
+        consumerKey,
+        async (envelope, meta) => {
+          if (!predicate(envelope)) {
+            return;
+          }
+          if (meta.replayed) {
+            this.metrics.controlPlaneReplayMessages.labels('pipe_coordination').inc();
+          }
+          await this.handleEnvelope(envelope);
+          this.metrics.controlPlaneMessagesDelivered.labels('pipe_coordination').inc();
+        },
+        {
+          onError: (_error, phase) => {
+            this.metrics.controlPlaneConsumeFailures.labels('pipe_coordination', phase).inc();
+          }
         }
-        await this.handleEnvelope(envelope);
-        this.metrics.controlPlaneMessagesDelivered.labels('pipe_coordination').inc();
-      },
-      {
-        onError: (_error, phase) => {
-          this.metrics.controlPlaneConsumeFailures.labels('pipe_coordination', phase).inc();
-        }
-      }
-    );
+      );
+    };
+    await Promise.all([
+      registerConsumer(`pipe-coordinator:commands:${localNodeId}`, (envelope) => !isAckEnvelope(envelope)),
+      registerConsumer(`pipe-coordinator:acks:${localNodeId}`, isAckEnvelope)
+    ]);
   }
 
   onModuleDestroy(): void {
@@ -468,7 +476,6 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     if (!feed || feed.roomId !== state.roomId || feed.producerId !== state.producerId) {
       return;
     }
-    const feedbackKey = consumerKey(feed.pipeTransportId, feed.pipeConsumerId);
     const timestamp = state.observation.timestamp ?? Date.now();
     const existing = this.remoteConsumerFeedback.get(state.consumerId);
     if (existing && (existing.observation.timestamp ?? 0) > timestamp) {
@@ -573,6 +580,8 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.metrics.pipeRemoteAttachFailures.labels('feed_release').inc();
       throw error;
+    } finally {
+      await this.maybeCloseIdlePipeTransport(state.pipeTransportId, 'consumer_closed');
     }
   }
 
@@ -665,6 +674,97 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.metrics.pipeRemotePublishFailures.labels('publish_release').inc();
       throw error;
+    } finally {
+      await this.maybeCloseIdlePipeTransport(state.pipeTransportId, 'producer_closed');
+    }
+  }
+
+  async closeRoomBindings(roomId: string): Promise<void> {
+    const ownerLookup = await this.registry.lookupRoomOwner(roomId).catch(() => undefined);
+    const currentOwnerNodeId = ownerLookup?.owner?.nodeId;
+    const currentOwnerClaimedAt = ownerLookup?.owner?.claimedAt ?? '';
+    const canPublishRoomClose = Boolean(ownerLookup?.available && currentOwnerNodeId === this.registry.localNodeId());
+    const roomPipeTransports = [...this.pipeStates.entries()]
+      .filter(([, state]) => state.roomId === roomId)
+      .map(([pipeTransportId, state]) => ({
+        pipeTransportId,
+        peerNodeId: state.ownerNodeId === this.registry.localNodeId() ? state.remoteNodeId : state.ownerNodeId
+      }));
+    let cleanupError: unknown;
+    const recordCleanupFailure = (label: string, error: unknown): void => {
+      cleanupError ??= error;
+      this.metrics.pipeCleanupFailures.labels(label).inc();
+      this.logger.warn(`Pipe room cleanup ${label} failed for room ${roomId}: ${error instanceof Error ? error.message : String(error)}`);
+    };
+
+    const remoteConsumerIds = [...this.remoteConsumerFeeds.entries()]
+      .filter(([, feedKey]) => this.remoteFeeds.get(feedKey)?.roomId === roomId)
+      .map(([consumerId]) => consumerId);
+    for (const consumerId of remoteConsumerIds) {
+      try {
+        await this.releaseRemoteConsumerFeed(consumerId, 'consumer_closed');
+      } catch (error) {
+        recordCleanupFailure('room_bindings_remote_consumer', error);
+      }
+    }
+
+    const remoteProducerIds = [...this.remotePublishedProducers.values()]
+      .filter((state) => state.roomId === roomId)
+      .map((state) => state.producerId);
+    for (const producerId of remoteProducerIds) {
+      try {
+        await this.releaseRemoteProducerPublication(producerId, 'producer_closed');
+      } catch (error) {
+        recordCleanupFailure('room_bindings_remote_producer', error);
+      }
+    }
+
+    const ownerFeeds = [...this.ownerFeeds.values()].filter((state) => state.roomId === roomId);
+    for (const state of ownerFeeds) {
+      try {
+        await this.forceCloseOwnerFeed(state, 'consumer_closed');
+      } catch (error) {
+        recordCleanupFailure('room_bindings_owner_feed', error);
+      }
+    }
+
+    const ownerPublished = [...this.ownerPublishedProducers.values()].filter((state) => state.roomId === roomId);
+    for (const state of ownerPublished) {
+      try {
+        await this.forceCloseOwnerPublishedProducer(state, 'producer_closed');
+      } catch (error) {
+        recordCleanupFailure('room_bindings_owner_published', error);
+      }
+    }
+
+    for (const lingering of roomPipeTransports) {
+      try {
+        await this.handleClose({
+          type: 'pipe:close',
+          roomId,
+          pipeTransportId: lingering.pipeTransportId,
+          ownerClaimedAt: currentOwnerClaimedAt,
+          reason: 'room_closed'
+        });
+      } catch (error) {
+        recordCleanupFailure('room_bindings_local_pipe_close', error);
+      }
+      if (canPublishRoomClose && lingering.peerNodeId !== this.registry.localNodeId()) {
+        await this.publish(lingering.peerNodeId, {
+          type: 'pipe:close',
+          roomId,
+          pipeTransportId: lingering.pipeTransportId,
+          ownerClaimedAt: currentOwnerClaimedAt,
+          reason: 'room_closed'
+        }).catch(() => {
+          recordCleanupFailure('room_closed_pipe_close', new Error(`Peer pipe close publish failed for ${lingering.pipeTransportId}`));
+        });
+      }
+    }
+
+    this.snapshot();
+    if (cleanupError) {
+      throw cleanupError;
     }
   }
 
@@ -1159,6 +1259,96 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  private async forceCloseOwnerFeed(
+    state: RemoteFeedState,
+    reason: PipeProducerCloseMessage['reason'] | PipeConsumerCloseMessage['reason']
+  ): Promise<void> {
+    const feedKey = remoteFeedKey(state.roomId, state.ownerNodeId, state.remoteNodeId, state.producerId);
+    const current = this.ownerFeeds.get(feedKey);
+    if (!current || !matchesBindingEpoch(state.bindingEpoch, current.bindingEpoch)) {
+      return;
+    }
+    this.ownerFeeds.delete(feedKey);
+    this.consumerFeedbackVersions.delete(consumerKey(current.pipeTransportId, current.pipeConsumerId));
+    await this.handleConsumerClose({
+      type: 'pipe:consumer:close',
+      roomId: current.roomId,
+      pipeTransportId: current.pipeTransportId,
+      ownerClaimedAt: current.ownerClaimedAt,
+      consumerId: current.pipeConsumerId,
+      producerId: current.producerId,
+      bindingEpoch: current.bindingEpoch,
+      stateVersion: current.nextStateVersion++,
+      reason
+    });
+    await this.publish(current.remoteNodeId, {
+      type: 'pipe:producer:close',
+      roomId: current.roomId,
+      pipeTransportId: current.pipeTransportId,
+      ownerClaimedAt: current.ownerClaimedAt,
+      producerId: current.proxyProducerId,
+      bindingEpoch: current.bindingEpoch,
+      reason
+    });
+  }
+
+  private async forceCloseOwnerPublishedProducer(
+    state: RemotePublishedProducerState,
+    reason: PipeProducerCloseMessage['reason']
+  ): Promise<void> {
+    const publicationKey = remotePublishedProducerKey(state.roomId, state.ownerNodeId, state.remoteNodeId, state.producerId);
+    const current = this.ownerPublishedProducers.get(publicationKey);
+    if (!current || !matchesBindingEpoch(state.bindingEpoch, current.bindingEpoch)) {
+      return;
+    }
+    this.ownerPublishedProducers.delete(publicationKey);
+    const dependentFeeds = [...this.ownerFeeds.entries()].filter(([, feed]) => feed.producerId === current.producerId);
+    await this.handleProducerClose({
+      type: 'pipe:producer:close',
+      roomId: current.roomId,
+      pipeTransportId: current.pipeTransportId,
+      ownerClaimedAt: current.ownerClaimedAt,
+      producerId: current.proxyProducerId,
+      bindingEpoch: current.bindingEpoch,
+      reason
+    });
+    await this.publish(current.remoteNodeId, {
+      type: 'pipe:consumer:close',
+      roomId: current.roomId,
+      pipeTransportId: current.pipeTransportId,
+      ownerClaimedAt: current.ownerClaimedAt,
+      consumerId: current.pipeConsumerId,
+      producerId: current.producerId,
+      bindingEpoch: current.bindingEpoch,
+      stateVersion: current.nextStateVersion++,
+      reason
+    });
+    for (const [feedKey, feed] of dependentFeeds) {
+      this.ownerFeeds.delete(feedKey);
+      this.consumerFeedbackVersions.delete(consumerKey(feed.pipeTransportId, feed.pipeConsumerId));
+      await this.handleConsumerClose({
+        type: 'pipe:consumer:close',
+        roomId: feed.roomId,
+        pipeTransportId: feed.pipeTransportId,
+        ownerClaimedAt: feed.ownerClaimedAt,
+        consumerId: feed.pipeConsumerId,
+        producerId: feed.producerId,
+        bindingEpoch: feed.bindingEpoch,
+        stateVersion: feed.nextStateVersion++,
+        reason: 'producer_closed'
+      });
+      await this.publish(feed.remoteNodeId, {
+        type: 'pipe:producer:close',
+        roomId: feed.roomId,
+        pipeTransportId: feed.pipeTransportId,
+        ownerClaimedAt: feed.ownerClaimedAt,
+        producerId: feed.proxyProducerId,
+        bindingEpoch: feed.bindingEpoch,
+        reason: 'producer_closed'
+      });
+    }
+  }
+
   private async handleProducerCreate(message: PipeProducerCreateMessage): Promise<void> {
     await this.ensureImplicitPipeTransport(message);
     const currentBindingEpoch = message.bindingEpoch ?? producerKey(message.pipeTransportId, message.producerId);
@@ -1234,6 +1424,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     }
     this.pipeProducers.delete(producerKey(message.pipeTransportId, message.producerId));
     await this.media?.unregisterProducer?.(message.producerId);
+    await this.maybeCloseIdlePipeTransport(message.pipeTransportId, 'producer_closed');
   }
 
   private async handleConsumerCreate(message: PipeConsumerCreateMessage): Promise<void> {
@@ -1303,6 +1494,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       preferredSvcLayers: message.preferredSvcLayers ?? current.preferredSvcLayers,
       stateVersion: message.stateVersion ?? current.stateVersion
     });
+    this.bumpOwnerFeedStateVersion(message);
   }
 
   private async handleConsumerFeedback(message: PipeConsumerFeedbackMessage): Promise<void> {
@@ -1341,6 +1533,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     this.pipeConsumers.delete(stateKey);
     this.consumerFeedbackVersions.delete(stateKey);
     await this.media?.unregisterConsumer?.(message.consumerId);
+    await this.maybeCloseIdlePipeTransport(message.pipeTransportId, 'consumer_closed');
   }
 
   private async handleClose(message: PipeCloseMessage): Promise<void> {
@@ -1415,6 +1608,47 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       jitterMs: message.jitterMs,
       rttMs: message.rttMs
     });
+  }
+
+  private async maybeCloseIdlePipeTransport(
+    pipeTransportId: string,
+    reason: PipeCloseMessage['reason']
+  ): Promise<void> {
+    const state = this.pipeStates.get(pipeTransportId);
+    if (!state) {
+      return;
+    }
+    const hasReferences = [...this.pipeProducers.keys()].some((key) => key.startsWith(`${pipeTransportId}:`))
+      || [...this.pipeConsumers.keys()].some((key) => key.startsWith(`${pipeTransportId}:`))
+      || [...this.ownerFeeds.values()].some((entry) => entry.pipeTransportId === pipeTransportId)
+      || [...this.remoteFeeds.values()].some((entry) => entry.pipeTransportId === pipeTransportId)
+      || [...this.ownerPublishedProducers.values()].some((entry) => entry.pipeTransportId === pipeTransportId)
+      || [...this.remotePublishedProducers.values()].some((entry) => entry.pipeTransportId === pipeTransportId);
+    if (hasReferences) {
+      return;
+    }
+    await this.handleClose({
+      type: 'pipe:close',
+      roomId: state.roomId,
+      pipeTransportId,
+      ownerClaimedAt: '',
+      reason
+    });
+  }
+
+  private bumpOwnerFeedStateVersion(message: PipeConsumerStateMessage): void {
+    for (const state of this.ownerFeeds.values()) {
+      if (
+        state.pipeTransportId === message.pipeTransportId
+        && state.pipeConsumerId === message.consumerId
+        && state.producerId === message.producerId
+        && matchesBindingEpoch(message.bindingEpoch, state.bindingEpoch)
+      ) {
+        const nextStateVersion = Math.max(state.nextStateVersion, (message.stateVersion ?? 0) + 1);
+        state.nextStateVersion = nextStateVersion;
+        return;
+      }
+    }
   }
 
   private async applyConsumerState(
@@ -2260,6 +2494,10 @@ function isAckMessage(message: PipeCoordinationMessage): message is PipeAckMessa
     typeof message.idempotencyKey === 'string' &&
     typeof message.requestType === 'string'
   );
+}
+
+function isAckEnvelope(envelope: PipeCoordinationEnvelope): envelope is PipeCoordinationEnvelope<PipeAckMessage> {
+  return isAckMessage(envelope.payload);
 }
 
 function isSetupMessage(message: PipeCommandMessage): boolean {

@@ -8,11 +8,31 @@
   pointer-events: none;
 }
 
+:host(.docked-host) {
+  position: static;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  pointer-events: auto;
+}
+
 .session-chat {
   display: grid;
   gap: 10px;
   justify-items: end;
   will-change: transform;
+}
+
+.session-chat.docked {
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+  justify-items: stretch;
+  will-change: auto;
 }
 
 .session-chat,
@@ -34,6 +54,23 @@
   cursor: grabbing;
 }
 
+.session-chat.docked .drag-handle {
+  cursor: default;
+  touch-action: auto;
+}
+
+.session-chat.docked:not(.collapsed) > .chat-toggle {
+  display: none;
+}
+
+.session-chat.docked.collapsed {
+  align-content: start;
+}
+
+.session-chat.docked .drag-grip {
+  display: none;
+}
+
 .chat-toggle {
   display: inline-flex;
   align-items: center;
@@ -45,6 +82,14 @@
   color: var(--text);
   box-shadow: var(--shadow-md);
   font-weight: 850;
+}
+
+.session-chat.docked .chat-toggle {
+  width: 100%;
+  justify-content: start;
+  border-color: var(--line-soft);
+  background: var(--panel-elevated);
+  box-shadow: none;
 }
 
 .drag-grip {
@@ -109,6 +154,16 @@
     linear-gradient(180deg, var(--panel-elevated), var(--panel-elevated)),
     var(--panel);
   box-shadow: var(--shadow-md);
+}
+
+.session-chat.docked .chat-panel {
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .chat-header {

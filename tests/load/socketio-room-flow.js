@@ -11,6 +11,7 @@ export const options = {
 };
 
 const baseUrl = __ENV.BASE_URL || 'http://localhost:3000';
+const operationsToken = __ENV.OPERATIONS_TOKEN;
 
 export default function () {
   const email = `load-${__VU}-${Date.now()}@example.com`;
@@ -29,7 +30,7 @@ export default function () {
     return;
   }
 
-  const metrics = http.get(`${baseUrl}/metrics`, { headers: { Authorization: `Bearer ${token}` } });
+  const metrics = http.get(`${baseUrl}/metrics`, { headers: metricsHeaders(token) });
   check(metrics, {
     'quality metrics registered': (response) =>
       response.status === 200 &&
@@ -62,4 +63,12 @@ export default function () {
     });
     socket.setTimeout(() => socket.close(), 5000);
   });
+}
+
+function metricsHeaders(token) {
+  const headers = { Authorization: `Bearer ${token}` };
+  if (operationsToken) {
+    headers['X-Operations-Token'] = operationsToken;
+  }
+  return headers;
 }

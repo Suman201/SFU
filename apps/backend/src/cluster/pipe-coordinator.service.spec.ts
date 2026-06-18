@@ -438,6 +438,61 @@ describe('PipeCoordinatorService', () => {
     expect(remote.media?.registerPipeProducer.mock.calls[0]?.[1]).toBe('pipe:internal:room-1:node-a:node-b');
   });
 
+  it('keeps remote feed setup live when nested acknowledgements are consumed on the dedicated ack stream worker', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+
+    await owner.service.onModuleInit();
+    await remote.service.onModuleInit();
+
+    const ownerCommandHandler = durableHandler(owner.redis, 'pipe-coordinator:commands:node-a');
+    const ownerAckHandler = durableHandler(owner.redis, 'pipe-coordinator:acks:node-a');
+    const remoteCommandHandler = durableHandler(remote.redis, 'pipe-coordinator:commands:node-b');
+    const remoteAckHandler = durableHandler(remote.redis, 'pipe-coordinator:acks:node-b');
+
+    const feedPromise = remote.service.ensureRemoteConsumerFeed({
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1',
+      status: 'live',
+      preferredLayers: { spatialLayer: 2, temporalLayer: 2 }
+    });
+
+    await waitForMessageCount(remote.redis, 1);
+    const ownerFeedTask = ownerCommandHandler(remote.redis.messages[0]!, durableMeta('pipe-coordinator:commands:node-a', '1-0'));
+
+    await waitForMessageCount(owner.redis, 1);
+    await remoteCommandHandler(owner.redis.messages[0]!, durableMeta('pipe-coordinator:commands:node-b', '2-0'));
+
+    await waitForMessageCount(remote.redis, 2);
+    await ownerAckHandler(remote.redis.messages[1]!, durableMeta('pipe-coordinator:acks:node-a', '3-0'));
+
+    await waitForMessageCount(owner.redis, 2);
+    await remoteCommandHandler(owner.redis.messages[1]!, durableMeta('pipe-coordinator:commands:node-b', '4-0'));
+
+    await waitForMessageCount(remote.redis, 3);
+    await ownerAckHandler(remote.redis.messages[2]!, durableMeta('pipe-coordinator:acks:node-a', '5-0'));
+
+    await ownerFeedTask;
+
+    await waitForMessageCount(owner.redis, 3);
+    await remoteAckHandler(owner.redis.messages[2]!, durableMeta('pipe-coordinator:acks:node-b', '6-0'));
+
+    const resolvedFeed = await feedPromise;
+    expect(resolvedFeed).toEqual({
+      pipeTransportId: 'pipe:internal:room-1:node-a:node-b',
+      proxyProducerId: 'producer-1'
+    });
+    expect(ownerMedia.registerPipeConsumer.mock.calls[0]?.[0]?.id).toBe('pipe-consumer:producer-1:node-b');
+    expect(ownerMedia.registerPipeConsumer.mock.calls[0]?.[0]?.transportId).toBe('pipe:internal:room-1:node-a:node-b');
+    expect(ownerMedia.registerPipeConsumer.mock.calls[0]?.[1]).toBe('pipe:internal:room-1:node-a:node-b');
+    expect(remoteMedia.registerPipeProducer.mock.calls[0]?.[0]?.id).toBe('producer-1');
+    expect(remoteMedia.registerPipeProducer.mock.calls[0]?.[0]?.transportId).toBe('pipe:internal:room-1:node-a:node-b');
+    expect(remoteMedia.registerPipeProducer.mock.calls[0]?.[1]).toBe('pipe:internal:room-1:node-a:node-b');
+  });
+
   it('reuses an existing remote feed for multiple consumers and tears it down only after the final release', async () => {
     const ownerMedia = fakeMedia();
     const remoteMedia = fakeMedia();
@@ -498,6 +553,179 @@ describe('PipeCoordinatorService', () => {
 
     expect(ownerMedia.unregisterConsumer).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b');
     expect(remoteMedia.unregisterProducer).toHaveBeenCalledWith('producer-1');
+    expect(owner.service.snapshot().activePipeTransports).toBe(0);
+    expect(owner.service.snapshot().pipeConsumers).toBe(0);
+    expect(remote.service.snapshot().activePipeTransports).toBe(0);
+    expect(remote.service.snapshot().pipeProducers).toBe(0);
+  });
+
+  it('closes all remote feed bindings for a room in one pass', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+
+    const firstFeedPromise = remote.service.ensureRemoteConsumerFeed({
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1'
+    });
+    await waitForMessageCount(remote.redis, 1);
+    const firstFeedRequest = remote.redis.messages[0]!;
+    const ownerAttachTask = owner.service.handleEnvelope(firstFeedRequest);
+    await waitForMessageCount(owner.redis, 1);
+    await remote.service.handleEnvelope(owner.redis.messages[0]!);
+    await owner.service.handleEnvelope(remote.redis.messages[1]!);
+    await waitForMessageCount(owner.redis, 2);
+    await remote.service.handleEnvelope(owner.redis.messages[1]!);
+    await owner.service.handleEnvelope(remote.redis.messages[2]!);
+    await ownerAttachTask;
+    await remote.service.handleEnvelope(owner.redis.messages[2]!);
+    await firstFeedPromise;
+
+    await remote.service.ensureRemoteConsumerFeed({
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-2'
+    });
+
+    const baselineRemoteMessages = remote.redis.messages.length;
+    const baselineOwnerMessages = owner.redis.messages.length;
+
+    const closeTask = remote.service.closeRoomBindings('room-1');
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+    const releaseEnvelope = remote.redis.messages[baselineRemoteMessages]!;
+    const ownerReleaseTask = owner.service.handleEnvelope(releaseEnvelope);
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+    await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages + 1]!);
+    await ownerReleaseTask;
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 2);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages + 1]!);
+    await closeTask;
+
+    expect(ownerMedia.unregisterConsumer).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b');
+    expect(remoteMedia.unregisterProducer).toHaveBeenCalledWith('producer-1');
+    expect(owner.service.snapshot().activePipeTransports).toBe(0);
+    expect(owner.service.snapshot().pipeConsumers).toBe(0);
+    expect(remote.service.snapshot().activePipeTransports).toBe(0);
+    expect(remote.service.snapshot().pipeProducers).toBe(0);
+  });
+
+  it('forcibly closes lingering room pipe transports across peers during room cleanup', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    const producer = ownerMedia.getProducer('producer-1')!;
+
+    await establishRemotePublication(owner, remote, producer);
+
+    (owner.service as unknown as { ownerPublishedProducers: Map<string, unknown> }).ownerPublishedProducers.clear();
+
+    const baselineOwnerMessages = owner.redis.messages.length;
+    const baselineRemoteMessages = remote.redis.messages.length;
+
+    const closeTask = owner.service.closeRoomBindings('room-1');
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    await drainPublishedMessages(owner, remote, baselineOwnerMessages, baselineRemoteMessages);
+    await closeTask;
+
+    expect(owner.service.snapshot().activePipeTransports).toBe(0);
+    expect(owner.service.snapshot().pipeProducers).toBe(0);
+    expect(remote.service.snapshot().activePipeTransports).toBe(0);
+    expect(remote.service.snapshot().pipeConsumers).toBe(0);
+    expect(ownerMedia.closePipeTransport).toHaveBeenCalledWith('pipe:internal:room-1:node-a:node-b');
+    expect(remoteMedia.closePipeTransport).toHaveBeenCalledWith('pipe:internal:room-1:node-a:node-b');
+  });
+
+  it('continues room cleanup and sweeps lingering pipe transports after a coordinated release failure', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+    const producer = ownerMedia.getProducer('producer-1')!;
+
+    await establishRemotePublication(owner, remote, producer);
+
+    const originalPublish = owner.service.publish.bind(owner.service);
+    jest.spyOn(owner.service, 'publish').mockImplementation(async (targetNodeId, payload) => {
+      if (payload.type === 'pipe:consumer:close') {
+        throw new Error('forced close failure');
+      }
+      return originalPublish(targetNodeId, payload);
+    });
+
+    const baselineOwnerMessages = owner.redis.messages.length;
+    const baselineRemoteMessages = remote.redis.messages.length;
+
+    let thrown: unknown;
+    const closeTask = owner.service.closeRoomBindings('room-1').catch((error) => {
+      thrown = error;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drainPublishedMessages(owner, remote, baselineOwnerMessages, baselineRemoteMessages);
+    await closeTask;
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain('forced close failure');
+    expect(owner.service.snapshot().activePipeTransports).toBe(0);
+    expect(owner.service.snapshot().pipeProducers).toBe(0);
+    expect(remote.service.snapshot().activePipeTransports).toBe(0);
+    expect(remote.service.snapshot().pipeConsumers).toBe(0);
+    expect((owner.metrics as { pipeCleanupFailures: { labels: jest.Mock } }).pipeCleanupFailures.labels).toHaveBeenCalledWith('room_bindings_owner_published');
+  });
+
+  it('closes owner feed consumers with the latest synced remote state version during room cleanup', async () => {
+    const ownerMedia = fakeMedia();
+    const remoteMedia = fakeMedia();
+    const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
+    const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
+
+    await establishRemoteConsumerFeed(owner, remote, {
+      roomId: 'room-1',
+      producerId: 'producer-1',
+      consumerId: 'consumer-1'
+    });
+
+    for (const state of [
+      { status: 'live' as const, priority: 3, preferredLayers: { spatialLayer: 1, temporalLayer: 1 } },
+      { status: 'paused' as const, priority: 5, preferredLayers: { spatialLayer: 2, temporalLayer: 2 } }
+    ]) {
+      const baselineRemoteMessages = remote.redis.messages.length;
+      const baselineOwnerMessages = owner.redis.messages.length;
+      const syncPromise = remote.service.syncRemoteConsumerState({
+        roomId: 'room-1',
+        producerId: 'producer-1',
+        consumerId: 'consumer-1',
+        ...state
+      });
+      await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+      await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages]!);
+      await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+      await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+      await syncPromise;
+    }
+
+    const baselineRemoteMessages = remote.redis.messages.length;
+    const baselineOwnerMessages = owner.redis.messages.length;
+    const closeTask = remote.service.closeRoomBindings('room-1');
+    await waitForMessageCount(remote.redis, baselineRemoteMessages + 1);
+    const releaseEnvelope = remote.redis.messages[baselineRemoteMessages]!;
+    const ownerReleaseTask = owner.service.handleEnvelope(releaseEnvelope);
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 1);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages]!);
+    await owner.service.handleEnvelope(remote.redis.messages[baselineRemoteMessages + 1]!);
+    await ownerReleaseTask;
+    await waitForMessageCount(owner.redis, baselineOwnerMessages + 2);
+    await remote.service.handleEnvelope(owner.redis.messages[baselineOwnerMessages + 1]!);
+    await closeTask;
+
+    expect(ownerMedia.unregisterConsumer).toHaveBeenCalledWith('pipe-consumer:producer-1:node-b');
+    expect(remoteMedia.unregisterProducer).toHaveBeenCalledWith('producer-1');
+    expect(owner.service.snapshot().pipeConsumers).toBe(0);
+    expect(owner.service.snapshot().activePipeTransports).toBe(0);
+    expect(remote.service.snapshot().activePipeTransports).toBe(0);
   });
 
   it('orchestrates a remote publisher into an owner proxy producer and source-node pipe consumer', async () => {
@@ -1137,6 +1365,28 @@ async function establishRemotePublication(
   return publishPromise;
 }
 
+async function drainPublishedMessages(
+  owner: ReturnType<typeof createHarness>,
+  remote: ReturnType<typeof createHarness>,
+  ownerMessageIndex: number,
+  remoteMessageIndex: number
+): Promise<void> {
+  let delivered = true;
+  while (delivered) {
+    delivered = false;
+    while (ownerMessageIndex < owner.redis.messages.length) {
+      await remote.service.handleEnvelope(owner.redis.messages[ownerMessageIndex]!);
+      ownerMessageIndex += 1;
+      delivered = true;
+    }
+    while (remoteMessageIndex < remote.redis.messages.length) {
+      await owner.service.handleEnvelope(remote.redis.messages[remoteMessageIndex]!);
+      remoteMessageIndex += 1;
+      delivered = true;
+    }
+  }
+}
+
 async function establishRemoteConsumerFeed(
   owner: ReturnType<typeof createHarness>,
   remote: ReturnType<typeof createHarness>,
@@ -1186,6 +1436,27 @@ async function hasMessageCount(redis: FakeRedisService, count: number, timeoutMs
   } catch {
     return false;
   }
+}
+
+function durableHandler(redis: FakeRedisService, consumerKey: string) {
+  const calls = redis.consumeDurable.mock.calls as unknown[][];
+  const match = calls.find((call) => call[1] === consumerKey);
+  if (!match) {
+    throw new Error(`Durable consumer ${consumerKey} was not registered`);
+  }
+  return match[2] as unknown as (
+    payload: PipeCoordinationEnvelope,
+    meta: { stream: string; id: string; replayed: boolean; consumerKey: string }
+  ) => Promise<void>;
+}
+
+function durableMeta(consumerKey: string, id: string) {
+  return {
+    stream: 'sfu:pipe-coordination',
+    id,
+    replayed: false,
+    consumerKey
+  };
 }
 
 function createHarness(
@@ -1274,17 +1545,6 @@ function producerCreate(pipeTransportId: string, producerId: string): PipeProduc
     participantId: 'publisher',
     kind: 'video',
     rtpParameters: rtpParameters(1111)
-  };
-}
-
-function producerClose(pipeTransportId: string, producerId: string): PipeProducerCloseMessage {
-  return {
-    type: 'pipe:producer:close',
-    roomId: 'room-1',
-    pipeTransportId,
-    ownerClaimedAt: CLAIMED_AT,
-    producerId,
-    reason: 'producer_closed'
   };
 }
 

@@ -35,5 +35,11 @@ export default [
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-undef': 'off'
     }
+  },
+  {
+    files: ['src/**/*.spec.ts', 'src/**/*.e2e-spec.ts', 'test/**/*.spec.ts', 'test/**/*.e2e-spec.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off'
+    }
   }
 ];

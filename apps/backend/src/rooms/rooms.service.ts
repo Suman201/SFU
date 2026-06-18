@@ -161,6 +161,14 @@ interface ResolvedRoomQualityState {
   warnings: string[];
 }
 
+interface LocalRoomCleanupMetrics {
+  participantIds: string[];
+  transportCount: number;
+  consumerCount: number;
+  producerCounts: Record<string, number>;
+  pipeTransportCount: number;
+}
+
 @Injectable()
 export class RoomsService {
   private readonly layerEventListeners = new Set<(event: ConsumerLayerEvent) => void>();
@@ -348,6 +356,7 @@ export class RoomsService {
       throw new NotFoundException('Participant not found');
     }
     participant.socketId = socketId;
+    participant.nodeId = this.nodeRegistry.localNodeId();
     participant.lastSeenAt = new Date();
     await participant.save();
     await this.redis.markPresence(roomId, participant.id, socketId);
@@ -418,27 +427,25 @@ export class RoomsService {
   async closeRoom(roomId: string, actorParticipantId: string): Promise<void> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
     await this.assertModerator(roomId, actorParticipantId, true);
-    const [activeParticipants, activeProducers, activeConsumers] = await Promise.all([
-      this.participants.find({ roomId, leftAt: { $exists: false } }),
-      this.producers.find({ roomId, status: { $ne: 'closed' } }),
-      this.consumers.find({ roomId, status: { $ne: 'closed' } })
-    ]);
+    const activeParticipants = await this.participants.find({ roomId, leftAt: { $exists: false } });
+    const localNodeId = this.nodeRegistry.localNodeId();
     await this.rooms.updateOne({ _id: roomId }, { closedAt: new Date() });
     await this.participants.updateMany({ roomId, leftAt: { $exists: false } }, { leftAt: new Date() });
     await this.producers.updateMany({ roomId, status: { $ne: 'closed' } }, { status: 'closed', closedAt: new Date() });
     await this.consumers.updateMany({ roomId, status: { $ne: 'closed' } }, { status: 'closed', closedAt: new Date() });
-    await this.media.closeRoom(roomId);
+    if (this.pipeCoordinator.isEnabled()) {
+      await this.pipeCoordinator.closeRoomBindings(roomId);
+    }
+    const cleanup = normalizeMediaRoomCleanupSummary(await this.media.closeRoom(roomId));
     this.clearDistributedRoomObservability(roomId);
     await this.nodeRegistry.releaseRoom(roomId);
-    for (const _participant of activeParticipants) {
+    for (const participant of activeParticipants) {
+      if (participant.nodeId !== undefined && participant.nodeId !== localNodeId) {
+        continue;
+      }
       this.metrics.activeParticipants.labels(roomId).dec();
     }
-    for (const producer of activeProducers) {
-      this.metrics.activeProducers.labels(producer.kind).dec();
-    }
-    for (const _consumer of activeConsumers) {
-      this.metrics.activeConsumers.dec();
-    }
+    this.applyLocalRoomCleanupMetrics(roomId, cleanup, { includeParticipants: false });
     this.metrics.activeRooms.dec();
   }
 
@@ -827,8 +834,8 @@ export class RoomsService {
     }
     await this.assertParticipant(consumer.roomId, participantId);
     const state = ownerLookup.local
-      ? this.media.consumerQualityState(consumerId)
-      : this.readFreshDistributedState(this.distributedConsumerQualityStates, consumerId) ?? this.media.consumerQualityState(consumerId);
+      ? this.readLocalConsumerQualityState(consumerId)
+      : this.readFreshDistributedState(this.distributedConsumerQualityStates, consumerId) ?? this.readLocalConsumerQualityState(consumerId);
     if (!state) {
       throw new NotFoundException('Consumer quality state not available');
     }
@@ -921,6 +928,8 @@ export class RoomsService {
   async handleMediaRoomFailure(failure: MediaWorkerRoomFailureEvent): Promise<void> {
     const room = await this.rooms.findById(failure.roomId);
     if (!room || room.mediaState?.status === 'failed') {
+      this.media.acknowledgeRoomFailure(failure.roomId);
+      this.metrics.mediaWorkerFailedRooms.set(this.media.workerPoolSnapshot().failedRooms.length);
       return;
     }
     const now = new Date(failure.failedAt);
@@ -929,6 +938,7 @@ export class RoomsService {
       this.producers.find({ roomId: failure.roomId, status: { $ne: 'closed' } }),
       this.consumers.find({ roomId: failure.roomId, status: { $ne: 'closed' } })
     ]);
+    const localNodeId = this.nodeRegistry.localNodeId();
     room.set('mediaState', {
       status: 'failed',
       failedAt: now,
@@ -946,20 +956,44 @@ export class RoomsService {
     for (const participant of participants) {
       await this.redis.removePresence(failure.roomId, participant.id);
     }
+    if (this.pipeCoordinator.isEnabled()) {
+      try {
+        await this.pipeCoordinator.closeRoomBindings(failure.roomId);
+      } catch {
+        this.metrics.pipeCleanupFailures.labels('media_room_failed_bindings').inc();
+      }
+    }
+    this.clearDistributedRoomObservability(failure.roomId);
     await this.nodeRegistry.releaseRoom(failure.roomId);
+    this.media.acknowledgeRoomFailure(failure.roomId);
     this.metrics.mediaWorkerRoomFailures.labels(failure.reason).inc();
     this.metrics.mediaWorkerFailedRooms.set(this.media.workerPoolSnapshot().failedRooms.length);
     this.metrics.activeRooms.dec();
-    for (const _participant of participants) {
-      this.metrics.activeParticipants.labels(failure.roomId).dec();
-    }
+    const affectedProducerIds = new Set(failure.affectedProducers);
+    const locallyAffectedParticipantIds = new Set(
+      consumers
+        .filter((consumer) => failure.affectedConsumers.includes(consumer.id))
+        .map((consumer) => consumer.participantId)
+    );
     for (const producer of producers) {
+      if (!affectedProducerIds.has(producer.id) || producer.nodeId !== localNodeId) {
+        continue;
+      }
+      locallyAffectedParticipantIds.add(producer.participantId);
       this.metrics.activeProducers.labels(producer.kind).dec();
     }
-    for (const _consumer of consumers) {
+    for (const participant of participants) {
+      if (participant.nodeId !== localNodeId && !locallyAffectedParticipantIds.has(participant.id)) {
+        continue;
+      }
+      this.metrics.activeParticipants.labels(failure.roomId).dec();
+    }
+    for (let index = 0; index < failure.affectedConsumers.length; index += 1) {
       this.metrics.activeConsumers.dec();
     }
-    this.clearDistributedRoomObservability(failure.roomId);
+    for (let index = 0; index < failure.affectedTransports.length; index += 1) {
+      this.metrics.activeTransports.dec();
+    }
     const event: RoomFailureEvent = {
       roomId: failure.roomId,
       reason: failure.reason,
@@ -1308,6 +1342,7 @@ export class RoomsService {
       userId: user.id,
       displayName,
       socketId,
+      nodeId: this.nodeRegistry.localNodeId(),
       role,
       audioEnabled: permissions.canPublishAudio,
       videoEnabled: permissions.canPublishVideo,
@@ -1388,21 +1423,23 @@ export class RoomsService {
   }
 
   private async handleConsumerLayerEvent(event: ConsumerLayerEvent): Promise<void> {
-    await this.consumers.updateOne(
-      { _id: event.consumerId },
-      {
-        $set: {
-          currentLayers: event.currentLayers,
-          targetLayers: event.targetLayers,
-          preferredLayers: event.preferredLayers,
-          currentSvcLayers: event.currentSvcLayers,
-          targetSvcLayers: event.targetSvcLayers,
-          preferredSvcLayers: event.preferredSvcLayers,
-          layerSwitchReason: event.reason,
-          layerSwitchedAt: new Date(event.timestamp)
+    if (isPersistedMongoId(event.consumerId)) {
+      await this.consumers.updateOne(
+        { _id: event.consumerId },
+        {
+          $set: {
+            currentLayers: event.currentLayers,
+            targetLayers: event.targetLayers,
+            preferredLayers: event.preferredLayers,
+            currentSvcLayers: event.currentSvcLayers,
+            targetSvcLayers: event.targetSvcLayers,
+            preferredSvcLayers: event.preferredSvcLayers,
+            layerSwitchReason: event.reason,
+            layerSwitchedAt: new Date(event.timestamp)
+          }
         }
-      }
-    );
+      );
+    }
     switch (event.type) {
       case 'changed':
         this.metrics.successfulLayerSwitches.labels(event.reason).inc();
@@ -1596,6 +1633,7 @@ export class RoomsService {
     }
     if (signal.event === 'room:closed' || signal.event === 'room:failed') {
       this.clearDistributedRoomObservability(signal.roomId);
+      void this.cleanupDistributedClosedRoom(signal.roomId);
     }
   }
 
@@ -1676,6 +1714,37 @@ export class RoomsService {
   private markObservabilityTombstone(map: Map<string, number>, key: string, observedAt = Date.now()): void {
     this.pruneObservabilityTombstones(map, observedAt);
     map.set(key, observedAt);
+  }
+
+  private async cleanupDistributedClosedRoom(roomId: string): Promise<void> {
+    if (this.pipeCoordinator.isEnabled()) {
+      try {
+        await this.pipeCoordinator.closeRoomBindings(roomId);
+      } catch {
+        this.metrics.pipeCleanupFailures.labels('distributed_room_closed_bindings').inc();
+      }
+    }
+    const cleanup = normalizeMediaRoomCleanupSummary(await this.media.closeRoom(roomId));
+    this.applyLocalRoomCleanupMetrics(roomId, cleanup);
+  }
+
+  private applyLocalRoomCleanupMetrics(roomId: string, cleanup: LocalRoomCleanupMetrics, options: { includeParticipants?: boolean } = {}): void {
+    if (options.includeParticipants ?? true) {
+      for (const _participantId of cleanup.participantIds) {
+        this.metrics.activeParticipants.labels(roomId).dec();
+      }
+    }
+    for (const [kind, count] of Object.entries(cleanup.producerCounts)) {
+      for (let index = 0; index < count; index += 1) {
+        this.metrics.activeProducers.labels(kind).dec();
+      }
+    }
+    for (let index = 0; index < cleanup.consumerCount; index += 1) {
+      this.metrics.activeConsumers.dec();
+    }
+    for (let index = 0; index < cleanup.transportCount; index += 1) {
+      this.metrics.activeTransports.dec();
+    }
   }
 
   private readRecentObservabilityTombstone(map: Map<string, number>, key: string, now = Date.now()): number | undefined {
@@ -1840,7 +1909,7 @@ export class RoomsService {
 
   private consumerLayerState(doc: ConsumerMongoDocument): ConsumerLayerState {
     return (
-      this.media.consumerLayerState(doc.id) ?? {
+      this.readLocalConsumerLayerState(doc.id) ?? {
         roomId: doc.roomId,
         participantId: doc.participantId,
         consumerId: doc.id,
@@ -1921,7 +1990,7 @@ export class RoomsService {
       currentSvcLayers: normalizeSvcLayerSelection(doc.currentSvcLayers as SvcLayerSelection | undefined),
       targetSvcLayers: normalizeSvcLayerSelection(doc.targetSvcLayers as SvcLayerSelection | undefined),
       layerState: this.consumerLayerState(doc),
-      quality: this.media.consumerQualityState(doc.id) ?? this.readFreshDistributedState(this.distributedConsumerQualityStates, doc.id),
+      quality: this.readLocalConsumerQualityState(doc.id) ?? this.readFreshDistributedState(this.distributedConsumerQualityStates, doc.id),
       rtpParameters: doc.rtpParameters as unknown as Consumer['rtpParameters'],
       status: doc.status,
       createdAt: doc.createdAt.toISOString()
@@ -1954,6 +2023,28 @@ export class RoomsService {
     }
     try {
       return this.media.producerLayerState(doc.id);
+    } catch (error) {
+      if (isMissingWorkerAssignmentError(error)) {
+        return undefined;
+      }
+      throw error;
+    }
+  }
+
+  private readLocalConsumerLayerState(consumerId: string): ConsumerLayerState | undefined {
+    try {
+      return this.media.consumerLayerState(consumerId);
+    } catch (error) {
+      if (isMissingWorkerAssignmentError(error)) {
+        return undefined;
+      }
+      throw error;
+    }
+  }
+
+  private readLocalConsumerQualityState(consumerId: string): ConsumerQualityState | undefined {
+    try {
+      return this.media.consumerQualityState(consumerId);
     } catch (error) {
       if (isMissingWorkerAssignmentError(error)) {
         return undefined;
@@ -2065,6 +2156,16 @@ function preferredLayerNameToSelection(layer: 'low' | 'medium' | 'high' | undefi
 
 function isMissingNodeId(nodeId: string | undefined | null): boolean {
   return !nodeId || nodeId.trim().length === 0;
+}
+
+function normalizeMediaRoomCleanupSummary(summary: Partial<LocalRoomCleanupMetrics> | undefined): LocalRoomCleanupMetrics {
+  return {
+    participantIds: summary?.participantIds ?? [],
+    transportCount: summary?.transportCount ?? 0,
+    consumerCount: summary?.consumerCount ?? 0,
+    producerCounts: summary?.producerCounts ?? {},
+    pipeTransportCount: summary?.pipeTransportCount ?? 0
+  };
 }
 
 function isMissingWorkerAssignmentError(error: unknown): boolean {
@@ -2184,6 +2285,10 @@ function isDegradedQualityState(reasons: ReadonlyArray<string>): boolean {
 function hasPendingLayerSwitch(state: Pick<ConsumerQualityState, 'currentLayers' | 'targetLayers' | 'currentSvcLayers' | 'targetSvcLayers'>): boolean {
   return JSON.stringify(state.currentLayers ?? null) !== JSON.stringify(state.targetLayers ?? null)
     || JSON.stringify(state.currentSvcLayers ?? null) !== JSON.stringify(state.targetSvcLayers ?? null);
+}
+
+function isPersistedMongoId(value: string): boolean {
+  return Types.ObjectId.isValid(value);
 }
 
 function averageNumber(values: number[]): number {

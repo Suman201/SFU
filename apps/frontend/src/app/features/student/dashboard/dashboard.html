@@ -18,7 +18,11 @@
       <p>Total weeks</p>
     </article>
     <article>
-      <span>{{ nextBatch()?.teacherName ?? 'None' }}</span>
+      @if (nextBatch(); as batch) {
+        <a class="summary-link" [routerLink]="['/teachers', batch.teacherId]">{{ batch.teacherName }}</a>
+      } @else {
+        <span>None</span>
+      }
       <p>Next teacher</p>
     </article>
   </section>
@@ -39,7 +43,10 @@
               <span>{{ batch.teacherName[0] }}</span>
               <div>
                 <strong>{{ batch.title }}</strong>
-                <small>{{ batch.teacherName }} · {{ batch.subject }}</small>
+                <small>
+                  <a [routerLink]="['/teachers', batch.teacherId]">{{ batch.teacherName }}</a>
+                  · {{ batch.subject }}
+                </small>
               </div>
             </div>
 

@@ -10,6 +10,7 @@ data:
   FRONTEND_URL: https://sfu.example.com
   NODE_REGION: default
   NODE_ZONE: default-a
+  # Must be the externally reachable control-plane URL for this node, not an internal pod IP.
   NODE_PUBLIC_URL: https://sfu.example.com
   NODE_HEARTBEAT_INTERVAL_MS: "5000"
   NODE_TTL_MS: "15000"
@@ -20,17 +21,20 @@ data:
   # Phase 11 pipe transport is foundation-only and must remain disabled unless explicitly tested.
   ENABLE_PIPE_TRANSPORT: "false"
   PIPE_PORT_RANGE: "41000-41100"
+  # When pipe transport is enabled, advertise the stable inter-node IP peers actually reach.
   PIPE_ADVERTISE_IP: ""
   PIPE_ALLOWED_NODE_IDS: ""
   PIPE_COORDINATION_TIMEOUT_MS: "5000"
   PIPE_COORDINATION_MAX_ATTEMPTS: "3"
   PIPE_MAX_SETUP_REQUESTS_PER_MINUTE: "120"
-  MONGODB_URI: mongodb://mongo:27017/native_sfu
-  REDIS_URL: redis://redis:6379
   TURN_REALM: native-sfu.local
-  TURN_URIS: turn:sfu.example.com:3478?transport=udp,turn:sfu.example.com:3478?transport=tcp
+  # Browser clients consume these URIs through GET /api/v1/media/turn-credentials.
+  # Production values must point at the public TURN address browsers actually reach.
+  # The current release candidate validates and advertises UDP TURN only.
+  TURN_URIS: turn:sfu.example.com:3478?transport=udp
   MEDIA_WORKER_MODE: worker
   MEDIA_WORKER_COUNT: "1"
+  HOST_CANDIDATE_PORT_RANGE: "40000-40100"
   MEDIA_WORKER_REQUEST_TIMEOUT_MS: "5000"
   MEDIA_WORKER_STARTUP_TIMEOUT_MS: "10000"
   MEDIA_WORKER_HEARTBEAT_INTERVAL_MS: "2000"
@@ -48,3 +52,5 @@ data:
   MEDIA_WORKER_SOFT_RTCP_PACKET_RATE: "5000"
   RECORDING_STORAGE_DRIVER: local
   RECORDING_LOCAL_PATH: /app/recordings
+  SWAGGER_ENABLED: "false"
+  METRICS_ENABLED: "true"

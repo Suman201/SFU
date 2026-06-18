@@ -61,6 +61,14 @@ interface ManagedPipeTransport {
   consumerIds: Set<string>;
 }
 
+export interface MediaRoomCleanupSummary {
+  participantIds: string[];
+  transportCount: number;
+  consumerCount: number;
+  producerCounts: Record<string, number>;
+  pipeTransportCount: number;
+}
+
 @Injectable()
 export class MediaService {
   private readonly transports = new Map<string, ManagedTransport>();
@@ -190,6 +198,10 @@ export class MediaService {
 
   onMediaWorkerRoomFailed(_listener: (event: MediaWorkerRoomFailureEvent) => void): () => void {
     return () => undefined;
+  }
+
+  acknowledgeRoomFailure(_roomId: string): void {
+    // In-process mode does not quarantine failed rooms.
   }
 
   async createWebRtcTransport(roomId: string, participantId: string): Promise<TransportOptions> {
@@ -636,9 +648,19 @@ export class MediaService {
     this.router.removeParticipant(participantId);
   }
 
-  async closeRoom(roomId: string): Promise<void> {
+  async closeRoom(roomId: string): Promise<MediaRoomCleanupSummary> {
+    const summary: MediaRoomCleanupSummary = {
+      participantIds: [],
+      transportCount: 0,
+      consumerCount: 0,
+      producerCounts: {},
+      pipeTransportCount: 0
+    };
+    const participantIds = new Set<string>();
     for (const transport of this.transports.values()) {
       if (transport.roomId === roomId) {
+        summary.transportCount += 1;
+        participantIds.add(transport.participantId);
         transport.closed = true;
         transport.bridge.close();
         this.srtp.closeSession(transport.id);
@@ -650,6 +672,9 @@ export class MediaService {
     }
     for (const [producerId, producer] of this.producers) {
       if (producer.roomId === roomId) {
+        if (!this.pipeTransports.has(producer.transportId)) {
+          summary.producerCounts[producer.kind] = (summary.producerCounts[producer.kind] ?? 0) + 1;
+        }
         this.releasePipeProducer(producerId);
         this.producers.delete(producerId);
         this.producerDynacastStates.delete(producerId);
@@ -658,6 +683,9 @@ export class MediaService {
     }
     for (const [consumerId, consumer] of this.consumers) {
       if (consumer.roomId === roomId) {
+        if (!this.pipeTransports.has(consumer.transportId)) {
+          summary.consumerCount += 1;
+        }
         this.releasePipeConsumer(consumerId);
         this.consumers.delete(consumerId);
         this.consumerLayerStates.delete(consumerId);
@@ -666,11 +694,14 @@ export class MediaService {
     }
     for (const [pipeTransportId, transport] of this.pipeTransports) {
       if (transport.roomId === roomId) {
+        summary.pipeTransportCount += 1;
         this.pipeTransports.delete(pipeTransportId);
       }
     }
     this.roomQualityStates.delete(roomId);
     this.router.removeRoom(roomId);
+    summary.participantIds = [...participantIds];
+    return summary;
   }
 
   async closePipeTransport(pipeTransportId: string): Promise<void> {

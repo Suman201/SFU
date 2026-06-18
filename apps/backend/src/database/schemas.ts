@@ -122,6 +122,9 @@ export class ParticipantDocument {
   @Prop({ index: true })
   userId?: string;
 
+  @Prop({ index: true })
+  nodeId?: string;
+
   @Prop({ required: true, trim: true, maxlength: 120 })
   displayName!: string;
 
@@ -161,6 +164,7 @@ export class ParticipantDocument {
 
 export const ParticipantSchema = SchemaFactory.createForClass(ParticipantDocument);
 ParticipantSchema.index({ roomId: 1, userId: 1, leftAt: 1 });
+ParticipantSchema.index({ roomId: 1, nodeId: 1, leftAt: 1 });
 ParticipantSchema.index({ roomId: 1, socketId: 1 }, { unique: true, partialFilterExpression: { leftAt: { $exists: false } } });
 ParticipantSchema.index({ roomId: 1, role: 1 });
 ParticipantSchema.index({ roomId: 1, admitted: 1, leftAt: 1 });

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 import { FormField, FormRoot, form as signalForm } from '@angular/forms/signals';
 
 interface ChatMessage {
@@ -33,15 +33,21 @@ interface ChatComposerFormModel {
   imports: [FormField, FormRoot],
   templateUrl: './session-chat.html',
   styleUrl: './session-chat.scss',
+  host: {
+    '[class.docked-host]': 'docked()'
+  },
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class SessionChat {
   readonly currentUser = input('Teacher');
   readonly currentRole = input<'Teacher' | 'Student'>('Teacher');
+  readonly docked = input(false);
+  readonly collapsed = input<boolean | null>(null);
+  readonly collapsedChange = output<boolean>();
 
   protected readonly dragOffset = signal<ChatPosition>({ x: 0, y: 0 });
   protected readonly dragging = signal(false);
-  protected readonly collapsed = signal(false);
+  protected readonly internalCollapsed = signal(false);
   protected readonly chatModel = signal<ChatComposerFormModel>({ message: '' });
   protected readonly chatForm = signalForm(this.chatModel);
   protected readonly messages = signal<ChatMessage[]>([
@@ -62,12 +68,17 @@ export class SessionChat {
   ]);
 
   protected readonly dragTransform = computed(() => {
+    if (this.docked()) {
+      return 'none';
+    }
+
     const offset = this.dragOffset();
 
     return `translate3d(${offset.x}px, ${offset.y}px, 0)`;
   });
 
-  protected readonly unreadCount = computed(() => (this.collapsed() ? this.messages().length : 0));
+  protected readonly isCollapsed = computed(() => this.collapsed() ?? this.internalCollapsed());
+  protected readonly unreadCount = computed(() => (this.isCollapsed() ? this.messages().length : 0));
 
   private dragState: ChatDragState | null = null;
   private suppressNextToggle = false;
@@ -80,11 +91,13 @@ export class SessionChat {
       return;
     }
 
-    this.collapsed.update((collapsed) => !collapsed);
+    const nextCollapsed = !this.isCollapsed();
+    this.internalCollapsed.set(nextCollapsed);
+    this.collapsedChange.emit(nextCollapsed);
   }
 
   protected startDrag(event: PointerEvent, chatElement: HTMLElement): void {
-    if (event.button !== 0) {
+    if (this.docked() || event.button !== 0) {
       return;
     }
 

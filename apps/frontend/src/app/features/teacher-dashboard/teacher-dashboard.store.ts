@@ -1,6 +1,7 @@
 import { Injectable, computed, effect, signal } from '@angular/core';
 
 export type TeacherSessionStatus = 'scheduled' | 'live' | 'completed' | 'cancelled';
+export type TeacherBatchStudentStatus = 'active' | 'invited' | 'paused' | 'suspended' | 'blocked';
 
 export interface CreateTeacherBatchInput {
   name: string;
@@ -27,6 +28,15 @@ export interface TeacherSession {
   completedAt?: string;
 }
 
+export interface TeacherBatchStudent {
+  id: string;
+  displayName: string;
+  email: string;
+  attendanceRate: number;
+  joinedAt: string;
+  status: TeacherBatchStudentStatus;
+}
+
 export interface TeacherBatch {
   id: string;
   name: string;
@@ -39,6 +49,7 @@ export interface TeacherBatch {
   durationMinutes: number;
   totalWeeks: number;
   createdAt: string;
+  students: TeacherBatchStudent[];
   sessions: TeacherSession[];
 }
 
@@ -71,18 +82,20 @@ export class TeacherDashboardStore {
   createBatch(input: CreateTeacherBatchInput): TeacherBatch {
     const now = new Date().toISOString();
     const batchId = this.createId('batch');
+    const enrolledCount = Math.min(input.enrolledCount, input.capacity);
     const batch: TeacherBatch = {
       id: batchId,
       name: input.name.trim(),
       courseName: input.courseName.trim(),
       cohortCode: input.cohortCode.trim(),
       capacity: input.capacity,
-      enrolledCount: Math.min(input.enrolledCount, input.capacity),
+      enrolledCount,
       weeklyDay: input.weeklyDay,
       startTime: input.startTime,
       durationMinutes: input.durationMinutes,
       totalWeeks: input.totalWeeks,
       createdAt: now,
+      students: this.createStudents(batchId, enrolledCount, now),
       sessions: this.createWeeklySessions(batchId, input)
     };
     this.state.update((state) => ({ batches: [batch, ...state.batches] }));
@@ -126,6 +139,19 @@ export class TeacherDashboardStore {
     this.state.update((state) => ({ batches: state.batches.filter((batch) => batch.id !== batchId) }));
   }
 
+  updateStudentStatus(batchId: string, studentId: string, status: TeacherBatchStudentStatus): void {
+    this.state.update((state) => ({
+      batches: state.batches.map((batch) =>
+        batch.id === batchId
+          ? {
+              ...batch,
+              students: batch.students.map((student) => (student.id === studentId ? { ...student, status } : student))
+            }
+          : batch
+      )
+    }));
+  }
+
   sessionBatch(sessionId: string): TeacherBatch | null {
     return this.batches().find((batch) => batch.sessions.some((session) => session.id === sessionId)) ?? null;
   }
@@ -136,6 +162,15 @@ export class TeacherDashboardStore {
         .filter((session) => session.status === 'scheduled' || session.status === 'live')
         .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime())[0] ?? null
     );
+  }
+
+  averageAttendance(batch: TeacherBatch): number | null {
+    if (!batch.students.length) {
+      return null;
+    }
+
+    const total = batch.students.reduce((sum, student) => sum + student.attendanceRate, 0);
+    return Math.round(total / batch.students.length);
   }
 
   private createWeeklySessions(batchId: string, input: CreateTeacherBatchInput): TeacherSession[] {
@@ -168,6 +203,91 @@ export class TeacherDashboardStore {
     return new Date(this.nextSession(batch)?.scheduledAt ?? batch.createdAt).getTime();
   }
 
+  private createStudents(batchId: string, count: number, joinedAt: string): TeacherBatchStudent[] {
+    const names = [
+      'Aarav Sharma',
+      'Mia Patel',
+      'Rohan Das',
+      'Sophia Roy',
+      'Kabir Mehta',
+      'Ananya Sen',
+      'Ishaan Gupta',
+      'Diya Nair',
+      'Vihaan Rao',
+      'Zara Khan',
+      'Arjun Iyer',
+      'Sara Thomas',
+      'Neil Kapoor',
+      'Ira Bose',
+      'Reyansh Jain',
+      'Tara Malhotra',
+      'Dev Menon',
+      'Nisha Reddy',
+      'Yash Verma',
+      'Aisha Ali'
+    ];
+
+    return Array.from({ length: count }, (_, index) => {
+      const baseName = names[index % names.length]!;
+      const displayName = index < names.length ? baseName : `${baseName} ${Math.floor(index / names.length) + 1}`;
+      const slug = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/(^\.|\.$)/g, '');
+      return {
+        id: `${batchId}-student-${index + 1}`,
+        displayName,
+        email: `${slug}@student.example.com`,
+        attendanceRate: 72 + ((index * 7) % 27),
+        joinedAt,
+        status: this.studentStatus(index)
+      };
+    });
+  }
+
+  private studentStatus(index: number): TeacherBatchStudentStatus {
+    if ((index + 1) % 13 === 0) {
+      return 'paused';
+    }
+    if ((index + 1) % 9 === 0) {
+      return 'invited';
+    }
+    return 'active';
+  }
+
+  private normalizeBatch(batch: TeacherBatch): TeacherBatch {
+    const capacity = Number(batch.capacity) || 0;
+    const enrolledCount = Math.min(Number(batch.enrolledCount) || 0, capacity);
+    const createdAt = batch.createdAt ?? new Date().toISOString();
+    const id = batch.id ?? this.createId('batch');
+    const students = Array.isArray(batch.students)
+      ? batch.students.map((student, index) => this.normalizeStudent(student, id, createdAt, index)).slice(0, capacity)
+      : this.createStudents(id, enrolledCount, createdAt);
+
+    return {
+      ...batch,
+      id,
+      capacity,
+      enrolledCount: students.length || enrolledCount,
+      createdAt,
+      students,
+      sessions: Array.isArray(batch.sessions) ? batch.sessions : []
+    };
+  }
+
+  private normalizeStudent(
+    student: TeacherBatchStudent,
+    batchId: string,
+    joinedAt: string,
+    index: number
+  ): TeacherBatchStudent {
+    return {
+      id: student.id ?? `${batchId}-student-${index + 1}`,
+      displayName: student.displayName ?? `Student ${index + 1}`,
+      email: student.email ?? `student.${index + 1}@student.example.com`,
+      attendanceRate: Number.isFinite(student.attendanceRate) ? student.attendanceRate : 0,
+      joinedAt: student.joinedAt ?? joinedAt,
+      status: student.status ?? 'active'
+    };
+  }
+
   private loadState(): TeacherDashboardState {
     try {
       const storedState = localStorage.getItem(STORAGE_KEY);
@@ -175,7 +295,7 @@ export class TeacherDashboardStore {
         return { batches: [] };
       }
       const parsed = JSON.parse(storedState) as TeacherDashboardState;
-      return Array.isArray(parsed.batches) ? parsed : { batches: [] };
+      return Array.isArray(parsed.batches) ? { batches: parsed.batches.map((batch) => this.normalizeBatch(batch)) } : { batches: [] };
     } catch {
       return { batches: [] };
     }

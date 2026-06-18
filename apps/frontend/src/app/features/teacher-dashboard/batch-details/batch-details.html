@@ -1,0 +1,253 @@
+<sfu-header />
+<main class="batch-details-shell">
+  <a class="back-link" routerLink="/teacher-dashboard">Back to batches</a>
+
+  @if (batch(); as batch) {
+    <section class="details-hero">
+      <div>
+        <p class="eyebrow">Batch details</p>
+        <h1>{{ batch.name }}</h1>
+        <div class="hero-meta">
+          <span>{{ batch.courseName }}</span>
+          <span>{{ batch.cohortCode }}</span>
+          <span>{{ weekdayLabel(batch.weeklyDay) }} at {{ batch.startTime }}</span>
+        </div>
+      </div>
+      <div class="hero-actions">
+        @if (nextSession(); as next) {
+          <button class="primary" type="button" (click)="startSession(next)">Start next session</button>
+        }
+        <a class="button" routerLink="/teacher-dashboard">All batches</a>
+      </div>
+    </section>
+
+    <section class="summary-grid" aria-label="Batch summary">
+      <article>
+        <span>{{ students().length }}/{{ batch.capacity }}</span>
+        <p>Students</p>
+      </article>
+      <article>
+        <span>{{ completedCount() }}/{{ batch.totalWeeks }}</span>
+        <p>Completed</p>
+      </article>
+      <article>
+        <span>{{ averageAttendanceLabel() }}</span>
+        <p>Avg attendance</p>
+      </article>
+      <article>
+        <span>{{ batch.durationMinutes }}</span>
+        <p>Minutes/session</p>
+      </article>
+    </section>
+
+    <section class="panel batch-overview">
+      <header>
+        <div>
+          <p class="eyebrow">Overview</p>
+          <h2>Batch information</h2>
+        </div>
+        <span class="progress-label">{{ batchProgress(batch) }}% complete</span>
+      </header>
+      <div class="progress-track" aria-label="Batch progress">
+        <span [style.width.%]="batchProgress(batch)"></span>
+      </div>
+      <div class="overview-grid">
+        <div>
+          <strong>Created</strong>
+          <span>{{ formatDate(batch.createdAt) }}</span>
+        </div>
+        <div>
+          <strong>Weekly schedule</strong>
+          <span>{{ weekdayLabel(batch.weeklyDay) }} at {{ batch.startTime }}</span>
+        </div>
+        <div>
+          <strong>Total sessions</strong>
+          <span>{{ batch.totalWeeks }}</span>
+        </div>
+        <div>
+          <strong>Next session</strong>
+          @if (nextSession(); as next) {
+            <span>{{ formatDateTime(next.scheduledAt) }}</span>
+          } @else {
+            <span>All sessions complete</span>
+          }
+        </div>
+      </div>
+    </section>
+
+    <section class="panel students-panel">
+      <header>
+        <div>
+          <p class="eyebrow">Students</p>
+          <h2>Student list</h2>
+        </div>
+        <span class="progress-label">{{ students().length }} enrolled</span>
+      </header>
+
+      @if (actionNotice()) {
+        <p class="action-notice">{{ actionNotice() }}</p>
+      }
+
+      @if (messageTarget(); as target) {
+        <aside class="message-composer" aria-label="Send student message">
+          <form [formRoot]="messageForm" (submit)="submitMessage($event)">
+            <header>
+              <div>
+                <p class="eyebrow">Message</p>
+                <h3>{{ target.displayName }}</h3>
+              </div>
+              <button type="button" class="icon-button" aria-label="Close message composer" (click)="cancelMessage()">×</button>
+            </header>
+            <label>
+              Message
+              <textarea [formField]="messageForm.message" rows="4" placeholder="Write a message to this student"></textarea>
+            </label>
+            <footer>
+              <button type="button" (click)="cancelMessage()">Cancel</button>
+              <button class="primary" type="submit" [disabled]="messageForm().invalid()">Send message</button>
+            </footer>
+          </form>
+        </aside>
+      }
+
+      @if (students().length) {
+        <div class="data-table-shell">
+          <div class="data-table-toolbar">
+            <div class="table-view-tabs" aria-label="Student view mode">
+              <button class="active" type="button">Table</button>
+              <button type="button">Board</button>
+              <button type="button">List</button>
+            </div>
+            <div class="table-tools">
+              <button class="table-tool-button" type="button">Search</button>
+              <button class="table-tool-button" type="button">Hide</button>
+              <button class="table-tool-button" type="button">Customize</button>
+              <button class="table-tool-button" type="button">Export</button>
+            </div>
+          </div>
+
+          <div class="data-table-filters" aria-label="Student filters">
+            <button class="filter-chip active" type="button">Status</button>
+            <button class="filter-chip active" type="button">Attendance</button>
+            <button class="filter-chip add-filter" type="button">+ Add filter</button>
+          </div>
+
+          <div class="data-table-wrap">
+            <table class="data-table" style="--data-table-min-width: 820px">
+              <thead>
+                <tr>
+                  <th class="table-checkbox-cell" scope="col"><input class="table-checkbox" type="checkbox" aria-label="Select all students" /></th>
+                  <th scope="col">Full name</th>
+                  <th scope="col">Email</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Attendance</th>
+                  <th scope="col">Joined date</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (student of students(); track student.id) {
+                  <tr>
+                    <td class="table-checkbox-cell">
+                      <input class="table-checkbox" type="checkbox" [attr.aria-label]="'Select ' + student.displayName" />
+                    </td>
+                    <td>
+                      <div class="table-primary-cell">
+                        <span class="table-avatar" aria-hidden="true">{{ student.displayName.slice(0, 1) }}</span>
+                        <span class="table-primary-text">
+                          <strong>{{ student.displayName }}</strong>
+                          <span>{{ studentStatusLabel(student.status) }}</span>
+                        </span>
+                      </div>
+                    </td>
+                    <td><a [href]="'mailto:' + student.email">{{ student.email }}</a></td>
+                    <td>
+                      <span
+                        class="data-pill"
+                        [class.success]="studentStatusTone(student.status) === 'success'"
+                        [class.warning]="studentStatusTone(student.status) === 'warning'"
+                        [class.danger]="studentStatusTone(student.status) === 'danger'"
+                      >
+                        {{ studentStatusLabel(student.status) }}
+                      </span>
+                    </td>
+                    <td><span class="data-pill auth">{{ attendanceLabel(student.attendanceRate) }}</span></td>
+                    <td>{{ formatDate(student.joinedAt) }}</td>
+                    <td class="row-menu-cell">
+                      <button
+                        class="table-menu-button"
+                        type="button"
+                        aria-label="Open student actions"
+                        [attr.aria-expanded]="openStudentMenuId() === student.id"
+                        (click)="toggleStudentMenu(student.id)"
+                      >
+                        ...
+                      </button>
+                      @if (openStudentMenuId() === student.id) {
+                        <div class="table-row-menu" role="menu">
+                          <button type="button" role="menuitem" (click)="openMessageComposer(student)">Send message</button>
+                          <button type="button" role="menuitem" (click)="copyProfileLink(student)">Copy profile link</button>
+                          <button type="button" role="menuitem" (click)="suspendStudent(student)">Suspend</button>
+                          <button class="danger" type="button" role="menuitem" (click)="blockStudent(student)">Block</button>
+                        </div>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+
+          <div class="data-table-footer">
+            <span>Rows per page 15</span>
+            <span>1-{{ students().length }} of {{ students().length }} students</span>
+          </div>
+        </div>
+      } @else {
+        <div class="empty-state compact">
+          <h3>No students enrolled</h3>
+          <p>Students will appear here after enrollment.</p>
+        </div>
+      }
+    </section>
+
+    <section class="panel sessions-panel">
+      <header>
+        <div>
+          <p class="eyebrow">Schedule</p>
+          <h2>Weekly sessions</h2>
+        </div>
+      </header>
+
+      <div class="session-list">
+        @for (session of sessions(); track session.id) {
+          <article class="session-row" [class.live]="session.status === 'live'" [class.completed]="session.status === 'completed'">
+            <div class="session-index">{{ session.sessionNumber }}</div>
+            <div class="session-copy">
+              <strong>{{ session.title }}</strong>
+              <span>{{ formatDateTime(session.scheduledAt) }} - {{ session.durationMinutes }} minutes</span>
+            </div>
+            <span class="status-pill" [class.live]="session.status === 'live'" [class.completed]="session.status === 'completed'">
+              {{ statusLabel(session.status) }}
+            </span>
+            <div class="session-actions">
+              @if (session.status === 'live') {
+                <button type="button" (click)="openSession(session)">Open</button>
+                <button type="button" (click)="completeSession(session)">Complete</button>
+              } @else if (session.status === 'scheduled') {
+                <button class="primary" type="button" (click)="startSession(session)">Start session</button>
+              }
+            </div>
+          </article>
+        }
+      </div>
+    </section>
+  } @else {
+    <section class="empty-state">
+      <h1>Batch not found</h1>
+      <p>The batch may have been removed or is not available in this workspace.</p>
+      <a class="button primary" routerLink="/teacher-dashboard">Back to batches</a>
+    </section>
+  }
+</main>
+<sfu-footer />

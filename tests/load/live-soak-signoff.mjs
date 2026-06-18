@@ -11,6 +11,8 @@ const soakRooms = parseInteger(process.env.SOAK_ROOMS, 6);
 const requestTimeoutMs = parseInteger(process.env.REQUEST_TIMEOUT_MS, 10_000);
 const stabilizeMs = parseInteger(process.env.STABILIZE_MS, 350);
 const baselineTimeoutMs = parseInteger(process.env.BASELINE_TIMEOUT_MS, 20_000);
+const enableWorkerCrashValidation = process.env.ENABLE_WORKER_CRASH_VALIDATION === 'true';
+const operationsToken = process.env.OPERATIONS_TOKEN;
 
 const accounts = {
   hostA: { email: 'teacher.one@example.com', password },
@@ -32,7 +34,7 @@ async function main() {
     remotePublish: null,
     drain: null,
     workerCrash: null,
-    browserRerunReminder: 'Use the existing Phase 14 Playwright slice after live soak if browser signoff is needed.',
+    browserRerunReminder: 'Use the current Playwright browser slice after live soak if browser signoff is needed.',
     finalBaseline: null
   };
 
@@ -127,7 +129,7 @@ async function createRemoteConsumerRoom(index, auth) {
   const subscriberOne = await connectParticipant(nodeBUrl, auth.studentA.accessToken);
   const subscriberTwo = await connectParticipant(nodeBUrl, auth.studentB.accessToken);
   const room = await emitAck(host.socket, 'room:create', {
-    name: `phase14-remote-consumer-${index}-${randomUUID().slice(0, 8)}`,
+    name: `release-gate-remote-consumer-${index}-${randomUUID().slice(0, 8)}`,
     maxParticipants: 8,
     waitingRoomEnabled: false,
     joinApprovalRequired: false
@@ -180,7 +182,7 @@ async function createRemotePublisherRoom(index, auth) {
   const host = await connectParticipant(nodeBUrl, auth.hostB.accessToken);
   const remotePublisher = await connectParticipant(nodeAUrl, auth.studentC.accessToken);
   const room = await emitAck(host.socket, 'room:create', {
-    name: `phase14-remote-publisher-${index}-${randomUUID().slice(0, 8)}`,
+    name: `release-gate-remote-publisher-${index}-${randomUUID().slice(0, 8)}`,
     maxParticipants: 6,
     waitingRoomEnabled: false,
     joinApprovalRequired: false
@@ -232,7 +234,7 @@ async function runRemotePublishSmoke(auth) {
 async function runDrainScenario(auth) {
   const sessions = await createScenarioRooms(4, auth);
   const before = await sampleCluster(auth.hostA.accessToken, auth.hostB.accessToken);
-  const drainResponse = await postJson(`${nodeBUrl}/api/v1/media/node/drain`, auth.hostB.accessToken, { reason: 'phase14_live_soak' });
+  const drainResponse = await postJson(`${nodeBUrl}/api/v1/media/node/drain`, auth.hostB.accessToken, { reason: 'release_gate_live_soak' });
   const readyDuringDrain = await fetch(`${nodeBUrl}/health/ready`);
   const liveDuringDrain = await fetch(`${nodeBUrl}/health/live`);
   const diagnosticsDuringDrain = await getJson(`${nodeBUrl}/api/v1/media/diagnostics/node`, auth.hostB.accessToken);
@@ -241,7 +243,7 @@ async function runDrainScenario(auth) {
   const drainedSocket = await connectParticipant(nodeBUrl, auth.hostB.accessToken);
   try {
     await emitAck(drainedSocket.socket, 'room:create', {
-      name: `phase14-drain-check-${randomUUID().slice(0, 8)}`,
+      name: `release-gate-drain-check-${randomUUID().slice(0, 8)}`,
       maxParticipants: 4
     });
   } catch {
@@ -266,18 +268,36 @@ async function runDrainScenario(auth) {
 }
 
 async function runWorkerCrashScenario(auth) {
+  if (!enableWorkerCrashValidation) {
+    return {
+      skipped: true,
+      reason: 'Set ENABLE_WORKER_CRASH_VALIDATION=true to opt into destructive local worker crash validation.'
+    };
+  }
+  if (!isLocalCrashTarget(nodeBUrl)) {
+    return {
+      skipped: true,
+      reason: `Worker crash validation only runs against local node targets; received ${nodeBUrl}.`
+    };
+  }
   const sessions = [await createRemotePublisherRoom(20_001, auth), await createRemotePublisherRoom(20_002, auth)];
   const workersBefore = await getJson(`${nodeBUrl}/api/v1/media/workers`, auth.hostB.accessToken);
   const worker = workersBefore.workers?.find((entry) => entry.pid);
   if (!worker?.pid) {
     throw new Error('No live worker pid available for crash validation');
   }
+  const baselineRestartCount = worker.restarts ?? 0;
+  const baselinePid = worker.pid;
   process.kill(worker.pid, 'SIGKILL');
   const afterCrash = await poll(
     async () => {
       const snapshot = await getJson(`${nodeBUrl}/api/v1/media/workers`, auth.hostB.accessToken);
       const current = snapshot.workers?.find((entry) => entry.workerId === worker.workerId);
-      return current && current.restarts > (worker.restarts ?? 0) && current.ready ? snapshot : undefined;
+      return current
+        && current.ready
+        && ((current.restarts ?? 0) > baselineRestartCount || (current.pid ?? 0) !== baselinePid)
+        ? snapshot
+        : undefined;
     },
     20_000,
     250
@@ -286,7 +306,7 @@ async function runWorkerCrashScenario(auth) {
   let recoveryRoomId;
   try {
     const room = await emitAck(recoverySocket.socket, 'room:create', {
-      name: `phase14-worker-recovery-${randomUUID().slice(0, 8)}`,
+      name: `release-gate-worker-recovery-${randomUUID().slice(0, 8)}`,
       maxParticipants: 4
     });
     recoveryRoomId = room.id;
@@ -319,8 +339,10 @@ async function ensureInitialBaseline(tokenA, tokenB) {
 }
 
 async function waitForBaseline(tokenA, tokenB) {
-  return poll(async () => {
+  let lastCluster;
+  const baseline = await poll(async () => {
     const cluster = await sampleCluster(tokenA, tokenB);
+    lastCluster = cluster;
     if (cluster.nodeA.metrics.activeRooms === 0
       && cluster.nodeA.metrics.activeTransports === 0
       && cluster.nodeA.metrics.activeConsumers === 0
@@ -332,7 +354,14 @@ async function waitForBaseline(tokenA, tokenB) {
       return cluster;
     }
     return undefined;
-  }, baselineTimeoutMs, 250);
+  }, baselineTimeoutMs, 250).catch((error) => {
+    if (lastCluster) {
+      const timeoutMessage = `${error instanceof Error ? error.message : String(error)}; last baseline sample=${JSON.stringify(lastCluster)}`;
+      throw new Error(timeoutMessage);
+    }
+    throw error;
+  });
+  return baseline;
 }
 
 async function sampleCluster(tokenA, tokenB) {
@@ -374,8 +403,24 @@ async function sampleNode(baseUrl, token) {
       workerRestarts: metricSum(metricsText, 'sfu_media_worker_restarts_total'),
       workerCrashes: metricSum(metricsText, 'sfu_media_worker_crashes_total'),
       workerFailedRooms: metricSum(metricsText, 'sfu_media_worker_failed_rooms'),
+      workerRssBytes: metricSum(metricsText, 'sfu_media_worker_rss_bytes'),
+      workerCpuUserMicros: metricSum(metricsText, 'sfu_media_worker_cpu_user_micros'),
+      workerCpuSystemMicros: metricSum(metricsText, 'sfu_media_worker_cpu_system_micros'),
+      workerIpcQueueDepth: metricSum(metricsText, 'sfu_media_worker_ipc_queue_depth'),
       roomAdmissionRejections: metricSum(metricsText, 'sfu_room_admission_rejections_total'),
-      clusterOwnedRooms: metricSum(metricsText, 'sfu_cluster_owned_rooms')
+      clusterOwnedRooms: metricSum(metricsText, 'sfu_cluster_owned_rooms'),
+      clusterRegisteredNodes: metricValue(metricsText, 'sfu_cluster_registered_nodes'),
+      clusterHealthyNodes: metricValue(metricsText, 'sfu_cluster_healthy_nodes'),
+      processResidentMemoryBytes: metricValue(metricsText, 'process_resident_memory_bytes'),
+      processCpuUserSeconds: metricValue(metricsText, 'process_cpu_user_seconds_total'),
+      processCpuSystemSeconds: metricValue(metricsText, 'process_cpu_system_seconds_total'),
+      eventLoopLagMeanMs: secondsToMs(metricValue(metricsText, 'nodejs_eventloop_lag_mean_seconds')),
+      eventLoopLagMaxMs: secondsToMs(metricValue(metricsText, 'nodejs_eventloop_lag_max_seconds')),
+      metricsRefreshStatus: {
+        cluster: metricLabelValue(metricsText, 'sfu_metrics_refresh_status', { component: 'cluster' }),
+        pipe: metricLabelValue(metricsText, 'sfu_metrics_refresh_status', { component: 'pipe' }),
+        mediaWorkers: metricLabelValue(metricsText, 'sfu_metrics_refresh_status', { component: 'media_workers' })
+      }
     },
     readyStatus: readyResponse.status,
     liveStatus: liveResponse.status
@@ -439,7 +484,7 @@ async function emitAck(socket, event, payload) {
 
 async function getJson(url, accessToken) {
   const response = await fetch(url, {
-    headers: { authorization: `Bearer ${accessToken}` }
+    headers: requestHeaders(accessToken)
   });
   if (!response.ok) {
     throw new Error(`Request failed ${url}: ${response.status} ${await response.text()}`);
@@ -451,7 +496,7 @@ async function postJson(url, accessToken, body) {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${accessToken}`,
+      ...requestHeaders(accessToken),
       'content-type': 'application/json'
     },
     body: JSON.stringify(body)
@@ -463,11 +508,24 @@ async function postJson(url, accessToken, body) {
 }
 
 async function getText(url) {
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: requestHeaders()
+  });
   if (!response.ok) {
     throw new Error(`Request failed ${url}: ${response.status} ${await response.text()}`);
   }
   return response.text();
+}
+
+function requestHeaders(accessToken) {
+  const headers = {};
+  if (accessToken) {
+    headers.authorization = `Bearer ${accessToken}`;
+  }
+  if (operationsToken) {
+    headers['x-operations-token'] = operationsToken;
+  }
+  return headers;
 }
 
 async function poll(operation, timeoutMs, intervalMs) {
@@ -505,10 +563,19 @@ function syntheticVideoRtpParameters(seed) {
       }
     ],
     rtcp: {
-      cname: `phase14-${seed}`,
+      cname: `release-gate-${seed}`,
       reducedSize: true
     }
   };
+}
+
+function isLocalCrashTarget(url) {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1';
+  } catch {
+    return false;
+  }
 }
 
 function metricSum(text, metricName) {
@@ -521,6 +588,41 @@ function metricSum(text, metricName) {
   return sum;
 }
 
+function metricValue(text, metricName) {
+  const pattern = new RegExp(`^${metricName}(?:\\{[^}]*\\})?\\s+([-+]?\\d+(?:\\.\\d+)?(?:e[-+]?\\d+)?)$`, 'gmi');
+  const match = pattern.exec(text);
+  return match ? Number(match[1] ?? 0) : undefined;
+}
+
+function metricLabelValue(text, metricName, expectedLabels) {
+  const pattern = new RegExp(`^${metricName}\\{([^}]*)\\}\\s+([-+]?\\d+(?:\\.\\d+)?(?:e[-+]?\\d+)?)$`, 'gmi');
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const labels = parseLabels(match[1] ?? '');
+    const allMatch = Object.entries(expectedLabels).every(([key, value]) => labels[key] === value);
+    if (allMatch) {
+      return Number(match[2] ?? 0);
+    }
+  }
+  return undefined;
+}
+
+function parseLabels(raw) {
+  const labels = {};
+  for (const entry of raw.split(',')) {
+    const [key, value] = entry.split('=');
+    if (!key || value === undefined) {
+      continue;
+    }
+    labels[key.trim()] = value.trim().replace(/^"|"$/g, '');
+  }
+  return labels;
+}
+
+function secondsToMs(value) {
+  return value === undefined ? undefined : Math.round(value * 1000 * 1000) / 1000;
+}
+
 function pickNodeSummary(diagnostics) {
   return {
     localNodeId: diagnostics.localNodeId,
@@ -531,7 +633,14 @@ function pickNodeSummary(diagnostics) {
     capacityScore: diagnostics.cluster?.localNode?.capacity?.capacityScore,
     activeRooms: diagnostics.cluster?.localNode?.capacity?.activeRooms,
     activeTransports: diagnostics.cluster?.localNode?.capacity?.activeTransports,
+    averageIpcLatencyMs: diagnostics.cluster?.localNode?.capacity?.averageIpcLatencyMs,
+    memoryRssBytes: diagnostics.cluster?.localNode?.capacity?.memoryRssBytes,
+    cpuUserMicros: diagnostics.cluster?.localNode?.capacity?.cpuUserMicros,
     readyWorkers: diagnostics.workers?.readyWorkers,
+    turnReady: diagnostics.turn?.secretConfigured && (diagnostics.turn?.supportedUriCount ?? 0) > 0,
+    turnSupportedUriCount: diagnostics.turn?.supportedUriCount,
+    turnLocalhostUriCount: diagnostics.turn?.localhostUriCount,
+    turnUdpOnly: diagnostics.turn?.udpOnly,
     pipeActive: diagnostics.pipe?.summary?.activePipeTransports,
     pipeRejectedRequests: diagnostics.pipe?.summary?.rejectedRequests
   };
@@ -553,7 +662,12 @@ function pickWorkerSummary(worker) {
     activeRooms: worker.activeRooms,
     activeTransports: worker.activeTransports,
     inflightRequests: worker.inflightRequests,
-    queueDepth: worker.queueDepth
+    queueDepth: worker.queueDepth,
+    averageIpcLatencyMs: worker.averageIpcLatencyMs,
+    memoryRssBytes: worker.memory?.rss,
+    heapUsedBytes: worker.memory?.heapUsed,
+    cpuUserMicros: worker.cpu?.user,
+    cpuSystemMicros: worker.cpu?.system
   };
 }
 

@@ -7,8 +7,10 @@ describe('Auth DTO validation', () => {
     const dto = plainToInstance(LoginDto, { email: 'not-email', password: 'short' });
 
     const errors = await validate(dto);
+    const properties = errors.map((error) => error.property);
 
-    expect(errors.map((error) => error.property)).toEqual(expect.arrayContaining(['email', 'password']));
+    expect(properties).toContain('email');
+    expect(properties).toContain('password');
   });
 
   it('accepts valid register payloads', async () => {
@@ -18,6 +20,8 @@ describe('Auth DTO validation', () => {
       password: 'StrongPassword@123'
     });
 
-    await expect(validate(dto)).resolves.toHaveLength(0);
+    const errors = await validate(dto);
+
+    expect(errors.length).toBe(0);
   });
 });

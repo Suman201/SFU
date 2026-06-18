@@ -26,21 +26,27 @@ export const appConfig = () => ({
       .filter(Boolean)
   },
   swagger: {
+    enabled: parseBoolean(process.env.SWAGGER_ENABLED, (process.env.NODE_ENV ?? 'development') !== 'production'),
     title: process.env.SWAGGER_TITLE ?? 'EduConnect Live Backend API',
     version: process.env.SWAGGER_VERSION ?? '0.1.0',
     path: process.env.SWAGGER_PATH ?? 'api/docs'
   },
   metrics: {
+    enabled: parseBoolean(process.env.METRICS_ENABLED, true),
     path: process.env.METRICS_PATH ?? 'metrics'
   },
   security: {
     rateLimitTtl: Number(process.env.RATE_LIMIT_TTL ?? 60),
-    rateLimitMax: Number(process.env.RATE_LIMIT_MAX ?? 120)
+    rateLimitMax: Number(process.env.RATE_LIMIT_MAX ?? 120),
+    operationsToken: process.env.OPERATIONS_TOKEN?.trim() || undefined
   },
   turn: {
     realm: process.env.TURN_REALM ?? 'native-sfu.local',
     secret: process.env.TURN_SECRET,
-    uris: (process.env.TURN_URIS ?? '').split(',').filter(Boolean)
+    uris: (process.env.TURN_URIS ?? '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
   },
   mediaWorker: {
     mode: process.env.MEDIA_WORKER_MODE ?? 'in-process',
@@ -112,7 +118,14 @@ function parsePortRange(value: string): { min: number; max: number } {
   const min = parts[0];
   const max = parts[1];
   if (!Number.isInteger(min) || !Number.isInteger(max)) {
-    return { min: 41000, max: 41100 };
+    throw new Error(`Invalid port range: ${value}`);
   }
   return { min: Number(min), max: Number(max) };
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) {
+    return fallback;
+  }
+  return value.trim().toLowerCase() === 'true';
 }

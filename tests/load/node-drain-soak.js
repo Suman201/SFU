@@ -11,13 +11,9 @@ export const options = {
 
 const baseUrl = __ENV.BASE_URL || 'http://localhost:3000';
 const applyDrain = __ENV.APPLY_NODE_DRAIN === 'true';
+const operationsToken = __ENV.OPERATIONS_TOKEN;
 
 export default function () {
-  const token = authToken();
-  if (!token) {
-    return;
-  }
-
   const liveBefore = http.get(`${baseUrl}/health/live`);
   check(liveBefore, {
     'live endpoint reachable before drain': (response) => response.status === 200
@@ -36,7 +32,11 @@ export default function () {
     return;
   }
 
-  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const token = authToken();
+  if (!token) {
+    return;
+  }
+  const headers = operationsHeaders(token);
   const drain = http.post(`${baseUrl}/api/v1/media/node/drain`, JSON.stringify({ reason: 'k6-node-drain-soak' }), { headers });
   check(drain, {
     'node drain accepted': (response) => response.status === 201 || response.status === 200,
@@ -85,4 +85,15 @@ function authToken() {
     'drain soak user registered': (res) => res.status === 201 || res.status === 200
   });
   return response.json('accessToken');
+}
+
+function operationsHeaders(token) {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  };
+  if (operationsToken) {
+    headers['X-Operations-Token'] = operationsToken;
+  }
+  return headers;
 }

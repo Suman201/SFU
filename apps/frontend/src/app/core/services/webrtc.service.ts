@@ -1,3 +1,4 @@
+import { HttpClient } from '@angular/common/http';
 import { Injectable, signal } from '@angular/core';
 import type {
   Consumer,
@@ -14,6 +15,8 @@ import type {
   SvcLayerSelection,
   TransportOptions
 } from '@native-sfu/contracts';
+import { firstValueFrom } from 'rxjs';
+import { API_BASE_URL } from './app-environment';
 import { SocketService } from './socket.service';
 
 export interface DeviceOption {
@@ -27,6 +30,18 @@ interface PublishedSender {
   svc: boolean;
 }
 
+interface TurnCredentialsResponse {
+  username: string;
+  credential: string;
+  ttl: number;
+  uris: string[];
+}
+
+type TurnStatus =
+  | { state: 'idle'; supportedUriCount: 0 }
+  | { state: 'ready'; supportedUriCount: number; expiresAt: number }
+  | { state: 'degraded'; supportedUriCount: number; reason: 'credentials_fetch_failed' | 'no_supported_uris' };
+
 export interface PublishOptions {
   svc?: boolean;
   scalabilityMode?: string;
@@ -39,10 +54,15 @@ export class WebRtcService {
   readonly screenStream = signal<MediaStream | null>(null);
   readonly devices = signal<{ audioInputs: DeviceOption[]; videoInputs: DeviceOption[] }>({ audioInputs: [], videoInputs: [] });
   readonly networkScore = signal(5);
+  readonly turnStatus = signal<TurnStatus>({ state: 'idle', supportedUriCount: 0 });
   private peer?: RTCPeerConnection;
   private readonly publishedProducers = new Map<string, { kind: ProducerKind; svc: boolean; senders: PublishedSender[] }>();
+  private cachedIceServers?: { expiresAt: number; servers: RTCIceServer[] };
 
-  constructor(private readonly socket: SocketService) {}
+  constructor(
+    private readonly socket: SocketService,
+    private readonly http: HttpClient
+  ) {}
 
   async refreshDevices(): Promise<void> {
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -80,8 +100,9 @@ export class WebRtcService {
 
   async preparePeer(roomId: string): Promise<TransportOptions> {
     const transport = await this.socket.emitAck('transport:create', { roomId });
+    const iceServers = await this.loadIceServers();
     this.peer = new RTCPeerConnection({
-      iceServers: transport.iceCandidates.map(() => ({ urls: [] })),
+      iceServers,
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require'
     });
@@ -186,6 +207,47 @@ export class WebRtcService {
         )
     );
   }
+
+  private async loadIceServers(): Promise<RTCIceServer[]> {
+    const now = Date.now();
+    if (this.cachedIceServers && this.cachedIceServers.expiresAt > now) {
+      return this.cachedIceServers.servers;
+    }
+    try {
+      const credentials = await firstValueFrom(this.http.get<TurnCredentialsResponse>(`${API_BASE_URL}/media/turn-credentials`));
+      const urls = credentials.uris.filter((uri) => isSupportedTurnUri(uri));
+      if (urls.length === 0) {
+        this.turnStatus.set({ state: 'degraded', reason: 'no_supported_uris', supportedUriCount: 0 });
+        this.cachedIceServers = { expiresAt: now + 5_000, servers: [] };
+        console.warn('[WebRtcService] TURN credentials returned no supported UDP relay URIs.');
+        return [];
+      }
+      const servers: RTCIceServer[] = [
+        {
+          urls,
+          username: credentials.username,
+          credential: credentials.credential
+        }
+      ];
+      const ttlMs = Math.max(30_000, credentials.ttl * 1000 - 30_000);
+      this.cachedIceServers = {
+        expiresAt: now + ttlMs,
+        servers
+      };
+      this.turnStatus.set({ state: 'ready', supportedUriCount: urls.length, expiresAt: now + ttlMs });
+      return servers;
+    } catch (error) {
+      this.turnStatus.set({ state: 'degraded', reason: 'credentials_fetch_failed', supportedUriCount: 0 });
+      this.cachedIceServers = { expiresAt: now + 5_000, servers: [] };
+      console.warn('[WebRtcService] TURN credential fetch failed; continuing without relay ICE servers.', error);
+      return [];
+    }
+  }
+}
+
+function isSupportedTurnUri(uri: string): boolean {
+  const normalized = uri.trim().toLowerCase();
+  return normalized.startsWith('turn:') && normalized.includes('transport=udp');
 }
 
 function addSenderForTrack(peer: RTCPeerConnection, track: MediaStreamTrack, stream: MediaStream, kind: ProducerKind, options: PublishOptions): PublishedSender | undefined {

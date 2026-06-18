@@ -24,7 +24,7 @@ The repository implements the control-plane and packet-router shape of a native 
 - VP8, H264, and VP9 keyframe detection.
 - Keyframe-gated consumer join recovery for active video streams.
 - Packet-loss, jitter, and bandwidth metric hooks.
-- ICE parameter generation, UDP host/server-reflexive/TURN relay candidate gathering, STUN binding checks, nomination, ICE restart, and consent freshness.
+- ICE parameter generation, UDP host candidate gathering, optional server-reflexive/TURN relay candidate gathering, STUN binding checks, nomination, ICE restart, and consent freshness.
 - DTLS 1.2 certificate generation, fingerprint generation/validation, state machine, ICE datagram integration, and SRTP key export.
 - SRTP/SRTCP encryption, decryption, authentication, replay protection, rollover tracking, and SSRC validation.
 - ICE-selected datagram demultiplexing for STUN, DTLS, RTP, RTCP, SRTP, and SRTCP.
@@ -53,7 +53,7 @@ These pieces are now split into reusable modules:
 - ICE restart rotates local credentials and clears remote checklist state.
 - Consent freshness periodically probes the selected pair and disconnects after configured failures.
 
-The Phase 1 production-ready scope is UDP ICE with host, server-reflexive, and TURN relay candidates. TCP/TLS TURN and advanced candidate pooling are deferred to later hardening work.
+The transport module supports UDP ICE with host candidates and can gather server-reflexive or TURN relay candidates when `stunServers` / `turnServers` are explicitly configured. The backend release-candidate deployment baseline wires browser TURN credential generation and UDP host candidates by default. TCP/TLS TURN and advanced candidate pooling are deferred to later hardening work.
 
 ## DTLS/SRTP Boundary
 

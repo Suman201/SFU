@@ -1,3 +1,180 @@
 <sfu-header />
-<main class="landing-shell"></main>
+<main class="landing-shell">
+  <section class="hero-section" aria-labelledby="landing-title">
+    <div class="hero-copy">
+      <p class="section-kicker">Native SFU live classroom</p>
+      <h1 id="landing-title">A compact command center for cohort-based learning.</h1>
+      <p class="hero-lede">
+        Native SFU brings live video, whiteboard work, chat, scheduling, and batch operations into one focused classroom platform.
+      </p>
+
+      <div class="hero-actions" aria-label="Landing page actions">
+        <a class="landing-button primary" routerLink="/teacher-dashboard">Teacher dashboard</a>
+        <a class="landing-button secondary" routerLink="/student/explore">Explore student batches</a>
+      </div>
+
+      <div class="hero-stats" aria-label="Platform highlights">
+        @for (stat of heroStats; track stat.label) {
+          <div class="hero-stat">
+            <strong>{{ stat.value }}</strong>
+            <span>{{ stat.label }}</span>
+          </div>
+        }
+      </div>
+    </div>
+
+    <article class="classroom-preview" aria-label="Live classroom product preview">
+      <header class="preview-topbar">
+        <div>
+          <span class="window-dot rose" aria-hidden="true"></span>
+          <span class="window-dot amber" aria-hidden="true"></span>
+          <span class="window-dot green" aria-hidden="true"></span>
+        </div>
+        <strong>Advanced WebRTC Cohort</strong>
+        <span class="live-badge">Live now</span>
+      </header>
+
+      <div class="preview-status-row" aria-label="Classroom status">
+        @for (signal of roomSignals; track signal) {
+          <span>{{ signal }}</span>
+        }
+      </div>
+
+      <div class="preview-grid">
+        <section class="video-tile" aria-label="Teacher video preview">
+          <div class="video-frame">
+            <span class="teacher-avatar">MS</span>
+            <span class="signal-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+          </div>
+          <footer>
+            <span>Meera Shah</span>
+            <strong>Screen + camera</strong>
+          </footer>
+        </section>
+
+        <section class="whiteboard-panel" aria-label="Whiteboard preview">
+          <header>
+            <strong>Whiteboard</strong>
+            <span>Saved 2 min ago</span>
+          </header>
+          <div class="board-canvas" aria-hidden="true">
+            <span class="board-node node-a">Offer</span>
+            <span class="board-node node-b">Signal</span>
+            <span class="board-node node-c">Cohort</span>
+            <span class="board-line line-a"></span>
+            <span class="board-line line-b"></span>
+            <span class="board-stroke stroke-a"></span>
+            <span class="board-stroke stroke-b"></span>
+          </div>
+        </section>
+
+        <aside class="preview-rail" aria-label="Classroom side panels">
+          <section class="mini-panel participants-panel">
+            <header>
+              <strong>Participants</strong>
+              <span>24</span>
+            </header>
+            <div class="participant-stack" aria-hidden="true">
+              <span>AR</span>
+              <span>NK</span>
+              <span>JB</span>
+              <span>+21</span>
+            </div>
+          </section>
+
+          <section class="mini-panel chat-panel">
+            <header>
+              <strong>Chat</strong>
+              <span>Synced</span>
+            </header>
+            <p><b>Riya</b> shared the rubric note.</p>
+            <p><b>Dev</b> raised a hand for Q&amp;A.</p>
+          </section>
+
+          <section class="mini-panel schedule-panel">
+            <header>
+              <strong>Next</strong>
+              <span>Today</span>
+            </header>
+            <p>Mentor review - 8:00 PM</p>
+          </section>
+        </aside>
+      </div>
+    </article>
+  </section>
+
+  <section class="feature-strip" aria-label="Platform capabilities">
+    @for (feature of quickFeatures; track feature.label) {
+      <article>
+        <span aria-hidden="true"></span>
+        <div>
+          <h2>{{ feature.label }}</h2>
+          <p>{{ feature.detail }}</p>
+        </div>
+      </article>
+    }
+  </section>
+
+  <section class="value-grid" aria-label="Teacher and student value">
+    @for (block of valueBlocks; track block.eyebrow) {
+      <article class="value-card">
+        <p class="section-kicker">{{ block.eyebrow }}</p>
+        <h2>{{ block.title }}</h2>
+        <p>{{ block.body }}</p>
+        <ul>
+          @for (point of block.points; track point) {
+            <li>{{ point }}</li>
+          }
+        </ul>
+        <a class="text-link" [routerLink]="block.route">{{ block.cta }}</a>
+      </article>
+    }
+  </section>
+
+  <section class="batches-section" aria-labelledby="featured-batches-title">
+    <div class="section-heading">
+      <p class="section-kicker">Featured batches</p>
+      <h2 id="featured-batches-title">Cohorts ready for live rooms.</h2>
+    </div>
+
+    <div class="batch-preview-grid">
+      @for (batch of featuredBatches; track batch.title) {
+        <article class="batch-preview-card" [attr.data-tone]="batch.tone">
+          <header>
+            <span>{{ batch.status }}</span>
+            <strong>{{ batch.seats }}</strong>
+          </header>
+          <h3>{{ batch.title }}</h3>
+          <p>{{ batch.teacher }}</p>
+          <footer>
+            <span>{{ batch.schedule }}</span>
+            <a routerLink="/student/explore">View</a>
+          </footer>
+        </article>
+      }
+    </div>
+  </section>
+
+  <section class="platform-summary" aria-label="Platform stats">
+    <div class="summary-stats">
+      @for (stat of platformStats; track stat.label) {
+        <div>
+          <strong>{{ stat.value }}</strong>
+          <span>{{ stat.label }}</span>
+        </div>
+      }
+    </div>
+
+    <div class="final-cta">
+      <div>
+        <p class="section-kicker">Native SFU</p>
+        <h2>Bring the next cohort into a live classroom built for teaching rhythm.</h2>
+      </div>
+      <div class="hero-actions">
+        <a class="landing-button primary" routerLink="/teacher-dashboard">Start teaching</a>
+        <a class="landing-button secondary" routerLink="/student/explore">Browse cohorts</a>
+      </div>
+    </div>
+  </section>
+</main>
 <sfu-footer />

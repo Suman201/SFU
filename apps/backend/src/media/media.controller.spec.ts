@@ -40,19 +40,36 @@ describe('MediaController', () => {
         advertiseIpConfigured: false,
         defaultProtocol: 'udp',
         reason: 'udp_advertise_ip_required'
+      },
+      configValues: {
+        'app.nodeEnv': 'production',
+        'turn.realm': 'turn.example.com',
+        'turn.secret': '',
+        'turn.uris': ['turn:127.0.0.1:3478?transport=udp']
       }
     });
 
     const diagnostics = await controller.nodeDiagnostics();
 
     expect(diagnostics.trafficReady).toBe(false);
+    expect(diagnostics.turn).toEqual({
+      requiredInProduction: true,
+      realm: 'turn.example.com',
+      secretConfigured: false,
+      uriCount: 1,
+      supportedUriCount: 1,
+      localhostUriCount: 1,
+      udpOnly: true
+    });
     for (const alert of [
       'local_node_draining',
       'media_workers_not_ready',
       'media_worker_failed_rooms',
       'media_worker_overload',
       'pipe_runtime_unsupported',
-      'pipe_requests_rejected'
+      'pipe_requests_rejected',
+      'turn_not_ready',
+      'turn_localhost_uris'
     ]) {
       expect(diagnostics.alerts).toContain(alert);
     }
@@ -105,6 +122,12 @@ describe('MediaController', () => {
         mediaWorkerMode: 'worker',
         advertiseIpConfigured: true,
         defaultProtocol: 'udp'
+      },
+      configValues: {
+        'app.nodeEnv': 'development',
+        'turn.realm': 'native-sfu.local',
+        'turn.secret': 'turn-secret-valid-length-32',
+        'turn.uris': ['turn:sfu.example.com:3478?transport=udp']
       }
     });
 
@@ -160,6 +183,12 @@ describe('MediaController', () => {
         mediaWorkerMode: 'worker',
         advertiseIpConfigured: true,
         defaultProtocol: 'udp'
+      },
+      configValues: {
+        'app.nodeEnv': 'development',
+        'turn.realm': 'native-sfu.local',
+        'turn.secret': 'turn-secret-valid-length-32',
+        'turn.uris': ['turn:sfu.example.com:3478?transport=udp']
       }
     });
 
@@ -172,6 +201,7 @@ function createController(options: {
   workerSnapshot: any;
   pipeSnapshot: any;
   pipeHealth: any;
+  configValues: Record<string, unknown>;
 }) {
   return new MediaController(
     { createTurnCredentials: jest.fn() } as never,
@@ -184,6 +214,9 @@ function createController(options: {
     {
       snapshot: jest.fn(() => options.pipeSnapshot),
       healthSnapshot: jest.fn(() => options.pipeHealth)
+    } as never,
+    {
+      get: jest.fn((key: string, fallback?: unknown) => options.configValues[key] ?? fallback)
     } as never
   );
 }

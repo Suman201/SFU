@@ -21,7 +21,7 @@ import type {
 } from '@native-sfu/contracts';
 import type { ConsumerTwccObservation, ConsumerTwccObservationEvent, RtcpFeedback } from '@native-sfu/sfu-core';
 import type { MediaPacketBridgeCounters } from '../media/media-packet-bridge';
-import { MediaService } from '../media.service';
+import { MediaService, type MediaRoomCleanupSummary } from '../media.service';
 import type { NestSfuOptions } from '../nest-sfu.options';
 import { PipeTransportService } from '../pipe-transport.service';
 import { MediaWorkerPool } from './media-worker-pool';
@@ -150,6 +150,10 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
   onMediaWorkerRoomFailed(listener: (event: MediaWorkerRoomFailureEvent) => void): () => void {
     this.roomFailureEventListeners.add(listener);
     return () => this.roomFailureEventListeners.delete(listener);
+  }
+
+  acknowledgeRoomFailure(roomId: string): void {
+    this.pool.clearRoomFailure(roomId);
   }
 
   async createWebRtcTransport(roomId: string, participantId: string): Promise<TransportOptions> {
@@ -452,21 +456,33 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
   }
 
   consumerLayerState(consumerId: string): ConsumerLayerState | undefined {
+    if (!this.consumers.has(consumerId)) {
+      return this.consumerLayerStates.get(consumerId);
+    }
     void this.refreshConsumerLayerState(consumerId);
     return this.consumerLayerStates.get(consumerId);
   }
 
   consumerQualityState(consumerId: string): ConsumerQualityState | undefined {
+    if (!this.consumers.has(consumerId)) {
+      return this.consumerQualityStates.get(consumerId);
+    }
     void this.refreshConsumerQualityState(consumerId);
     return this.consumerQualityStates.get(consumerId);
   }
 
   producerQualityState(producerId: string): ProducerQualityState | undefined {
+    if (!this.producers.has(producerId)) {
+      return this.producerQualityStates.get(producerId);
+    }
     void this.refreshProducerQualityState(producerId);
     return this.producerQualityStates.get(producerId);
   }
 
   transportQualityState(transportId: string): TransportQualityState | undefined {
+    if (!this.transports.has(transportId)) {
+      return this.transportQualityStates.get(transportId);
+    }
     void this.refreshTransportQualityState(transportId);
     return this.transportQualityStates.get(transportId);
   }
@@ -477,6 +493,9 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
   }
 
   producerLayerState(producerId: string): ProducerLayerState | undefined {
+    if (!this.producers.has(producerId)) {
+      return this.producerLayerStates.get(producerId);
+    }
     void this.refreshProducerLayerState(producerId);
     return this.producerLayerStates.get(producerId);
   }
@@ -534,7 +553,49 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async closeRoom(roomId: string): Promise<void> {
+  async closeRoom(roomId: string): Promise<MediaRoomCleanupSummary> {
+    const summary: MediaRoomCleanupSummary = {
+      participantIds: [],
+      transportCount: 0,
+      consumerCount: 0,
+      producerCounts: {},
+      pipeTransportCount: 0
+    };
+    const participantIds = new Set<string>();
+    for (const owner of this.transports.values()) {
+      if (owner.roomId === roomId) {
+        summary.transportCount += 1;
+        participantIds.add(owner.participantId);
+      }
+    }
+    for (const producer of this.producers.values()) {
+      if (producer.roomId === roomId) {
+        if (!this.pipeTransports.has(producer.transportId)) {
+          summary.producerCounts[producer.kind] = (summary.producerCounts[producer.kind] ?? 0) + 1;
+        }
+      }
+    }
+    for (const consumer of this.consumers.values()) {
+      if (consumer.roomId === roomId) {
+        if (!this.pipeTransports.has(consumer.transportId)) {
+          summary.consumerCount += 1;
+        }
+      }
+    }
+    for (const binding of this.pipeTransports.values()) {
+      if (binding.roomId === roomId) {
+        summary.pipeTransportCount += 1;
+      }
+    }
+    summary.participantIds = [...participantIds];
+    const hasLocalState = summary.transportCount > 0
+      || summary.consumerCount > 0
+      || summary.pipeTransportCount > 0
+      || Object.keys(summary.producerCounts).length > 0
+      || this.roomQualityStates.has(roomId);
+    if (!hasLocalState) {
+      return summary;
+    }
     const worker = this.pool.workerForRoom(roomId);
     await worker.request({ type: 'closeRoom', roomId });
     for (const [transportId, owner] of this.transports) {
@@ -567,6 +628,7 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
       }
     }
     this.pool.releaseRoom(roomId);
+    return summary;
   }
 
   workerPoolSnapshot(): MediaWorkerPoolSnapshot {

@@ -84,7 +84,8 @@ export class NodeRegistryService implements OnModuleInit, OnModuleDestroy, Befor
   }
 
   async beforeApplicationShutdown(signal?: string): Promise<void> {
-    await this.beginDraining(signal ? `shutdown:${signal}` : 'shutdown');
+    this.runtimeDraining = true;
+    this.runtimeDrainReason = signal ? `shutdown:${signal}` : 'shutdown';
   }
 
   localNodeId(): string {

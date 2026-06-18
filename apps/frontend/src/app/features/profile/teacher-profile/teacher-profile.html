@@ -1,19 +1,30 @@
 <sfu-header />
 <main class="profile-shell">
-  <section class="profile-hero">
-    <div class="identity">
-      <span class="avatar">TH</span>
-      <div>
-        <p class="eyebrow">Teacher profile</p>
-        <h1>Teacher Host</h1>
-        <span>Realtime WebRTC classrooms</span>
-      </div>
+  <a class="back-link" routerLink="/teacher-dashboard">Back to dashboard</a>
+
+  <section class="profile-cover">
+    <img [src]="coverImage()" [alt]="profile.name + ' cover image'" />
+    <div class="cover-content">
+      <span>Teacher self profile</span>
+      <strong>{{ profile.specialization }}</strong>
     </div>
-    <a routerLink="/teacher-dashboard">Teacher dashboard</a>
+  </section>
+
+  <section class="profile-identity-panel">
+    <img class="profile-image" [src]="profileImage()" [alt]="profile.name + ' profile image'" />
+    <div class="identity-copy">
+      <p class="eyebrow">Teacher profile</p>
+      <h1>{{ profile.name }}</h1>
+      <span>{{ profile.title }}</span>
+      <p>{{ profile.location }}</p>
+    </div>
+    <div class="identity-actions">
+      <a class="primary-link" [href]="'mailto:' + profile.email">Contact email</a>
+    </div>
   </section>
 
   <section class="metric-grid" aria-label="Teacher profile summary">
-    @for (metric of metrics; track metric.label) {
+    @for (metric of metrics(); track metric.label) {
       <article>
         <span>{{ metric.value }}</span>
         <p>{{ metric.label }}</p>
@@ -21,18 +32,164 @@
     }
   </section>
 
-  <section class="profile-panel">
-    <header>
-      <p class="eyebrow">Account</p>
-      <h2>Profile details</h2>
+  <section class="profile-grid">
+    <article class="profile-panel about-panel">
+      <p class="eyebrow">About</p>
+      <h2>{{ profile.specialization }}</h2>
+      <p>{{ profile.bio }}</p>
+    </article>
+
+    <article class="profile-panel">
+      <p class="eyebrow">Education</p>
+      <h2>Academic background</h2>
+      <div class="timeline-list">
+        @for (education of profile.education; track education.degree) {
+          <div>
+            <strong>{{ education.degree }}</strong>
+            <span>{{ education.institution }}</span>
+            <small>{{ education.year }}</small>
+          </div>
+        }
+      </div>
+    </article>
+
+    <article class="profile-panel experience-panel">
+      <p class="eyebrow">Experience</p>
+      <h2>Professional journey</h2>
+      <div class="timeline-list">
+        @for (experience of profile.experiences; track experience.role) {
+          <div>
+            <strong>{{ experience.role }}</strong>
+            <span>{{ experience.organization }} - {{ experience.period }}</span>
+            <p>{{ experience.summary }}</p>
+          </div>
+        }
+      </div>
+    </article>
+
+    <article class="profile-panel">
+      <p class="eyebrow">Availability</p>
+      <h2>Office hours</h2>
+      <div class="detail-list">
+        <span>Email</span>
+        <strong>{{ profile.email }}</strong>
+        <span>Office hours</span>
+        <strong>{{ profile.officeHours }}</strong>
+        <span>Years experience</span>
+        <strong>{{ profile.yearsExperience }}</strong>
+      </div>
+    </article>
+  </section>
+
+  <section class="profile-panel tab-panel">
+    <header class="tab-panel-header">
+      <div>
+        <p class="eyebrow">Profile details</p>
+        <h2>Manage your profile surface</h2>
+      </div>
+      <nav class="profile-tabs" aria-label="Teacher profile sections">
+        @for (tab of tabs; track tab.id) {
+          <button
+            type="button"
+            [class.is-active]="activeTab() === tab.id"
+            [attr.aria-selected]="activeTab() === tab.id"
+            (click)="selectTab(tab.id)"
+          >
+            <span>{{ tab.label }}</span>
+            <strong>{{ tabCount(tab.id) }}</strong>
+          </button>
+        }
+      </nav>
     </header>
 
-    <div class="detail-grid">
-      @for (detail of details; track detail.label) {
-        <article>
-          <span>{{ detail.label }}</span>
-          <strong>{{ detail.value }}</strong>
-        </article>
+    <div class="tab-content">
+      @switch (activeTab()) {
+        @case ('gallery') {
+          <div class="gallery-grid">
+            @for (item of profile.gallery; track item.id) {
+              <article class="gallery-card">
+                <div class="gallery-visual">
+                  <span>{{ $index + 1 }}</span>
+                </div>
+                <strong>{{ item.title }}</strong>
+                <p>{{ item.caption }}</p>
+              </article>
+            }
+          </div>
+        }
+
+        @case ('demo') {
+          <div class="demo-list">
+            @for (demoClass of profile.demoClasses; track demoClass.id) {
+              <article class="demo-card">
+                <div>
+                  <span>{{ demoClass.level }}</span>
+                  <h3>{{ demoClass.title }}</h3>
+                  <p>{{ demoClass.summary }}</p>
+                </div>
+                <strong>{{ demoClass.duration }}</strong>
+              </article>
+            }
+          </div>
+        }
+
+        @case ('reviews') {
+          <div class="review-grid">
+            @for (review of profile.reviews; track review.id) {
+              <article class="review-card">
+                <header>
+                  <strong>{{ review.student }}</strong>
+                  <span>{{ review.rating }}</span>
+                </header>
+                <p>{{ review.comment }}</p>
+              </article>
+            }
+          </div>
+        }
+
+        @case ('awards') {
+          <div class="award-list">
+            @for (award of profile.awards; track award.id) {
+              <article>
+                <span>{{ award.year }}</span>
+                <div>
+                  <strong>{{ award.title }}</strong>
+                  <p>{{ award.issuer }}</p>
+                </div>
+              </article>
+            }
+          </div>
+        }
+
+        @case ('batches') {
+          @if (batches().length) {
+            <div class="batch-list">
+              @for (batch of batches(); track batch.id) {
+                <article class="batch-row">
+                  <div>
+                    <strong>{{ batch.name }}</strong>
+                    <span>{{ batch.courseName }}</span>
+                  </div>
+                  <div class="batch-meta">
+                    <span>{{ batch.cohortCode }}</span>
+                    <span>{{ batchFillLabel(batch) }}</span>
+                    <span>{{ nextSessionLabel(batch) }}</span>
+                    <span>{{ attendanceLabel(batch) }}</span>
+                  </div>
+                  <footer>
+                    <a [routerLink]="['/teacher-dashboard/batches', batch.id]">Details</a>
+                  </footer>
+                </article>
+              }
+            </div>
+          } @else {
+            <div class="empty-state">
+              <h3>No batches created</h3>
+              <p>Create a batch from the teacher dashboard to show it here.</p>
+              <a class="primary-link" routerLink="/teacher-dashboard">Open dashboard</a>
+            </div>
+          }
+        }
       }
     </div>
   </section>

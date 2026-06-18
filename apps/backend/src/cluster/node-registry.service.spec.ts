@@ -90,18 +90,19 @@ describe('NodeRegistryService', () => {
     await service.assertLocalRoomOwner('room-1');
   });
 
-  it('publishes a draining heartbeat during shutdown instead of deleting the node immediately', async () => {
+  it('publishes a single draining heartbeat during shutdown and stays quiet after Redis is already closed', async () => {
     const redis = new FakeRedisService();
     const service = createRegistry('node-a', redis);
     await service.heartbeatNow();
 
-    await service.beforeApplicationShutdown('SIGTERM');
     await service.onModuleDestroy();
+    redis.close();
+    await service.beforeApplicationShutdown('SIGTERM');
     const storedNode = await redis.getJson<{ draining: boolean; health: string }>('sfu:node:node-a');
 
     expect(storedNode?.draining).toBe(true);
     expect(storedNode?.health).toBe('draining');
-    const drainingEvent = redis.publish.mock.calls.find(
+    const drainingEvents = redis.publish.mock.calls.filter(
       ([channel, message]) =>
         channel === 'sfu:room-owner-events' &&
         typeof message === 'object' &&
@@ -109,7 +110,7 @@ describe('NodeRegistryService', () => {
         (message as { type?: string; nodeId?: string }).type === 'node-draining' &&
         (message as { type?: string; nodeId?: string }).nodeId === 'node-a'
     );
-    expect(Boolean(drainingEvent)).toBe(true);
+    expect(drainingEvents.length).toBe(1);
   });
 });
 
@@ -209,19 +210,23 @@ function fakeMetrics(): Record<string, unknown> {
 class FakeRedisService {
   readonly values = new Map<string, string>();
   readonly sets = new Map<string, Set<string>>();
+  private closed = false;
   readonly raw = {
     sadd: jest.fn(async (key: string, value: string) => {
+      this.assertOpen();
       const set = this.sets.get(key) ?? new Set<string>();
       set.add(value);
       this.sets.set(key, set);
       return 1;
     }),
     srem: jest.fn(async (key: string, value: string) => {
+      this.assertOpen();
       this.sets.get(key)?.delete(value);
       return 1;
     }),
     smembers: jest.fn(async (key: string) => [...(this.sets.get(key) ?? [])]),
     set: jest.fn(async (key: string, value: string, ...args: string[]) => {
+      this.assertOpen();
       if (args.includes('NX') && this.values.has(key)) {
         return null;
       }
@@ -240,6 +245,17 @@ class FakeRedisService {
   }
 
   publish = jest.fn(async (_channel: string, _message: unknown): Promise<void> => {
+    this.assertOpen();
     return undefined;
   });
+
+  close(): void {
+    this.closed = true;
+  }
+
+  private assertOpen(): void {
+    if (this.closed) {
+      throw new Error('Connection is closed.');
+    }
+  }
 }
