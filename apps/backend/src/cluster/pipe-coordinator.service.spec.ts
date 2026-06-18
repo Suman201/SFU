@@ -1277,7 +1277,7 @@ function producerCreate(pipeTransportId: string, producerId: string): PipeProduc
   };
 }
 
-function producerClose(pipeTransportId: string, producerId: string): PipeProducerCloseMessage {
+function _producerClose(pipeTransportId: string, producerId: string): PipeProducerCloseMessage {
   return {
     type: 'pipe:producer:close',
     roomId: 'room-1',

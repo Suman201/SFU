@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { hostname } from 'node:os';
-import mongoose, { Model } from 'mongoose';
+import mongoose from 'mongoose';
 import { ProducerDocument, ProducerSchema } from './schemas';
 
 const DEFAULT_MONGODB_URI = 'mongodb://127.0.0.1:27017/native_sfu';

@@ -9,6 +9,7 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { buildPublicRouteExclusions } from './bootstrap/public-routes';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { SuccessResponseInterceptor } from './common/interceptors/success-response.interceptor';
 import { MetricsController } from './metrics/metrics.controller';
 
 async function bootstrap(): Promise<void> {
@@ -46,6 +47,7 @@ async function bootstrap(): Promise<void> {
     })
   );
   app.useGlobalFilters(new GlobalExceptionFilter(app.get(HttpAdapterHost)));
+  app.useGlobalInterceptors(new SuccessResponseInterceptor());
 
   const document = SwaggerModule.createDocument(
     app,

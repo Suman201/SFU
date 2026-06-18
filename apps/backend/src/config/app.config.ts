@@ -33,6 +33,10 @@ export const appConfig = () => ({
   metrics: {
     path: process.env.METRICS_PATH ?? 'metrics'
   },
+  seed: {
+    superAdminEmail: process.env.SUPER_ADMIN_EMAIL,
+    superAdminPassword: process.env.SUPER_ADMIN_PASSWORD
+  },
   security: {
     rateLimitTtl: Number(process.env.RATE_LIMIT_TTL ?? 60),
     rateLimitMax: Number(process.env.RATE_LIMIT_MAX ?? 120)

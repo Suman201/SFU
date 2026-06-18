@@ -41,6 +41,8 @@ const schema = Joi.object({
   SWAGGER_VERSION: Joi.string().default('0.1.0'),
   SWAGGER_PATH: Joi.string().default('api/docs'),
   METRICS_PATH: Joi.string().default('metrics'),
+  SUPER_ADMIN_EMAIL: Joi.string().email().optional(),
+  SUPER_ADMIN_PASSWORD: Joi.string().min(12).optional(),
   MEDIA_WORKER_MODE: Joi.string().valid('in-process', 'worker').default('in-process'),
   MEDIA_WORKER_COUNT: Joi.number().integer().min(1).default(1),
   HOST_CANDIDATE_PORT_RANGE: Joi.string().pattern(/^\d{2,5}-\d{2,5}$/).default('40000-40100'),

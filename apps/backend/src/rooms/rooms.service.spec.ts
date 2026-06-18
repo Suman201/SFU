@@ -376,7 +376,7 @@ describe('RoomsService', () => {
   });
 
   it('surfaces owner-authoritative room diagnostics from distributed quality cache on non-owner nodes', async () => {
-    const { service, participants, producers, consumers, emitSignal, media } = createService();
+    const { service, participants, producers: _producers, consumers: _consumers, emitSignal, media } = createService();
     const state: RoomQualityState = {
       roomId: 'room-1',
       score: {
@@ -501,7 +501,7 @@ describe('RoomsService', () => {
   });
 
   it('rejects stale distributed quality updates and keeps the newer cached state', async () => {
-    const { service, participants, consumers, producers, emitSignal, media } = createService();
+    const { service, participants, consumers, producers: _producers, emitSignal, media } = createService();
     participants.findOne.mockResolvedValue({ id: 'participant-1', roomId: 'room-1' });
     media.consumerQualityState.mockReturnValue(undefined);
     jest.spyOn(service as any, 'requireRoomOwnerLookup').mockResolvedValue(ownerLookup(false));
@@ -527,7 +527,7 @@ describe('RoomsService', () => {
   });
 
   it('expires stale distributed consumer quality cache entries on read', async () => {
-    const { service, participants, consumers, producers, emitSignal, media } = createService();
+    const { service, participants, consumers, producers: _producers, emitSignal, media } = createService();
     participants.findOne.mockResolvedValue({ id: 'participant-1', roomId: 'room-1' });
     media.consumerQualityState.mockReturnValue(undefined);
     jest.spyOn(service as any, 'requireRoomOwnerLookup').mockResolvedValue(ownerLookup(false));
@@ -556,7 +556,7 @@ describe('RoomsService', () => {
   });
 
   it('clears distributed quality caches when a remote room closes', async () => {
-    const { service, participants, consumers, producers, emitSignal, media } = createService();
+    const { service, participants, consumers, producers: _producers, emitSignal, media } = createService();
     participants.findOne.mockResolvedValue({ id: 'participant-1', roomId: 'room-1' });
     media.roomQualityState.mockReturnValue(undefined);
     media.consumerQualityState.mockReturnValue(undefined);

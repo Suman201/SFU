@@ -8,26 +8,55 @@ export type ParticipantMongoDocument = HydratedDocument<ParticipantDocument>;
 export type ProducerMongoDocument = HydratedDocument<ProducerDocument>;
 export type ConsumerMongoDocument = HydratedDocument<ConsumerDocument>;
 export type PermissionMongoDocument = HydratedDocument<PermissionDocument>;
+export type AccessPermissionMongoDocument = HydratedDocument<AccessPermissionDocument>;
+export type RoleMongoDocument = HydratedDocument<RoleDocument>;
+export type RolePermissionMongoDocument = HydratedDocument<RolePermissionDocument>;
+export type UserRoleMongoDocument = HydratedDocument<UserRoleDocument>;
+export type SessionMongoDocument = HydratedDocument<SessionDocument>;
+export type PasswordResetTokenMongoDocument = HydratedDocument<PasswordResetTokenDocument>;
+export type EmailVerificationTokenMongoDocument = HydratedDocument<EmailVerificationTokenDocument>;
+export type AuditLogMongoDocument = HydratedDocument<AuditLogDocument>;
 export type ModerationMongoDocument = HydratedDocument<ModerationDocument>;
 export type ChatMessageMongoDocument = HydratedDocument<ChatMessageDocument>;
 export type RecordingMongoDocument = HydratedDocument<RecordingDocument>;
 
 @Schema({ collection: 'users', timestamps: true })
 export class UserDocument {
+  @Prop({ trim: true, maxlength: 120 })
+  name?: string;
+
   @Prop({ required: true, trim: true, maxlength: 120 })
   displayName!: string;
 
   @Prop({ required: true, unique: true, lowercase: true, trim: true, maxlength: 254 })
   email!: string;
 
+  @Prop({ trim: true, maxlength: 40 })
+  phone?: string;
+
   @Prop({ required: true, select: false })
   passwordHash!: string;
 
-  @Prop({ type: [String], enum: Object.values(Role), default: [Role.PARTICIPANT] })
-  roles!: Role[];
+  @Prop({ type: [String], default: ['STUDENT'] })
+  roles!: string[];
+
+  @Prop({ type: [String], default: [] })
+  permissions!: string[];
+
+  @Prop({ required: true, enum: ['active', 'inactive', 'suspended', 'invited'], default: 'active', index: true })
+  status!: 'active' | 'inactive' | 'suspended' | 'invited';
 
   @Prop({ default: false })
   disabled!: boolean;
+
+  @Prop({ type: Date })
+  emailVerifiedAt?: Date;
+
+  @Prop({ type: Date })
+  lastLoginAt?: Date;
+
+  @Prop({ type: Date, index: true })
+  deletedAt?: Date;
 
   @Prop({ type: [String], default: [] })
   refreshTokenIds!: string[];
@@ -38,6 +67,169 @@ export class UserDocument {
 
 export const UserSchema = SchemaFactory.createForClass(UserDocument);
 UserSchema.index({ disabled: 1 });
+UserSchema.index({ status: 1, deletedAt: 1 });
+
+@Schema({ collection: 'roles', timestamps: true })
+export class RoleDocument {
+  @Prop({ required: true, trim: true, maxlength: 120 })
+  name!: string;
+
+  @Prop({ required: true, unique: true, lowercase: true, trim: true, maxlength: 80 })
+  slug!: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  description?: string;
+
+  @Prop({ default: false })
+  isSystem!: boolean;
+
+  @Prop({ required: true, enum: ['active', 'inactive'], default: 'active', index: true })
+  status!: 'active' | 'inactive';
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const RoleSchema = SchemaFactory.createForClass(RoleDocument);
+
+@Schema({ collection: 'permissions', timestamps: true })
+export class AccessPermissionDocument {
+  @Prop({ required: true, trim: true, maxlength: 120 })
+  name!: string;
+
+  @Prop({ required: true, unique: true, lowercase: true, trim: true, maxlength: 120 })
+  slug!: string;
+
+  @Prop({ required: true, lowercase: true, trim: true, maxlength: 80, index: true })
+  module!: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  description?: string;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const AccessPermissionSchema = SchemaFactory.createForClass(AccessPermissionDocument);
+AccessPermissionSchema.index({ module: 1, slug: 1 });
+
+@Schema({ collection: 'role_permissions', timestamps: true })
+export class RolePermissionDocument {
+  @Prop({ required: true, index: true })
+  roleId!: string;
+
+  @Prop({ required: true, index: true })
+  permissionId!: string;
+
+  @Prop({ required: true, index: true })
+  permissionSlug!: string;
+}
+
+export const RolePermissionSchema = SchemaFactory.createForClass(RolePermissionDocument);
+RolePermissionSchema.index({ roleId: 1, permissionId: 1 }, { unique: true });
+
+@Schema({ collection: 'user_roles', timestamps: true })
+export class UserRoleDocument {
+  @Prop({ required: true, index: true })
+  userId!: string;
+
+  @Prop({ required: true, index: true })
+  roleId!: string;
+
+  @Prop({ required: true, index: true })
+  roleSlug!: string;
+}
+
+export const UserRoleSchema = SchemaFactory.createForClass(UserRoleDocument);
+UserRoleSchema.index({ userId: 1, roleId: 1 }, { unique: true });
+
+@Schema({ collection: 'sessions', timestamps: true })
+export class SessionDocument {
+  @Prop({ required: true, index: true })
+  userId!: string;
+
+  @Prop({ required: true, select: false })
+  refreshTokenHash!: string;
+
+  @Prop({ required: true, unique: true, index: true })
+  refreshTokenJti!: string;
+
+  @Prop({ trim: true, maxlength: 100 })
+  ipAddress?: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  userAgent?: string;
+
+  @Prop({ required: true, index: true })
+  expiresAt!: Date;
+
+  @Prop({ type: Date, index: true })
+  revokedAt?: Date;
+}
+
+export const SessionSchema = SchemaFactory.createForClass(SessionDocument);
+SessionSchema.index({ userId: 1, revokedAt: 1, expiresAt: 1 });
+
+@Schema({ collection: 'password_reset_tokens', timestamps: true })
+export class PasswordResetTokenDocument {
+  @Prop({ required: true, index: true })
+  userId!: string;
+
+  @Prop({ required: true, unique: true, index: true })
+  tokenHash!: string;
+
+  @Prop({ required: true, index: true })
+  expiresAt!: Date;
+
+  @Prop({ type: Date })
+  usedAt?: Date;
+}
+
+export const PasswordResetTokenSchema = SchemaFactory.createForClass(PasswordResetTokenDocument);
+
+@Schema({ collection: 'email_verification_tokens', timestamps: true })
+export class EmailVerificationTokenDocument {
+  @Prop({ required: true, index: true })
+  userId!: string;
+
+  @Prop({ required: true, unique: true, index: true })
+  tokenHash!: string;
+
+  @Prop({ required: true, index: true })
+  expiresAt!: Date;
+
+  @Prop({ type: Date })
+  usedAt?: Date;
+}
+
+export const EmailVerificationTokenSchema = SchemaFactory.createForClass(EmailVerificationTokenDocument);
+
+@Schema({ collection: 'audit_logs', timestamps: true })
+export class AuditLogDocument {
+  @Prop({ index: true })
+  actorId?: string;
+
+  @Prop({ required: true, index: true })
+  action!: string;
+
+  @Prop({ index: true })
+  targetType?: string;
+
+  @Prop({ index: true })
+  targetId?: string;
+
+  @Prop({ trim: true, maxlength: 100 })
+  ipAddress?: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  userAgent?: string;
+
+  @Prop({ type: Object })
+  metadata?: Record<string, unknown>;
+}
+
+export const AuditLogSchema = SchemaFactory.createForClass(AuditLogDocument);
+AuditLogSchema.index({ actorId: 1, action: 1, createdAt: -1 });
 
 @Schema({ _id: false })
 export class RoomSettingsDocument {
@@ -165,7 +357,7 @@ ParticipantSchema.index({ roomId: 1, socketId: 1 }, { unique: true, partialFilte
 ParticipantSchema.index({ roomId: 1, role: 1 });
 ParticipantSchema.index({ roomId: 1, admitted: 1, leftAt: 1 });
 
-@Schema({ collection: 'permissions', timestamps: true })
+@Schema({ collection: 'participant_permissions', timestamps: true })
 export class PermissionDocument {
   @Prop({ required: true, index: true })
   roomId!: string;

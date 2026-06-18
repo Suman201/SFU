@@ -7,6 +7,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { NestSfuModule } from '@native-sfu/nest-sfu';
 import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module';
+import { AuditLogsModule } from './audit-logs/audit-logs.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { appConfig } from './config/app.config';
 import { validateConfig } from './config/env.validation';
@@ -18,6 +19,11 @@ import { MetricsService } from './metrics/metrics.service';
 import { RedisModule } from './redis/redis.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { ClusterModule } from './cluster/cluster.module';
+import { PermissionsModule } from './permissions/permissions.module';
+import { RbacModule } from './rbac/rbac.module';
+import { RolesModule } from './roles/roles.module';
+import { SessionsModule } from './sessions/sessions.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -128,7 +134,13 @@ import { ClusterModule } from './cluster/cluster.module';
         }
       })
     }),
+    AuditLogsModule,
+    RbacModule,
     AuthModule,
+    UsersModule,
+    RolesModule,
+    PermissionsModule,
+    SessionsModule,
     RoomsModule,
     MediaApiModule,
     HealthModule

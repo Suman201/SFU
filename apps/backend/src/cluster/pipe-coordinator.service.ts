@@ -15,7 +15,6 @@ import type {
   PipeCoordinationMessage,
   PipeCreateMessage,
   PipeErrorCode,
-  PipeErrorMessage,
   PipeFeedReleaseMessage,
   PipeFeedRequestMessage,
   PipeNodeEndpoint,
@@ -30,8 +29,7 @@ import type {
   Producer,
   ProducerStatus,
   RtpLayerSelection,
-  SvcLayerSelection,
-  RtpParameters
+  SvcLayerSelection
 } from '@native-sfu/contracts';
 import { MediaService, PipeTransportManager, PipeTransportService } from '@native-sfu/nest-sfu';
 import { MetricsService } from '../metrics/metrics.service';
@@ -468,7 +466,6 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     if (!feed || feed.roomId !== state.roomId || feed.producerId !== state.producerId) {
       return;
     }
-    const feedbackKey = consumerKey(feed.pipeTransportId, feed.pipeConsumerId);
     const timestamp = state.observation.timestamp ?? Date.now();
     const existing = this.remoteConsumerFeedback.get(state.consumerId);
     if (existing && (existing.observation.timestamp ?? 0) > timestamp) {
