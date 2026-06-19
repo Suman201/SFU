@@ -66,6 +66,17 @@
           </select>
         </label>
         <label>
+          Media profile
+          <select [formField]="roomForm.mediaProfileId">
+            <option value="meeting">Meeting</option>
+            <option value="webinar">Webinar</option>
+            <option value="classroom">Classroom</option>
+            <option value="support">Support</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label>
           Capacity
           <input type="number" [formField]="roomForm.maxParticipants">
         </label>

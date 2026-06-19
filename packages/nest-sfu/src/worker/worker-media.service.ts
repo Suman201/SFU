@@ -492,6 +492,14 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
     return this.roomQualityStates.get(roomId);
   }
 
+  roomWorkerId(roomId: string): string | undefined {
+    try {
+      return this.pool.workerForRoom(roomId).workerId;
+    } catch {
+      return undefined;
+    }
+  }
+
   producerLayerState(producerId: string): ProducerLayerState | undefined {
     if (!this.producers.has(producerId)) {
       return this.producerLayerStates.get(producerId);

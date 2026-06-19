@@ -41,10 +41,33 @@ npm run test:browser:firefox
 npm run test:browser:webkit
 ```
 
+For Milestone U2 operator signoff, use the focused local browser workflow:
+
+```bash
+npm run test:browser:operator
+```
+
+That slice starts a repo-managed local backend stack plus an Angular dev server and then drives the real operator UI through Chromium. It validates:
+
+- room protection and recovery state in the host controls UI
+- incident timeline and snapshot history rendering
+- live recovery action propagation
+- distributed owner redirect handling with room rehydration on the redirected page
+- `room:failed` browser surfacing against the real backend failure-handling path
+- incident, recovery, snapshot, and failure metrics remaining coherent with the UI
+
+Notes:
+
+- Use Node `22.22.3` or set `SFU_NODE_BIN` to a compatible Node 22 binary for this local harness.
+- This is a truthful repo-supported validation path for operator/browser signoff in this environment.
+- It is not a substitute for staged ingress, TURN, or public-network media proof.
+- In this local environment the Angular production build path can still fail with an allocator crash, so U2 browser signoff is intentionally anchored to the Node 22 `ng serve` harness rather than pretending that `ng build` is currently the strong local gate.
+
 ## Supported Environment Matrix
 
 | Validation slice | Current status | Strongest command | Important limit |
 | --- | --- | --- | --- |
+| Local operator incident workflow | Chromium validated | `npm run test:browser:operator` | Proves operator UI/runtime truth locally, not public ingress or staged media truth |
 | Local single-node browser media | Partial local regression evidence | `npm run test:browser` | Good for repo/runtime regressions, not public-network proof |
 | Staged TURN relay gathering | Chromium validated | `npm run test:browser:staging-turn` | Proves relay candidate gathering only, not full publish/subscribe over ingress |
 | Staged full browser publish/subscribe over shared ingress | Chromium harness available | `npm run test:browser -- tests/browser/staging-ingress-browser-proof.spec.ts --project=chromium` | Requires real staging credentials and still needs a real out-of-sandbox browser run for signoff |

@@ -26,11 +26,16 @@ import type {
   ProducerLayerState,
   Room,
   RoomFailureEvent,
+  RoomIncidentState,
+  RoomIncidentTimelineState,
   RoomOwnerLookupResponse,
+  RoomRecoveryActionResult,
+  RoomSnapshotHistoryState,
   ServerToClientEvents,
   SetConsumerPreferredLayersRequest,
   SetConsumerPreferredSvcLayersRequest,
-  TransportOptions
+  TransportOptions,
+  UpdateRoomMediaProfileRequest
 } from '@native-sfu/contracts';
 import type { Server, Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
@@ -146,6 +151,18 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.rooms.onRoomQualityUpdated((state) => {
       void this.emitRoomEvent(state.roomId, 'room:quality-updated', state);
     });
+    this.rooms.onRoomQualitySummaryUpdated((state) => {
+      void this.emitRoomEvent(state.roomId, 'room:quality-summary-updated', state);
+    });
+    this.rooms.onRoomIncidentStateUpdated((state) => {
+      void this.emitRoomEvent(state.roomId, 'room:incident-updated', state);
+    });
+    this.rooms.onRoomIncidentTimelineEvent((event) => {
+      void this.emitRoomEvent(event.roomId, 'room:incident-event', event);
+    });
+    this.rooms.onRoomSnapshotGenerated((summary) => {
+      void this.emitRoomEvent(summary.roomId, 'room:snapshot-generated', summary);
+    });
     this.rooms.onRoomFailed((event: RoomFailureEvent) => {
       this.emitRoomEvent(event.roomId, 'room:failed', event).catch(() => undefined);
     });
@@ -212,8 +229,8 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const response = await this.rooms.joinRoom(this.requireUser(socket), socket.id, request);
       socket.data.roomId = request.roomId;
       socket.data.participantId = response.participantId;
-      await socket.join(request.roomId);
       if (response.admitted) {
+        await socket.join(request.roomId);
         const participant = response.room.participants.find((item) => item.id === response.participantId);
         if (participant) {
           await this.emitRoomEvent(request.roomId, 'participant:joined', participant);
@@ -258,6 +275,11 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   admit(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { roomId: string; participantId: string }, @WsAck() ack: SocketAck<void>): Promise<void> {
     return socketAck(ack, async () => {
       const room = await this.rooms.admit(request.roomId, this.requireParticipant(socket), request.participantId);
+      const participant = room.participants.find((item) => item.id === request.participantId);
+      await this.joinParticipantSocket(request.roomId, participant?.socketId);
+      if (participant) {
+        await this.emitRoomEvent(request.roomId, 'participant:joined', participant);
+      }
       await this.emitRoomEvent(request.roomId, 'room:updated', room);
     });
   }
@@ -431,6 +453,68 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return socketAck(ack, () => this.rooms.getRoomQualityState(request.roomId, this.requireParticipant(socket)));
   }
 
+  @SubscribeMessage('room:get-quality-summary')
+  getRoomQualitySummary(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['room:get-quality-summary']>[0],
+    @WsAck() ack: SocketAck<Parameters<ServerToClientEvents['room:quality-summary-updated']>[0]>
+  ): Promise<void> {
+    return socketAck(ack, () => this.rooms.getRoomQualitySummaryState(request.roomId, this.requireParticipant(socket)));
+  }
+
+  @SubscribeMessage('room:get-incident-state')
+  getRoomIncidentState(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['room:get-incident-state']>[0],
+    @WsAck() ack: SocketAck<RoomIncidentState>
+  ): Promise<void> {
+    return socketAck(ack, () => this.rooms.getRoomIncidentState(request.roomId, this.requireParticipant(socket)));
+  }
+
+  @SubscribeMessage('room:get-incident-timeline')
+  getRoomIncidentTimeline(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['room:get-incident-timeline']>[0],
+    @WsAck() ack: SocketAck<RoomIncidentTimelineState>
+  ): Promise<void> {
+    return socketAck(ack, () => this.rooms.getRoomIncidentTimeline(request, this.requireParticipant(socket)));
+  }
+
+  @SubscribeMessage('room:get-snapshot-history')
+  getRoomSnapshotHistory(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['room:get-snapshot-history']>[0],
+    @WsAck() ack: SocketAck<RoomSnapshotHistoryState>
+  ): Promise<void> {
+    return socketAck(ack, () => this.rooms.getRoomSnapshotHistory(request, this.requireParticipant(socket)));
+  }
+
+  @SubscribeMessage('room:run-recovery-action')
+  runRoomRecoveryAction(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['room:run-recovery-action']>[0],
+    @WsAck() ack: SocketAck<RoomRecoveryActionResult>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const result = await this.rooms.runRoomRecoveryAction(request, this.requireParticipant(socket));
+      await this.emitRoomEvent(result.room.id, 'room:updated', result.room);
+      return result;
+    });
+  }
+
+  @SubscribeMessage('room:update-media-profile')
+  updateRoomMediaProfile(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: UpdateRoomMediaProfileRequest,
+    @WsAck() ack: SocketAck<Room>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const room = await this.rooms.updateRoomMediaProfile(request, this.requireParticipant(socket));
+      await this.emitRoomEvent(room.id, 'room:updated', room);
+      return room;
+    });
+  }
+
   @SubscribeMessage('transport:get-quality')
   getTransportQuality(
     @ConnectedSocket() socket: SfuSocket,
@@ -579,6 +663,16 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private async emitRoomEvent(roomId: string, event: keyof ServerToClientEvents, ...payload: unknown[]): Promise<void> {
     (this.server.to(roomId) as unknown as { emit: (event: string, ...payload: unknown[]) => void }).emit(event, ...payload);
     await this.signals.publish(roomId, event, ...payload);
+  }
+
+  private async joinParticipantSocket(roomId: string, socketId: string | undefined): Promise<void> {
+    if (!socketId) {
+      return;
+    }
+    const target = (this.server.sockets.sockets as Map<string, Socket<ClientToServerEvents, ServerToClientEvents>> | undefined)?.get(socketId);
+    if (target) {
+      await target.join(roomId);
+    }
   }
 
   private isConnectionThrottled(socket: SfuSocket): boolean {

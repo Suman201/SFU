@@ -546,6 +546,10 @@ export class MediaService {
     return this.router.roomQualitySnapshot(roomId) ?? this.roomQualityStates.get(roomId);
   }
 
+  roomWorkerId(_roomId: string): string | undefined {
+    return undefined;
+  }
+
   producerLayerState(producerId: string): ProducerLayerState | undefined {
     const producer = this.producers.get(producerId);
     const snapshot = this.router.producerLayerSnapshot(producerId);

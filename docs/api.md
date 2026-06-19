@@ -39,6 +39,87 @@ Both return:
 
 Returns the room snapshot for an authenticated active participant.
 
+`GET /rooms/:roomId/quality`
+
+Returns the raw room quality state for an authenticated active participant.
+
+`GET /rooms/:roomId/quality-summary`
+
+Returns the policy-aware room quality summary used by host controls and operator workflows. The payload includes:
+
+- room health: `stable`, `degraded`, or `critical`
+- active room media profile: `meeting`, `webinar`, `classroom`, or `support`
+- join / publish / screen-share protection state: `allow`, `warn`, `soft-throttle`, or `reject`
+- degraded consumer / producer / transport counts
+- bitrate rollups and recommendation list
+
+`GET /rooms/:roomId/incident-state`
+
+Returns the current operator-facing incident state for a host or co-host participant, including:
+
+- status: `stable`, `degraded`, `critical`, `recovering`, or `failed`
+- manual protection state
+- active recovery state
+- active alerts
+- workflow recommendations
+- snapshot counters
+
+`GET /rooms/:roomId/incident-timeline`
+
+Returns the recent incident event timeline for a host or co-host participant.
+
+`GET /rooms/:roomId/snapshot-history`
+
+Returns recent room snapshot bundle summaries for a host or co-host participant.
+
+`GET /rooms/:roomId/audit-log`
+
+Returns the persisted room-scoped platform event history for a host or co-host participant. This is the broader structured audit log, not the incident-only timeline.
+
+Supported query parameters:
+
+- `eventTypes=producer.created,producer.closed`
+- `actorUserId=<userId>`
+- `actorParticipantId=<participantId>`
+- `from=<ISO timestamp>`
+- `to=<ISO timestamp>`
+- `limit=<1-200>`
+
+`PATCH /rooms/:roomId/media-profile`
+
+Requires bearer auth for an active host or co-host participant in the room.
+
+```json
+{
+  "profileId": "webinar"
+}
+```
+
+Applies the new room media profile immediately to live producer / consumer policy.
+If the participant is attached to a non-owner node, the Socket.IO path returns a `ROOM_REDIRECT` payload with `ownerUrl` so the frontend can reconnect to the room owner before retrying the change.
+
+`PATCH /rooms/:roomId/recovery`
+
+Requires bearer auth for an active host or co-host participant in the room.
+
+```json
+{
+  "action": "protect_room",
+  "reason": "Protect while we stabilize transport loss"
+}
+```
+
+Runs an operator recovery action such as:
+
+- `protect_room`
+- `unprotect_room`
+- `reopen_admissions`
+- `pause_new_publishing`
+- `resume_new_publishing`
+- `force_incident_snapshot`
+- `mark_operator_recovery`
+- `clear_recovery`
+
 ## Media
 
 `GET /media/turn-credentials`
@@ -67,14 +148,52 @@ The following routes are operator-facing:
 | `GET /api/v1/media/diagnostics/node` | `X-Operations-Token` | Node-level drain/capacity/pipe diagnostics. |
 | `GET /api/v1/media/diagnostics/workers/:workerId` | `X-Operations-Token` | Per-worker diagnostics. |
 | `GET /api/v1/media/diagnostics/pipe` | `X-Operations-Token` | Pipe runtime diagnostics. |
+| `GET /api/v1/media/diagnostics/rooms/:roomId/incident-snapshot` | `X-Operations-Token` | Room-scoped incident export with profile, protections, degraded entities, and transport summaries. |
+| `GET /api/v1/media/diagnostics/rooms/:roomId/incident-state` | `X-Operations-Token` | Current operator incident state without room-participant auth. |
+| `GET /api/v1/media/diagnostics/rooms/:roomId/incident-timeline` | `X-Operations-Token` | Persisted incident timeline for the room. |
+| `GET /api/v1/media/diagnostics/rooms/:roomId/snapshot-history` | `X-Operations-Token` | Recent incident snapshot bundle summaries. |
+| `GET /api/v1/media/diagnostics/rooms/snapshot-bundles/:bundleId` | `X-Operations-Token` | Full incident snapshot bundle payload by bundle id. |
+| `POST /api/v1/media/diagnostics/rooms/:roomId/incident-snapshot` | `X-Operations-Token` | Manually generate and persist a room incident snapshot bundle. |
+| `POST /api/v1/media/diagnostics/rooms/:roomId/fail` | `X-Operations-Token` | Non-production diagnostics hook that injects a real room-failure event for validation and operator-flow testing. |
+| `GET /api/v1/media/diagnostics/transports/:transportId/incident-snapshot` | `X-Operations-Token` | Transport-scoped incident export with room policy and related producer / consumer context. |
 | `POST /api/v1/media/workers/:workerId/drain` | `X-Operations-Token` | Drain a worker gracefully. |
 | `POST /api/v1/media/node/drain` | `X-Operations-Token` | Drain the local node before maintenance. |
 | `POST /api/v1/media/node/undrain` | `X-Operations-Token` | Resume local admission after maintenance. |
+| `POST /api/v1/events/webhooks` | `X-Operations-Token` | Create a signed webhook endpoint and return the secret once. |
+| `GET /api/v1/events/webhooks` | `X-Operations-Token` | List webhook endpoints with health state and last-delivery summary. |
+| `GET /api/v1/events/webhooks/:endpointId` | `X-Operations-Token` | Inspect one webhook endpoint. |
+| `PATCH /api/v1/events/webhooks/:endpointId` | `X-Operations-Token` | Update endpoint URL, subscriptions, filters, timeouts, retry policy, or enabled state. |
+| `POST /api/v1/events/webhooks/:endpointId/rotate-secret` | `X-Operations-Token` | Rotate the webhook signing secret and return the new secret once. |
+| `GET /api/v1/events/log` | `X-Operations-Token` | Global platform event log query surface. |
+| `GET /api/v1/events/rooms/:roomId/log` | `X-Operations-Token` | Room-scoped platform event log query surface. |
+| `GET /api/v1/events/deliveries` | `X-Operations-Token` | Delivery history with endpoint, event, status, and time filters. |
+| `GET /api/v1/events/deliveries/exhausted` | `X-Operations-Token` | Exhausted / dead-letter delivery queue view. |
+| `GET /api/v1/events/deliveries/:deliveryId` | `X-Operations-Token` | One delivery record with attempt history. |
+| `POST /api/v1/events/deliveries/:deliveryId/replay` | `X-Operations-Token` | Replay a failed delivery through the real queue and signer path. |
+| `POST /api/v1/events/log/:eventId/endpoints/:endpointId/replay` | `X-Operations-Token` | Replay a specific event to a specific endpoint through the real queue and signer path. |
+| `GET /api/v1/events/diagnostics/summary` | `X-Operations-Token` | Eventing / webhook backlog and unhealthy-endpoint summary. |
 
 Operational notes:
 
 - `/health/*` stays outside `/api/v1` so orchestrators can probe liveness and readiness without the room-auth stack.
 - `/api/v1/media/*` diagnostics and drain routes are operator-only and should not be exposed through end-user clients.
+- `/api/v1/events/*` is the operator eventing surface for audit queries, webhook management, delivery replay, and delivery diagnostics.
+- Incident snapshot exports are JSON payloads intended for download, ticket attachment, or copy/paste into operational tooling. They are not public room APIs.
+- `POST /api/v1/media/diagnostics/rooms/:roomId/fail` is disabled in production and exists only to drive truthful local or pre-production browser validation through the real room-failure path.
+
+Webhook delivery notes:
+
+- Payloads are signed as `sha256=<hex>` in `X-Native-Sfu-Signature`.
+- The signature input is `${timestamp}.${rawJsonBody}` where the timestamp is sent in `X-Native-Sfu-Timestamp`.
+- Every delivery includes:
+  - `X-Native-Sfu-Delivery-Id`
+  - `X-Native-Sfu-Event-Id`
+  - `X-Native-Sfu-Event-Type`
+  - `X-Native-Sfu-Timestamp`
+  - `X-Native-Sfu-Signature`
+- Non-2xx responses, timeouts, and transport errors are treated as failures.
+- Failed deliveries retry with bounded exponential backoff until they reach `exhausted`.
+- Replay routes enqueue a fresh delivery record and reuse the real delivery pipeline rather than shortcutting the HTTP send.
 
 ## Recordings
 
@@ -94,6 +213,12 @@ Stops a recording owned by the room host.
 `GET /recordings/rooms/:roomId`
 
 Lists room recordings for the host.
+
+Recording eventing notes:
+
+- Starting a recording emits `recording.started`.
+- Stopping a recording emits `recording.stopped`.
+- `recording.failed` is reserved for a future recording failure path; the current recording surface does not yet synthesize failure states.
 
 ## Health and Metrics
 

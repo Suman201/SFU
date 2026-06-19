@@ -241,6 +241,99 @@ describe('MediaController', () => {
 
     expect(() => controller.workerDiagnostics('missing-worker')).toThrow(NotFoundException);
   });
+
+  it('delegates room incident snapshot exports to the rooms service', async () => {
+    const snapshot = { scope: 'room', roomId: 'room-1' } as any;
+    const controller = createController({
+      clusterSnapshot: { localNode: { nodeId: 'node-a', health: 'healthy', draining: false, capacity: { capacityScore: 0 } } },
+      workerSnapshot: { mode: 'worker', workerCount: 0, readyWorkers: 0, healthyWorkers: 0, drainingWorkers: 0, overloadedWorkers: 0, activeRooms: 0, failedRooms: [], failures: [], workers: [] },
+      pipeSnapshot: { enabled: false, localNodeId: 'node-a', activePipeTransports: 0, pipeProducers: 0, pipeConsumers: 0, rejectedRequests: 0 },
+      pipeHealth: { enabled: false, durable: false, supported: true, mediaWorkerMode: 'worker', advertiseIpConfigured: true, defaultProtocol: 'udp' },
+      configValues: {},
+      roomExports: {
+        exportRoomIncidentSnapshot: jest.fn(async () => snapshot)
+      }
+    });
+
+    const result = await controller.roomIncidentSnapshot('room-1');
+    expect(result).toBe(snapshot);
+  });
+
+  it('delegates room incident workflow diagnostics to the rooms service', async () => {
+    const state = { roomId: 'room-1', status: 'critical' } as any;
+    const timeline = { roomId: 'room-1', events: [] } as any;
+    const history = { roomId: 'room-1', bundles: [] } as any;
+    const bundle = { bundleId: 'bundle-1', roomId: 'room-1' } as any;
+    const controller = createController({
+      clusterSnapshot: { localNode: { nodeId: 'node-a', health: 'healthy', draining: false, capacity: { capacityScore: 0 } } },
+      workerSnapshot: { mode: 'worker', workerCount: 0, readyWorkers: 0, healthyWorkers: 0, drainingWorkers: 0, overloadedWorkers: 0, activeRooms: 0, failedRooms: [], failures: [], workers: [] },
+      pipeSnapshot: { enabled: false, localNodeId: 'node-a', activePipeTransports: 0, pipeProducers: 0, pipeConsumers: 0, rejectedRequests: 0 },
+      pipeHealth: { enabled: false, durable: false, supported: true, mediaWorkerMode: 'worker', advertiseIpConfigured: true, defaultProtocol: 'udp' },
+      configValues: {},
+      roomExports: {
+        getRoomIncidentStateForOperations: jest.fn(async () => state),
+        getRoomIncidentTimelineForOperations: jest.fn(async () => timeline),
+        getRoomSnapshotHistoryForOperations: jest.fn(async () => history),
+        getRoomSnapshotBundle: jest.fn(async () => bundle),
+        generateRoomSnapshotBundleForOperations: jest.fn(async () => bundle),
+        injectRoomFailureForOperations: jest.fn(async () => undefined)
+      },
+      platformEvents: {
+        appendEvent: jest.fn(async () => ({ id: 'event-1' }))
+      }
+    });
+
+    expect(await controller.roomIncidentState('room-1')).toBe(state);
+    expect(await controller.roomIncidentTimeline('room-1')).toBe(timeline);
+    expect(await controller.roomSnapshotHistory('room-1')).toBe(history);
+    expect(await controller.roomSnapshotBundle('bundle-1')).toBe(bundle);
+    expect(await controller.generateRoomIncidentSnapshot('room-1', { reason: 'manual proof' })).toBe(bundle);
+    expect(await controller.injectRoomFailure('room-1', { workerId: 'worker-1' })).toEqual({ ok: true });
+  });
+
+  it('records operator action events for worker and node drain operations', async () => {
+    const platformEvents = {
+      appendEvent: jest.fn(async () => ({ id: 'event-1' }))
+    };
+    const controller = createController({
+      clusterSnapshot: { localNode: { nodeId: 'node-a', health: 'healthy', draining: false, capacity: { capacityScore: 0 } } },
+      workerSnapshot: { mode: 'worker', workerCount: 0, readyWorkers: 0, healthyWorkers: 0, drainingWorkers: 0, overloadedWorkers: 0, activeRooms: 0, failedRooms: [], failures: [], workers: [] },
+      pipeSnapshot: { enabled: false, localNodeId: 'node-a', activePipeTransports: 0, pipeProducers: 0, pipeConsumers: 0, rejectedRequests: 0 },
+      pipeHealth: { enabled: false, durable: false, supported: true, mediaWorkerMode: 'worker', advertiseIpConfigured: true, defaultProtocol: 'udp' },
+      configValues: {},
+      workerPoolExports: {
+        drainMediaWorker: jest.fn(async () => ({ workerCount: 0 }))
+      },
+      clusterExports: {
+        beginDraining: jest.fn(async () => ({ nodeId: 'node-a', draining: true })),
+        endDraining: jest.fn(async () => ({ nodeId: 'node-a', draining: false }))
+      },
+      platformEvents
+    });
+
+    await controller.drainWorker('worker-1', { forceAfterMs: 1000 });
+    await controller.drainNode({ reason: 'maintenance' });
+    await controller.undrainNode();
+
+    expect(platformEvents.appendEvent).toHaveBeenCalledTimes(3);
+  });
+
+  it('delegates transport incident snapshot exports to the rooms service', async () => {
+    const snapshot = { scope: 'transport', transportId: 'transport-1' } as any;
+    const controller = createController({
+      clusterSnapshot: { localNode: { nodeId: 'node-a', health: 'healthy', draining: false, capacity: { capacityScore: 0 } } },
+      workerSnapshot: { mode: 'worker', workerCount: 0, readyWorkers: 0, healthyWorkers: 0, drainingWorkers: 0, overloadedWorkers: 0, activeRooms: 0, failedRooms: [], failures: [], workers: [] },
+      pipeSnapshot: { enabled: false, localNodeId: 'node-a', activePipeTransports: 0, pipeProducers: 0, pipeConsumers: 0, rejectedRequests: 0 },
+      pipeHealth: { enabled: false, durable: false, supported: true, mediaWorkerMode: 'worker', advertiseIpConfigured: true, defaultProtocol: 'udp' },
+      configValues: {},
+      roomExports: {
+        exportTransportIncidentSnapshot: jest.fn(async () => snapshot)
+      }
+    });
+
+    const result = await controller.transportIncidentSnapshot('transport-1');
+    expect(result).toBe(snapshot);
+  });
 });
 
 function createController(options: {
@@ -249,14 +342,37 @@ function createController(options: {
   pipeSnapshot: any;
   pipeHealth: any;
   configValues: Record<string, unknown>;
+  roomExports?: {
+    exportRoomIncidentSnapshot?: jest.Mock;
+    getRoomIncidentStateForOperations?: jest.Mock;
+    getRoomIncidentTimelineForOperations?: jest.Mock;
+    getRoomSnapshotHistoryForOperations?: jest.Mock;
+    getRoomSnapshotBundle?: jest.Mock;
+    generateRoomSnapshotBundleForOperations?: jest.Mock;
+    injectRoomFailureForOperations?: jest.Mock;
+    exportTransportIncidentSnapshot?: jest.Mock;
+  };
+  workerPoolExports?: {
+    drainMediaWorker?: jest.Mock;
+  };
+  clusterExports?: {
+    beginDraining?: jest.Mock;
+    endDraining?: jest.Mock;
+  };
+  platformEvents?: {
+    appendEvent?: jest.Mock;
+  };
 }) {
   return new MediaController(
     { createTurnCredentials: jest.fn() } as never,
     {
-      workerPoolSnapshot: jest.fn(() => options.workerSnapshot)
+      workerPoolSnapshot: jest.fn(() => options.workerSnapshot),
+      drainMediaWorker: options.workerPoolExports?.drainMediaWorker ?? jest.fn(async () => options.workerSnapshot)
     } as never,
     {
-      snapshot: jest.fn(async () => options.clusterSnapshot)
+      snapshot: jest.fn(async () => options.clusterSnapshot),
+      beginDraining: options.clusterExports?.beginDraining ?? jest.fn(async () => options.clusterSnapshot.localNode),
+      endDraining: options.clusterExports?.endDraining ?? jest.fn(async () => options.clusterSnapshot.localNode)
     } as never,
     {
       snapshot: jest.fn(() => options.pipeSnapshot),
@@ -264,6 +380,19 @@ function createController(options: {
     } as never,
     {
       get: jest.fn((key: string, fallback?: unknown) => options.configValues[key] ?? fallback)
+    } as never,
+    {
+      exportRoomIncidentSnapshot: options.roomExports?.exportRoomIncidentSnapshot ?? jest.fn(),
+      getRoomIncidentStateForOperations: options.roomExports?.getRoomIncidentStateForOperations ?? jest.fn(),
+      getRoomIncidentTimelineForOperations: options.roomExports?.getRoomIncidentTimelineForOperations ?? jest.fn(),
+      getRoomSnapshotHistoryForOperations: options.roomExports?.getRoomSnapshotHistoryForOperations ?? jest.fn(),
+      getRoomSnapshotBundle: options.roomExports?.getRoomSnapshotBundle ?? jest.fn(),
+      generateRoomSnapshotBundleForOperations: options.roomExports?.generateRoomSnapshotBundleForOperations ?? jest.fn(),
+      injectRoomFailureForOperations: options.roomExports?.injectRoomFailureForOperations ?? jest.fn(),
+      exportTransportIncidentSnapshot: options.roomExports?.exportTransportIncidentSnapshot ?? jest.fn()
+    } as never,
+    {
+      appendEvent: options.platformEvents?.appendEvent ?? jest.fn(async () => ({ id: 'platform-event-1' }))
     } as never
   );
 }

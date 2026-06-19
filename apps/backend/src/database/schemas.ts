@@ -1,9 +1,21 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
-import { Role } from '@native-sfu/contracts';
+import {
+  PLATFORM_EVENT_ACTOR_TYPES,
+  PLATFORM_EVENT_SCHEMA_VERSION,
+  PLATFORM_EVENT_TYPES,
+  WEBHOOK_DELIVERY_STATUSES,
+  WEBHOOK_ENDPOINT_HEALTH_STATES,
+  Role
+} from '@native-sfu/contracts';
 
 export type UserMongoDocument = HydratedDocument<UserDocument>;
 export type RoomMongoDocument = HydratedDocument<RoomDocument>;
+export type RoomIncidentEventMongoDocument = HydratedDocument<RoomIncidentEventDocument>;
+export type RoomSnapshotBundleMongoDocument = HydratedDocument<RoomSnapshotBundleDocument>;
+export type PlatformEventMongoDocument = HydratedDocument<PlatformEventDocument>;
+export type WebhookEndpointMongoDocument = HydratedDocument<WebhookEndpointDocument>;
+export type WebhookDeliveryMongoDocument = HydratedDocument<WebhookDeliveryDocument>;
 export type ParticipantMongoDocument = HydratedDocument<ParticipantDocument>;
 export type ProducerMongoDocument = HydratedDocument<ProducerDocument>;
 export type ConsumerMongoDocument = HydratedDocument<ConsumerDocument>;
@@ -66,6 +78,20 @@ export class RoomSettingsDocument {
 export const RoomSettingsSchema = SchemaFactory.createForClass(RoomSettingsDocument);
 
 @Schema({ _id: false })
+export class RoomMediaProfileDocument {
+  @Prop({ required: true, enum: ['meeting', 'webinar', 'classroom', 'support'], default: 'meeting' })
+  id!: 'meeting' | 'webinar' | 'classroom' | 'support';
+
+  @Prop()
+  updatedByParticipantId?: string;
+
+  @Prop()
+  updatedAt?: Date;
+}
+
+export const RoomMediaProfileSchema = SchemaFactory.createForClass(RoomMediaProfileDocument);
+
+@Schema({ _id: false })
 export class RoomMediaStateDocument {
   @Prop({ required: true, enum: ['active', 'failed'], default: 'active' })
   status!: 'active' | 'failed';
@@ -85,6 +111,131 @@ export class RoomMediaStateDocument {
 
 export const RoomMediaStateSchema = SchemaFactory.createForClass(RoomMediaStateDocument);
 
+@Schema({ _id: false })
+export class RoomOperatorAlertDocument {
+  @Prop({
+    required: true,
+    enum: [
+      'room_critical',
+      'repeated_throttles',
+      'room_failed',
+      'distributed_owner_risk',
+      'repeated_snapshots',
+      'protection_prolonged',
+      'critical_state_prolonged'
+    ]
+  })
+  code!: 'room_critical' | 'repeated_throttles' | 'room_failed' | 'distributed_owner_risk' | 'repeated_snapshots' | 'protection_prolonged' | 'critical_state_prolonged';
+
+  @Prop({ required: true, enum: ['warn', 'critical'] })
+  severity!: 'warn' | 'critical';
+
+  @Prop({ required: true, trim: true, maxlength: 160 })
+  title!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 1000 })
+  detail!: string;
+
+  @Prop({ required: true })
+  firstTriggeredAt!: Date;
+
+  @Prop({ required: true })
+  lastTriggeredAt!: Date;
+
+  @Prop({ required: true, min: 1, default: 1 })
+  occurrenceCount!: number;
+}
+
+export const RoomOperatorAlertSchema = SchemaFactory.createForClass(RoomOperatorAlertDocument);
+
+@Schema({ _id: false })
+export class RoomIncidentStateDocument {
+  @Prop({ required: true, enum: ['stable', 'degraded', 'critical', 'recovering', 'failed'], default: 'stable' })
+  status!: 'stable' | 'degraded' | 'critical' | 'recovering' | 'failed';
+
+  @Prop({ required: true, enum: ['stable', 'degraded', 'critical'], default: 'stable' })
+  health!: 'stable' | 'degraded' | 'critical';
+
+  @Prop()
+  healthChangedAt?: Date;
+
+  @Prop({ required: true, default: false })
+  protected!: boolean;
+
+  @Prop()
+  protectedAt?: Date;
+
+  @Prop()
+  protectedByParticipantId?: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  protectedReason?: string;
+
+  @Prop({ required: true, enum: ['default', 'reopened', 'protected'], default: 'default' })
+  admissionsState!: 'default' | 'reopened' | 'protected';
+
+  @Prop({ required: true, enum: ['default', 'paused', 'protected'], default: 'default' })
+  publishingState!: 'default' | 'paused' | 'protected';
+
+  @Prop({ required: true, default: false })
+  underRecovery!: boolean;
+
+  @Prop()
+  recoveryStartedAt?: Date;
+
+  @Prop()
+  recoveryStartedByParticipantId?: string;
+
+  @Prop()
+  recoveryClearedAt?: Date;
+
+  @Prop()
+  recoveryClearedByParticipantId?: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  recoveryReason?: string;
+
+  @Prop()
+  lastFailureAt?: Date;
+
+  @Prop({ enum: ['worker_crashed', 'worker_drained_forced', 'worker_unhealthy', 'worker_overloaded'] })
+  lastFailureReason?: 'worker_crashed' | 'worker_drained_forced' | 'worker_unhealthy' | 'worker_overloaded';
+
+  @Prop({ trim: true, maxlength: 1000 })
+  lastFailureMessage?: string;
+
+  @Prop({
+    enum: [
+      'protect_room',
+      'unprotect_room',
+      'reopen_admissions',
+      'pause_new_publishing',
+      'resume_new_publishing',
+      'force_incident_snapshot',
+      'mark_operator_recovery',
+      'clear_recovery'
+    ]
+  })
+  lastRecoveryAction?: 'protect_room' | 'unprotect_room' | 'reopen_admissions' | 'pause_new_publishing' | 'resume_new_publishing' | 'force_incident_snapshot' | 'mark_operator_recovery' | 'clear_recovery';
+
+  @Prop()
+  lastRecoveryActionAt?: Date;
+
+  @Prop({ type: [RoomOperatorAlertSchema], default: [] })
+  activeAlerts!: RoomOperatorAlertDocument[];
+
+  @Prop({ required: true, min: 0, default: 0 })
+  snapshotCount!: number;
+
+  @Prop()
+  latestSnapshotId?: string;
+
+  @Prop({ required: true, default: Date.now })
+  updatedAt!: Date;
+}
+
+export const RoomIncidentStateSchema = SchemaFactory.createForClass(RoomIncidentStateDocument);
+
 @Schema({ collection: 'rooms', timestamps: true })
 export class RoomDocument {
   @Prop({ required: true, trim: true, maxlength: 160 })
@@ -96,8 +247,27 @@ export class RoomDocument {
   @Prop({ type: RoomSettingsSchema, required: true })
   settings!: RoomSettingsDocument;
 
+  @Prop({ type: RoomMediaProfileSchema, default: () => ({ id: 'meeting' }) })
+  mediaProfile!: RoomMediaProfileDocument;
+
   @Prop({ type: RoomMediaStateSchema, default: () => ({ status: 'active' }) })
   mediaState!: RoomMediaStateDocument;
+
+  @Prop({
+    type: RoomIncidentStateSchema,
+    default: () => ({
+      status: 'stable',
+      health: 'stable',
+      protected: false,
+      admissionsState: 'default',
+      publishingState: 'default',
+      underRecovery: false,
+      activeAlerts: [],
+      snapshotCount: 0,
+      updatedAt: new Date()
+    })
+  })
+  incidentState!: RoomIncidentStateDocument;
 
   @Prop({ type: [String], default: [] })
   invitedUserIds!: string[];
@@ -113,6 +283,431 @@ export const RoomSchema = SchemaFactory.createForClass(RoomDocument);
 RoomSchema.index({ name: 'text' });
 RoomSchema.index({ hostId: 1, closedAt: 1 });
 RoomSchema.index({ 'settings.visibility': 1, closedAt: 1 });
+
+@Schema({ collection: 'room_incident_events' })
+export class RoomIncidentEventDocument {
+  @Prop({ required: true, index: true })
+  roomId!: string;
+
+  @Prop({
+    required: true,
+    enum: [
+      'health_changed',
+      'protection_changed',
+      'join_throttled',
+      'join_rejected',
+      'publish_throttled',
+      'publish_rejected',
+      'screen_share_throttled',
+      'screen_share_rejected',
+      'profile_changed',
+      'recommendation_changed',
+      'snapshot_generated',
+      'room_failed',
+      'room_recovered',
+      'manual_action',
+      'approval_action',
+      'alert_raised',
+      'alert_suppressed',
+      'infrastructure_impact'
+    ]
+  })
+  type!:
+    | 'health_changed'
+    | 'protection_changed'
+    | 'join_throttled'
+    | 'join_rejected'
+    | 'publish_throttled'
+    | 'publish_rejected'
+    | 'screen_share_throttled'
+    | 'screen_share_rejected'
+    | 'profile_changed'
+    | 'recommendation_changed'
+    | 'snapshot_generated'
+    | 'room_failed'
+    | 'room_recovered'
+    | 'manual_action'
+    | 'approval_action'
+    | 'alert_raised'
+    | 'alert_suppressed'
+    | 'infrastructure_impact';
+
+  @Prop({ required: true, enum: ['info', 'warn', 'critical'] })
+  severity!: 'info' | 'warn' | 'critical';
+
+  @Prop({ required: true, trim: true, maxlength: 240 })
+  summary!: string;
+
+  @Prop({ trim: true, maxlength: 4000 })
+  detail?: string;
+
+  @Prop({ enum: ['participant', 'operator', 'automation', 'system', 'worker', 'node'] })
+  actorType?: 'participant' | 'operator' | 'automation' | 'system' | 'worker' | 'node';
+
+  @Prop()
+  actorParticipantId?: string;
+
+  @Prop()
+  actorUserId?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  actorLabel?: string;
+
+  @Prop()
+  actorNodeId?: string;
+
+  @Prop()
+  actorWorkerId?: string;
+
+  @Prop()
+  relatedParticipantId?: string;
+
+  @Prop()
+  relatedProducerId?: string;
+
+  @Prop()
+  relatedConsumerId?: string;
+
+  @Prop()
+  relatedTransportId?: string;
+
+  @Prop()
+  snapshotId?: string;
+
+  @Prop({
+    enum: [
+      'room_critical',
+      'repeated_throttles',
+      'room_failed',
+      'distributed_owner_risk',
+      'repeated_snapshots',
+      'protection_prolonged',
+      'critical_state_prolonged'
+    ]
+  })
+  alertCode?: 'room_critical' | 'repeated_throttles' | 'room_failed' | 'distributed_owner_risk' | 'repeated_snapshots' | 'protection_prolonged' | 'critical_state_prolonged';
+
+  @Prop()
+  ownerNodeId?: string;
+
+  @Prop()
+  workerId?: string;
+
+  @Prop({ required: true, type: Date, default: Date.now, index: true })
+  createdAt!: Date;
+}
+
+export const RoomIncidentEventSchema = SchemaFactory.createForClass(RoomIncidentEventDocument);
+RoomIncidentEventSchema.index({ roomId: 1, createdAt: -1 });
+RoomIncidentEventSchema.index({ roomId: 1, type: 1, createdAt: -1 });
+RoomIncidentEventSchema.index({ roomId: 1, severity: 1, createdAt: -1 });
+
+@Schema({ collection: 'room_snapshot_bundles' })
+export class RoomSnapshotBundleDocument {
+  @Prop({ required: true, index: true })
+  roomId!: string;
+
+  @Prop({
+    required: true,
+    enum: ['manual_operator', 'critical_quality', 'room_failure', 'repeated_throttles', 'repeated_snapshots']
+  })
+  triggerReason!: 'manual_operator' | 'critical_quality' | 'room_failure' | 'repeated_throttles' | 'repeated_snapshots';
+
+  @Prop({ required: true, default: false })
+  automatic!: boolean;
+
+  @Prop({ enum: ['participant', 'operator', 'automation', 'system', 'worker', 'node'] })
+  actorType?: 'participant' | 'operator' | 'automation' | 'system' | 'worker' | 'node';
+
+  @Prop()
+  actorParticipantId?: string;
+
+  @Prop()
+  actorUserId?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  actorLabel?: string;
+
+  @Prop()
+  actorNodeId?: string;
+
+  @Prop()
+  actorWorkerId?: string;
+
+  @Prop({ required: true, enum: ['stable', 'degraded', 'critical'] })
+  health!: 'stable' | 'degraded' | 'critical';
+
+  @Prop({ required: true, enum: ['stable', 'degraded', 'critical', 'recovering', 'failed'] })
+  status!: 'stable' | 'degraded' | 'critical' | 'recovering' | 'failed';
+
+  @Prop({ required: true, default: false })
+  protected!: boolean;
+
+  @Prop({ required: true, default: false })
+  underRecovery!: boolean;
+
+  @Prop({ required: true, min: 0, default: 0 })
+  degradedEntityCount!: number;
+
+  @Prop({ required: true, min: 0, default: 0 })
+  warningCount!: number;
+
+  @Prop({ type: Object, required: true })
+  bundle!: Record<string, unknown>;
+
+  @Prop({ required: true, type: Date, default: Date.now, index: true })
+  createdAt!: Date;
+}
+
+export const RoomSnapshotBundleSchema = SchemaFactory.createForClass(RoomSnapshotBundleDocument);
+RoomSnapshotBundleSchema.index({ roomId: 1, createdAt: -1 });
+RoomSnapshotBundleSchema.index({ roomId: 1, triggerReason: 1, createdAt: -1 });
+
+@Schema({ collection: 'platform_events' })
+export class PlatformEventDocument {
+  @Prop({ required: true, min: PLATFORM_EVENT_SCHEMA_VERSION, default: PLATFORM_EVENT_SCHEMA_VERSION })
+  schemaVersion!: number;
+
+  @Prop({ type: String, required: true, enum: PLATFORM_EVENT_TYPES, index: true })
+  type!: (typeof PLATFORM_EVENT_TYPES)[number];
+
+  @Prop({ index: true })
+  roomId?: string;
+
+  @Prop({ type: String, enum: PLATFORM_EVENT_ACTOR_TYPES })
+  actorType?: (typeof PLATFORM_EVENT_ACTOR_TYPES)[number];
+
+  @Prop({ index: true })
+  actorParticipantId?: string;
+
+  @Prop({ index: true })
+  actorUserId?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  actorLabel?: string;
+
+  @Prop()
+  actorNodeId?: string;
+
+  @Prop()
+  actorWorkerId?: string;
+
+  @Prop({ index: true })
+  sourceNodeId?: string;
+
+  @Prop({ required: true, type: Date, default: Date.now, index: true })
+  occurredAt!: Date;
+
+  @Prop({ type: Object, required: true })
+  event!: Record<string, unknown>;
+
+  @Prop({ required: true })
+  serializedEvent!: string;
+
+  @Prop({ required: true, type: Date, default: Date.now, index: true })
+  createdAt!: Date;
+}
+
+export const PlatformEventSchema = SchemaFactory.createForClass(PlatformEventDocument);
+PlatformEventSchema.index({ roomId: 1, occurredAt: -1 });
+PlatformEventSchema.index({ type: 1, occurredAt: -1 });
+PlatformEventSchema.index({ roomId: 1, type: 1, occurredAt: -1 });
+PlatformEventSchema.index({ actorUserId: 1, occurredAt: -1 });
+PlatformEventSchema.index({ actorParticipantId: 1, occurredAt: -1 });
+
+@Schema({ _id: false })
+export class WebhookEndpointHealthDocument {
+  @Prop({ type: String, required: true, enum: WEBHOOK_ENDPOINT_HEALTH_STATES, default: 'healthy' })
+  status!: (typeof WEBHOOK_ENDPOINT_HEALTH_STATES)[number];
+
+  @Prop({ type: String, enum: WEBHOOK_DELIVERY_STATUSES })
+  lastDeliveryStatus?: (typeof WEBHOOK_DELIVERY_STATUSES)[number];
+
+  @Prop()
+  lastDeliveryAt?: Date;
+
+  @Prop()
+  lastResponseStatusCode?: number;
+
+  @Prop({ trim: true, maxlength: 2000 })
+  lastError?: string;
+
+  @Prop({ required: true, min: 0, default: 0 })
+  consecutiveFailures!: number;
+}
+
+export const WebhookEndpointHealthSchema = SchemaFactory.createForClass(WebhookEndpointHealthDocument);
+
+@Schema({ collection: 'webhook_endpoints', timestamps: true })
+export class WebhookEndpointDocument {
+  @Prop({ required: true, trim: true, maxlength: 160 })
+  name!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 2000, index: true })
+  url!: string;
+
+  @Prop({ required: true, default: true, index: true })
+  enabled!: boolean;
+
+  @Prop({ type: [String], enum: PLATFORM_EVENT_TYPES, required: true, default: [] })
+  subscribedEventTypes!: Array<(typeof PLATFORM_EVENT_TYPES)[number]>;
+
+  @Prop({ type: [String], default: [] })
+  roomFilterIds!: string[];
+
+  @Prop({ required: true, min: 500, max: 30000, default: 5000 })
+  timeoutMs!: number;
+
+  @Prop({ required: true, min: 1, max: 10, default: 5 })
+  maxAttempts!: number;
+
+  @Prop({ required: true, min: 250, max: 3_600_000, default: 2000 })
+  initialBackoffMs!: number;
+
+  @Prop({ type: String, required: true, enum: ['hmac-sha256'], default: 'hmac-sha256' })
+  signingAlgorithm!: 'hmac-sha256';
+
+  @Prop({ required: true, select: false })
+  signingSecretCiphertext!: string;
+
+  @Prop({ required: true, select: false })
+  signingSecretIv!: string;
+
+  @Prop({ required: true, select: false })
+  signingSecretAuthTag!: string;
+
+  @Prop({ trim: true, maxlength: 80 })
+  secretFingerprint?: string;
+
+  @Prop()
+  secretLastRotatedAt?: Date;
+
+  @Prop({ type: WebhookEndpointHealthSchema, default: () => ({ status: 'healthy', consecutiveFailures: 0 }) })
+  health!: WebhookEndpointHealthDocument;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const WebhookEndpointSchema = SchemaFactory.createForClass(WebhookEndpointDocument);
+WebhookEndpointSchema.index({ enabled: 1, updatedAt: -1 });
+WebhookEndpointSchema.index({ subscribedEventTypes: 1, enabled: 1 });
+
+@Schema({ _id: false })
+export class WebhookDeliveryAttemptDocument {
+  @Prop({ required: true, min: 1 })
+  attemptNumber!: number;
+
+  @Prop({ required: true, type: Date })
+  attemptedAt!: Date;
+
+  @Prop({ required: true, type: Date })
+  completedAt!: Date;
+
+  @Prop({ type: String, required: true, enum: ['succeeded', 'failed', 'timeout'] })
+  status!: 'succeeded' | 'failed' | 'timeout';
+
+  @Prop()
+  responseStatusCode?: number;
+
+  @Prop({ required: true, min: 0 })
+  durationMs!: number;
+
+  @Prop({ trim: true, maxlength: 4000 })
+  error?: string;
+
+  @Prop()
+  nextAttemptAt?: Date;
+}
+
+export const WebhookDeliveryAttemptSchema = SchemaFactory.createForClass(WebhookDeliveryAttemptDocument);
+
+@Schema({ _id: false })
+export class WebhookReplayActorDocument {
+  @Prop({ type: String, enum: PLATFORM_EVENT_ACTOR_TYPES })
+  type?: (typeof PLATFORM_EVENT_ACTOR_TYPES)[number];
+
+  @Prop()
+  participantId?: string;
+
+  @Prop()
+  userId?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  label?: string;
+
+  @Prop()
+  nodeId?: string;
+
+  @Prop()
+  workerId?: string;
+}
+
+export const WebhookReplayActorSchema = SchemaFactory.createForClass(WebhookReplayActorDocument);
+
+@Schema({ collection: 'webhook_deliveries', timestamps: true })
+export class WebhookDeliveryDocument {
+  @Prop({ required: true, index: true })
+  endpointId!: string;
+
+  @Prop({ required: true, index: true })
+  eventId!: string;
+
+  @Prop({ type: String, required: true, enum: PLATFORM_EVENT_TYPES, index: true })
+  eventType!: (typeof PLATFORM_EVENT_TYPES)[number];
+
+  @Prop({ index: true })
+  roomId?: string;
+
+  @Prop({ type: String, required: true, enum: WEBHOOK_DELIVERY_STATUSES, default: 'queued', index: true })
+  status!: (typeof WEBHOOK_DELIVERY_STATUSES)[number];
+
+  @Prop({ required: true, min: 0, default: 0 })
+  attemptCount!: number;
+
+  @Prop()
+  lastResponseStatusCode?: number;
+
+  @Prop({ trim: true, maxlength: 4000 })
+  lastError?: string;
+
+  @Prop({ required: true, type: Date, default: Date.now, index: true })
+  nextAttemptAt!: Date;
+
+  @Prop({ type: Date })
+  deliveredAt?: Date;
+
+  @Prop({ type: Date })
+  exhaustedAt?: Date;
+
+  @Prop({ type: Date })
+  cancelledAt?: Date;
+
+  @Prop()
+  replayOfDeliveryId?: string;
+
+  @Prop({ type: WebhookReplayActorSchema })
+  replayedBy?: WebhookReplayActorDocument;
+
+  @Prop()
+  lockedBy?: string;
+
+  @Prop({ type: Date, index: true })
+  lockedUntil?: Date;
+
+  @Prop({ type: [WebhookDeliveryAttemptSchema], default: [] })
+  attempts!: WebhookDeliveryAttemptDocument[];
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const WebhookDeliverySchema = SchemaFactory.createForClass(WebhookDeliveryDocument);
+WebhookDeliverySchema.index({ endpointId: 1, createdAt: -1 });
+WebhookDeliverySchema.index({ eventId: 1, endpointId: 1, createdAt: -1 });
+WebhookDeliverySchema.index({ roomId: 1, createdAt: -1 });
+WebhookDeliverySchema.index({ status: 1, nextAttemptAt: 1, lockedUntil: 1 });
+WebhookDeliverySchema.index({ endpointId: 1, status: 1, nextAttemptAt: 1 });
 
 @Schema({ collection: 'participants', timestamps: true })
 export class ParticipantDocument {

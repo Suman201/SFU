@@ -1,4 +1,13 @@
-import type { ConsumerLayerEvent, ProducerDynacastEvent, RoomFailureEvent, RoomQualityState, TransportQualityState } from '@native-sfu/contracts';
+import type {
+  ConsumerLayerEvent,
+  ProducerDynacastEvent,
+  RoomFailureEvent,
+  RoomIncidentState,
+  RoomIncidentTimelineEvent,
+  RoomQualityState,
+  RoomSnapshotBundleSummary,
+  TransportQualityState
+} from '@native-sfu/contracts';
 import { RoomOwnerRedirectException } from '../cluster/node-registry.service';
 import { RoomsGateway } from './rooms.gateway';
 
@@ -209,6 +218,94 @@ describe('RoomsGateway', () => {
       expect(response.data.available).toBe(true);
     });
 
+    it('publishes incident state, timeline, and snapshot updates onto the room signal path', async () => {
+      const { emitRoomIncidentState, emitRoomIncidentEvent, emitSnapshotGenerated, emissions, signals } = createGatewayHarness();
+      const state: RoomIncidentState = {
+        roomId: 'room-1',
+        status: 'recovering',
+        health: 'critical',
+        protected: true,
+        admissionsState: 'protected',
+        publishingState: 'paused',
+        underRecovery: true,
+        activeAlerts: [],
+        snapshotCount: 1,
+        updatedAt: '2026-06-19T00:00:00.000Z'
+      };
+      const event: RoomIncidentTimelineEvent = {
+        id: 'incident-1',
+        roomId: 'room-1',
+        type: 'manual_action',
+        severity: 'warn',
+        summary: 'Operator protected the room',
+        createdAt: '2026-06-19T00:00:01.000Z'
+      };
+      const snapshot: RoomSnapshotBundleSummary = {
+        bundleId: 'bundle-1',
+        roomId: 'room-1',
+        generatedAt: '2026-06-19T00:00:02.000Z',
+        triggerReason: 'manual_operator',
+        automatic: false,
+        health: 'critical',
+        status: 'recovering',
+        protected: true,
+        underRecovery: true,
+        degradedEntityCount: 3,
+        warningCount: 2
+      };
+
+      emitRoomIncidentState(state);
+      emitRoomIncidentEvent(event);
+      emitSnapshotGenerated(snapshot);
+      await flushPromises();
+
+      expect(
+        emissions.some((emission) => emission.target === 'room-1' && emission.event === 'room:incident-updated' && emission.payload === state)
+      ).toBe(true);
+      expect(
+        emissions.some((emission) => emission.target === 'room-1' && emission.event === 'room:incident-event' && emission.payload === event)
+      ).toBe(true);
+      expect(
+        emissions.some((emission) => emission.target === 'room-1' && emission.event === 'room:snapshot-generated' && emission.payload === snapshot)
+      ).toBe(true);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'room:incident-updated', state);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'room:incident-event', event);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'room:snapshot-generated', snapshot);
+    });
+
+    it('returns incident state over Socket.IO', async () => {
+      const { gateway, rooms } = createGatewayHarness();
+      const ack = jest.fn();
+
+      await gateway.getRoomIncidentState({ data: { participantId: 'host-1' } } as never, { roomId: 'room-1' }, ack);
+
+      expect(rooms.getRoomIncidentState).toHaveBeenCalledWith('room-1', 'host-1');
+      expect((ack.mock.calls[0]![0] as any).ok).toBe(true);
+      expect((ack.mock.calls[0]![0] as any).data.roomId).toBe('room-1');
+    });
+
+    it('runs a recovery action and broadcasts the updated room', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      const ack = jest.fn();
+
+      await gateway.runRoomRecoveryAction(
+        { data: { participantId: 'host-1' } } as never,
+        { roomId: 'room-1', action: 'protect_room', reason: 'Protect while congestion clears' },
+        ack
+      );
+
+      expect(rooms.runRoomRecoveryAction).toHaveBeenCalledWith(
+        { roomId: 'room-1', action: 'protect_room', reason: 'Protect while congestion clears' },
+        'host-1'
+      );
+      expect(
+        emissions.some((emission) => emission.target === 'room-1' && emission.event === 'room:updated' && (emission.payload as any).id === 'room-1')
+      ).toBe(true);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'room:updated', { id: 'room-1' });
+      expect((ack.mock.calls[0]![0] as any).ok).toBe(true);
+      expect((ack.mock.calls[0]![0] as any).data.action).toBe('protect_room');
+    });
+
     it('returns transport quality over Socket.IO', async () => {
       const { gateway, rooms } = createGatewayHarness();
       const ack = jest.fn();
@@ -227,6 +324,92 @@ describe('RoomsGateway', () => {
       const response = ack.mock.calls[0]![0] as any;
       expect(response.ok).toBe(true);
       expect(response.data.transportId).toBe('transport-1');
+    });
+
+    it('keeps pending joiners out of the Socket.IO room until they are admitted', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      const pendingParticipant = {
+        id: 'participant-2',
+        socketId: 'pending-socket',
+        admitted: false
+      };
+      rooms.joinRoom.mockResolvedValue({
+        room: {
+          id: 'room-1',
+          participants: [pendingParticipant]
+        },
+        participantId: 'participant-2',
+        admitted: false,
+        admissionDecision: {
+          scope: 'join',
+          health: 'degraded',
+          action: 'soft-throttle',
+          code: 'profile_policy',
+          message: 'New room joins should be slowed or manually admitted until the room stabilizes.',
+          triggeredBy: ['profile'],
+          updatedAt: '2026-06-19T00:00:00.000Z'
+        }
+      });
+      const socket: {
+        id: string;
+        data: {
+          user: { id: string; email: string; roles: string[] };
+          roomId?: string;
+          participantId?: string;
+        };
+        join: jest.Mock;
+      } = {
+        id: 'pending-socket',
+        data: { user: { id: 'user-2', email: 'viewer@example.test', roles: ['participant'] } },
+        join: jest.fn()
+      };
+      const ack = jest.fn();
+
+      await gateway.joinRoom(socket as never, { roomId: 'room-1', displayName: 'Viewer' }, ack);
+
+      expect(socket.join).not.toHaveBeenCalled();
+      expect(socket.data.roomId).toBe('room-1');
+      expect(socket.data.participantId).toBe('participant-2');
+      expect(emissions).toEqual([{ target: 'room-1', event: 'waiting-room:pending', payload: pendingParticipant }]);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'waiting-room:pending', pendingParticipant);
+      expect(ack.mock.calls[0]![0]?.ok).toBe(true);
+      expect(ack.mock.calls[0]![0]?.data?.participantId).toBe('participant-2');
+      expect(ack.mock.calls[0]![0]?.data?.admitted).toBe(false);
+    });
+
+    it('joins the admitted participant socket before broadcasting room admission events', async () => {
+      const { gateway, rooms, emissions, signals, socketRegistry } = createGatewayHarness();
+      const pendingSocket: { join: jest.Mock<Promise<void>, [string]> } = {
+        join: jest.fn(async (_roomId: string) => undefined)
+      };
+      const admittedParticipant = {
+        id: 'participant-2',
+        socketId: 'pending-socket',
+        admitted: true
+      };
+      const room = {
+        id: 'room-1',
+        participants: [admittedParticipant]
+      };
+      socketRegistry.set('pending-socket', pendingSocket as never);
+      rooms.admit.mockResolvedValue(room);
+      const socket = {
+        data: { participantId: 'host-1' }
+      };
+      const ack = jest.fn();
+
+      await gateway.admit(socket as never, { roomId: 'room-1', participantId: 'participant-2' }, ack);
+
+      expect(pendingSocket.join).toHaveBeenCalledWith('room-1');
+      expect(emissions).toEqual([
+        { target: 'room-1', event: 'participant:joined', payload: admittedParticipant },
+        { target: 'room-1', event: 'room:updated', payload: room }
+      ]);
+      expect(signals.publish.mock.calls).toEqual([
+        ['room-1', 'participant:joined', admittedParticipant],
+        ['room-1', 'room:updated', room]
+      ]);
+      expect(ack.mock.calls[0]![0]).toEqual({ ok: true, data: undefined });
     });
 
     it('returns redirect details and does not join socket room on remote-owned join', async () => {
@@ -267,10 +450,19 @@ interface GatewayRoomsHarness {
   onProducerScoreUpdated: jest.Mock;
   onTransportQualityUpdated: jest.Mock;
   onRoomQualityUpdated: jest.Mock;
+  onRoomQualitySummaryUpdated: jest.Mock;
+  onRoomIncidentStateUpdated: jest.Mock;
+  onRoomIncidentTimelineEvent: jest.Mock;
+  onRoomSnapshotGenerated: jest.Mock;
   onRoomFailed: jest.Mock;
   lookupRoomOwner: jest.Mock;
   getTransportQualityState: jest.Mock;
+  getRoomIncidentState: jest.Mock;
+  getRoomIncidentTimeline: jest.Mock;
+  getRoomSnapshotHistory: jest.Mock;
+  runRoomRecoveryAction: jest.Mock;
   joinRoom: jest.Mock;
+  admit: jest.Mock;
   producerDynacastSignalTarget: jest.Mock;
   recordDynacastSignalDelivery: jest.Mock;
   recordDynacastSignalFailure: jest.Mock;
@@ -286,13 +478,22 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
   emitConsumerLayer: (event: ConsumerLayerEvent) => void;
   emitTransportQuality: (state: TransportQualityState) => void;
   emitRoomQuality: (state: RoomQualityState) => void;
+  emitRoomQualitySummary: (state: unknown) => void;
+  emitRoomIncidentState: (state: RoomIncidentState) => void;
+  emitRoomIncidentEvent: (event: RoomIncidentTimelineEvent) => void;
+  emitSnapshotGenerated: (summary: RoomSnapshotBundleSummary) => void;
   emitRoomFailure: (event: RoomFailureEvent) => void;
   emissions: Array<{ target: string; event: string; payload: unknown }>;
+  socketRegistry: Map<string, { join: jest.Mock<Promise<void>, [string]> }>;
 } {
   let consumerLayerListener: ((event: ConsumerLayerEvent) => void) | undefined;
   let producerDynacastListener: ((event: ProducerDynacastEvent) => void) | undefined;
   let transportQualityListener: ((state: TransportQualityState) => void) | undefined;
   let roomQualityListener: ((state: RoomQualityState) => void) | undefined;
+  let roomQualitySummaryListener: ((state: unknown) => void) | undefined;
+  let roomIncidentStateListener: ((state: RoomIncidentState) => void) | undefined;
+  let roomIncidentEventListener: ((event: RoomIncidentTimelineEvent) => void) | undefined;
+  let snapshotGeneratedListener: ((summary: RoomSnapshotBundleSummary) => void) | undefined;
   let roomFailureListener: ((event: RoomFailureEvent) => void) | undefined;
   let signalListener:
     | ((signal: { sourceNodeId: string; roomId: string; event: string; payload: unknown[] }) => void)
@@ -314,6 +515,22 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
     }),
     onRoomQualityUpdated: jest.fn((listener: (state: RoomQualityState) => void) => {
       roomQualityListener = listener;
+      return jest.fn();
+    }),
+    onRoomQualitySummaryUpdated: jest.fn((listener: (state: unknown) => void) => {
+      roomQualitySummaryListener = listener;
+      return jest.fn();
+    }),
+    onRoomIncidentStateUpdated: jest.fn((listener: (state: RoomIncidentState) => void) => {
+      roomIncidentStateListener = listener;
+      return jest.fn();
+    }),
+    onRoomIncidentTimelineEvent: jest.fn((listener: (event: RoomIncidentTimelineEvent) => void) => {
+      roomIncidentEventListener = listener;
+      return jest.fn();
+    }),
+    onRoomSnapshotGenerated: jest.fn((listener: (summary: RoomSnapshotBundleSummary) => void) => {
+      snapshotGeneratedListener = listener;
       return jest.fn();
     }),
     onRoomFailed: jest.fn((listener: (event: RoomFailureEvent) => void) => {
@@ -359,7 +576,48 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
       pacingQueueDepth: 0,
       updatedAt: '2026-06-17T00:00:00.000Z'
     })),
+    getRoomIncidentState: jest.fn(async (roomId: string) => ({
+      roomId,
+      status: 'stable',
+      health: 'stable',
+      protected: false,
+      admissionsState: 'default',
+      publishingState: 'default',
+      underRecovery: false,
+      activeAlerts: [],
+      snapshotCount: 0,
+      updatedAt: '2026-06-19T00:00:00.000Z'
+    })),
+    getRoomIncidentTimeline: jest.fn(async (request: { roomId: string; limit?: number }) => ({
+      roomId: request.roomId,
+      events: [],
+      updatedAt: '2026-06-19T00:00:00.000Z'
+    })),
+    getRoomSnapshotHistory: jest.fn(async (request: { roomId: string; limit?: number }) => ({
+      roomId: request.roomId,
+      bundles: [],
+      updatedAt: '2026-06-19T00:00:00.000Z'
+    })),
+    runRoomRecoveryAction: jest.fn(async (request: { roomId: string; action: string }) => ({
+      roomId: request.roomId,
+      action: request.action,
+      executed: true,
+      room: { id: request.roomId },
+      incidentState: {
+        roomId: request.roomId,
+        status: 'recovering',
+        health: 'critical',
+        protected: true,
+        admissionsState: 'protected',
+        publishingState: 'protected',
+        underRecovery: true,
+        activeAlerts: [],
+        snapshotCount: 1,
+        updatedAt: '2026-06-19T00:00:00.000Z'
+      }
+    })),
     joinRoom: jest.fn(),
+    admit: jest.fn(),
     producerDynacastSignalTarget: jest.fn(async (_event: ProducerDynacastEvent, roomSocketCount: number) =>
       options.targetMissing
         ? undefined
@@ -382,13 +640,17 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
   };
   const gateway = new RoomsGateway(rooms as never, {} as never, signals as never);
   const emissions: Array<{ target: string; event: string; payload: unknown }> = [];
+  const socketRegistry = new Map<string, { join: jest.Mock<Promise<void>, [string]> }>();
   gateway.server = {
     to: (target: string) => ({
       emit: (event: string, ...payload: unknown[]) => emissions.push({ target, event, payload: payload.length <= 1 ? payload[0] : payload })
     }),
     in: () => ({
       fetchSockets: async () => [{ id: 'publisher-socket' }, { id: 'subscriber-a' }, { id: 'subscriber-b' }]
-    })
+    }),
+    sockets: {
+      sockets: socketRegistry
+    }
   } as never;
 
   return {
@@ -425,13 +687,38 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
       }
       roomQualityListener(state);
     },
+    emitRoomQualitySummary: (state: unknown) => {
+      if (!roomQualitySummaryListener) {
+        throw new Error('Room quality summary listener was not registered');
+      }
+      roomQualitySummaryListener(state);
+    },
+    emitRoomIncidentState: (state: RoomIncidentState) => {
+      if (!roomIncidentStateListener) {
+        throw new Error('Room incident state listener was not registered');
+      }
+      roomIncidentStateListener(state);
+    },
+    emitRoomIncidentEvent: (event: RoomIncidentTimelineEvent) => {
+      if (!roomIncidentEventListener) {
+        throw new Error('Room incident timeline listener was not registered');
+      }
+      roomIncidentEventListener(event);
+    },
+    emitSnapshotGenerated: (summary: RoomSnapshotBundleSummary) => {
+      if (!snapshotGeneratedListener) {
+        throw new Error('Room snapshot listener was not registered');
+      }
+      snapshotGeneratedListener(summary);
+    },
     emitRoomFailure: (event: RoomFailureEvent) => {
       if (!roomFailureListener) {
         throw new Error('Room failure listener was not registered');
       }
       roomFailureListener(event);
     },
-    emissions
+    emissions,
+    socketRegistry
   };
 }
 

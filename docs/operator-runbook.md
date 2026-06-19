@@ -84,3 +84,121 @@ When cross-node media setup fails:
    - `sfu_pipe_rtcp_packets_total`
 
 If diagnostics show repeated setup rejection or zero active transports, treat it as a control-plane or exposure problem before investigating browser behavior.
+
+## Eventing and Webhook Triage
+
+When an operator asks whether an event was emitted or whether a webhook actually fired:
+
+1. Query `GET /api/v1/events/log` or `GET /api/v1/events/rooms/<roomId>/log`.
+2. Confirm the expected event type, actor, and timestamp are present in the audit log.
+3. If the event exists, query `GET /api/v1/events/deliveries?eventId=<eventId>`.
+4. If no delivery exists:
+   - verify the endpoint is enabled
+   - verify the endpoint subscribes to that event type
+   - verify any room filter includes the room
+5. If delivery exists but failed:
+   - inspect `lastResponseStatusCode`
+   - inspect `lastError`
+   - inspect the attempt history
+6. If the delivery is `exhausted`, fix the receiver and replay either:
+   - `POST /api/v1/events/deliveries/<deliveryId>/replay`
+   - `POST /api/v1/events/log/<eventId>/endpoints/<endpointId>/replay`
+
+Useful metrics in this workflow:
+
+- `sfu_platform_events_emitted_total`
+- `sfu_platform_event_queries_total`
+- `sfu_webhook_delivery_attempts_total`
+- `sfu_webhook_deliveries_succeeded_total`
+- `sfu_webhook_deliveries_failed_total`
+- `sfu_webhook_deliveries_exhausted_total`
+- `sfu_webhook_deliveries_cancelled_total`
+- `sfu_webhook_retries_scheduled_total`
+- `sfu_webhook_replays_total`
+- `sfu_webhook_endpoint_count`
+- `sfu_webhook_delivery_queue`
+- `sfu_webhook_delivery_duration_ms`
+
+Delivery behavior notes:
+
+- signature header: `X-Native-Sfu-Signature`
+- timestamp header: `X-Native-Sfu-Timestamp`
+- event id header: `X-Native-Sfu-Event-Id`
+- delivery id header: `X-Native-Sfu-Delivery-Id`
+- event type header: `X-Native-Sfu-Event-Type`
+- non-2xx responses are failures
+- exhausted deliveries remain queryable until normal data-retention cleanup
+- replay creates a fresh delivery record; it does not mutate the original failed attempt history
+
+## Room Autopilot Triage
+
+When a host reports degraded room behavior or unexpected admission throttling:
+
+1. Check `GET /api/v1/rooms/<roomId>/quality-summary` with a host participant token.
+2. Check `GET /api/v1/media/diagnostics/rooms/<roomId>/incident-snapshot` with `X-Operations-Token`.
+3. Confirm the active room media profile matches intent:
+   - `meeting`: balanced collaboration default
+   - `webinar`: stronger protection for new publishers and higher screen-share weight
+   - `classroom`: screen-share friendly without fully suppressing discussion
+   - `support`: most aggressive room protection under congestion
+4. Inspect the protection decisions for:
+   - joins
+   - new publishing
+   - screen share
+   - whether publishing is being soft-throttled into a paused state instead of hard rejected
+5. Use the recommendation list to decide whether to:
+   - move to a more protective room profile
+   - pause or reduce non-essential screen sharing
+   - hold new publishers
+   - hold or manually admit new joins
+
+If host controls stop responding on a distributed room, check whether the browser is attached to a non-owner node. Owner-authoritative room-profile changes return `ROOM_REDIRECT` with `ownerUrl`; the frontend should reconnect to that owner before retrying the action.
+
+The most useful new metrics in this workflow are:
+
+- `sfu_room_profile_distribution`
+- `sfu_room_profile_changes_total`
+- `sfu_room_protection_decisions_total`
+- `sfu_degraded_room_count`
+- `sfu_room_protection_state`
+- `sfu_room_policy_recommendation_count`
+- `sfu_incident_snapshots_generated_total`
+
+If a room is repeatedly entering `critical` health while node or worker pressure is also elevated, treat it as an infrastructure-admission problem first and only tune room profiles second.
+
+## Room Incident Workflow
+
+When a host or operator reports an active room incident:
+
+1. Check `GET /api/v1/rooms/<roomId>/incident-state` with a host or co-host token.
+2. Check `GET /api/v1/rooms/<roomId>/incident-timeline` to confirm whether the issue is:
+   - repeated throttling
+   - new protection changes
+   - worker/media failure
+   - distributed owner visibility loss
+3. If you need an attachment-quality bundle, call `POST /api/v1/media/diagnostics/rooms/<roomId>/incident-snapshot` with `X-Operations-Token`.
+4. If the room is still taking damage from growth, run one or more recovery actions:
+   - `protect_room`
+   - `pause_new_publishing`
+   - `mark_operator_recovery`
+5. Once health returns to `stable`, reopen in this order:
+   - `reopen_admissions`
+   - `resume_new_publishing`
+   - `unprotect_room`
+   - `clear_recovery`
+
+Watch these metrics while doing it:
+
+- `sfu_room_recovery_actions_total`
+- `sfu_rooms_under_recovery`
+- `sfu_room_recovery_duration_ms`
+- `sfu_room_alert_events_total`
+- `sfu_room_incident_timeline_events_total`
+- `sfu_snapshot_bundles_generated_total`
+
+Operator notes:
+
+- `room:incident-updated`, `room:incident-event`, and `room:snapshot-generated` are live room signals, not just polled diagnostics.
+- room audit/event history is intentionally REST-backed rather than a new Socket.IO stream; use the room incident signals for live operator UX and the audit log for durable history and replay source-of-truth.
+- A failed room should usually be snapshotted before cleanup evidence ages out.
+- If a room is remotely owned and warning strings mention owner-quality visibility or remote-owner risk, investigate owner-node continuity before reopening traffic.

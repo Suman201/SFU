@@ -1,13 +1,15 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import type { ClusterNodeInfo } from '@native-sfu/contracts';
+import type { ClusterNodeInfo, RoomFailureEvent, RoomIncidentState, RoomIncidentTimelineState, RoomSnapshotHistoryState } from '@native-sfu/contracts';
 import { IceService, MediaService, type MediaWorkerPoolSnapshot, TurnCredentials } from '@native-sfu/nest-sfu';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { OperationsTokenGuard } from '../common/guards/operations-token.guard';
 import { NodeRegistryService } from '../cluster/node-registry.service';
 import { PipeCoordinatorService, type PipeCoordinatorHealthSnapshot, type PipeCoordinatorSnapshot } from '../cluster/pipe-coordinator.service';
+import { PlatformEventsService } from '../events/platform-events.service';
+import { RoomsService } from '../rooms/rooms.service';
 import {
   isLocalOrWildcardHost,
   isSupportedStunUri,
@@ -90,7 +92,9 @@ export class MediaController {
     private readonly media: MediaService,
     private readonly cluster: NodeRegistryService,
     private readonly pipeCoordinator: PipeCoordinatorService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    private readonly rooms: RoomsService,
+    private readonly platformEvents: PlatformEventsService
   ) {}
 
   @ApiBearerAuth()
@@ -210,21 +214,164 @@ export class MediaController {
   }
 
   @UseGuards(OperationsTokenGuard)
+  @Get('diagnostics/rooms/:roomId/incident-snapshot')
+  roomIncidentSnapshot(@Param('roomId') roomId: string) {
+    return this.rooms.exportRoomIncidentSnapshot(roomId);
+  }
+
+  @UseGuards(OperationsTokenGuard)
+  @Get('diagnostics/rooms/:roomId/incident-state')
+  roomIncidentState(@Param('roomId') roomId: string): Promise<RoomIncidentState> {
+    return this.rooms.getRoomIncidentStateForOperations(roomId);
+  }
+
+  @UseGuards(OperationsTokenGuard)
+  @Get('diagnostics/rooms/:roomId/incident-timeline')
+  roomIncidentTimeline(@Param('roomId') roomId: string): Promise<RoomIncidentTimelineState> {
+    return this.rooms.getRoomIncidentTimelineForOperations(roomId);
+  }
+
+  @UseGuards(OperationsTokenGuard)
+  @Get('diagnostics/rooms/:roomId/snapshot-history')
+  roomSnapshotHistory(@Param('roomId') roomId: string): Promise<RoomSnapshotHistoryState> {
+    return this.rooms.getRoomSnapshotHistoryForOperations(roomId);
+  }
+
+  @UseGuards(OperationsTokenGuard)
+  @Get('diagnostics/rooms/snapshot-bundles/:bundleId')
+  roomSnapshotBundle(@Param('bundleId') bundleId: string) {
+    return this.rooms.getRoomSnapshotBundle(bundleId);
+  }
+
+  @UseGuards(OperationsTokenGuard)
+  @Post('diagnostics/rooms/:roomId/incident-snapshot')
+  async generateRoomIncidentSnapshot(@Param('roomId') roomId: string, @Body() body: { reason?: string }) {
+    const bundle = await this.rooms.generateRoomSnapshotBundleForOperations(roomId, body?.reason);
+    await this.platformEvents.appendEvent(
+      {
+        type: 'operator.action.executed',
+        roomId,
+        actor: {
+          type: 'operator',
+          label: 'operations-token'
+        },
+        payload: {
+          action: 'incident_snapshot_generated',
+          scope: 'room',
+          roomId,
+          outcome: 'executed',
+          reason: body?.reason
+        }
+      },
+      { deliverWebhook: false }
+    );
+    return bundle;
+  }
+
+  @UseGuards(OperationsTokenGuard)
+  @Post('diagnostics/rooms/:roomId/fail')
+  async injectRoomFailure(
+    @Param('roomId') roomId: string,
+    @Body() body: { reason?: RoomFailureEvent['reason']; message?: string; recoverable?: boolean; workerId?: string }
+  ): Promise<{ ok: true }> {
+    if (this.config.get<string>('app.nodeEnv', 'development') === 'production') {
+      throw new ForbiddenException('Room failure injection is disabled in production');
+    }
+    await this.rooms.injectRoomFailureForOperations(roomId, body);
+    await this.platformEvents.appendEvent(
+      {
+        type: 'operator.action.executed',
+        roomId,
+        actor: {
+          type: 'operator',
+          label: 'operations-token'
+        },
+        payload: {
+          action: 'room_failure_injected',
+          scope: 'room',
+          roomId,
+          outcome: 'executed',
+          reason: body?.message ?? body?.reason
+        }
+      },
+      { deliverWebhook: false }
+    );
+    return { ok: true };
+  }
+
+  @UseGuards(OperationsTokenGuard)
+  @Get('diagnostics/transports/:transportId/incident-snapshot')
+  transportIncidentSnapshot(@Param('transportId') transportId: string) {
+    return this.rooms.exportTransportIncidentSnapshot(transportId);
+  }
+
+  @UseGuards(OperationsTokenGuard)
   @Post('workers/:workerId/drain')
-  drainWorker(@Param('workerId') workerId: string, @Body() body: { forceAfterMs?: number }): Promise<MediaWorkerPoolSnapshot> {
-    return this.media.drainMediaWorker(workerId, body?.forceAfterMs);
+  async drainWorker(@Param('workerId') workerId: string, @Body() body: { forceAfterMs?: number }): Promise<MediaWorkerPoolSnapshot> {
+    const snapshot = await this.media.drainMediaWorker(workerId, body?.forceAfterMs);
+    await this.platformEvents.appendEvent(
+      {
+        type: 'operator.action.executed',
+        actor: {
+          type: 'operator',
+          label: 'operations-token'
+        },
+        payload: {
+          action: 'worker_drain_started',
+          scope: 'worker',
+          workerId,
+          outcome: 'executed',
+          reason: body?.forceAfterMs !== undefined ? `force_after_ms=${body.forceAfterMs}` : undefined
+        }
+      },
+      { deliverWebhook: false }
+    );
+    return snapshot;
   }
 
   @UseGuards(OperationsTokenGuard)
   @Post('node/drain')
-  drainNode(@Body() body: { reason?: string }): Promise<ClusterNodeInfo> {
-    return this.cluster.beginDraining(body?.reason ?? 'api');
+  async drainNode(@Body() body: { reason?: string }): Promise<ClusterNodeInfo> {
+    const node = await this.cluster.beginDraining(body?.reason ?? 'api');
+    await this.platformEvents.appendEvent(
+      {
+        type: 'operator.action.executed',
+        actor: {
+          type: 'operator',
+          label: 'operations-token'
+        },
+        payload: {
+          action: 'node_drain_started',
+          scope: 'node',
+          outcome: 'executed',
+          reason: body?.reason ?? 'api'
+        }
+      },
+      { deliverWebhook: false }
+    );
+    return node;
   }
 
   @UseGuards(OperationsTokenGuard)
   @Post('node/undrain')
-  undrainNode(): Promise<ClusterNodeInfo> {
-    return this.cluster.endDraining();
+  async undrainNode(): Promise<ClusterNodeInfo> {
+    const node = await this.cluster.endDraining();
+    await this.platformEvents.appendEvent(
+      {
+        type: 'operator.action.executed',
+        actor: {
+          type: 'operator',
+          label: 'operations-token'
+        },
+        payload: {
+          action: 'node_drain_cleared',
+          scope: 'node',
+          outcome: 'executed'
+        }
+      },
+      { deliverWebhook: false }
+    );
+    return node;
   }
 }
 

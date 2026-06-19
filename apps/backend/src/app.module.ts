@@ -11,6 +11,7 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { appConfig } from './config/app.config';
 import { validateConfig } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
+import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
 import { MediaApiModule } from './media/media-api.module';
 import { MetricsModule } from './metrics/metrics.module';
@@ -66,6 +67,7 @@ import { ClusterModule } from './cluster/cluster.module';
     DatabaseModule,
     RedisModule,
     MetricsModule,
+    EventsModule,
     NestSfuModule.forRootAsync({
       imports: [ConfigModule, MetricsModule],
       inject: [ConfigService, MetricsService],

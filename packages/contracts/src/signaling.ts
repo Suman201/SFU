@@ -13,6 +13,8 @@ import type {
   GetConsumerQualityRequest,
   GetProducerQualityRequest,
   GetRoomQualityRequest,
+  RoomIncidentTimelineState,
+  RoomSnapshotHistoryState,
   GetTransportQualityRequest,
   ProducerQualityState,
   RoomQualityState,
@@ -22,9 +24,22 @@ import type {
 import type { Participant, ParticipantPatch } from './participants.js';
 import type { Permissions } from './permissions.js';
 import type { CreateProducerRequest, Producer, ProducerDynacastControlFailureReport, ProducerDynacastEvent, ProducerLayerState } from './producers.js';
-import type { CreateRoomRequest, JoinRoomRequest, JoinRoomResponse, Room, RoomFailureEvent } from './rooms.js';
+import type {
+  CreateRoomRequest,
+  GetRoomIncidentTimelineRequest,
+  GetRoomSnapshotHistoryRequest,
+  JoinRoomRequest,
+  JoinRoomResponse,
+  Room,
+  RoomFailureEvent,
+  RoomIncidentState,
+  RoomRecoveryActionResult,
+  RunRoomRecoveryActionRequest,
+  UpdateRoomMediaProfileRequest
+} from './rooms.js';
 import type { RoomOwnerInfo, RoomOwnerLookupResponse } from './cluster.js';
 import type { DtlsParameters, IceCandidate, IceParameters, TransportOptions } from './transport.js';
+import type { RoomQualitySummaryState } from './metrics.js';
 
 export interface ClientToServerEvents {
   'room:create': (request: CreateRoomRequest, ack: Ack<Room>) => void;
@@ -34,6 +49,7 @@ export interface ClientToServerEvents {
   'room:close': (request: { roomId: string }, ack: Ack<void>) => void;
   'room:lock': (request: { roomId: string }, ack: Ack<void>) => void;
   'room:unlock': (request: { roomId: string }, ack: Ack<void>) => void;
+  'room:update-media-profile': (request: UpdateRoomMediaProfileRequest, ack: Ack<Room>) => void;
   'room:admit': (request: { roomId: string; participantId: string }, ack: Ack<void>) => void;
   'room:reject': (request: { roomId: string; participantId: string }, ack: Ack<void>) => void;
   'transport:create': (request: { roomId: string }, ack: Ack<TransportOptions>) => void;
@@ -58,6 +74,11 @@ export interface ClientToServerEvents {
   'consumer:get-quality': (request: GetConsumerQualityRequest, ack: Ack<ConsumerQualityState>) => void;
   'producer:get-quality': (request: GetProducerQualityRequest, ack: Ack<ProducerQualityState>) => void;
   'room:get-quality': (request: GetRoomQualityRequest, ack: Ack<RoomQualityState>) => void;
+  'room:get-quality-summary': (request: GetRoomQualityRequest, ack: Ack<RoomQualitySummaryState>) => void;
+  'room:get-incident-state': (request: GetRoomQualityRequest, ack: Ack<RoomIncidentState>) => void;
+  'room:get-incident-timeline': (request: GetRoomIncidentTimelineRequest, ack: Ack<RoomIncidentTimelineState>) => void;
+  'room:get-snapshot-history': (request: GetRoomSnapshotHistoryRequest, ack: Ack<RoomSnapshotHistoryState>) => void;
+  'room:run-recovery-action': (request: RunRoomRecoveryActionRequest, ack: Ack<RoomRecoveryActionResult>) => void;
   'transport:get-quality': (request: GetTransportQualityRequest, ack: Ack<TransportQualityState>) => void;
   'consumer:close': (request: { consumerId: string }, ack: Ack<void>) => void;
   'permission:update': (request: { roomId: string; participantId: string; permissions: Partial<Permissions> }, ack: Ack<void>) => void;
@@ -76,6 +97,9 @@ export interface ServerToClientEvents {
   'room:closed': (roomId: string) => void;
   'room:failed': (event: RoomFailureEvent) => void;
   'room:owner-changed': (owner: RoomOwnerInfo) => void;
+  'room:incident-updated': (state: RoomIncidentState) => void;
+  'room:incident-event': (state: RoomIncidentTimelineState['events'][number]) => void;
+  'room:snapshot-generated': (summary: RoomSnapshotHistoryState['bundles'][number]) => void;
   'participant:joined': (participant: Participant) => void;
   'participant:left': (participantId: string) => void;
   'participant:updated': (participantId: string, patch: ParticipantPatch) => void;
@@ -95,6 +119,7 @@ export interface ServerToClientEvents {
   'consumer:score-updated': (state: ConsumerQualityState) => void;
   'transport:quality-updated': (state: TransportQualityState) => void;
   'room:quality-updated': (state: RoomQualityState) => void;
+  'room:quality-summary-updated': (state: RoomQualitySummaryState) => void;
   'consumer:layers-changed': (event: ConsumerLayerEvent) => void;
   'consumer:layers-switching': (event: ConsumerLayerEvent) => void;
   'consumer:layers-unavailable': (event: ConsumerLayerEvent) => void;

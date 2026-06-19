@@ -14,9 +14,25 @@ import {
   CreateProducerRequest,
   CreateRoomRequest,
   DEFAULT_PARTICIPANT_PERMISSIONS,
+  GetRoomIncidentTimelineRequest,
+  GetRoomSnapshotHistoryRequest,
   IceCandidate,
+  RoomIncidentActor,
+  RoomIncidentState,
+  RoomIncidentSnapshotBundle,
+  RoomIncidentTimelineEvent,
+  RoomIncidentTimelineState,
+  RoomRecoveryActionResult,
+  RoomRecoveryActionType,
+  RoomRecoveryWorkflow,
+  RoomSnapshotBundleSummary,
+  RoomSnapshotHistoryState,
+  RoomSnapshotTriggerReason,
   JoinRoomRequest,
   JoinRoomResponse,
+  IncidentConsumerSummary,
+  IncidentProducerSummary,
+  IncidentTransportSummary,
   Participant,
   Permissions,
   Producer,
@@ -26,15 +42,27 @@ import {
   ProducerDynacastState,
   ProducerSvcState,
   ProducerLayerState,
+  PlatformEventActor,
+  PlatformEventListResponse,
+  PlatformEventQuery,
   RoomQualityState,
+  RoomQualitySummaryState,
+  RoomOperatorAlert,
+  RoomIncidentSnapshot,
   RoomFailureEvent,
+  RoomHealthState,
+  RoomMediaProfile,
+  RoomMediaProfileId,
+  RoomAutopilotDecision,
   Role,
   RtpLayerSelection,
   RtpParameters,
+  TransportIncidentSnapshot,
   SvcLayerSelection,
   TransportQualityState,
   Room,
   TransportOptions,
+  UpdateRoomMediaProfileRequest,
   VIEWER_PERMISSIONS
 } from '@native-sfu/contracts';
 import type { RoomOwnerLookupResponse } from '@native-sfu/contracts';
@@ -52,14 +80,29 @@ import {
   ProducerDocument,
   ProducerMongoDocument,
   RoomDocument,
-  RoomMongoDocument
+  RoomIncidentEventDocument,
+  RoomIncidentEventMongoDocument,
+  RoomIncidentStateDocument,
+  RoomMongoDocument,
+  RoomOperatorAlertDocument,
+  RoomSnapshotBundleDocument,
+  RoomSnapshotBundleMongoDocument
 } from '../database/schemas';
 import { NodeRegistryService } from '../cluster/node-registry.service';
 import { PipeCoordinatorService } from '../cluster/pipe-coordinator.service';
 import { MediaService, type MediaWorkerRoomFailureEvent } from '@native-sfu/nest-sfu';
 import { MetricsService } from '../metrics/metrics.service';
 import { RedisService } from '../redis/redis.service';
+import { PlatformEventsService } from '../events/platform-events.service';
 import { RoomSignalService, type RoomSignalEnvelope } from './room-signal.service';
+import {
+  applyProfileBitratePolicy,
+  buildRoomQualitySummary,
+  defaultConsumerLayers,
+  defaultConsumerPriority,
+  defaultProducerPriority,
+  resolveRoomMediaProfile
+} from './room-policy';
 
 export interface SocketUser {
   id: string;
@@ -77,10 +120,19 @@ const ROOM_QUALITY_SIGNAL_STALE_MS = 15_000;
 const DISTRIBUTED_QUALITY_STALE_MS = 15_000;
 const OBSERVABILITY_TOMBSTONE_TTL_MS = 60_000;
 
+class RoomPolicyViolationError extends ForbiddenException {
+  constructor(message: string, readonly details: RoomAutopilotDecision) {
+    super(message);
+  }
+}
+
 export interface RoomDiagnosticsState {
   room: Room;
   owner: RoomOwnerLookupResponse;
   quality: RoomQualityState;
+  incidentState: RoomIncidentState;
+  recentTimeline: RoomIncidentTimelineEvent[];
+  snapshotHistory: RoomSnapshotBundleSummary[];
   qualitySource: 'local-owner' | 'remote-signal-cache' | 'local-fallback';
   ownerAuthoritativeQuality: boolean;
   qualityAgeMs: number;
@@ -147,6 +199,11 @@ export interface RoomAdaptiveDiagnosticsState {
   warnings: string[];
 }
 
+interface RoomPolicyContext {
+  room: Room;
+  summary: RoomQualitySummaryState;
+}
+
 interface DistributedStateEntry<T extends { roomId: string; updatedAt: string }> {
   state: T;
   observedAt: number;
@@ -177,9 +234,16 @@ export class RoomsService {
   private readonly producerQualityEventListeners = new Set<(state: ProducerQualityState) => void>();
   private readonly transportQualityEventListeners = new Set<(state: TransportQualityState) => void>();
   private readonly roomQualityEventListeners = new Set<(state: RoomQualityState) => void>();
+  private readonly roomQualitySummaryEventListeners = new Set<(state: RoomQualitySummaryState) => void>();
   private readonly roomFailureEventListeners = new Set<(event: RoomFailureEvent) => void>();
+  private readonly roomIncidentStateEventListeners = new Set<(state: RoomIncidentState) => void>();
+  private readonly roomIncidentTimelineEventListeners = new Set<(event: RoomIncidentTimelineEvent) => void>();
+  private readonly roomSnapshotGeneratedEventListeners = new Set<(summary: RoomSnapshotBundleSummary) => void>();
+  private readonly roomQualitySummaryStates = new Map<string, RoomQualitySummaryState>();
   private readonly distributedRoomQualityStates = new Map<string, RoomQualityState>();
   private readonly distributedRoomQualityObservedAt = new Map<string, number>();
+  private readonly distributedRoomQualitySummaryStates = new Map<string, RoomQualitySummaryState>();
+  private readonly distributedRoomQualitySummaryObservedAt = new Map<string, number>();
   private readonly distributedConsumerQualityStates = new Map<string, DistributedStateEntry<ConsumerQualityState>>();
   private readonly distributedProducerQualityStates = new Map<string, DistributedStateEntry<ProducerQualityState>>();
   private readonly distributedTransportQualityStates = new Map<string, DistributedStateEntry<TransportQualityState>>();
@@ -187,9 +251,12 @@ export class RoomsService {
   private readonly distributedParticipantTombstones = new Map<string, number>();
   private readonly distributedConsumerTombstones = new Map<string, number>();
   private readonly distributedProducerTombstones = new Map<string, number>();
+  private readonly appliedRoomProfileSignatures = new Map<string, string>();
 
   constructor(
     @InjectModel(RoomDocument.name) private readonly rooms: Model<RoomMongoDocument>,
+    @InjectModel(RoomIncidentEventDocument.name) private readonly roomIncidentEvents: Model<RoomIncidentEventMongoDocument>,
+    @InjectModel(RoomSnapshotBundleDocument.name) private readonly roomSnapshotBundles: Model<RoomSnapshotBundleMongoDocument>,
     @InjectModel(ParticipantDocument.name) private readonly participants: Model<ParticipantMongoDocument>,
     @InjectModel(PermissionDocument.name) private readonly permissions: Model<PermissionMongoDocument>,
     @InjectModel(ProducerDocument.name) private readonly producers: Model<ProducerMongoDocument>,
@@ -201,7 +268,8 @@ export class RoomsService {
     private readonly nodeRegistry: NodeRegistryService,
     private readonly pipeCoordinator: PipeCoordinatorService,
     private readonly metrics: MetricsService,
-    private readonly signals: RoomSignalService
+    private readonly signals: RoomSignalService,
+    private readonly platformEvents: PlatformEventsService
   ) {
     this.media.onConsumerLayerEvent((event) => {
       void this.handleConsumerLayerEvent(event);
@@ -251,9 +319,29 @@ export class RoomsService {
     return () => this.roomQualityEventListeners.delete(listener);
   }
 
+  onRoomQualitySummaryUpdated(listener: (state: RoomQualitySummaryState) => void): () => void {
+    this.roomQualitySummaryEventListeners.add(listener);
+    return () => this.roomQualitySummaryEventListeners.delete(listener);
+  }
+
   onRoomFailed(listener: (event: RoomFailureEvent) => void): () => void {
     this.roomFailureEventListeners.add(listener);
     return () => this.roomFailureEventListeners.delete(listener);
+  }
+
+  onRoomIncidentStateUpdated(listener: (state: RoomIncidentState) => void): () => void {
+    this.roomIncidentStateEventListeners.add(listener);
+    return () => this.roomIncidentStateEventListeners.delete(listener);
+  }
+
+  onRoomIncidentTimelineEvent(listener: (event: RoomIncidentTimelineEvent) => void): () => void {
+    this.roomIncidentTimelineEventListeners.add(listener);
+    return () => this.roomIncidentTimelineEventListeners.delete(listener);
+  }
+
+  onRoomSnapshotGenerated(listener: (summary: RoomSnapshotBundleSummary) => void): () => void {
+    this.roomSnapshotGeneratedEventListeners.add(listener);
+    return () => this.roomSnapshotGeneratedEventListeners.delete(listener);
   }
 
   async createRoom(user: SocketUser, socketId: string, request: CreateRoomRequest): Promise<Room> {
@@ -273,6 +361,11 @@ export class RoomsService {
         maxParticipants: request.maxParticipants ?? 100,
         recordingEnabled: false,
         chatEnabled: true
+      },
+      mediaProfile: {
+        id: request.mediaProfileId ?? 'meeting',
+        updatedAt: new Date(),
+        updatedByParticipantId: hostParticipantId
       },
       mediaState: { status: 'active' }
     });
@@ -297,6 +390,16 @@ export class RoomsService {
     await roomDoc.save();
     await this.redis.markPresence(roomDoc.id, participant.id, socketId);
     this.metrics.activeRooms.inc();
+    this.metrics.roomProfileDistribution.labels(roomDoc.mediaProfile?.id ?? 'meeting').inc();
+    await this.platformEvents.appendEvent({
+      type: 'room.created',
+      roomId: roomDoc.id,
+      actor: this.platformActorFromParticipant(participant),
+      payload: {
+        room: this.platformRoomReference(roomDoc),
+        host: this.platformParticipantReference(participant)
+      }
+    });
     return this.getRoom(roomDoc.id);
   }
 
@@ -336,17 +439,65 @@ export class RoomsService {
       this.metrics.roomAdmissionRejections.labels('invite_required').inc();
       throw new ForbiddenException('Invite required');
     }
+    const policyContext = await this.getRoomPolicyContext(room.id, room);
+    const joinDecision = policyContext.summary.protections.join;
+    this.recordProtectionDecision(room.mediaProfile?.id ?? 'meeting', joinDecision);
+    if (joinDecision.action === 'reject') {
+      await this.recordRoomIncidentEvent({
+        roomId: room.id,
+        type: 'join_rejected',
+        severity: 'critical',
+        summary: joinDecision.message,
+        actor: {
+          type: 'participant',
+          userId: user.id,
+          label: request.displayName
+        }
+      });
+      this.metrics.roomAdmissionRejections.labels(`policy_${joinDecision.code}`).inc();
+      throw new RoomPolicyViolationError(joinDecision.message, joinDecision);
+    }
     const role = request.asViewer ? Role.VIEWER : Role.PARTICIPANT;
     const basePermissions = role === Role.VIEWER ? VIEWER_PERMISSIONS : DEFAULT_PARTICIPANT_PERMISSIONS;
-    const admitted = !(room.settings.waitingRoomEnabled || room.settings.joinApprovalRequired);
+    const admitted = !(room.settings.waitingRoomEnabled || room.settings.joinApprovalRequired || joinDecision.action === 'soft-throttle');
     const participant = await this.createParticipant(room.id, user, socketId, role, basePermissions, admitted, request.displayName);
+    if (!admitted || joinDecision.action === 'soft-throttle') {
+      await this.recordRoomIncidentEvent({
+        roomId: room.id,
+        type: 'join_throttled',
+        severity: 'warn',
+        summary: joinDecision.message,
+        actor: {
+          type: 'participant',
+          participantId: participant.id,
+          userId: user.id,
+          label: request.displayName
+        },
+        relatedParticipantId: participant.id
+      });
+    }
     await this.redis.markPresence(room.id, participant.id, socketId);
     this.metrics.roomJoinDuration.observe(performance.now() - startedAt);
     const updatedRoom = await this.getRoom(room.id);
+    await this.platformEvents.appendEvent({
+      type: 'room.joined',
+      roomId: room.id,
+      actor: this.platformActorFromParticipant(participant),
+      payload: {
+        room: {
+          roomId: room.id,
+          ...(room.name ? { name: room.name } : {})
+        },
+        participant: this.platformParticipantReference(participant),
+        admitted,
+        asViewer: role === Role.VIEWER
+      }
+    });
     return {
       room: updatedRoom,
       participantId: participant.id,
-      admitted
+      admitted,
+      admissionDecision: joinDecision
     };
   }
 
@@ -414,19 +565,62 @@ export class RoomsService {
     }
     this.metrics.activeParticipants.labels(roomId).dec();
     const room = await this.rooms.findById(roomId);
+    const roomReference = room
+      ? {
+          roomId: room.id,
+          ...(room.name ? { name: room.name } : {})
+        }
+      : { roomId };
+    const actor = this.platformActorFromParticipant(participant);
+    const participantReference = this.platformParticipantReference(participant);
     if (ownerLookup.local && room?.hostId === participantId) {
       await this.rooms.updateOne({ _id: roomId }, { closedAt: new Date() });
+      this.cleanupRoomAutopilotState(roomId);
+      this.metrics.roomProfileDistribution.labels(room.mediaProfile?.id ?? 'meeting').dec();
       this.clearDistributedRoomObservability(roomId);
       await this.nodeRegistry.releaseRoom(roomId);
       this.metrics.activeRooms.dec();
+      await this.platformEvents.appendEvent({
+        type: 'room.left',
+        roomId,
+        actor,
+        payload: {
+          room: roomReference,
+          participant: participantReference,
+          closedRoom: true
+        }
+      });
+      await this.platformEvents.appendEvent({
+        type: 'room.closed',
+        roomId,
+        actor,
+        payload: {
+          room: roomReference,
+          participantCount: 0
+        }
+      });
       return { closed: true };
     }
+    await this.platformEvents.appendEvent({
+      type: 'room.left',
+      roomId,
+      actor,
+      payload: {
+        room: roomReference,
+        participant: participantReference,
+        closedRoom: false
+      }
+    });
     return { closed: false };
   }
 
   async closeRoom(roomId: string, actorParticipantId: string): Promise<void> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
-    await this.assertModerator(roomId, actorParticipantId, true);
+    const actor = await this.assertModerator(roomId, actorParticipantId, true);
+    const room = await this.rooms.findById(roomId);
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
     const activeParticipants = await this.participants.find({ roomId, leftAt: { $exists: false } });
     const localNodeId = this.nodeRegistry.localNodeId();
     await this.rooms.updateOne({ _id: roomId }, { closedAt: new Date() });
@@ -437,6 +631,8 @@ export class RoomsService {
       await this.pipeCoordinator.closeRoomBindings(roomId);
     }
     const cleanup = normalizeMediaRoomCleanupSummary(await this.media.closeRoom(roomId));
+    this.cleanupRoomAutopilotState(roomId);
+    this.metrics.roomProfileDistribution.labels(room.mediaProfile?.id ?? 'meeting').dec();
     this.clearDistributedRoomObservability(roomId);
     await this.nodeRegistry.releaseRoom(roomId);
     for (const participant of activeParticipants) {
@@ -447,26 +643,134 @@ export class RoomsService {
     }
     this.applyLocalRoomCleanupMetrics(roomId, cleanup, { includeParticipants: false });
     this.metrics.activeRooms.dec();
+    await this.platformEvents.appendEvent({
+      type: 'room.closed',
+      roomId,
+      actor: this.platformActorFromParticipantContext(actor, actorParticipantId, 'operator'),
+      payload: {
+        room: {
+          roomId: room.id,
+          ...(room.name ? { name: room.name } : {})
+        },
+        participantCount: 0
+      }
+    });
   }
 
   async setLocked(roomId: string, actorParticipantId: string, locked: boolean): Promise<Room> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
-    await this.assertModerator(roomId, actorParticipantId, true);
+    const actor = await this.assertModerator(roomId, actorParticipantId, true);
     await this.rooms.updateOne({ _id: roomId }, { 'settings.locked': locked });
-    return this.getRoom(roomId);
+    const room = await this.getRoom(roomId);
+    await this.platformEvents.appendEvent({
+      type: locked ? 'room.locked' : 'room.unlocked',
+      roomId,
+      actor: this.platformActorFromParticipantContext(actor, actorParticipantId, 'operator'),
+      payload: {
+        room: {
+          roomId,
+          ...(room.name ? { name: room.name } : {})
+        },
+        locked
+      }
+    });
+    return room;
   }
 
   async admit(roomId: string, actorParticipantId: string, participantId: string): Promise<Room> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
-    await this.assertModerator(roomId, actorParticipantId, false);
+    const actor = await this.assertModerator(roomId, actorParticipantId, false);
+    const activeCount = await this.participants.countDocuments({ roomId, admitted: true, leftAt: { $exists: false } });
+    const room = await this.rooms.findById(roomId);
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+    if (activeCount >= room.settings.maxParticipants) {
+      this.metrics.roomAdmissionRejections.labels('room_full').inc();
+      throw new ForbiddenException('Room is full');
+    }
+    const policyContext = await this.getRoomPolicyContext(roomId, room);
+    const joinDecision = policyContext.summary.protections.join;
+    this.recordProtectionDecision(room.mediaProfile?.id ?? 'meeting', joinDecision);
+    if (joinDecision.action === 'reject') {
+      await this.recordRoomIncidentEvent({
+        roomId,
+        type: 'approval_action',
+        severity: 'critical',
+        summary: 'A pending participant could not be admitted because room protections still reject new joins.',
+        actor: {
+          type: 'operator',
+          participantId: actorParticipantId
+        },
+        relatedParticipantId: participantId
+      });
+      this.metrics.roomAdmissionRejections.labels(`policy_${joinDecision.code}`).inc();
+      throw new RoomPolicyViolationError(joinDecision.message, joinDecision);
+    }
     await this.participants.updateOne({ _id: participantId, roomId }, { admitted: true, $unset: { leftAt: '' } });
-    return this.getRoom(roomId);
+    await this.recordRoomIncidentEvent({
+      roomId,
+      type: 'approval_action',
+      severity: 'info',
+      summary: 'A pending participant was admitted to the room.',
+      actor: {
+        type: 'operator',
+        participantId: actorParticipantId
+      },
+      relatedParticipantId: participantId
+    });
+    const [updatedRoom, admittedParticipant] = await Promise.all([
+      this.getRoom(roomId),
+      this.participants.findById(participantId)
+    ]);
+    if (admittedParticipant) {
+      await this.platformEvents.appendEvent({
+        type: 'participant.admitted',
+        roomId,
+        actor: this.platformActorFromParticipant(actor, 'operator'),
+        payload: {
+          room: {
+            roomId,
+            ...(updatedRoom.name ? { name: updatedRoom.name } : {})
+          },
+          participant: this.platformParticipantReference(admittedParticipant)
+        }
+      });
+    }
+    return updatedRoom;
   }
 
   async reject(roomId: string, actorParticipantId: string, participantId: string): Promise<void> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
-    await this.assertModerator(roomId, actorParticipantId, false);
+    const actor = await this.assertModerator(roomId, actorParticipantId, false);
+    const participant = await this.participants.findById(participantId);
     await this.participants.updateOne({ _id: participantId, roomId }, { leftAt: new Date() });
+    await this.recordRoomIncidentEvent({
+      roomId,
+      type: 'approval_action',
+      severity: 'warn',
+      summary: 'A pending participant was rejected from the room.',
+      actor: {
+        type: 'operator',
+        participantId: actorParticipantId
+      },
+      relatedParticipantId: participantId
+    });
+    if (participant) {
+      const room = await this.rooms.findById(roomId);
+      await this.platformEvents.appendEvent({
+        type: 'participant.rejected',
+        roomId,
+        actor: this.platformActorFromParticipant(actor, 'operator'),
+        payload: {
+          room: {
+            roomId,
+            ...(room?.name ? { name: room.name } : {})
+          },
+          participant: this.platformParticipantReference(participant)
+        }
+      });
+    }
   }
 
   async createTransport(roomId: string, participantId: string): Promise<TransportOptions> {
@@ -512,6 +816,13 @@ export class RoomsService {
     }
     const participant = await this.assertParticipant(request.roomId, participantId);
     const permission = await this.getPermissions(request.roomId, participantId);
+    const policyContext = await this.getRoomPolicyContext(request.roomId);
+    const profile = policyContext.room.mediaProfile;
+    const rtpParameters = applyProfileBitratePolicy(profile, request.kind, request.rtpParameters);
+    const publishDecision = request.kind === 'screen'
+      ? policyContext.summary.protections.screenShare
+      : policyContext.summary.protections.publish;
+    this.recordProtectionDecision(profile.id, publishDecision);
     if (request.kind === 'audio' && !permission.canPublishAudio) {
       this.metrics.roomAdmissionRejections.labels('publish_audio_denied').inc();
       throw new ForbiddenException('Audio publishing denied');
@@ -524,8 +835,43 @@ export class RoomsService {
       this.metrics.roomAdmissionRejections.labels('publish_screen_denied').inc();
       throw new ForbiddenException('Screen sharing denied');
     }
-    await this.media.bindProducer(request.transportId, participantId, request.rtpParameters);
-    const priority = normalizeConsumerPriority(request.priority);
+    if (request.kind === 'screen' && publishDecision.action === 'reject') {
+      await this.recordRoomIncidentEvent({
+        roomId: request.roomId,
+        type: 'screen_share_rejected',
+        severity: 'critical',
+        summary: publishDecision.message,
+        actor: {
+          type: 'participant',
+          participantId,
+          userId: participant.userId,
+          label: participant.displayName
+        },
+        relatedParticipantId: participantId
+      });
+      this.metrics.roomAdmissionRejections.labels(`policy_${publishDecision.code}`).inc();
+      throw new RoomPolicyViolationError(publishDecision.message, publishDecision);
+    }
+    if (request.kind !== 'screen' && publishDecision.action === 'reject') {
+      await this.recordRoomIncidentEvent({
+        roomId: request.roomId,
+        type: 'publish_rejected',
+        severity: 'critical',
+        summary: publishDecision.message,
+        actor: {
+          type: 'participant',
+          participantId,
+          userId: participant.userId,
+          label: participant.displayName
+        },
+        relatedParticipantId: participantId
+      });
+      this.metrics.roomAdmissionRejections.labels(`policy_${publishDecision.code}`).inc();
+      throw new RoomPolicyViolationError(publishDecision.message, publishDecision);
+    }
+    const status = publishDecision.action === 'soft-throttle' ? 'paused' : 'live';
+    await this.media.bindProducer(request.transportId, participantId, rtpParameters);
+    const priority = normalizeConsumerPriority(request.priority ?? defaultProducerPriority(profile, request.kind));
     const producerDoc = new this.producers({
       roomId: request.roomId,
       participantId,
@@ -533,8 +879,8 @@ export class RoomsService {
       transportId: request.transportId,
       nodeId: this.nodeRegistry.localNodeId(),
       priority,
-      rtpParameters: request.rtpParameters,
-      status: 'live'
+      rtpParameters,
+      status
     });
     const producer: Producer = {
       id: producerDoc.id,
@@ -543,8 +889,9 @@ export class RoomsService {
       kind: request.kind,
       transportId: request.transportId,
       priority,
-      rtpParameters: request.rtpParameters,
-      status: 'live',
+      rtpParameters,
+      ...(publishDecision.action === 'allow' ? {} : { policyDecision: publishDecision }),
+      status,
       createdAt: new Date().toISOString()
     };
     let registered = false;
@@ -561,11 +908,40 @@ export class RoomsService {
         producerDoc.svcState = producer.svc as unknown as Record<string, unknown>;
       }
       await producerDoc.save();
-      if (request.kind === 'screen') {
+      if (publishDecision.action === 'soft-throttle') {
+        await this.recordRoomIncidentEvent({
+          roomId: request.roomId,
+          type: request.kind === 'screen' ? 'screen_share_throttled' : 'publish_throttled',
+          severity: 'warn',
+          summary: publishDecision.message,
+          actor: {
+            type: 'participant',
+            participantId,
+            userId: participant.userId,
+            label: participant.displayName
+          },
+          relatedParticipantId: participantId,
+          relatedProducerId: producerDoc.id
+        });
+      }
+      if (request.kind === 'screen' && status === 'live') {
         participant.screenSharing = true;
         await participant.save();
       }
       this.metrics.activeProducers.labels(request.kind).inc();
+      await this.platformEvents.appendEvent({
+        type: 'producer.created',
+        roomId: request.roomId,
+        actor: this.platformActorFromParticipant(participant),
+        payload: {
+          room: {
+            roomId: request.roomId,
+            mediaProfileId: profile.id
+          },
+          producer: this.platformProducerReference(producerDoc),
+          policyAction: publishDecision.action
+        }
+      });
       return this.toProducer(producerDoc);
     } catch (error) {
       if (!ownerLookup.local && this.pipeCoordinator.isEnabled()) {
@@ -588,15 +964,36 @@ export class RoomsService {
     if (!ownerLookup.local && (!this.pipeCoordinator.isEnabled() || !producerHostedLocally)) {
       await this.nodeRegistry.assertLocalRoomOwner(producer.roomId);
     }
-    await this.assertCanControlProducer(producer, participantId);
+    const actor = await this.assertCanControlProducer(producer, participantId);
     producer.status = status;
     await producer.save();
     await this.media.setProducerPaused(producerId, status === 'paused');
+    if (producer.kind === 'screen') {
+      await this.participants.updateOne(
+        { _id: producer.participantId, roomId: producer.roomId },
+        { screenSharing: status === 'live' }
+      );
+    }
     if (ownerLookup.local && this.pipeCoordinator.isEnabled() && !producerHostedLocally) {
       await this.pipeCoordinator.syncOriginProducerState({ roomId: producer.roomId, producerId, status });
     } else if (!ownerLookup.local && this.pipeCoordinator.isEnabled() && producerHostedLocally) {
       await this.pipeCoordinator.syncRemoteProducerState({ roomId: producer.roomId, producerId, status }).catch(() => undefined);
     }
+    await this.platformEvents.appendEvent({
+      type: status === 'paused' ? 'producer.paused' : 'producer.resumed',
+      roomId: producer.roomId,
+      actor: this.platformActorFromParticipantContext(
+        actor,
+        participantId,
+        actor?.id === producer.participantId ? 'participant' : 'operator'
+      ),
+      payload: {
+        room: {
+          roomId: producer.roomId
+        },
+        producer: this.platformProducerReference(producer)
+      }
+    });
     return this.toProducer(producer);
   }
 
@@ -633,7 +1030,7 @@ export class RoomsService {
     if (!ownerLookup.local && (!this.pipeCoordinator.isEnabled() || !producerHostedLocally)) {
       await this.nodeRegistry.assertLocalRoomOwner(producer.roomId);
     }
-    await this.assertCanControlProducer(producer, participantId);
+    const actor = await this.assertCanControlProducer(producer, participantId);
     producer.status = 'closed';
     producer.closedAt = new Date();
     await producer.save();
@@ -652,7 +1049,33 @@ export class RoomsService {
     if (!ownerLookup.local && this.pipeCoordinator.isEnabled() && producerHostedLocally) {
       await this.releaseRemoteProducerPublicationSafely(producerId, 'producer_closed', 'close_producer');
     }
+    if (producer.kind === 'screen') {
+      const remainingScreens = await this.producers.countDocuments({
+        roomId: producer.roomId,
+        participantId: producer.participantId,
+        kind: 'screen',
+        status: { $ne: 'closed' }
+      });
+      if (remainingScreens === 0) {
+        await this.participants.updateOne({ _id: producer.participantId, roomId: producer.roomId }, { screenSharing: false });
+      }
+    }
     this.metrics.activeProducers.labels(producer.kind).dec();
+    await this.platformEvents.appendEvent({
+      type: 'producer.closed',
+      roomId: producer.roomId,
+      actor: this.platformActorFromParticipantContext(
+        actor,
+        participantId,
+        actor?.id === producer.participantId ? 'participant' : 'operator'
+      ),
+      payload: {
+        room: {
+          roomId: producer.roomId
+        },
+        producer: this.platformProducerReference(producer)
+      }
+    });
     return this.toProducer(producer);
   }
 
@@ -662,17 +1085,22 @@ export class RoomsService {
     if (!producer || producer.status === 'closed') {
       throw new NotFoundException('Producer not found');
     }
-    await this.assertParticipant(request.roomId, participantId);
+    const participant = await this.assertParticipant(request.roomId, participantId);
     await this.media.assertTransportOwner(request.transportId, participantId);
-    const preferredLayers = normalizeLayerSelection(request.preferredLayers ?? preferredLayerNameToSelection(request.preferredLayer ?? 'high'));
+    const room = await this.getRoom(request.roomId);
+    const preferredLayers = normalizeLayerSelection(
+      request.preferredLayers
+      ?? defaultConsumerLayers(room.mediaProfile, producer.kind, { viewer: participant.role === Role.VIEWER })
+      ?? preferredLayerNameToSelection(request.preferredLayer ?? 'high')
+    );
     const preferredSvcLayers = normalizeSvcLayerSelection(request.preferredSvcLayers);
     const consumerDoc = new this.consumers({
       roomId: request.roomId,
       producerId: producer.id,
       participantId,
       transportId: request.transportId,
-      priority: normalizeConsumerPriority(request.priority),
-      preferredLayer: request.preferredLayer ?? 'high',
+      priority: normalizeConsumerPriority(request.priority ?? defaultConsumerPriority(room.mediaProfile, producer.kind)),
+      preferredLayer: request.preferredLayer ?? selectionToPreferredLayerName(preferredLayers) ?? 'high',
       preferredLayers,
       preferredSvcLayers,
       rtpParameters: consumerRtpParametersForProducer(producer.rtpParameters as unknown as RtpParameters),
@@ -710,6 +1138,18 @@ export class RoomsService {
       throw error;
     }
     this.metrics.activeConsumers.inc();
+    await this.platformEvents.appendEvent({
+      type: 'consumer.created',
+      roomId: request.roomId,
+      actor: this.platformActorFromParticipant(participant),
+      payload: {
+        room: {
+          roomId: request.roomId,
+          mediaProfileId: room.mediaProfile.id
+        },
+        consumer: this.platformConsumerReference(consumerDoc)
+      }
+    });
     return this.toConsumer(consumerDoc);
   }
 
@@ -743,6 +1183,18 @@ export class RoomsService {
     await consumer.save();
     await this.media.setConsumerPaused(consumerId, status === 'paused');
     await this.syncDistributedConsumerDemandByProducer(consumer.roomId, consumer.producerId, { ownerLookup, consumerId });
+    const actor = await this.participants.findOne({ _id: participantId, roomId: consumer.roomId, leftAt: { $exists: false } });
+    await this.platformEvents.appendEvent({
+      type: status === 'paused' ? 'consumer.paused' : 'consumer.resumed',
+      roomId: consumer.roomId,
+      actor: this.platformActorFromParticipantContext(actor ?? undefined, participantId),
+      payload: {
+        room: {
+          roomId: consumer.roomId
+        },
+        consumer: this.platformConsumerReference(consumer)
+      }
+    });
     return this.toConsumer(consumer);
   }
 
@@ -875,6 +1327,382 @@ export class RoomsService {
     return state;
   }
 
+  async getRoomQualitySummaryState(roomId: string, participantId: string): Promise<RoomQualitySummaryState> {
+    await this.assertParticipant(roomId, participantId);
+    return this.computeRoomQualitySummary(roomId);
+  }
+
+  async getRoomIncidentState(roomId: string, participantId: string): Promise<RoomIncidentState> {
+    await this.assertModerator(roomId, participantId, false);
+    const summary = await this.computeRoomQualitySummary(roomId);
+    return this.buildRoomIncidentState(roomId, summary);
+  }
+
+  async getRoomIncidentTimeline(request: GetRoomIncidentTimelineRequest, participantId: string): Promise<RoomIncidentTimelineState> {
+    await this.assertModerator(request.roomId, participantId, false);
+    return this.listRoomIncidentTimeline(request.roomId, request.limit);
+  }
+
+  async getRoomSnapshotHistory(request: GetRoomSnapshotHistoryRequest, participantId: string): Promise<RoomSnapshotHistoryState> {
+    await this.assertModerator(request.roomId, participantId, false);
+    return this.listRoomSnapshotHistory(request.roomId, request.limit);
+  }
+
+  async runRoomRecoveryAction(request: {
+    roomId: string;
+    action: RoomRecoveryActionType;
+    reason?: string;
+  }, actorParticipantId: string): Promise<RoomRecoveryActionResult> {
+    await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
+    const actor = await this.assertModerator(request.roomId, actorParticipantId, false);
+    const roomDoc = await this.rooms.findById(request.roomId);
+    if (!roomDoc) {
+      throw new NotFoundException('Room not found');
+    }
+    const summary = await this.computeRoomQualitySummary(request.roomId);
+    const now = new Date();
+    const state = roomDoc.incidentState ?? defaultIncidentStateDocument(request.roomId, now);
+    let executed = true;
+    let blockedReason: string | undefined;
+    let generatedSnapshotId: string | undefined;
+    let shouldPersist = false;
+    const reason = sanitizeOperatorReason(request.reason);
+
+    switch (request.action) {
+      case 'protect_room':
+        if (roomDoc.mediaState?.status === 'failed') {
+          executed = false;
+          blockedReason = 'The room is already failed. Capture a snapshot or mark operator recovery instead.';
+          break;
+        }
+        if (state.protected) {
+          executed = false;
+          blockedReason = 'The room is already protected.';
+          break;
+        }
+        state.protected = true;
+        state.protectedAt = now;
+        state.protectedByParticipantId = actor.id;
+        state.protectedReason = reason ?? 'Operator protected the room while quality or infrastructure recovered.';
+        if (state.admissionsState === 'default') {
+          state.admissionsState = 'protected';
+        }
+        if (state.publishingState === 'default') {
+          state.publishingState = 'protected';
+        }
+        shouldPersist = true;
+        break;
+      case 'unprotect_room':
+        if (!state.protected) {
+          executed = false;
+          blockedReason = 'The room is not currently protected.';
+          break;
+        }
+        state.protected = false;
+        state.protectedReason = undefined;
+        state.protectedByParticipantId = undefined;
+        if (state.admissionsState !== 'default') {
+          state.admissionsState = 'default';
+        }
+        if (state.publishingState !== 'default') {
+          state.publishingState = 'default';
+        }
+        shouldPersist = true;
+        break;
+      case 'reopen_admissions':
+        if (roomDoc.settings.locked) {
+          executed = false;
+          blockedReason = 'Unlock the room before reopening admissions.';
+          break;
+        }
+        if (roomDoc.mediaState?.status === 'failed') {
+          executed = false;
+          blockedReason = 'The room media is failed and cannot admit new participants yet.';
+          break;
+        }
+        if (state.admissionsState === 'reopened') {
+          executed = false;
+          blockedReason = 'Admissions are already reopened.';
+          break;
+        }
+        state.admissionsState = 'reopened';
+        shouldPersist = true;
+        break;
+      case 'pause_new_publishing':
+        if (roomDoc.mediaState?.status === 'failed') {
+          executed = false;
+          blockedReason = 'The room media is failed and publishing is already unavailable.';
+          break;
+        }
+        if (state.publishingState === 'paused') {
+          executed = false;
+          blockedReason = 'New publishing is already paused.';
+          break;
+        }
+        if (state.protected) {
+          state.publishingState = 'protected';
+        } else {
+          state.publishingState = 'paused';
+        }
+        shouldPersist = true;
+        break;
+      case 'resume_new_publishing':
+        if (state.protected && state.publishingState === 'protected') {
+          executed = false;
+          blockedReason = 'Remove room protection before resuming new publishing.';
+          break;
+        }
+        if (state.publishingState === 'default') {
+          executed = false;
+          blockedReason = 'New publishing is already allowed.';
+          break;
+        }
+        state.publishingState = 'default';
+        shouldPersist = true;
+        break;
+      case 'force_incident_snapshot':
+        break;
+      case 'mark_operator_recovery':
+        if (state.underRecovery) {
+          executed = false;
+          blockedReason = 'The room is already marked under operator recovery.';
+          break;
+        }
+        state.underRecovery = true;
+        state.recoveryStartedAt = now;
+        state.recoveryStartedByParticipantId = actor.id;
+        state.recoveryReason = reason ?? 'Operator acknowledged the incident and began a guided recovery workflow.';
+        shouldPersist = true;
+        break;
+      case 'clear_recovery':
+        if (!state.underRecovery) {
+          executed = false;
+          blockedReason = 'The room is not marked under operator recovery.';
+          break;
+        }
+        if (summary.health !== 'stable') {
+          executed = false;
+          blockedReason = 'Wait for the room to return to a stable health state before clearing recovery.';
+          break;
+        }
+        if (roomDoc.mediaState?.status === 'failed') {
+          executed = false;
+          blockedReason = 'The room is still failed and cannot exit recovery yet.';
+          break;
+        }
+        state.underRecovery = false;
+        state.recoveryClearedAt = now;
+        state.recoveryClearedByParticipantId = actor.id;
+        state.recoveryReason = reason ?? state.recoveryReason;
+        shouldPersist = true;
+        break;
+    }
+
+    if (!executed) {
+      this.metrics.roomRecoveryActions.labels(request.action, 'blocked').inc();
+      const room = await this.getRoom(request.roomId);
+      await this.platformEvents.appendEvent({
+        type: 'recovery.action.executed',
+        roomId: request.roomId,
+        actor: this.platformActorFromParticipant(actor, 'operator'),
+        payload: {
+          room: {
+            roomId: request.roomId,
+            ...(room.name ? { name: room.name } : {}),
+            mediaProfileId: room.mediaProfile.id
+          },
+          action: request.action,
+          executed: false,
+          blockedReason,
+          protected: state.protected,
+          underRecovery: state.underRecovery,
+          status: state.status
+        }
+      });
+      return {
+        roomId: request.roomId,
+        action: request.action,
+        executed: false,
+        blockedReason,
+        room,
+        incidentState: await this.buildRoomIncidentState(request.roomId, summary)
+      };
+    }
+
+    if (shouldPersist) {
+      state.lastRecoveryAction = request.action;
+      state.lastRecoveryActionAt = now;
+      state.updatedAt = now;
+      roomDoc.incidentState = state as RoomMongoDocument['incidentState'];
+      await roomDoc.save();
+    }
+
+    this.metrics.roomRecoveryActions.labels(request.action, 'executed').inc();
+    if (request.action === 'reopen_admissions') {
+      this.metrics.reopenedRooms.inc();
+    }
+    if (request.action === 'mark_operator_recovery') {
+      this.metrics.roomsUnderRecovery.inc();
+    }
+    if (request.action === 'clear_recovery' && state.recoveryStartedAt) {
+      this.metrics.roomsUnderRecovery.dec();
+      this.metrics.roomRecoveryDuration.observe(Math.max(0, now.getTime() - state.recoveryStartedAt.getTime()));
+    }
+
+    if (request.action === 'force_incident_snapshot') {
+      const bundle = await this.generateRoomSnapshotBundle(request.roomId, 'manual_operator', {
+        automatic: false,
+        actor: incidentActorFromParticipant(actor, 'operator')
+      });
+      generatedSnapshotId = bundle.bundleId;
+    } else {
+      await this.recordRoomIncidentEvent({
+        roomId: request.roomId,
+        type: 'manual_action',
+        severity: 'warn',
+        summary: recoveryActionSummary(request.action),
+        detail: reason,
+        actor: incidentActorFromParticipant(actor, 'operator')
+      });
+    }
+
+    const room = await this.getRoom(request.roomId);
+    await this.emitRoomQualitySummaryUpdate(request.roomId, room);
+    const incidentState = await this.getRoomIncidentState(request.roomId, actorParticipantId);
+    await this.platformEvents.appendEvent({
+      type: 'recovery.action.executed',
+      roomId: request.roomId,
+      actor: this.platformActorFromParticipant(actor, 'operator'),
+      payload: {
+        room: {
+          roomId: request.roomId,
+          ...(room.name ? { name: room.name } : {}),
+          mediaProfileId: room.mediaProfile.id
+        },
+        action: request.action,
+        executed: true,
+        ...(generatedSnapshotId ? { generatedSnapshotId } : {}),
+        protected: incidentState.protected,
+        underRecovery: incidentState.underRecovery,
+        status: incidentState.status
+      }
+    });
+    return {
+      roomId: request.roomId,
+      action: request.action,
+      executed: true,
+      room,
+      incidentState,
+      ...(generatedSnapshotId ? { generatedSnapshotId } : {})
+    };
+  }
+
+  async updateRoomMediaProfile(request: UpdateRoomMediaProfileRequest, actorParticipantId: string): Promise<Room> {
+    await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
+    const actor = await this.assertModerator(request.roomId, actorParticipantId, false);
+    const room = await this.rooms.findById(request.roomId);
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+    const previousProfileId = room.mediaProfile?.id ?? 'meeting';
+    room.mediaProfile = {
+      id: request.profileId,
+      updatedAt: new Date(),
+      updatedByParticipantId: actorParticipantId
+    } as RoomMongoDocument['mediaProfile'];
+    await room.save();
+    await this.recordRoomIncidentEvent({
+      roomId: request.roomId,
+      type: 'profile_changed',
+      severity: 'info',
+      summary: `Room media profile changed from ${previousProfileId} to ${request.profileId}.`,
+      actor: {
+        type: 'operator',
+        participantId: actorParticipantId
+      }
+    });
+    await this.applyRoomMediaProfile(room.id, request.profileId);
+    if (previousProfileId !== request.profileId) {
+      this.metrics.roomProfileDistribution.labels(previousProfileId).dec();
+      this.metrics.roomProfileDistribution.labels(request.profileId).inc();
+      this.metrics.roomProfileChanges.labels(previousProfileId, request.profileId).inc();
+    }
+    const updatedRoom = await this.getRoom(request.roomId);
+    await this.emitRoomQualitySummaryUpdate(request.roomId, updatedRoom).catch(() => undefined);
+    await this.platformEvents.appendEvent({
+      type: 'room.media_profile.changed',
+      roomId: request.roomId,
+      actor: this.platformActorFromParticipantContext(actor, actorParticipantId, 'operator'),
+      payload: {
+        room: {
+          roomId: request.roomId,
+          ...(updatedRoom.name ? { name: updatedRoom.name } : {})
+        },
+        previousProfileId,
+        nextProfileId: request.profileId
+      }
+    });
+    return updatedRoom;
+  }
+
+  async updateRoomMediaProfileForUser(roomId: string, userId: string, profileId: RoomMediaProfileId): Promise<Room> {
+    const participant = await this.participants.findOne({ roomId, userId, leftAt: { $exists: false } });
+    if (!participant) {
+      throw new ForbiddenException('Not a room participant');
+    }
+    return this.updateRoomMediaProfile({ roomId, profileId }, participant.id);
+  }
+
+  async getRoomIncidentStateForUser(roomId: string, userId: string): Promise<RoomIncidentState> {
+    const participant = await this.participants.findOne({ roomId, userId, leftAt: { $exists: false } });
+    if (!participant) {
+      throw new ForbiddenException('Not a room participant');
+    }
+    return this.getRoomIncidentState(roomId, participant.id);
+  }
+
+  async getRoomIncidentTimelineForUser(roomId: string, userId: string, limit?: number): Promise<RoomIncidentTimelineState> {
+    const participant = await this.participants.findOne({ roomId, userId, leftAt: { $exists: false } });
+    if (!participant) {
+      throw new ForbiddenException('Not a room participant');
+    }
+    return this.getRoomIncidentTimeline({ roomId, limit }, participant.id);
+  }
+
+  async getRoomSnapshotHistoryForUser(roomId: string, userId: string, limit?: number): Promise<RoomSnapshotHistoryState> {
+    const participant = await this.participants.findOne({ roomId, userId, leftAt: { $exists: false } });
+    if (!participant) {
+      throw new ForbiddenException('Not a room participant');
+    }
+    return this.getRoomSnapshotHistory({ roomId, limit }, participant.id);
+  }
+
+  async getRoomAuditLogForUser(
+    roomId: string,
+    userId: string,
+    query: Omit<PlatformEventQuery, 'roomId'> = {}
+  ): Promise<PlatformEventListResponse> {
+    const participant = await this.participants.findOne({ roomId, userId, leftAt: { $exists: false } });
+    if (!participant) {
+      throw new ForbiddenException('Not a room participant');
+    }
+    await this.assertModerator(roomId, participant.id, false);
+    return this.platformEvents.listEvents({ ...query, roomId });
+  }
+
+  async runRoomRecoveryActionForUser(
+    roomId: string,
+    userId: string,
+    action: RoomRecoveryActionType,
+    reason?: string
+  ): Promise<RoomRecoveryActionResult> {
+    const participant = await this.participants.findOne({ roomId, userId, leftAt: { $exists: false } });
+    if (!participant) {
+      throw new ForbiddenException('Not a room participant');
+    }
+    return this.runRoomRecoveryAction({ roomId, action, reason }, participant.id);
+  }
+
   async getTransportQualityStateForUser(transportId: string, userId: string): Promise<TransportQualityState> {
     const state = this.media.transportQualityState(transportId) ?? this.readFreshDistributedState(this.distributedTransportQualityStates, transportId);
     if (!state) {
@@ -947,8 +1775,41 @@ export class RoomsService {
       workerId: failure.workerId
     });
     room.closedAt = room.closedAt ?? now;
+    const incidentState = room.incidentState ?? defaultIncidentStateDocument(failure.roomId, now);
+    incidentState.status = 'failed';
+    incidentState.health = 'critical';
+    incidentState.healthChangedAt = now;
+    incidentState.lastFailureAt = now;
+    incidentState.lastFailureReason = failure.reason;
+    incidentState.lastFailureMessage = failure.message;
+    incidentState.underRecovery = true;
+    incidentState.recoveryStartedAt = incidentState.recoveryStartedAt ?? now;
+    incidentState.recoveryReason = incidentState.recoveryReason ?? failure.message;
+    incidentState.updatedAt = now;
+    room.incidentState = incidentState as RoomMongoDocument['incidentState'];
+    await room.save();
+    await this.generateRoomSnapshotBundle(failure.roomId, 'room_failure', {
+      automatic: true,
+      actor: {
+        type: 'worker',
+        workerId: failure.workerId,
+        label: failure.reason
+      },
+      reason: failure.message
+    }).catch(() => undefined);
+    await this.recordRoomIncidentEvent({
+      roomId: failure.roomId,
+      type: 'room_failed',
+      severity: 'critical',
+      summary: failure.message,
+      actor: {
+        type: 'worker',
+        workerId: failure.workerId,
+        label: failure.reason
+      },
+      workerId: failure.workerId
+    });
     await Promise.all([
-      room.save(),
       this.participants.updateMany({ roomId: failure.roomId, leftAt: { $exists: false } }, { leftAt: now }),
       this.producers.updateMany({ roomId: failure.roomId, status: { $ne: 'closed' } }, { status: 'closed', closedAt: now }),
       this.consumers.updateMany({ roomId: failure.roomId, status: { $ne: 'closed' } }, { status: 'closed', closedAt: now })
@@ -963,6 +1824,8 @@ export class RoomsService {
         this.metrics.pipeCleanupFailures.labels('media_room_failed_bindings').inc();
       }
     }
+    this.cleanupRoomAutopilotState(failure.roomId);
+    this.metrics.roomProfileDistribution.labels(room.mediaProfile?.id ?? 'meeting').dec();
     this.clearDistributedRoomObservability(failure.roomId);
     await this.nodeRegistry.releaseRoom(failure.roomId);
     this.media.acknowledgeRoomFailure(failure.roomId);
@@ -1006,8 +1869,69 @@ export class RoomsService {
       affectedConsumers: failure.affectedConsumers,
       workerId: failure.workerId
     };
+    await this.platformEvents.appendEvent({
+      type: 'room.failed',
+      roomId: failure.roomId,
+      actor: {
+        type: 'worker',
+        workerId: failure.workerId,
+        label: failure.reason
+      },
+      payload: {
+        room: {
+          roomId: failure.roomId,
+          ...(room.name ? { name: room.name } : {}),
+          mediaProfileId: room.mediaProfile?.id
+        },
+        reason: failure.reason,
+        message: failure.message,
+        recoverable: failure.recoverable,
+        workerId: failure.workerId,
+        affectedParticipantIds: event.affectedParticipants,
+        affectedProducerIds: failure.affectedProducers,
+        affectedConsumerIds: failure.affectedConsumers,
+        affectedTransportIds: failure.affectedTransports
+      }
+    });
     for (const listener of this.roomFailureEventListeners) {
       listener(event);
+    }
+    for (const listener of this.roomIncidentStateEventListeners) {
+      listener(enrichIncidentStateWithDerivedFields(
+        {
+          ...toRoomIncidentState(failure.roomId, room.incidentState),
+          activeAlerts: [
+            nextAlert(undefined, {
+              code: 'room_failed',
+              severity: 'critical',
+              title: 'Room media failed',
+              detail: failure.message
+            })
+          ]
+        },
+        {
+          mediaState: {
+            status: 'failed',
+            failedAt: failure.failedAt,
+            failureReason: failure.reason,
+            failureMessage: failure.message,
+            workerId: failure.workerId
+          },
+          settings: room.settings,
+          owner: undefined,
+          id: failure.roomId
+        } as Pick<Room, 'id' | 'settings' | 'mediaState' | 'owner'>,
+        {
+          roomId: failure.roomId,
+          health: 'critical',
+          protections: {
+            join: overrideAutopilotDecision(defaultDecision('join'), 'reject', 'room_failed', 'Room media is unavailable while operators recover the room.'),
+            publish: overrideAutopilotDecision(defaultDecision('publish'), 'reject', 'room_failed', 'Room media is unavailable while operators recover the room.'),
+            screenShare: overrideAutopilotDecision(defaultDecision('screen-share'), 'reject', 'room_failed', 'Room media is unavailable while operators recover the room.')
+          }
+        } as Pick<RoomQualitySummaryState, 'roomId' | 'health' | 'protections'>,
+        { local: true, available: true }
+      ));
     }
   }
 
@@ -1036,6 +1960,18 @@ export class RoomsService {
       await this.releaseRemoteConsumerFeedSafely(consumerId, 'consumer_closed', 'close_consumer');
     }
     this.metrics.activeConsumers.dec();
+    const actor = await this.participants.findOne({ _id: participantId, roomId: consumer.roomId, leftAt: { $exists: false } });
+    await this.platformEvents.appendEvent({
+      type: 'consumer.closed',
+      roomId: consumer.roomId,
+      actor: this.platformActorFromParticipantContext(actor ?? undefined, participantId),
+      payload: {
+        room: {
+          roomId: consumer.roomId
+        },
+        consumer: this.platformConsumerReference(consumer)
+      }
+    });
     if (syncError) {
       throw syncError;
     }
@@ -1052,28 +1988,81 @@ export class RoomsService {
 
   async kick(roomId: string, actorParticipantId: string, participantId: string, reason?: string): Promise<void> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
-    await this.addModeration(roomId, actorParticipantId, participantId, 'kick', reason);
+    const moderation = await this.addModeration(roomId, actorParticipantId, participantId, 'kick', reason);
+    await this.platformEvents.appendEvent({
+      type: 'participant.kicked',
+      roomId,
+      actor: this.platformActorFromParticipant(moderation.actor, 'operator'),
+      payload: {
+        room: {
+          roomId
+        },
+        participant: this.platformParticipantReference(moderation.participant),
+        ...(reason ? { reason } : {})
+      }
+    });
     await this.leaveRoom(roomId, participantId);
   }
 
   async ban(roomId: string, actorParticipantId: string, participantId: string, reason?: string): Promise<void> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
-    await this.addModeration(roomId, actorParticipantId, participantId, 'ban', reason);
+    const moderation = await this.addModeration(roomId, actorParticipantId, participantId, 'ban', reason);
+    await this.platformEvents.appendEvent({
+      type: 'participant.banned',
+      roomId,
+      actor: this.platformActorFromParticipant(moderation.actor, 'operator'),
+      payload: {
+        room: {
+          roomId
+        },
+        participant: this.platformParticipantReference(moderation.participant),
+        ...(reason ? { reason } : {})
+      }
+    });
     await this.leaveRoom(roomId, participantId);
   }
 
   async unban(roomId: string, actorParticipantId: string, participantId: string): Promise<void> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
-    await this.assertModerator(roomId, actorParticipantId, false);
+    const actor = await this.assertModerator(roomId, actorParticipantId, false);
+    const participant = await this.participants.findById(participantId);
     await this.moderation.updateMany({ roomId, participantId, action: 'ban', active: true }, { active: false });
+    if (participant) {
+      await this.platformEvents.appendEvent({
+        type: 'participant.unbanned',
+        roomId,
+        actor: this.platformActorFromParticipant(actor, 'operator'),
+        payload: {
+          room: {
+            roomId
+          },
+          participant: this.platformParticipantReference(participant)
+        }
+      });
+    }
   }
 
   async mute(roomId: string, actorParticipantId: string, participantId: string, force = false): Promise<void> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
-    await this.assertModerator(roomId, actorParticipantId, false);
+    const actor = await this.assertModerator(roomId, actorParticipantId, false);
+    const participant = await this.participants.findById(participantId);
     await this.participants.updateOne({ _id: participantId, roomId }, { audioEnabled: false });
     if (force) {
       await this.addModeration(roomId, actorParticipantId, participantId, 'force-mute');
+    }
+    if (participant) {
+      await this.platformEvents.appendEvent({
+        type: 'participant.muted',
+        roomId,
+        actor: this.platformActorFromParticipant(actor, 'operator'),
+        payload: {
+          room: {
+            roomId
+          },
+          participant: this.platformParticipantReference(participant),
+          forced: force
+        }
+      });
     }
   }
 
@@ -1179,16 +2168,33 @@ export class RoomsService {
     return this.getRoomQualityState(roomId, participant.id);
   }
 
+  async getRoomQualitySummaryStateForUser(roomId: string, userId: string): Promise<RoomQualitySummaryState> {
+    const participant = await this.participants.findOne({ roomId, userId, leftAt: { $exists: false } });
+    if (!participant) {
+      throw new ForbiddenException('Not a room participant');
+    }
+    return this.getRoomQualitySummaryState(roomId, participant.id);
+  }
+
   async getRoomDiagnosticsForUser(roomId: string, userId: string): Promise<RoomDiagnosticsState> {
     const participant = await this.participants.findOne({ roomId, userId, leftAt: { $exists: false } });
     if (!participant) {
       throw new ForbiddenException('Not a room participant');
     }
     const [room, resolved] = await Promise.all([this.getRoom(roomId), this.resolveRoomQualityState(roomId)]);
+    const [summary, recentTimeline, snapshotHistory] = await Promise.all([
+      this.computeRoomQualitySummary(roomId, room),
+      this.listRoomIncidentTimeline(roomId, 12).then((timeline) => timeline.events),
+      this.listRoomSnapshotHistory(roomId, 8).then((history) => history.bundles)
+    ]);
+    const incidentState = await this.buildRoomIncidentState(roomId, summary, room);
     return {
       room,
       owner: resolved.owner,
       quality: resolved.quality,
+      incidentState,
+      recentTimeline,
+      snapshotHistory,
       qualitySource: resolved.qualitySource,
       ownerAuthoritativeQuality: resolved.ownerAuthoritativeQuality,
       qualityAgeMs: ageFromIso(resolved.quality.updatedAt),
@@ -1275,6 +2281,915 @@ export class RoomsService {
     };
   }
 
+  async exportRoomIncidentSnapshot(roomId: string): Promise<RoomIncidentSnapshot> {
+    const snapshot = await this.buildRoomIncidentSnapshot(roomId);
+    this.metrics.incidentSnapshotsGenerated.labels('room').inc();
+    return snapshot;
+  }
+
+  async exportTransportIncidentSnapshot(transportId: string): Promise<TransportIncidentSnapshot> {
+    const transportState = this.media.transportQualityState(transportId) ?? this.readFreshDistributedState(this.distributedTransportQualityStates, transportId);
+    if (!transportState) {
+      throw new NotFoundException('Transport quality state not available');
+    }
+    const policyContext = await this.getRoomPolicyContext(transportState.roomId);
+    const room = policyContext.room;
+    const relatedProducers = room.producers.filter((producer) => producer.transportId === transportId);
+    const relatedConsumers = room.consumers.filter((consumer) => consumer.transportId === transportId);
+    this.metrics.incidentSnapshotsGenerated.labels('transport').inc();
+    return {
+      scope: 'transport',
+      generatedAt: new Date().toISOString(),
+      transport: this.transportIncidentSummary(transportId, room),
+      roomId: room.id,
+      roomProfile: room.mediaProfile,
+      ownerNodeId: room.owner?.nodeId,
+      ownerPublicUrl: room.owner?.publicUrl,
+      ownerAvailable: Boolean(room.owner),
+      workerId: room.mediaState?.workerId ?? this.resolveRoomWorkerId(room.id),
+      roomQualitySummary: policyContext.summary,
+      relatedProducers: relatedProducers.map((producer) => this.producerIncidentSummary(producer)),
+      relatedConsumers: relatedConsumers.map((consumer) => this.consumerIncidentSummary(consumer)),
+      degradedEntities: policyContext.summary.degradedEntityIds
+    };
+  }
+
+  async getRoomSnapshotBundle(bundleId: string): Promise<RoomIncidentSnapshotBundle> {
+    const bundle = await this.roomSnapshotBundles.findById(bundleId);
+    if (!bundle) {
+      throw new NotFoundException('Room snapshot bundle not found');
+    }
+    return this.toRoomSnapshotBundle(bundle);
+  }
+
+  async generateRoomSnapshotBundleForOperations(roomId: string, reason?: string): Promise<RoomIncidentSnapshotBundle> {
+    return this.generateRoomSnapshotBundle(roomId, 'manual_operator', {
+      automatic: false,
+      actor: {
+        type: 'operator',
+        label: 'operations-token'
+      },
+      reason
+    });
+  }
+
+  async injectRoomFailureForOperations(
+    roomId: string,
+    input?: {
+      reason?: RoomFailureEvent['reason'];
+      message?: string;
+      recoverable?: boolean;
+      workerId?: string;
+    }
+  ): Promise<void> {
+    const room = await this.getRoom(roomId);
+    const workerId = input?.workerId ?? room.mediaState?.workerId ?? this.resolveRoomWorkerId(roomId) ?? 'operations-worker';
+    const affectedTransports = [...new Set([...room.producers.map((producer) => producer.transportId), ...room.consumers.map((consumer) => consumer.transportId)])];
+    await this.handleMediaRoomFailure({
+      roomId,
+      workerId,
+      reason: input?.reason ?? 'worker_drained_forced',
+      message: input?.message ?? `Media worker ${workerId} force-closed room ${roomId} during diagnostics validation`,
+      failedAt: new Date().toISOString(),
+      affectedTransports,
+      affectedProducers: room.producers.map((producer) => producer.id),
+      affectedConsumers: room.consumers.map((consumer) => consumer.id),
+      recoverable: input?.recoverable ?? true
+    });
+  }
+
+  async getRoomIncidentStateForOperations(roomId: string): Promise<RoomIncidentState> {
+    const summary = await this.computeRoomQualitySummary(roomId);
+    return this.buildRoomIncidentState(roomId, summary);
+  }
+
+  async getRoomIncidentTimelineForOperations(roomId: string, limit?: number): Promise<RoomIncidentTimelineState> {
+    return this.listRoomIncidentTimeline(roomId, limit);
+  }
+
+  async getRoomSnapshotHistoryForOperations(roomId: string, limit?: number): Promise<RoomSnapshotHistoryState> {
+    return this.listRoomSnapshotHistory(roomId, limit);
+  }
+
+  private async buildRoomIncidentSnapshot(roomId: string): Promise<RoomIncidentSnapshot> {
+    const policyContext = await this.getRoomPolicyContext(roomId);
+    const room = policyContext.room;
+    const relatedTransportIds = new Set([
+      ...room.producers.map((producer) => producer.transportId),
+      ...room.consumers.map((consumer) => consumer.transportId)
+    ]);
+    const transportSummaries = [...relatedTransportIds].map((transportId) => this.transportIncidentSummary(transportId, room));
+    return {
+      scope: 'room',
+      generatedAt: new Date().toISOString(),
+      room,
+      ownerNodeId: room.owner?.nodeId,
+      ownerPublicUrl: room.owner?.publicUrl,
+      ownerAvailable: Boolean(room.owner),
+      workerId: room.mediaState?.workerId ?? this.resolveRoomWorkerId(room.id),
+      roomProfile: room.mediaProfile,
+      roomQualitySummary: policyContext.summary,
+      participantSummary: {
+        total: room.participants.length,
+        admitted: room.participants.filter((participant) => participant.admitted).length,
+        pending: room.participants.filter((participant) => !participant.admitted).length,
+        viewers: room.participants.filter((participant) => participant.role === Role.VIEWER).length,
+        hosts: room.participants.filter((participant) => participant.role === Role.HOST).length,
+        coHosts: room.participants.filter((participant) => participant.role === Role.CO_HOST).length,
+        screenSharing: room.participants.filter((participant) => participant.screenSharing).length,
+        handRaised: room.participants.filter((participant) => participant.handRaised).length
+      },
+      producers: room.producers.map((producer) => this.producerIncidentSummary(producer)),
+      consumers: room.consumers.map((consumer) => this.consumerIncidentSummary(consumer)),
+      transports: transportSummaries,
+      degradedEntities: policyContext.summary.degradedEntityIds,
+      congestionIndicators: {
+        congestionState: policyContext.summary.congestionState,
+        score: policyContext.summary.score.score,
+        reasons: policyContext.summary.score.reasons,
+        targetBitrate: policyContext.summary.bitrate.target,
+        allocatedBitrate: policyContext.summary.bitrate.allocated,
+        actualBitrate: policyContext.summary.bitrate.actual
+      },
+      pipeContext: {
+        crossNode: Boolean(room.owner && room.owner.nodeId !== this.nodeRegistry.localNodeId()),
+        localNodeId: this.nodeRegistry.localNodeId()
+      }
+    };
+  }
+
+  private async buildRoomIncidentState(roomId: string, summary: RoomQualitySummaryState, roomOverride?: Room): Promise<RoomIncidentState> {
+    const [roomDoc, room, ownerLookup] = await Promise.all([
+      this.rooms.findById(roomId),
+      roomOverride ? Promise.resolve(roomOverride) : this.getRoom(roomId),
+      this.nodeRegistry.lookupRoomOwner(roomId)
+    ]);
+    const persisted = toRoomIncidentState(roomId, roomDoc?.incidentState);
+    const nextAlerts = await this.evaluateRoomAlerts(room, summary, persisted, ownerLookup);
+    return enrichRoomIncidentState(room, summary, ownerLookup, {
+      ...persisted,
+      activeAlerts: nextAlerts
+    });
+  }
+
+  private async listRoomIncidentTimeline(roomId: string, limit = 24): Promise<RoomIncidentTimelineState> {
+    const safeLimit = Math.max(1, Math.min(limit, 100));
+    const events = await this.roomIncidentEvents.find({ roomId }).sort({ createdAt: -1 }).limit(safeLimit);
+    return {
+      roomId,
+      events: events.map((event) => this.toRoomIncidentTimelineEvent(event)),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  private async listRoomSnapshotHistory(roomId: string, limit = 12): Promise<RoomSnapshotHistoryState> {
+    const safeLimit = Math.max(1, Math.min(limit, 100));
+    const bundles = await this.roomSnapshotBundles.find({ roomId }).sort({ createdAt: -1 }).limit(safeLimit);
+    return {
+      roomId,
+      bundles: bundles.map((bundle) => this.toRoomSnapshotBundleSummary(bundle)),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  private applyRoomIncidentOverrides(room: Room, summary: RoomQualitySummaryState): RoomQualitySummaryState {
+    const incident = room.incidentState;
+    if (!incident) {
+      return summary;
+    }
+    const warnings = new Set(summary.warnings);
+    let join = summary.protections.join;
+    let publish = summary.protections.publish;
+    let screenShare = summary.protections.screenShare;
+
+    if (room.mediaState?.status === 'failed') {
+      join = overrideAutopilotDecision(join, 'reject', 'room_failed', 'Room media is unavailable while operators recover the room.');
+      publish = overrideAutopilotDecision(publish, 'reject', 'room_failed', 'Room media is unavailable while operators recover the room.');
+      screenShare = overrideAutopilotDecision(screenShare, 'reject', 'room_failed', 'Room media is unavailable while operators recover the room.');
+      warnings.add('room_media_failed');
+    }
+
+    if (incident.protected && incident.admissionsState !== 'reopened') {
+      join = overrideAutopilotDecision(
+        join,
+        'reject',
+        'operator_protected',
+        'New admissions are blocked while the room is under operator protection.'
+      );
+      warnings.add('room_operator_protected');
+    }
+
+    if (incident.protected) {
+      publish = overrideAutopilotDecision(
+        publish,
+        'reject',
+        'operator_protected',
+        'New publishing is blocked while the room is under operator protection.'
+      );
+      screenShare = overrideAutopilotDecision(
+        screenShare,
+        'reject',
+        'operator_protected',
+        'New screen sharing is blocked while the room is under operator protection.'
+      );
+    }
+
+    if (incident.publishingState === 'paused') {
+      publish = overrideAutopilotDecision(
+        publish,
+        'reject',
+        'operator_publish_paused',
+        'Operators have paused new publishing until the room stabilizes.'
+      );
+      screenShare = overrideAutopilotDecision(
+        screenShare,
+        'reject',
+        'operator_publish_paused',
+        'Operators have paused new screen sharing until the room stabilizes.'
+      );
+      warnings.add('room_publishing_paused');
+    }
+
+    if (incident.admissionsState === 'reopened') {
+      warnings.add('room_admissions_reopened');
+    }
+    if (incident.underRecovery) {
+      warnings.add('room_under_operator_recovery');
+    }
+
+    return {
+      ...summary,
+      protections: {
+        join,
+        publish,
+        screenShare
+      },
+      warnings: [...warnings],
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  private async refreshRoomIncidentState(
+    roomId: string,
+    summary: RoomQualitySummaryState,
+    previousSummary?: RoomQualitySummaryState,
+    roomOverride?: Room
+  ): Promise<RoomIncidentState> {
+    const roomDoc = await this.rooms.findById(roomId);
+    if (!roomDoc) {
+      return defaultIncidentState(roomId);
+    }
+    const room = roomOverride ?? await this.getRoom(roomId);
+    const previousState = toRoomIncidentState(roomId, roomDoc.incidentState);
+    const nextState = await this.buildRoomIncidentState(roomId, summary, room);
+    const persistedState = toIncidentStateDocument(nextState, roomDoc.incidentState);
+    const stateChanged = JSON.stringify(previousState) !== JSON.stringify(toRoomIncidentState(roomId, persistedState));
+    if (stateChanged) {
+      roomDoc.incidentState = persistedState as RoomMongoDocument['incidentState'];
+      await roomDoc.save();
+    }
+
+    if (previousSummary) {
+      await this.recordSummaryTransitionEvents(room, previousSummary, summary, previousState, nextState);
+    }
+    await this.syncAlertTimeline(room, previousState.activeAlerts, nextState.activeAlerts);
+
+    for (const listener of this.roomIncidentStateEventListeners) {
+      listener(nextState);
+    }
+
+    if (previousSummary && previousSummary.health !== 'critical' && summary.health === 'critical') {
+      await this.generateRoomSnapshotBundle(roomId, 'critical_quality', {
+        automatic: true,
+        actor: { type: 'automation', label: 'room-policy' }
+      }).catch(() => undefined);
+    }
+
+    return nextState;
+  }
+
+  private async generateRoomSnapshotBundle(
+    roomId: string,
+    triggerReason: RoomSnapshotTriggerReason,
+    options: {
+      automatic: boolean;
+      actor?: RoomIncidentActor;
+      reason?: string;
+    }
+  ): Promise<RoomIncidentSnapshotBundle> {
+    const snapshot = await this.buildRoomIncidentSnapshot(roomId);
+    const incidentState = await this.buildRoomIncidentState(roomId, snapshot.roomQualitySummary, snapshot.room);
+    const recentTimeline = (await this.listRoomIncidentTimeline(roomId, 12)).events;
+    const ownerLookup = await this.nodeRegistry.lookupRoomOwner(roomId);
+    const createdAt = new Date();
+    const payload: RoomIncidentSnapshotBundle = {
+      ...snapshot,
+      bundleId: '',
+      triggerReason,
+      automatic: options.automatic,
+      actor: options.actor,
+      incidentState,
+      recentTimeline,
+      distributedContext: {
+        ownerLocal: ownerLookup.local,
+        ownerNodeId: ownerLookup.owner?.nodeId,
+        ownerPublicUrl: ownerLookup.owner?.publicUrl,
+        qualitySource: snapshot.roomQualitySummary.qualitySource,
+        ownerAuthoritativeQuality: snapshot.roomQualitySummary.ownerAuthoritativeQuality,
+        localNodeId: this.nodeRegistry.localNodeId()
+      }
+    };
+    const doc = await this.roomSnapshotBundles.create({
+      roomId,
+      triggerReason,
+      automatic: options.automatic,
+      actorType: options.actor?.type,
+      actorParticipantId: options.actor?.participantId,
+      actorUserId: options.actor?.userId,
+      actorLabel: options.actor?.label,
+      actorNodeId: options.actor?.nodeId,
+      actorWorkerId: options.actor?.workerId,
+      health: snapshot.roomQualitySummary.health,
+      status: incidentState.status,
+      protected: incidentState.protected,
+      underRecovery: incidentState.underRecovery,
+      degradedEntityCount:
+        snapshot.roomQualitySummary.degradedEntityIds.consumers.length
+        + snapshot.roomQualitySummary.degradedEntityIds.producers.length
+        + snapshot.roomQualitySummary.degradedEntityIds.transports.length,
+      warningCount: snapshot.roomQualitySummary.warnings.length,
+      bundle: payload,
+      createdAt
+    });
+    payload.bundleId = doc.id;
+    doc.bundle = payload as unknown as Record<string, unknown>;
+    await doc.save();
+    this.metrics.incidentSnapshotsGenerated.labels('room').inc();
+    this.metrics.snapshotBundlesGenerated.labels(triggerReason, options.automatic ? 'automatic' : 'manual').inc();
+    const roomDoc = await this.rooms.findById(roomId);
+    if (roomDoc) {
+      const state = roomDoc.incidentState ?? defaultIncidentStateDocument(roomId, createdAt);
+      state.snapshotCount = (state.snapshotCount ?? 0) + 1;
+      state.latestSnapshotId = doc.id;
+      state.updatedAt = createdAt;
+      roomDoc.incidentState = state as RoomMongoDocument['incidentState'];
+      await roomDoc.save();
+    }
+    await this.recordRoomIncidentEvent({
+      roomId,
+      type: 'snapshot_generated',
+      severity: 'warn',
+      summary: snapshotTriggerSummary(triggerReason),
+      detail: options.reason,
+      actor: options.actor,
+      snapshotId: doc.id
+    });
+    await this.platformEvents.appendEvent({
+      type: 'incident.snapshot.generated',
+      roomId,
+      actor: this.platformActorFromIncidentActor(options.actor),
+      payload: {
+        room: {
+          roomId,
+          ...(snapshot.room.name ? { name: snapshot.room.name } : {}),
+          mediaProfileId: snapshot.room.mediaProfile.id
+        },
+        bundleId: doc.id,
+        triggerReason,
+        automatic: options.automatic,
+        health: snapshot.roomQualitySummary.health,
+        status: incidentState.status,
+        degradedEntityCount:
+          snapshot.roomQualitySummary.degradedEntityIds.consumers.length
+          + snapshot.roomQualitySummary.degradedEntityIds.producers.length
+          + snapshot.roomQualitySummary.degradedEntityIds.transports.length,
+        warningCount: snapshot.roomQualitySummary.warnings.length
+      }
+    });
+    const summary = this.toRoomSnapshotBundleSummary(doc);
+    for (const listener of this.roomSnapshotGeneratedEventListeners) {
+      listener(summary);
+    }
+    return this.toRoomSnapshotBundle(doc);
+  }
+
+  private toRoomIncidentTimelineEvent(event: RoomIncidentEventMongoDocument): RoomIncidentTimelineEvent {
+    return {
+      id: event.id,
+      roomId: event.roomId,
+      type: event.type,
+      severity: event.severity,
+      summary: event.summary,
+      detail: event.detail,
+      ...(event.actorType
+        ? {
+            actor: {
+              type: event.actorType,
+              participantId: event.actorParticipantId,
+              userId: event.actorUserId,
+              label: event.actorLabel,
+              nodeId: event.actorNodeId,
+              workerId: event.actorWorkerId
+            }
+          }
+        : {}),
+      relatedParticipantId: event.relatedParticipantId,
+      relatedProducerId: event.relatedProducerId,
+      relatedConsumerId: event.relatedConsumerId,
+      relatedTransportId: event.relatedTransportId,
+      snapshotId: event.snapshotId,
+      alertCode: event.alertCode,
+      ownerNodeId: event.ownerNodeId,
+      workerId: event.workerId,
+      createdAt: event.createdAt.toISOString()
+    };
+  }
+
+  private toRoomSnapshotBundleSummary(bundle: RoomSnapshotBundleMongoDocument): RoomSnapshotBundleSummary {
+    return {
+      bundleId: bundle.id,
+      roomId: bundle.roomId,
+      generatedAt: bundle.createdAt.toISOString(),
+      triggerReason: bundle.triggerReason,
+      automatic: bundle.automatic,
+      ...(bundle.actorType
+        ? {
+            actor: {
+              type: bundle.actorType,
+              participantId: bundle.actorParticipantId,
+              userId: bundle.actorUserId,
+              label: bundle.actorLabel,
+              nodeId: bundle.actorNodeId,
+              workerId: bundle.actorWorkerId
+            }
+          }
+        : {}),
+      health: bundle.health,
+      status: bundle.status,
+      protected: bundle.protected,
+      underRecovery: bundle.underRecovery,
+      degradedEntityCount: bundle.degradedEntityCount,
+      warningCount: bundle.warningCount
+    };
+  }
+
+  private toRoomSnapshotBundle(bundle: RoomSnapshotBundleMongoDocument): RoomIncidentSnapshotBundle {
+    return {
+      ...(bundle.bundle as unknown as Omit<RoomIncidentSnapshotBundle, 'bundleId'>),
+      bundleId: bundle.id
+    };
+  }
+
+  private async evaluateRoomAlerts(
+    room: Room,
+    summary: RoomQualitySummaryState,
+    currentState: RoomIncidentState,
+    ownerLookup: RoomOwnerLookupResponse
+  ): Promise<RoomOperatorAlert[]> {
+    const now = Date.now();
+    const previous = new Map((currentState.activeAlerts ?? []).map((alert) => [alert.code, alert]));
+    const alerts: RoomOperatorAlert[] = [];
+    const recentThrottleCount = await this.roomIncidentEvents.countDocuments({
+      roomId: room.id,
+      type: { $in: ['join_throttled', 'join_rejected', 'publish_throttled', 'publish_rejected', 'screen_share_throttled', 'screen_share_rejected'] },
+      createdAt: { $gte: new Date(now - 10 * 60_000) }
+    });
+    const recentSnapshotCount = await this.roomSnapshotBundles.countDocuments({
+      roomId: room.id,
+      createdAt: { $gte: new Date(now - 15 * 60_000) }
+    });
+
+    if (summary.health === 'critical') {
+      alerts.push(nextAlert(previous.get('room_critical'), {
+        code: 'room_critical',
+        severity: 'critical',
+        title: 'Room entered a critical state',
+        detail: `The room quality summary is critical and protections are actively restricting joins or publishing.`
+      }));
+    }
+    if (recentThrottleCount >= 3) {
+      alerts.push(nextAlert(previous.get('repeated_throttles'), {
+        code: 'repeated_throttles',
+        severity: 'warn',
+        title: 'Repeated throttles or rejections detected',
+        detail: `The room has recorded ${recentThrottleCount} admission or publish throttles/rejections in the last 10 minutes.`
+      }));
+    }
+    if (room.mediaState?.status === 'failed') {
+      alerts.push(nextAlert(previous.get('room_failed'), {
+        code: 'room_failed',
+        severity: 'critical',
+        title: 'Room media failed',
+        detail: room.mediaState.failureMessage ?? 'The room media plane failed and needs operator intervention.'
+      }));
+    }
+    if (!ownerLookup.local && summary.warnings.some((warning) => warning.startsWith('room_owner_') || warning.startsWith('owner_quality_signal_'))) {
+      alerts.push(nextAlert(previous.get('distributed_owner_risk'), {
+        code: 'distributed_owner_risk',
+        severity: 'warn',
+        title: 'Distributed owner continuity risk',
+        detail: 'The room depends on a remote owner node and quality visibility is degraded or stale.'
+      }));
+    }
+    if (recentSnapshotCount >= 3) {
+      alerts.push(nextAlert(previous.get('repeated_snapshots'), {
+        code: 'repeated_snapshots',
+        severity: 'warn',
+        title: 'Repeated incident snapshots generated',
+        detail: `The room has generated ${recentSnapshotCount} incident snapshots in the last 15 minutes.`
+      }));
+    }
+    if (currentState.protected && currentState.protectedAt && now - Date.parse(currentState.protectedAt) >= 5 * 60_000) {
+      alerts.push(nextAlert(previous.get('protection_prolonged'), {
+        code: 'protection_prolonged',
+        severity: 'warn',
+        title: 'Room protection has been active for an extended period',
+        detail: 'The room remains protected more than five minutes after the incident began.'
+      }));
+    }
+    if (summary.health !== 'stable' && currentState.healthChangedAt && now - Date.parse(currentState.healthChangedAt) >= 3 * 60_000) {
+      alerts.push(nextAlert(previous.get('critical_state_prolonged'), {
+        code: 'critical_state_prolonged',
+        severity: summary.health === 'critical' ? 'critical' : 'warn',
+        title: 'Room has not recovered',
+        detail: `The room has remained ${summary.health} for longer than the expected recovery window.`
+      }));
+    }
+
+    return alerts;
+  }
+
+  private async syncAlertTimeline(room: Room, previousAlerts: RoomOperatorAlert[], nextAlerts: RoomOperatorAlert[]): Promise<void> {
+    const previous = new Map(previousAlerts.map((alert) => [alert.code, alert]));
+    const next = new Map(nextAlerts.map((alert) => [alert.code, alert]));
+    for (const alert of nextAlerts) {
+      if (!previous.has(alert.code)) {
+        this.metrics.roomAlertEvents.labels(alert.code, 'emitted').inc();
+        await this.recordRoomIncidentEvent({
+          roomId: room.id,
+          type: 'alert_raised',
+          severity: alert.severity,
+          summary: alert.title,
+          detail: alert.detail,
+          actor: { type: 'automation', label: 'room-alerts' },
+          alertCode: alert.code
+        });
+      } else {
+        this.metrics.roomAlertEvents.labels(alert.code, 'suppressed').inc();
+      }
+    }
+    for (const alert of previousAlerts) {
+      if (!next.has(alert.code)) {
+        this.metrics.roomAlertEvents.labels(alert.code, 'resolved').inc();
+      }
+    }
+  }
+
+  private async recordSummaryTransitionEvents(
+    room: Room,
+    previousSummary: RoomQualitySummaryState,
+    nextSummary: RoomQualitySummaryState,
+    previousState: RoomIncidentState,
+    nextState: RoomIncidentState
+  ): Promise<void> {
+    if (previousSummary.health !== nextSummary.health) {
+      await this.platformEvents.appendEvent({
+        type: nextSummary.health === 'stable' ? 'room.recovered' : 'room.degraded',
+        roomId: room.id,
+        actor: {
+          type: 'automation',
+          label: 'room-policy'
+        },
+        payload: {
+          room: {
+            roomId: room.id,
+            ...(room.name ? { name: room.name } : {}),
+            mediaProfileId: room.mediaProfile.id
+          },
+          previousHealth: previousSummary.health,
+          health: nextSummary.health,
+          status: nextState.status,
+          warnings: nextSummary.warnings
+        }
+      });
+      await this.recordRoomIncidentEvent({
+        roomId: room.id,
+        type: nextSummary.health === 'stable' ? 'room_recovered' : 'health_changed',
+        severity: nextSummary.health === 'critical' ? 'critical' : nextSummary.health === 'degraded' ? 'warn' : 'info',
+        summary: nextSummary.health === 'stable'
+          ? 'Room health recovered to stable.'
+          : `Room health changed from ${previousSummary.health} to ${nextSummary.health}.`,
+        actor: { type: 'automation', label: 'room-policy' }
+      });
+    }
+    if (!sameProtectionState(previousSummary.protections, nextSummary.protections)) {
+      await this.platformEvents.appendEvent({
+        type: 'room.protection.changed',
+        roomId: room.id,
+        actor: {
+          type: 'automation',
+          label: 'room-policy'
+        },
+        payload: {
+          room: {
+            roomId: room.id,
+            ...(room.name ? { name: room.name } : {})
+          },
+          protected: nextState.protected,
+          admissionsState: nextState.admissionsState,
+          publishingState: nextState.publishingState,
+          source: 'automation',
+          reason: nextSummary.warnings.join(', ') || undefined
+        }
+      });
+      await this.recordRoomIncidentEvent({
+        roomId: room.id,
+        type: 'protection_changed',
+        severity: protectionSeverity(nextSummary.protections),
+        summary: `Room protections changed to join=${nextSummary.protections.join.action}, publish=${nextSummary.protections.publish.action}, screen=${nextSummary.protections.screenShare.action}.`,
+        actor: { type: 'automation', label: 'room-policy' }
+      });
+    }
+    if (!sameRecommendationCodes(previousSummary.recommendations, nextSummary.recommendations)) {
+      await this.recordRoomIncidentEvent({
+        roomId: room.id,
+        type: 'recommendation_changed',
+        severity: recommendationSeverity(nextSummary.recommendations),
+        summary: `Automation recommendations changed for the room.`,
+        detail: nextSummary.recommendations.map((recommendation) => recommendation.title).join('; '),
+        actor: { type: 'automation', label: 'room-policy' }
+      });
+    }
+    const newWarnings = nextSummary.warnings.filter((warning) => !previousSummary.warnings.includes(warning));
+    if (newWarnings.length > 0) {
+      await this.recordRoomIncidentEvent({
+        roomId: room.id,
+        type: 'infrastructure_impact',
+        severity: 'warn',
+        summary: 'Room warnings changed due to node, worker, or distributed-owner pressure.',
+        detail: newWarnings.join(', '),
+        actor: { type: 'automation', label: 'room-diagnostics' }
+      });
+    }
+    if (previousState.status !== nextState.status && nextState.status === 'recovering') {
+      await this.recordRoomIncidentEvent({
+        roomId: room.id,
+        type: 'manual_action',
+        severity: 'warn',
+        summary: 'Room entered operator recovery mode.',
+        actor: { type: 'automation', label: 'room-recovery' }
+      });
+    }
+  }
+
+  private async recordRoomIncidentEvent(input: {
+    roomId: string;
+    type: RoomIncidentTimelineEvent['type'];
+    severity: RoomIncidentTimelineEvent['severity'];
+    summary: string;
+    detail?: string;
+    actor?: RoomIncidentActor;
+    relatedParticipantId?: string;
+    relatedProducerId?: string;
+    relatedConsumerId?: string;
+    relatedTransportId?: string;
+    snapshotId?: string;
+    alertCode?: RoomOperatorAlert['code'];
+    ownerNodeId?: string;
+    workerId?: string;
+  }): Promise<RoomIncidentTimelineEvent> {
+    const doc = await this.roomIncidentEvents.create({
+      roomId: input.roomId,
+      type: input.type,
+      severity: input.severity,
+      summary: input.summary,
+      detail: input.detail,
+      actorType: input.actor?.type,
+      actorParticipantId: input.actor?.participantId,
+      actorUserId: input.actor?.userId,
+      actorLabel: input.actor?.label,
+      actorNodeId: input.actor?.nodeId,
+      actorWorkerId: input.actor?.workerId,
+      relatedParticipantId: input.relatedParticipantId,
+      relatedProducerId: input.relatedProducerId,
+      relatedConsumerId: input.relatedConsumerId,
+      relatedTransportId: input.relatedTransportId,
+      snapshotId: input.snapshotId,
+      alertCode: input.alertCode,
+      ownerNodeId: input.ownerNodeId,
+      workerId: input.workerId,
+      createdAt: new Date()
+    });
+    this.metrics.roomIncidentTimelineEvents.labels(input.type, input.severity).inc();
+    const event = this.toRoomIncidentTimelineEvent(doc);
+    for (const listener of this.roomIncidentTimelineEventListeners) {
+      listener(event);
+    }
+    return event;
+  }
+
+  private async getRoomPolicyContext(roomId: string, _roomDoc?: RoomMongoDocument): Promise<RoomPolicyContext> {
+    const [room, summary] = await Promise.all([this.getRoom(roomId), this.computeRoomQualitySummary(roomId)]);
+    return { room, summary };
+  }
+
+  private async computeRoomQualitySummary(roomId: string, roomOverride?: Room): Promise<RoomQualitySummaryState> {
+    const room = roomOverride ?? await this.getRoom(roomId);
+    const ownerLookup = await this.requireRoomOwnerLookup(roomId);
+    const distributedSummary = ownerLookup.local ? undefined : this.readFreshRoomQualitySummaryState(roomId);
+    if (distributedSummary) {
+      const previousDistributed = this.roomQualitySummaryStates.get(roomId);
+      this.roomQualitySummaryStates.set(roomId, distributedSummary);
+      this.metrics.updateRoomAutopilotSummary(distributedSummary, previousDistributed);
+      return distributedSummary;
+    }
+    const resolved = await this.resolveRoomQualityStateWithFallback(roomId);
+    const clusterSnapshot = await this.nodeRegistry.snapshot();
+    const ownerNode = resolved.owner.owner
+      ? clusterSnapshot.nodes.find((node) => node.nodeId === resolved.owner.owner?.nodeId)
+      : undefined;
+    const node = resolved.owner.local ? clusterSnapshot.localNode : ownerNode ?? clusterSnapshot.localNode;
+    const summary = buildRoomQualitySummary({
+      room,
+      quality: resolved.quality,
+      qualitySource: resolved.qualitySource,
+      ownerAuthoritativeQuality: resolved.ownerAuthoritativeQuality,
+      warnings: resolved.warnings,
+      node,
+      workers: this.media.workerPoolSnapshot()
+    });
+    const nextSummary = this.applyRoomIncidentOverrides(room, summary);
+    const previous = this.roomQualitySummaryStates.get(roomId);
+    this.roomQualitySummaryStates.set(roomId, nextSummary);
+    this.metrics.updateRoomAutopilotSummary(nextSummary, previous);
+    return nextSummary;
+  }
+
+  private async emitRoomQualitySummaryUpdate(roomId: string, roomOverride?: Room): Promise<RoomQualitySummaryState> {
+    const previousSummary = this.roomQualitySummaryStates.get(roomId);
+    const summary = await this.computeRoomQualitySummary(roomId, roomOverride);
+    const ownerLookup = await this.nodeRegistry.lookupRoomOwner(roomId);
+    if (ownerLookup.local || !ownerLookup.owner) {
+      await this.refreshRoomIncidentState(roomId, summary, previousSummary, roomOverride).catch(() => undefined);
+    }
+    for (const listener of this.roomQualitySummaryEventListeners) {
+      listener(summary);
+    }
+    return summary;
+  }
+
+  private async resolveRoomQualityStateWithFallback(roomId: string): Promise<ResolvedRoomQualityState> {
+    try {
+      return await this.resolveRoomQualityState(roomId);
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        throw error;
+      }
+      const owner = await this.requireRoomOwnerLookup(roomId);
+      return {
+        owner,
+        quality: createFallbackRoomQualityState(roomId),
+        qualitySource: owner.local ? 'local-owner' : 'local-fallback',
+        ownerAuthoritativeQuality: owner.local,
+        warnings: ['room_quality_state_unavailable']
+      };
+    }
+  }
+
+  private async applyRoomMediaProfile(roomId: string, profileId: RoomMediaProfileId): Promise<void> {
+    const ownerLookup = await this.requireRoomOwnerLookup(roomId);
+    const room = await this.getRoom(roomId);
+    const profile = room.mediaProfile.id === profileId
+      ? room.mediaProfile
+      : resolveRoomMediaProfile(profileId, {
+          updatedAt: room.mediaProfile.updatedAt,
+          updatedByParticipantId: room.mediaProfile.updatedByParticipantId
+        });
+    const producerDocs = await this.producers.find({ roomId, status: { $ne: 'closed' } });
+    const consumerDocs = await this.consumers.find({ roomId, status: { $ne: 'closed' } });
+    const participantMap = new Map(room.participants.map((participant) => [participant.id, participant]));
+    const producerMap = new Map(producerDocs.map((producer) => [producer.id, producer]));
+    const touchedProducerIds = new Set<string>();
+
+    for (const producerDoc of producerDocs) {
+      if (!await this.isProducerHostedLocally(producerDoc, ownerLookup)) {
+        continue;
+      }
+      const nextPriority = normalizeConsumerPriority(defaultProducerPriority(profile, producerDoc.kind));
+      if (normalizeConsumerPriority(producerDoc.priority) !== nextPriority) {
+        producerDoc.priority = nextPriority;
+        await producerDoc.save();
+        this.media.setProducerPriority(producerDoc.id, nextPriority);
+      }
+      touchedProducerIds.add(producerDoc.id);
+    }
+
+    for (const consumerDoc of consumerDocs) {
+      if (!this.isConsumerHostedLocally(consumerDoc)) {
+        continue;
+      }
+      const producerDoc = producerMap.get(consumerDoc.producerId);
+      if (!producerDoc) {
+        continue;
+      }
+      const participant = participantMap.get(consumerDoc.participantId);
+      const nextPriority = normalizeConsumerPriority(defaultConsumerPriority(profile, producerDoc.kind));
+      const nextLayers = normalizeLayerSelection(
+        defaultConsumerLayers(profile, producerDoc.kind, { viewer: participant?.role === Role.VIEWER })
+      );
+      consumerDoc.priority = nextPriority;
+      if (nextLayers) {
+        consumerDoc.preferredLayers = nextLayers as Record<string, unknown>;
+        consumerDoc.preferredLayer = selectionToPreferredLayerName(nextLayers);
+      }
+      await consumerDoc.save();
+      this.media.setConsumerPriority(consumerDoc.id, nextPriority);
+      if (nextLayers) {
+        await this.media.setConsumerPreferredLayers(consumerDoc.id, nextLayers);
+      }
+      touchedProducerIds.add(consumerDoc.producerId);
+    }
+
+    if (this.pipeCoordinator.isEnabled()) {
+      for (const producerId of touchedProducerIds) {
+        await this.syncDistributedConsumerDemandByProducer(roomId, producerId, { ownerLookup }).catch(() => undefined);
+      }
+    }
+    this.appliedRoomProfileSignatures.set(roomId, roomProfileSignature(profile));
+  }
+
+  private producerIncidentSummary(producer: Producer): IncidentProducerSummary {
+    return {
+      producerId: producer.id,
+      participantId: producer.participantId,
+      transportId: producer.transportId,
+      kind: producer.kind,
+      priority: producer.priority,
+      status: producer.status,
+      score: producer.quality?.score.score,
+      level: producer.quality?.score.level,
+      currentLayers: producer.currentLayers,
+      activeLayers: producer.dynacast?.activeLayers,
+      targetLayers: producer.dynacast?.desiredLayers[0] ?? producer.currentLayers
+    };
+  }
+
+  private consumerIncidentSummary(consumer: Consumer): IncidentConsumerSummary {
+    return {
+      consumerId: consumer.id,
+      participantId: consumer.participantId,
+      producerId: consumer.producerId,
+      transportId: consumer.transportId,
+      priority: consumer.priority,
+      status: consumer.status,
+      score: consumer.quality?.score.score,
+      level: consumer.quality?.score.level,
+      currentLayers: consumer.currentLayers,
+      preferredLayers: consumer.preferredLayers,
+      targetLayers: consumer.targetLayers,
+      currentSvcLayers: consumer.currentSvcLayers,
+      preferredSvcLayers: consumer.preferredSvcLayers,
+      targetSvcLayers: consumer.targetSvcLayers
+    };
+  }
+
+  private transportIncidentSummary(transportId: string, room: Room): IncidentTransportSummary {
+    const state = this.media.transportQualityState(transportId) ?? this.readFreshDistributedState(this.distributedTransportQualityStates, transportId);
+    const producers = room.producers.filter((producer) => producer.transportId === transportId);
+    const consumers = room.consumers.filter((consumer) => consumer.transportId === transportId);
+    return {
+      transportId,
+      participantId: consumers[0]?.participantId ?? producers[0]?.participantId ?? 'unknown',
+      consumerCount: consumers.length,
+      producerCount: producers.length,
+      score: state?.score.score,
+      level: state?.score.level,
+      targetBitrate: state?.targetBitrate,
+      allocatedBitrate: state?.allocatedBitrate,
+      actualBitrate: state?.actualBitrate,
+      pacingQueueDepth: state?.pacingQueueDepth
+    };
+  }
+
+  private recordProtectionDecision(profileId: RoomMediaProfileId, decision: RoomAutopilotDecision): void {
+    if (decision.action !== 'allow') {
+      this.metrics.roomProtectionDecisions.labels(profileId, decision.scope, decision.action, decision.code).inc();
+    }
+  }
+
+  private cleanupRoomAutopilotState(roomId: string): void {
+    const previous = this.roomQualitySummaryStates.get(roomId);
+    if (previous) {
+      this.metrics.clearRoomAutopilotSummary(previous);
+      this.roomQualitySummaryStates.delete(roomId);
+    }
+  }
+
+  private resolveRoomWorkerId(roomId: string): string | undefined {
+    const mediaWithRoomWorker = this.media as MediaService & { roomWorkerId?: (roomId: string) => string | undefined };
+    return mediaWithRoomWorker.roomWorkerId?.(roomId);
+  }
+
   private async getRoom(roomId: string): Promise<Room> {
     const room = await this.rooms.findById(roomId);
     if (!room) {
@@ -1308,6 +3223,10 @@ export class RoomsService {
         recordingEnabled: room.settings.recordingEnabled,
         chatEnabled: room.settings.chatEnabled
       },
+      mediaProfile: resolveRoomMediaProfile(room.mediaProfile?.id, {
+        updatedAt: room.mediaProfile?.updatedAt?.toISOString(),
+        updatedByParticipantId: room.mediaProfile?.updatedByParticipantId
+      }),
       mediaState: {
         status: room.mediaState?.status ?? 'active',
         failedAt: room.mediaState?.failedAt?.toISOString(),
@@ -1315,6 +3234,7 @@ export class RoomsService {
         failureMessage: room.mediaState?.failureMessage,
         workerId: room.mediaState?.workerId
       },
+      incidentState: toRoomIncidentState(room.id, room.incidentState),
       owner,
       participants: participants.map((participant) =>
         this.toParticipant(participant, permissionMap.get(participant.id) ?? DEFAULT_PARTICIPANT_PERMISSIONS, consumerLayerMap.get(participant.id))
@@ -1388,11 +3308,11 @@ export class RoomsService {
     return actor;
   }
 
-  private async assertCanControlProducer(producer: ProducerMongoDocument, participantId: string): Promise<void> {
+  private async assertCanControlProducer(producer: ProducerMongoDocument, participantId: string): Promise<ParticipantMongoDocument> {
     if (producer.participantId === participantId) {
-      return;
+      return this.assertParticipant(producer.roomId, participantId);
     }
-    await this.assertModerator(producer.roomId, participantId, false);
+    return this.assertModerator(producer.roomId, participantId, false);
   }
 
   private async assertNotBanned(roomId: string, userId: string): Promise<void> {
@@ -1408,9 +3328,12 @@ export class RoomsService {
     participantId: string,
     action: 'kick' | 'ban' | 'shadow-mute' | 'force-mute' | 'disable-camera' | 'stop-screen',
     reason?: string
-  ): Promise<void> {
-    await this.assertModerator(roomId, actorParticipantId, false);
+  ): Promise<{ actor: ParticipantMongoDocument; participant: ParticipantMongoDocument }> {
+    const actor = await this.assertModerator(roomId, actorParticipantId, false);
     const participant = await this.participants.findById(participantId);
+    if (!participant || participant.roomId !== roomId) {
+      throw new NotFoundException('Participant not found');
+    }
     await this.moderation.create({
       roomId,
       participantId,
@@ -1420,6 +3343,7 @@ export class RoomsService {
       reason,
       active: true
     });
+    return { actor, participant };
   }
 
   private async handleConsumerLayerEvent(event: ConsumerLayerEvent): Promise<void> {
@@ -1558,6 +3482,7 @@ export class RoomsService {
     this.metrics.roomCongestionState.labels(state.roomId, 'underuse').set(state.congestionState === 'underuse' ? 1 : 0);
     this.metrics.roomCongestionState.labels(state.roomId, 'normal').set(state.congestionState === 'normal' ? 1 : 0);
     this.metrics.roomCongestionState.labels(state.roomId, 'overuse').set(state.congestionState === 'overuse' ? 1 : 0);
+    void this.emitRoomQualitySummaryUpdate(state.roomId).catch(() => undefined);
     for (const listener of this.roomQualityEventListeners) {
       listener(state);
     }
@@ -1565,6 +3490,21 @@ export class RoomsService {
 
   private handleDistributedRoomSignal(signal: RoomSignalEnvelope): void {
     const [payload] = signal.payload;
+    if (signal.event === 'room:quality-summary-updated') {
+      if (
+        isRoomQualitySummaryStatePayload(payload)
+        && !this.shouldIgnoreDistributedStateUpdate({ roomId: payload.roomId, updatedAt: payload.updatedAt })
+      ) {
+        this.setDistributedRoomQualitySummaryState(payload);
+      }
+      return;
+    }
+    if (signal.event === 'room:updated') {
+      if (isRoomPayloadWithProfile(payload)) {
+        void this.handleDistributedRoomProfileUpdate(payload).catch(() => undefined);
+      }
+      return;
+    }
     if (signal.event === 'room:quality-updated') {
       if (isRoomQualityState(payload) && !this.shouldIgnoreDistributedStateUpdate({ roomId: payload.roomId, updatedAt: payload.updatedAt })) {
         this.setDistributedRoomQualityState(payload);
@@ -1676,9 +3616,12 @@ export class RoomsService {
     this.markObservabilityTombstone(this.distributedRoomTombstones, roomId);
     this.distributedRoomQualityStates.delete(roomId);
     this.distributedRoomQualityObservedAt.delete(roomId);
+    this.distributedRoomQualitySummaryStates.delete(roomId);
+    this.distributedRoomQualitySummaryObservedAt.delete(roomId);
     this.deleteDistributedStatesForRoom(this.distributedConsumerQualityStates, roomId);
     this.deleteDistributedStatesForRoom(this.distributedProducerQualityStates, roomId);
     this.deleteDistributedStatesForRoom(this.distributedTransportQualityStates, roomId);
+    this.appliedRoomProfileSignatures.delete(roomId);
   }
 
   private shouldIgnoreDistributedStateUpdate(options: {
@@ -1792,6 +3735,15 @@ export class RoomsService {
     this.distributedRoomQualityObservedAt.set(state.roomId, Date.now());
   }
 
+  private setDistributedRoomQualitySummaryState(state: RoomQualitySummaryState): void {
+    const current = this.distributedRoomQualitySummaryStates.get(state.roomId);
+    if (current && compareIsoTimestamps(state.updatedAt, current.updatedAt) < 0) {
+      return;
+    }
+    this.distributedRoomQualitySummaryStates.set(state.roomId, state);
+    this.distributedRoomQualitySummaryObservedAt.set(state.roomId, Date.now());
+  }
+
   private setDistributedQualityState<T extends { roomId: string; updatedAt: string }>(
     cache: Map<string, DistributedStateEntry<T>>,
     key: string,
@@ -1821,6 +3773,20 @@ export class RoomsService {
     return state;
   }
 
+  private readFreshRoomQualitySummaryState(roomId: string): RoomQualitySummaryState | undefined {
+    const state = this.distributedRoomQualitySummaryStates.get(roomId);
+    const observedAt = this.distributedRoomQualitySummaryObservedAt.get(roomId);
+    if (!state || observedAt === undefined) {
+      return undefined;
+    }
+    if (Date.now() - observedAt > ROOM_QUALITY_SIGNAL_STALE_MS) {
+      this.distributedRoomQualitySummaryStates.delete(roomId);
+      this.distributedRoomQualitySummaryObservedAt.delete(roomId);
+      return undefined;
+    }
+    return state;
+  }
+
   private readFreshDistributedState<T extends { roomId: string; updatedAt: string }>(
     cache: Map<string, DistributedStateEntry<T>>,
     key: string
@@ -1834,6 +3800,14 @@ export class RoomsService {
       return undefined;
     }
     return entry.state;
+  }
+
+  private async handleDistributedRoomProfileUpdate(room: Pick<Room, 'id' | 'mediaProfile'>): Promise<void> {
+    const signature = roomProfileSignature(room.mediaProfile);
+    if (this.appliedRoomProfileSignatures.get(room.id) === signature) {
+      return;
+    }
+    await this.applyRoomMediaProfile(room.id, room.mediaProfile.id);
   }
 
   private async syncDistributedConsumerDemandByProducer(
@@ -1997,6 +3971,115 @@ export class RoomsService {
     };
   }
 
+  private platformRoomReference(
+    room:
+      | Pick<Room, 'id' | 'name' | 'settings' | 'mediaProfile' | 'hostId'>
+      | Pick<RoomMongoDocument, 'id' | 'name' | 'settings' | 'mediaProfile' | 'hostId'>
+  ) {
+    return {
+      roomId: room.id,
+      ...(room.name ? { name: room.name } : {}),
+      ...(room.settings?.visibility ? { visibility: room.settings.visibility } : {}),
+      ...(room.settings?.maxParticipants !== undefined ? { maxParticipants: room.settings.maxParticipants } : {}),
+      ...(room.settings?.waitingRoomEnabled !== undefined ? { waitingRoomEnabled: room.settings.waitingRoomEnabled } : {}),
+      ...(room.settings?.joinApprovalRequired !== undefined ? { joinApprovalRequired: room.settings.joinApprovalRequired } : {}),
+      ...(room.mediaProfile?.id ? { mediaProfileId: room.mediaProfile.id } : {}),
+      ...(room.hostId ? { hostParticipantId: room.hostId } : {})
+    };
+  }
+
+  private platformParticipantReference(participant: Pick<ParticipantMongoDocument, 'id' | 'userId' | 'displayName' | 'role' | 'admitted' | 'nodeId'>) {
+    return {
+      participantId: participant.id,
+      ...(participant.userId ? { userId: participant.userId } : {}),
+      ...(participant.displayName ? { displayName: participant.displayName } : {}),
+      ...(participant.role ? { role: participant.role } : {}),
+      admitted: participant.admitted,
+      ...(participant.nodeId ? { nodeId: participant.nodeId } : {})
+    };
+  }
+
+  private platformProducerReference(
+    producer: Pick<ProducerMongoDocument, 'id' | 'participantId' | 'transportId' | 'kind' | 'status' | 'priority'>
+  ) {
+    return {
+      producerId: producer.id,
+      participantId: producer.participantId,
+      transportId: producer.transportId,
+      kind: producer.kind,
+      status: producer.status,
+      priority: normalizeConsumerPriority(producer.priority)
+    };
+  }
+
+  private platformConsumerReference(
+    consumer: Pick<
+      ConsumerMongoDocument,
+      'id' | 'participantId' | 'producerId' | 'transportId' | 'status' | 'priority' | 'preferredLayers' | 'preferredSvcLayers'
+    >
+  ) {
+    return {
+      consumerId: consumer.id,
+      participantId: consumer.participantId,
+      producerId: consumer.producerId,
+      transportId: consumer.transportId,
+      status: consumer.status,
+      priority: normalizeConsumerPriority(consumer.priority),
+      preferredLayers: normalizeLayerSelection(consumer.preferredLayers as RtpLayerSelection | undefined),
+      preferredSvcLayers: normalizeSvcLayerSelection(consumer.preferredSvcLayers as SvcLayerSelection | undefined)
+    };
+  }
+
+  private platformActorFromParticipant(
+    participant: Pick<ParticipantMongoDocument, 'id' | 'userId' | 'displayName' | 'nodeId'>,
+    type: PlatformEventActor['type'] = 'participant'
+  ): PlatformEventActor {
+    return {
+      type,
+      participantId: participant.id,
+      ...(participant.userId ? { userId: participant.userId } : {}),
+      ...(participant.displayName ? { label: participant.displayName } : {}),
+      ...(participant.nodeId ? { nodeId: participant.nodeId } : {})
+    };
+  }
+
+  private platformActorFromParticipantContext(
+    participant: Pick<ParticipantMongoDocument, 'id' | 'userId' | 'displayName' | 'nodeId'> | undefined,
+    participantId: string,
+    type: PlatformEventActor['type'] = 'participant'
+  ): PlatformEventActor {
+    if (participant) {
+      return this.platformActorFromParticipant(participant, type);
+    }
+    return {
+      type,
+      participantId
+    };
+  }
+
+  private platformActorFromIncidentActor(actor?: RoomIncidentActor): PlatformEventActor | undefined {
+    if (!actor) {
+      return undefined;
+    }
+    return {
+      type:
+        actor.type === 'operator'
+          ? 'operator'
+          : actor.type === 'automation'
+            ? 'automation'
+            : actor.type === 'worker'
+              ? 'worker'
+              : actor.type === 'node'
+                ? 'node'
+                : 'participant',
+      ...(actor.participantId ? { participantId: actor.participantId } : {}),
+      ...(actor.userId ? { userId: actor.userId } : {}),
+      ...(actor.label ? { label: actor.label } : {}),
+      ...(actor.nodeId ? { nodeId: actor.nodeId } : {}),
+      ...(actor.workerId ? { workerId: actor.workerId } : {})
+    };
+  }
+
   private async isProducerHostedLocally(
     producer: Pick<ProducerMongoDocument, 'id' | 'nodeId'>,
     ownerLookup?: RoomOwnerLookupResponse
@@ -2154,6 +4237,49 @@ function preferredLayerNameToSelection(layer: 'low' | 'medium' | 'high' | undefi
   }
 }
 
+function selectionToPreferredLayerName(selection: RtpLayerSelection | undefined): 'low' | 'medium' | 'high' | undefined {
+  if (!selection) {
+    return undefined;
+  }
+  const spatialLayer = selection.spatialLayer ?? 2;
+  if (spatialLayer <= 0) {
+    return 'low';
+  }
+  if (spatialLayer === 1) {
+    return 'medium';
+  }
+  return 'high';
+}
+
+function createFallbackRoomQualityState(roomId: string): RoomQualityState {
+  const updatedAt = new Date().toISOString();
+  return {
+    roomId,
+    score: {
+      score: 100,
+      level: 'excellent',
+      reasons: ['stable'],
+      breakdown: {
+        packetLossScore: 100,
+        rttScore: 100,
+        jitterScore: 100,
+        congestionScore: 100,
+        retransmissionScore: 100,
+        allocationScore: 100
+      },
+      updatedAt
+    },
+    consumers: [],
+    producers: [],
+    transports: [],
+    targetBitrate: 0,
+    allocatedBitrate: 0,
+    actualBitrate: 0,
+    congestionState: 'normal',
+    updatedAt
+  };
+}
+
 function isMissingNodeId(nodeId: string | undefined | null): boolean {
   return !nodeId || nodeId.trim().length === 0;
 }
@@ -2170,6 +4296,424 @@ function normalizeMediaRoomCleanupSummary(summary: Partial<LocalRoomCleanupMetri
 
 function isMissingWorkerAssignmentError(error: unknown): boolean {
   return error instanceof Error && /is not assigned to a worker/i.test(error.message);
+}
+
+type IncidentDateLike = Date | string | undefined;
+
+interface PersistedIncidentAlertLike {
+  code: RoomOperatorAlert['code'];
+  severity: RoomOperatorAlert['severity'];
+  title: string;
+  detail: string;
+  firstTriggeredAt?: IncidentDateLike;
+  lastTriggeredAt?: IncidentDateLike;
+  occurrenceCount?: number;
+}
+
+interface PersistedIncidentStateLike {
+  roomId?: string;
+  status?: RoomIncidentState['status'];
+  health?: RoomIncidentState['health'];
+  healthChangedAt?: IncidentDateLike;
+  protected?: boolean;
+  protectedAt?: IncidentDateLike;
+  protectedByParticipantId?: string;
+  protectedReason?: string;
+  admissionsState?: RoomIncidentState['admissionsState'];
+  publishingState?: RoomIncidentState['publishingState'];
+  underRecovery?: boolean;
+  recoveryStartedAt?: IncidentDateLike;
+  recoveryStartedByParticipantId?: string;
+  recoveryClearedAt?: IncidentDateLike;
+  recoveryClearedByParticipantId?: string;
+  recoveryReason?: string;
+  lastFailureAt?: IncidentDateLike;
+  lastFailureReason?: RoomIncidentState['lastFailureReason'];
+  lastFailureMessage?: string;
+  lastRecoveryAction?: RoomIncidentState['lastRecoveryAction'];
+  lastRecoveryActionAt?: IncidentDateLike;
+  activeAlerts?: PersistedIncidentAlertLike[] | RoomOperatorAlertDocument[];
+  snapshotCount?: number;
+  latestSnapshotId?: string;
+  updatedAt?: IncidentDateLike;
+}
+
+function defaultIncidentStateDocument(roomId: string, now = new Date()): PersistedIncidentStateLike {
+  return {
+    roomId,
+    status: 'stable',
+    health: 'stable',
+    healthChangedAt: now,
+    protected: false,
+    admissionsState: 'default',
+    publishingState: 'default',
+    underRecovery: false,
+    activeAlerts: [],
+    snapshotCount: 0,
+    updatedAt: now
+  };
+}
+
+function defaultIncidentState(roomId: string): RoomIncidentState {
+  return toRoomIncidentState(roomId, defaultIncidentStateDocument(roomId));
+}
+
+function toRoomIncidentState(
+  roomId: string,
+  value: PersistedIncidentStateLike | RoomIncidentStateDocument | undefined
+): RoomIncidentState {
+  const base = value ?? defaultIncidentStateDocument(roomId);
+  return {
+    roomId,
+    status: base.status ?? 'stable',
+    health: base.health ?? 'stable',
+    healthChangedAt: toIso(base.healthChangedAt),
+    protected: base.protected ?? false,
+    protectedAt: toIso(base.protectedAt),
+    protectedByParticipantId: base.protectedByParticipantId,
+    protectedReason: base.protectedReason,
+    admissionsState: base.admissionsState ?? 'default',
+    publishingState: base.publishingState ?? 'default',
+    underRecovery: base.underRecovery ?? false,
+    recoveryStartedAt: toIso(base.recoveryStartedAt),
+    recoveryStartedByParticipantId: base.recoveryStartedByParticipantId,
+    recoveryClearedAt: toIso(base.recoveryClearedAt),
+    recoveryClearedByParticipantId: base.recoveryClearedByParticipantId,
+    recoveryReason: base.recoveryReason,
+    lastFailureAt: toIso(base.lastFailureAt),
+    lastFailureReason: base.lastFailureReason,
+    lastFailureMessage: base.lastFailureMessage,
+    lastRecoveryAction: base.lastRecoveryAction,
+    lastRecoveryActionAt: toIso(base.lastRecoveryActionAt),
+    activeAlerts: (base.activeAlerts ?? []).map((alert: PersistedIncidentAlertLike | RoomOperatorAlertDocument) => ({
+      code: alert.code,
+      severity: alert.severity,
+      title: alert.title,
+      detail: alert.detail,
+      firstTriggeredAt: toIso(alert.firstTriggeredAt) ?? new Date().toISOString(),
+      lastTriggeredAt: toIso(alert.lastTriggeredAt) ?? new Date().toISOString(),
+      occurrenceCount: alert.occurrenceCount ?? 1
+    })),
+    snapshotCount: base.snapshotCount ?? 0,
+    latestSnapshotId: base.latestSnapshotId,
+    updatedAt: toIso(base.updatedAt) ?? new Date().toISOString()
+  };
+}
+
+function toIncidentStateDocument(
+  state: RoomIncidentState,
+  existing?: PersistedIncidentStateLike | RoomIncidentStateDocument
+): PersistedIncidentStateLike {
+  return {
+    ...(existing ?? {}),
+    roomId: state.roomId,
+    status: state.status,
+    health: state.health,
+    healthChangedAt: state.healthChangedAt ? new Date(state.healthChangedAt) : undefined,
+    protected: state.protected,
+    protectedAt: state.protectedAt ? new Date(state.protectedAt) : undefined,
+    protectedByParticipantId: state.protectedByParticipantId,
+    protectedReason: state.protectedReason,
+    admissionsState: state.admissionsState,
+    publishingState: state.publishingState,
+    underRecovery: state.underRecovery,
+    recoveryStartedAt: state.recoveryStartedAt ? new Date(state.recoveryStartedAt) : undefined,
+    recoveryStartedByParticipantId: state.recoveryStartedByParticipantId,
+    recoveryClearedAt: state.recoveryClearedAt ? new Date(state.recoveryClearedAt) : undefined,
+    recoveryClearedByParticipantId: state.recoveryClearedByParticipantId,
+    recoveryReason: state.recoveryReason,
+    lastFailureAt: state.lastFailureAt ? new Date(state.lastFailureAt) : undefined,
+    lastFailureReason: state.lastFailureReason,
+    lastFailureMessage: state.lastFailureMessage,
+    lastRecoveryAction: state.lastRecoveryAction,
+    lastRecoveryActionAt: state.lastRecoveryActionAt ? new Date(state.lastRecoveryActionAt) : undefined,
+    activeAlerts: state.activeAlerts.map((alert: RoomOperatorAlert) => ({
+      code: alert.code,
+      severity: alert.severity,
+      title: alert.title,
+      detail: alert.detail,
+      firstTriggeredAt: new Date(alert.firstTriggeredAt),
+      lastTriggeredAt: new Date(alert.lastTriggeredAt),
+      occurrenceCount: alert.occurrenceCount
+    })),
+    snapshotCount: state.snapshotCount,
+    latestSnapshotId: state.latestSnapshotId,
+    updatedAt: new Date(state.updatedAt)
+  };
+}
+
+function enrichRoomIncidentState(
+  room: Pick<Room, 'id' | 'settings' | 'mediaState' | 'owner'>,
+  summary: Pick<RoomQualitySummaryState, 'roomId' | 'health' | 'protections'>,
+  ownerLookup: Pick<RoomOwnerLookupResponse, 'local' | 'owner' | 'available' | 'reason'>,
+  persisted: RoomIncidentState
+): RoomIncidentState {
+  return enrichIncidentStateWithDerivedFields(
+    {
+      ...persisted,
+      roomId: room.id,
+      health: summary.health,
+      status: deriveIncidentStatus(room.mediaState, persisted, summary.health),
+      healthChangedAt:
+        persisted.health === summary.health && persisted.healthChangedAt
+          ? persisted.healthChangedAt
+          : new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    },
+    room,
+    summary,
+    ownerLookup
+  );
+}
+
+function enrichIncidentStateWithDerivedFields(
+  state: RoomIncidentState,
+  room: Pick<Room, 'id' | 'settings' | 'mediaState' | 'owner'>,
+  summary: Pick<RoomQualitySummaryState, 'roomId' | 'health' | 'protections'>,
+  ownerLookup: Pick<RoomOwnerLookupResponse, 'local' | 'owner' | 'available' | 'reason'>
+): RoomIncidentState {
+  return {
+    ...state,
+    blockedReasons: buildBlockedReasons(room, summary, state),
+    workflows: buildRecoveryWorkflows(room, summary, state, ownerLookup)
+  };
+}
+
+function buildBlockedReasons(
+  room: Pick<Room, 'settings' | 'mediaState'>,
+  summary: Pick<RoomQualitySummaryState, 'protections'>,
+  state: RoomIncidentState
+): string[] {
+  const reasons = new Set<string>();
+  if (room.settings.locked) {
+    reasons.add('Room admissions are locked by the host.');
+  }
+  if (room.mediaState?.status === 'failed') {
+    reasons.add('Room media is failed and needs recovery before new sessions can proceed.');
+  }
+  if (state.protected && state.admissionsState !== 'reopened') {
+    reasons.add(summary.protections.join.message);
+  }
+  if (state.protected || state.publishingState === 'paused') {
+    reasons.add(summary.protections.publish.message);
+  }
+  return [...reasons];
+}
+
+function buildRecoveryWorkflows(
+  room: Pick<Room, 'settings' | 'mediaState'>,
+  summary: Pick<RoomQualitySummaryState, 'health'> & Partial<Pick<RoomQualitySummaryState, 'warnings'>>,
+  state: RoomIncidentState,
+  ownerLookup: Pick<RoomOwnerLookupResponse, 'local' | 'available' | 'reason'>
+): RoomRecoveryWorkflow[] {
+  const warnings = summary.warnings ?? [];
+  return [
+    {
+      id: 'protect_room',
+      title: 'Protect room',
+      status: state.protected ? 'active' : summary.health === 'stable' ? 'available' : 'recommended',
+      detail: state.protected
+        ? 'Operator protections are limiting joins or publishing while the room stabilizes.'
+        : 'Protecting the room pauses growth while current participants recover.',
+      suggestedActions: state.protected ? ['unprotect_room'] : ['protect_room']
+    },
+    {
+      id: 'drain_prepare',
+      title: 'Prepare for drain',
+      status: warnings.some((warning) => /node|worker|owner_quality_signal/i.test(warning)) ? 'recommended' : 'available',
+      detail: ownerLookup.local
+        ? 'Use room protections and snapshots before draining the current owner node or worker.'
+        : `This room is owned remotely${ownerLookup.reason ? ` (${ownerLookup.reason.replaceAll('_', ' ')})` : ''}. Coordinate recovery with the owner node.`,
+      suggestedActions: ['protect_room', 'pause_new_publishing', 'force_incident_snapshot']
+    },
+    {
+      id: 'reopen_room',
+      title: 'Reopen room',
+      status: state.protected
+        ? summary.health === 'stable' && room.mediaState?.status !== 'failed' && !room.settings.locked
+          ? 'recommended'
+          : 'blocked'
+        : 'available',
+      detail: 'Reopen admissions or remove protection once the room is stable and the infrastructure is healthy.',
+      blockedReason:
+        state.protected && (summary.health !== 'stable' || room.mediaState?.status === 'failed' || room.settings.locked)
+          ? 'The room is not ready to reopen yet.'
+          : undefined,
+      suggestedActions: ['reopen_admissions', 'resume_new_publishing', 'unprotect_room']
+    },
+    {
+      id: 'acknowledge_failure',
+      title: 'Acknowledge failure',
+      status: room.mediaState?.status === 'failed'
+        ? state.underRecovery
+          ? 'active'
+          : 'recommended'
+        : state.underRecovery
+          ? 'active'
+          : 'available',
+      detail: 'Mark the room under recovery so operators can coordinate drain, snapshot, and reopen steps.',
+      suggestedActions: state.underRecovery ? ['clear_recovery'] : ['mark_operator_recovery']
+    }
+  ];
+}
+
+function deriveIncidentStatus(
+  mediaState: Room['mediaState'] | undefined,
+  state: Pick<RoomIncidentState, 'underRecovery'>,
+  health: RoomHealthState
+): RoomIncidentState['status'] {
+  if (mediaState?.status === 'failed') {
+    return 'failed';
+  }
+  if (state.underRecovery) {
+    return 'recovering';
+  }
+  return health;
+}
+
+function overrideAutopilotDecision(
+  decision: RoomAutopilotDecision,
+  action: RoomAutopilotDecision['action'],
+  code: RoomAutopilotDecision['code'],
+  message: string
+): RoomAutopilotDecision {
+  return {
+    ...decision,
+    action,
+    code,
+    message,
+    triggeredBy: ['operator'],
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function incidentActorFromParticipant(
+  participant: Pick<ParticipantMongoDocument, 'id' | 'userId' | 'displayName'>,
+  type: RoomIncidentActor['type']
+): RoomIncidentActor {
+  return {
+    type,
+    participantId: participant.id,
+    userId: participant.userId,
+    label: participant.displayName
+  };
+}
+
+function nextAlert(
+  previous: RoomOperatorAlert | undefined,
+  base: Pick<RoomOperatorAlert, 'code' | 'severity' | 'title' | 'detail'>
+): RoomOperatorAlert {
+  const now = new Date().toISOString();
+  return {
+    ...base,
+    firstTriggeredAt: previous?.firstTriggeredAt ?? now,
+    lastTriggeredAt: now,
+    occurrenceCount: (previous?.occurrenceCount ?? 0) + 1
+  };
+}
+
+function recoveryActionSummary(action: RoomRecoveryActionType): string {
+  switch (action) {
+    case 'protect_room':
+      return 'Operator protected the room.';
+    case 'unprotect_room':
+      return 'Operator removed room protection.';
+    case 'reopen_admissions':
+      return 'Operator reopened room admissions.';
+    case 'pause_new_publishing':
+      return 'Operator paused new publishing.';
+    case 'resume_new_publishing':
+      return 'Operator resumed new publishing.';
+    case 'force_incident_snapshot':
+      return 'Operator generated a fresh incident snapshot.';
+    case 'mark_operator_recovery':
+      return 'Operator marked the room under recovery.';
+    case 'clear_recovery':
+      return 'Operator cleared the room recovery state.';
+  }
+}
+
+function snapshotTriggerSummary(reason: RoomSnapshotTriggerReason): string {
+  switch (reason) {
+    case 'manual_operator':
+      return 'An operator generated a fresh incident snapshot bundle.';
+    case 'critical_quality':
+      return 'A snapshot bundle was generated automatically when the room entered a critical state.';
+    case 'room_failure':
+      return 'A snapshot bundle was generated automatically for a room media failure.';
+    case 'repeated_throttles':
+      return 'A snapshot bundle was generated automatically after repeated throttles or rejections.';
+    case 'repeated_snapshots':
+      return 'A snapshot bundle was generated automatically after repeated incident activity.';
+  }
+}
+
+function sanitizeOperatorReason(reason: string | undefined): string | undefined {
+  if (!reason) {
+    return undefined;
+  }
+  const value = reason.trim();
+  return value.length === 0 ? undefined : value.slice(0, 500);
+}
+
+function sameProtectionState(
+  left: RoomQualitySummaryState['protections'],
+  right: RoomQualitySummaryState['protections']
+): boolean {
+  return left.join.action === right.join.action
+    && left.join.code === right.join.code
+    && left.publish.action === right.publish.action
+    && left.publish.code === right.publish.code
+    && left.screenShare.action === right.screenShare.action
+    && left.screenShare.code === right.screenShare.code;
+}
+
+function protectionSeverity(protections: RoomQualitySummaryState['protections']): RoomIncidentTimelineEvent['severity'] {
+  const actions = [protections.join.action, protections.publish.action, protections.screenShare.action];
+  if (actions.includes('reject')) {
+    return 'critical';
+  }
+  if (actions.includes('soft-throttle') || actions.includes('warn')) {
+    return 'warn';
+  }
+  return 'info';
+}
+
+function sameRecommendationCodes(
+  left: RoomQualitySummaryState['recommendations'],
+  right: RoomQualitySummaryState['recommendations']
+): boolean {
+  return JSON.stringify(left.map((recommendation) => recommendation.code).sort())
+    === JSON.stringify(right.map((recommendation) => recommendation.code).sort());
+}
+
+function recommendationSeverity(recommendations: RoomQualitySummaryState['recommendations']): RoomIncidentTimelineEvent['severity'] {
+  if (recommendations.some((recommendation) => recommendation.severity === 'critical')) {
+    return 'critical';
+  }
+  if (recommendations.some((recommendation) => recommendation.severity === 'warn')) {
+    return 'warn';
+  }
+  return 'info';
+}
+
+function toIso(value: Date | string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function defaultDecision(scope: RoomAutopilotDecision['scope']): RoomAutopilotDecision {
+  return {
+    scope,
+    health: 'critical',
+    action: 'reject',
+    code: 'room_failed',
+    message: 'Room media is unavailable while operators recover the room.',
+    triggeredBy: ['operator'],
+    updatedAt: new Date().toISOString()
+  };
 }
 
 function normalizeLayerSelection(selection: RtpLayerSelection | undefined): RtpLayerSelection | undefined {
@@ -2261,6 +4805,26 @@ function isRoomQualityState(value: unknown): value is RoomQualityState {
     && typeof (value as RoomQualityState).roomId === 'string'
     && typeof (value as RoomQualityState).updatedAt === 'string'
     && typeof (value as RoomQualityState).congestionState === 'string';
+}
+
+function isRoomQualitySummaryStatePayload(value: unknown): value is RoomQualitySummaryState {
+  return typeof value === 'object'
+    && value !== null
+    && typeof (value as RoomQualitySummaryState).roomId === 'string'
+    && typeof (value as RoomQualitySummaryState).updatedAt === 'string'
+    && typeof (value as RoomQualitySummaryState).health === 'string'
+    && typeof (value as RoomQualitySummaryState).profile?.id === 'string';
+}
+
+function isRoomPayloadWithProfile(value: unknown): value is Pick<Room, 'id' | 'mediaProfile'> {
+  return typeof value === 'object'
+    && value !== null
+    && typeof (value as Room).id === 'string'
+    && typeof (value as Room).mediaProfile?.id === 'string';
+}
+
+function roomProfileSignature(profile: Pick<RoomMediaProfile, 'id' | 'updatedAt'>): string {
+  return `${profile.id}:${profile.updatedAt ?? 'none'}`;
 }
 
 function compareIsoTimestamps(left: string, right: string): number {

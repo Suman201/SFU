@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { email, FormField, FormRoot, form as signalForm, max, maxLength, min, minLength, required } from '@angular/forms/signals';
 import { Router } from '@angular/router';
+import type { CreateRoomRequest, RoomMediaProfileId, RoomOwnerRedirect } from '@native-sfu/contracts';
 import { AuthService } from '../../core/services/auth.service';
+import { buildRoomOwnerRedirectUrl } from '../../core/services/app-environment';
 import { RoomStore } from '../../core/services/room.store';
-import { SocketService } from '../../core/services/socket.service';
+import { SocketAckError, SocketService } from '../../core/services/socket.service';
 import { ThemeService } from '../../core/services/theme.service';
 
 interface AuthFormModel {
@@ -18,6 +20,7 @@ interface RoomFormModel {
   maxParticipants: number;
   waitingRoomEnabled: boolean;
   joinApprovalRequired: boolean;
+  mediaProfileId: RoomMediaProfileId;
 }
 
 interface JoinFormModel {
@@ -64,7 +67,8 @@ export class SfuForms {
     visibility: 'public',
     maxParticipants: 100,
     waitingRoomEnabled: false,
-    joinApprovalRequired: false
+    joinApprovalRequired: false,
+    mediaProfileId: 'meeting'
   });
   protected readonly roomForm = signalForm(this.roomModel, (path) => {
     required(path.name);
@@ -151,6 +155,9 @@ export class SfuForms {
       this.store.setLocalParticipant(response.participantId);
       await this.router.navigate(['/rooms', response.room.id]);
     } catch (error) {
+      if (this.followRoomOwnerRedirect(error, this.joinModel().roomId)) {
+        return;
+      }
       this.error.set(error instanceof Error ? error.message : 'Failed to join room');
     } finally {
       this.busy.set(false);
@@ -166,11 +173,28 @@ export class SfuForms {
     this.theme.toggle();
   }
 
-  private normalizedRoomFormValue(): RoomFormModel {
+  private normalizedRoomFormValue(): CreateRoomRequest {
     const value = this.roomModel();
     return {
       ...value,
       maxParticipants: Number(value.maxParticipants)
     };
+  }
+
+  private followRoomOwnerRedirect(error: unknown, roomId: string): boolean {
+    if (!(error instanceof SocketAckError) || error.code !== 'ROOM_REDIRECT') {
+      return false;
+    }
+    const redirect = error.details as Partial<RoomOwnerRedirect> | undefined;
+    if (!redirect?.ownerUrl || typeof window === 'undefined') {
+      return false;
+    }
+    window.location.assign(
+      buildRoomOwnerRedirectUrl(redirect.ownerUrl, roomId, {
+        displayName: this.joinModel().displayName,
+        asViewer: this.joinModel().asViewer
+      })
+    );
+    return true;
   }
 }

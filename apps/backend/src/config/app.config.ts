@@ -111,6 +111,17 @@ export const appConfig = () => ({
     s3AccessKeyId: process.env.S3_ACCESS_KEY_ID,
     s3SecretAccessKey: process.env.S3_SECRET_ACCESS_KEY
   },
+  events: {
+    webhooks: {
+      enabled: parseBoolean(process.env.WEBHOOK_DELIVERY_ENABLED, true),
+      secretEncryptionKey: process.env.WEBHOOK_SECRET_ENCRYPTION_KEY ?? process.env.JWT_ACCESS_SECRET,
+      defaultTimeoutMs: Number(process.env.WEBHOOK_DEFAULT_TIMEOUT_MS ?? 5000),
+      defaultMaxAttempts: Number(process.env.WEBHOOK_DEFAULT_MAX_ATTEMPTS ?? 5),
+      defaultInitialBackoffMs: Number(process.env.WEBHOOK_DEFAULT_INITIAL_BACKOFF_MS ?? 2000),
+      pollIntervalMs: Number(process.env.WEBHOOK_DELIVERY_POLL_INTERVAL_MS ?? 1000),
+      leaseMs: Number(process.env.WEBHOOK_DELIVERY_LEASE_MS ?? 30000)
+    }
+  },
   // Backward-compatible aliases for existing code that still reads raw keys.
   NODE_ENV: process.env.NODE_ENV ?? 'development',
   PORT: Number(process.env.PORT ?? 3000),

@@ -5,6 +5,11 @@ type RuntimeEnvironment = {
 
 type RuntimeOverrideKey = keyof RuntimeEnvironment;
 
+export type RoomOwnerRedirectJoinContext = {
+  displayName?: string;
+  asViewer?: boolean;
+};
+
 declare global {
   interface Window {
     __SFU_ENV__?: RuntimeEnvironment;
@@ -20,6 +25,36 @@ const defaultSocketUrl = `${defaultOrigin}/sfu`;
 
 export const API_BASE_URL = normalizeUrl(runtimeEnvironment?.apiBaseUrl ?? defaultApiBaseUrl);
 export const SOCKET_URL = normalizeUrl(runtimeEnvironment?.socketUrl ?? defaultSocketUrl);
+
+export function buildRoomOwnerRedirectUrl(ownerUrl: string, roomId: string, joinContext?: RoomOwnerRedirectJoinContext): string {
+  const ownerOrigin = new URL(normalizeUrl(ownerUrl)).origin;
+
+  if (typeof window === 'undefined') {
+    return `${ownerOrigin}/rooms/${encodeURIComponent(roomId)}`;
+  }
+
+  const currentOrigin = window.location.origin;
+  const currentApiOrigin = new URL(API_BASE_URL).origin;
+  const currentSocketOrigin = new URL(SOCKET_URL).origin;
+  const usingSplitFrontendRuntime = currentOrigin !== currentApiOrigin || currentOrigin !== currentSocketOrigin;
+  const targetOrigin = usingSplitFrontendRuntime && currentOrigin !== ownerOrigin ? currentOrigin : ownerOrigin;
+  const target = new URL(`/rooms/${encodeURIComponent(roomId)}`, `${targetOrigin}/`);
+
+  if (usingSplitFrontendRuntime && targetOrigin === currentOrigin) {
+    target.searchParams.set('apiBaseUrl', `${ownerOrigin}/api/v1`);
+    target.searchParams.set('socketUrl', `${ownerOrigin}/sfu`);
+  }
+
+  const displayName = joinContext?.displayName?.trim();
+  if (displayName) {
+    target.searchParams.set('joinDisplayName', displayName);
+  }
+  if (joinContext?.asViewer) {
+    target.searchParams.set('joinAsViewer', '1');
+  }
+
+  return target.toString();
+}
 
 function normalizeUrl(value: string): string {
   return value.replace(/\/+$/, '');

@@ -19,8 +19,26 @@ describe('RoomsGateway Socket.IO ack integration (e2e)', () => {
     onProducerScoreUpdated: jest.fn(() => jest.fn()),
     onTransportQualityUpdated: jest.fn(() => jest.fn()),
     onRoomQualityUpdated: jest.fn(() => jest.fn()),
+    onRoomQualitySummaryUpdated: jest.fn(() => jest.fn()),
+    onRoomIncidentStateUpdated: jest.fn(() => jest.fn()),
+    onRoomIncidentTimelineEvent: jest.fn(() => jest.fn()),
+    onRoomSnapshotGenerated: jest.fn(() => jest.fn()),
     onRoomFailed: jest.fn(() => jest.fn()),
     createRoom: jest.fn(async () => ({ id: 'room-1', hostId: 'host-1' })),
+    getRoomQualitySummaryState: jest.fn(async () => ({ roomId: 'room-1', health: 'stable' })),
+    getRoomIncidentState: jest.fn(async () => ({
+      roomId: 'room-1',
+      status: 'stable',
+      health: 'stable',
+      protected: false,
+      admissionsState: 'default',
+      publishingState: 'default',
+      underRecovery: false,
+      activeAlerts: [],
+      snapshotCount: 0,
+      updatedAt: '2026-06-19T00:00:00.000Z'
+    })),
+    updateRoomMediaProfile: jest.fn(async () => ({ id: 'room-1', mediaProfile: { id: 'webinar' } })),
     leaveRoomForSocket: jest.fn(async () => ({ closed: false, left: false }))
   };
   const auth = {
@@ -104,5 +122,52 @@ describe('RoomsGateway Socket.IO ack integration (e2e)', () => {
     expect(typeof socketId).toBe('string');
     expect(request.name).toBe('Release Gate Ack Validation');
     expect(request.maxParticipants).toBe(4);
+  });
+
+  it('returns an acknowledgement payload for room:get-quality-summary', async () => {
+    const response = await new Promise<{ ok: boolean; data?: { roomId: string; health: string }; error?: { message?: string } }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Ack timeout for room:get-quality-summary')), 5_000);
+      socket.emit('room:get-quality-summary', { roomId: 'room-1' }, (ackResponse: { ok: boolean; data?: { roomId: string; health: string }; error?: { message?: string } }) => {
+        clearTimeout(timer);
+        resolve(ackResponse);
+      });
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.data).toEqual({ roomId: 'room-1', health: 'stable' });
+    expect(rooms.getRoomQualitySummaryState as jest.Mock).toHaveBeenCalledWith('room-1', 'host-1');
+  });
+
+  it('returns an acknowledgement payload for room:update-media-profile', async () => {
+    const response = await new Promise<{ ok: boolean; data?: { id: string; mediaProfile: { id: string } }; error?: { message?: string } }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Ack timeout for room:update-media-profile')), 5_000);
+      socket.emit(
+        'room:update-media-profile',
+        { roomId: 'room-1', profileId: 'webinar' },
+        (ackResponse: { ok: boolean; data?: { id: string; mediaProfile: { id: string } }; error?: { message?: string } }) => {
+          clearTimeout(timer);
+          resolve(ackResponse);
+        }
+      );
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.data).toEqual({ id: 'room-1', mediaProfile: { id: 'webinar' } });
+    expect(rooms.updateRoomMediaProfile as jest.Mock).toHaveBeenCalledWith({ roomId: 'room-1', profileId: 'webinar' }, 'host-1');
+  });
+
+  it('returns an acknowledgement payload for room:get-incident-state', async () => {
+    const response = await new Promise<{ ok: boolean; data?: { roomId: string; status: string }; error?: { message?: string } }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Ack timeout for room:get-incident-state')), 5_000);
+      socket.emit('room:get-incident-state', { roomId: 'room-1' }, (ackResponse: { ok: boolean; data?: { roomId: string; status: string }; error?: { message?: string } }) => {
+        clearTimeout(timer);
+        resolve(ackResponse);
+      });
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.data?.roomId).toBe('room-1');
+    expect(response.data?.status).toBe('stable');
+    expect(rooms.getRoomIncidentState as jest.Mock).toHaveBeenCalledWith('room-1', 'host-1');
   });
 });

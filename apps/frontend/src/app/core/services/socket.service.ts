@@ -4,6 +4,17 @@ import { io, Socket } from 'socket.io-client';
 import { AuthService } from './auth.service';
 import { SOCKET_URL } from './app-environment';
 
+export class SocketAckError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly details?: unknown
+  ) {
+    super(message);
+    this.name = 'SocketAckError';
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class SocketService {
   private socket?: Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -38,7 +49,7 @@ export class SocketService {
         if (response.ok) {
           resolve(response.data as ExtractAckData<Parameters<ClientToServerEvents[K]>[1]>);
         } else {
-          reject(new Error(response.error.message));
+          reject(new SocketAckError(response.error.code, response.error.message, response.error.details));
         }
       });
     });
@@ -46,6 +57,10 @@ export class SocketService {
 
   on<K extends keyof ServerToClientEvents>(event: K, handler: (...args: Parameters<ServerToClientEvents[K]>) => void): void {
     this.connect().on(event, handler as never);
+  }
+
+  off<K extends keyof ServerToClientEvents>(event: K, handler: (...args: Parameters<ServerToClientEvents[K]>) => void): void {
+    this.socket?.off(event, handler as never);
   }
 }
 

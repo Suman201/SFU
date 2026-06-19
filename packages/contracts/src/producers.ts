@@ -1,4 +1,5 @@
 import type { ProducerQualityState } from './metrics.js';
+import type { RoomAutopilotDecision } from './rooms.js';
 
 export type ProducerKind = 'audio' | 'video' | 'screen';
 export type ProducerStatus = 'live' | 'paused' | 'closed';
@@ -205,6 +206,7 @@ export interface Producer {
   svc?: ProducerSvcState;
   dynacast?: ProducerDynacastState;
   quality?: ProducerQualityState;
+  policyDecision?: RoomAutopilotDecision;
   status: ProducerStatus;
   createdAt: string;
 }

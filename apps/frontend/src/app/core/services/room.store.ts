@@ -1,5 +1,22 @@
 import { Injectable, signal } from '@angular/core';
-import type { ChatMessage, Consumer, ConsumerLayerEvent, ConsumerQualityState, Participant, Producer, ProducerDynacastEvent, ProducerQualityState, Room, RoomQualityState } from '@native-sfu/contracts';
+import type {
+  ChatMessage,
+  Consumer,
+  ConsumerLayerEvent,
+  ConsumerQualityState,
+  Participant,
+  Producer,
+  ProducerDynacastEvent,
+  ProducerQualityState,
+  Room,
+  RoomIncidentState,
+  RoomIncidentTimelineEvent,
+  RoomIncidentTimelineState,
+  RoomQualityState,
+  RoomQualitySummaryState,
+  RoomSnapshotBundleSummary,
+  RoomSnapshotHistoryState
+} from '@native-sfu/contracts';
 
 @Injectable({ providedIn: 'root' })
 export class RoomStore {
@@ -9,8 +26,25 @@ export class RoomStore {
   readonly activeSpeakerId = signal<string | null>(null);
   readonly waitingCount = signal(0);
   readonly roomQuality = signal<RoomQualityState | null>(null);
+  readonly roomQualitySummary = signal<RoomQualitySummaryState | null>(null);
+  readonly roomIncidentState = signal<RoomIncidentState | null>(null);
+  readonly roomIncidentTimeline = signal<RoomIncidentTimelineState | null>(null);
+  readonly roomSnapshotHistory = signal<RoomSnapshotHistoryState | null>(null);
 
   setRoom(room: Room): void {
+    const previousRoom = this.room();
+    if (previousRoom?.id !== room.id) {
+      this.roomQuality.set(null);
+      this.roomQualitySummary.set(null);
+      this.roomIncidentState.set(room.incidentState ?? null);
+      this.roomIncidentTimeline.set(null);
+      this.roomSnapshotHistory.set(null);
+    } else if (previousRoom.mediaProfile.id !== room.mediaProfile.id) {
+      this.roomQualitySummary.set(null);
+      this.roomIncidentState.set(room.incidentState ?? this.roomIncidentState());
+    } else if (room.incidentState) {
+      this.roomIncidentState.set(room.incidentState);
+    }
     this.room.set(room);
   }
 
@@ -145,6 +179,70 @@ export class RoomStore {
 
   applyRoomQuality(state: RoomQualityState): void {
     this.roomQuality.set(state);
+  }
+
+  applyRoomQualitySummary(state: RoomQualitySummaryState): void {
+    this.roomQualitySummary.set(state);
+  }
+
+  applyRoomIncidentState(state: RoomIncidentState): void {
+    this.roomIncidentState.set(state);
+    const room = this.room();
+    if (!room) {
+      return;
+    }
+    this.room.set({
+      ...room,
+      incidentState: state
+    });
+  }
+
+  applyRoomIncidentTimeline(state: RoomIncidentTimelineState): void {
+    this.roomIncidentTimeline.set(state);
+  }
+
+  appendRoomIncidentEvent(event: RoomIncidentTimelineEvent): void {
+    const current = this.roomIncidentTimeline();
+    const events = [event, ...(current?.events ?? []).filter((entry) => entry.id !== event.id)].slice(0, 50);
+    this.roomIncidentTimeline.set({
+      roomId: event.roomId,
+      events,
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  applyRoomSnapshotHistory(state: RoomSnapshotHistoryState): void {
+    this.roomSnapshotHistory.set(state);
+  }
+
+  appendRoomSnapshotBundle(summary: RoomSnapshotBundleSummary): void {
+    const current = this.roomSnapshotHistory();
+    const bundles = [summary, ...(current?.bundles ?? []).filter((entry) => entry.bundleId !== summary.bundleId)].slice(0, 20);
+    this.roomSnapshotHistory.set({
+      roomId: summary.roomId,
+      bundles,
+      updatedAt: new Date().toISOString()
+    });
+    const incidentState = this.roomIncidentState();
+    if (incidentState && incidentState.roomId === summary.roomId) {
+      this.roomIncidentState.set({
+        ...incidentState,
+        snapshotCount: Math.max(incidentState.snapshotCount + 1, bundles.length),
+        latestSnapshotId: summary.bundleId,
+        updatedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  applyRoomOwner(owner: Room['owner']): void {
+    const room = this.room();
+    if (!room) {
+      return;
+    }
+    this.room.set({
+      ...room,
+      owner
+    });
   }
 
   addMessage(message: ChatMessage): void {
