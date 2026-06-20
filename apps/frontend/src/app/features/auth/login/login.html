@@ -1,10 +1,11 @@
-<sfu-header />
-
-<main class="auth-shell">
+<sfu-auth-layout [role]="expectedRole" [title]="title" [subtitle]="subtitle">
   <form class="auth-panel" [formRoot]="form" (submit)="submit($event)">
     <header>
-      <h1>Login</h1>
-      <a routerLink="/register">Create account</a>
+      <div>
+        <p class="eyebrow">{{ expectedRole }} portal</p>
+        <h1>{{ title }}</h1>
+      </div>
+      <a [routerLink]="alternateLoginPath">Use {{ alternateRole }} login</a>
     </header>
 
     <label>
@@ -17,12 +18,16 @@
       <input type="password" [formField]="form.password" autocomplete="current-password">
     </label>
 
-    <button class="primary" type="submit" [disabled]="form().invalid() || busy()">Login</button>
+    <button class="primary" type="submit" [disabled]="form().invalid() || busy()">
+      {{ busy() ? 'Checking...' : 'Login' }}
+    </button>
 
-    @if (error()) {
-      <p class="error">{{ error() }}</p>
+    @if (error() || auth.sessionNotice()) {
+      <p class="error">{{ error() || auth.sessionNotice() }}</p>
     }
-  </form>
-</main>
 
-<sfu-footer />
+    <p class="secondary-link">
+      New here? <a routerLink="/register">Create a student account</a>
+    </p>
+  </form>
+</sfu-auth-layout>

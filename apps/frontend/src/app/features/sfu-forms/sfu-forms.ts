@@ -110,8 +110,8 @@ export class SfuForms {
         : this.auth.register(value.displayName, value.email, value.password);
     request.subscribe({
       next: () => this.busy.set(false),
-      error: (error: Error) => {
-        this.error.set(error.message);
+      error: (error: unknown) => {
+        this.error.set(this.auth.authErrorMessage(error));
         this.busy.set(false);
       }
     });

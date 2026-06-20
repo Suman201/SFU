@@ -31,7 +31,7 @@ export class Landing {
       eyebrow: 'For teachers',
       title: 'Turn what you know into a live class.',
       body: 'Create public batches, manage students, run sessions, and grow a teaching presence without needing a separate operations stack.',
-      route: '/teacher-dashboard',
+      route: '/teacher/dashboard',
       cta: 'Teacher dashboard',
       points: ['Create classes for any subject', 'Manage enrollments and schedules', 'Teach with video, chat, and whiteboard']
     },

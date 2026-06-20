@@ -1,25 +1,11 @@
-.auth-shell {
-  min-height: calc(100vh - 128px);
-  display: grid;
-  align-content: start;
-  justify-items: center;
-  padding: 32px 18px;
-}
-
 .auth-panel {
-  width: min(100%, 420px);
-  background: var(--panel-elevated);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
-  padding: 20px;
   display: grid;
   gap: 16px;
-  box-shadow: var(--shadow-md);
 }
 
 header {
   display: flex;
-  align-items: center;
+  align-items: start;
   justify-content: space-between;
   gap: 12px;
 }
@@ -27,6 +13,15 @@ header {
 h1 {
   margin: 0;
   font-size: 24px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: #458b73;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 a {
@@ -47,4 +42,11 @@ label {
   margin: 0;
   color: var(--danger);
   font-weight: 600;
+  white-space: pre-line;
+}
+
+.secondary-link {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }

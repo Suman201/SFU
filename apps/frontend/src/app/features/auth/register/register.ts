@@ -51,9 +51,9 @@ export class Register {
     this.error.set('');
     const value = this.formModel();
     this.auth.register(value.displayName, value.email, value.password).subscribe({
-      next: () => void this.router.navigate(['/sfu-forms']),
-      error: (error: Error) => {
-        this.error.set(error.message);
+      next: ({ user }) => void this.router.navigate([this.auth.redirectPathFor(user.role)]),
+      error: (error: unknown) => {
+        this.error.set(this.auth.authErrorMessage(error));
         this.busy.set(false);
       },
       complete: () => this.busy.set(false)

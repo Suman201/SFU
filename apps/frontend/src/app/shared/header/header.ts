@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { ThemeService } from '../../core/services/theme.service';
 
@@ -14,9 +14,12 @@ import { ThemeService } from '../../core/services/theme.service';
 export class Header {
   protected readonly auth = inject(AuthService);
   protected readonly theme = inject(ThemeService);
+  private readonly router = inject(Router);
 
   protected logout(): void {
+    const role = this.auth.role() ?? 'student';
     this.auth.logout();
+    void this.router.navigate([`/${role}/login`]);
   }
 
   protected toggleTheme(): void {

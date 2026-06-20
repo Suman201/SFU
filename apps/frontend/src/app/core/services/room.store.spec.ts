@@ -53,7 +53,7 @@ describe('RoomStore', () => {
     store.applyRoomIncidentState(incidentStateFixture('room-1'));
     store.appendRoomSnapshotBundle(snapshotBundleFixture('bundle-1', 'room-1'));
 
-    expect(store.roomSnapshotHistory()?.bundles).toHaveLength(1);
+    expect(store.roomSnapshotHistory()?.bundles.length).toBe(1);
     expect(store.roomIncidentState()?.latestSnapshotId).toBe('bundle-1');
 
     store.setRoom(roomFixture('room-2', 'webinar'));

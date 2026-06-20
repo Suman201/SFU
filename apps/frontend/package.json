@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prestart": "npm run build --workspace @native-sfu/contracts",
     "start": "ng serve --host 0.0.0.0 --port 4200 --proxy-config proxy.conf.cjs",
+    "prebuild": "npm run build --workspace @native-sfu/contracts",
     "build": "ng build",
     "test": "ng test --watch=false --browsers=ChromeHeadless",
     "lint": "eslint \"src/**/*.ts\""

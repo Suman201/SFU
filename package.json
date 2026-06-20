@@ -34,8 +34,8 @@
     "seed:dummy-users": "npm run seed:dummy-users -w @native-sfu/backend",
     "dev:backend": "npm run start:dev -w @native-sfu/backend",
     "dev:frontend": "npm run start -w @native-sfu/frontend",
-    "docker:up": "docker compose -f infra/docker-compose.yml up --build",
-    "docker:down": "docker compose -f infra/docker-compose.yml down --remove-orphans"
+    "docker:up": "docker compose -f infra/docker-compose.dev.yml up --build",
+    "docker:down": "docker compose -f infra/docker-compose.dev.yml down --remove-orphans"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0"

@@ -1,6 +1,6 @@
 <sfu-header />
 <main class="profile-shell">
-  <a class="back-link" routerLink="/teacher-dashboard">Back to dashboard</a>
+  <a class="back-link" routerLink="/teacher/dashboard">Back to dashboard</a>
 
   <section class="profile-cover">
     <img [src]="coverImage()" [alt]="profile.name + ' cover image'" />
@@ -177,7 +177,7 @@
                     <span>{{ attendanceLabel(batch) }}</span>
                   </div>
                   <footer>
-                    <a [routerLink]="['/teacher-dashboard/batches', batch.id]">Details</a>
+                    <a [routerLink]="['/teacher/dashboard/batches', batch.id]">Details</a>
                   </footer>
                 </article>
               }
@@ -186,7 +186,7 @@
             <div class="empty-state">
               <h3>No batches created</h3>
               <p>Create a batch from the teacher dashboard to show it here.</p>
-              <a class="primary-link" routerLink="/teacher-dashboard">Open dashboard</a>
+              <a class="primary-link" routerLink="/teacher/dashboard">Open dashboard</a>
             </div>
           }
         }

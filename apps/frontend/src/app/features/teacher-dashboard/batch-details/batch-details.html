@@ -1,6 +1,6 @@
 <sfu-header />
 <main class="batch-details-shell">
-  <a class="back-link" routerLink="/teacher-dashboard">Back to batches</a>
+  <a class="back-link" routerLink="/teacher/dashboard">Back to batches</a>
 
   @if (batch(); as batch) {
     <section class="details-hero">
@@ -17,7 +17,7 @@
         @if (nextSession(); as next) {
           <button class="primary" type="button" (click)="startSession(next)">Start next session</button>
         }
-        <a class="button" routerLink="/teacher-dashboard">All batches</a>
+        <a class="button" routerLink="/teacher/dashboard">All batches</a>
       </div>
     </section>
 
@@ -246,7 +246,7 @@
     <section class="empty-state">
       <h1>Batch not found</h1>
       <p>The batch may have been removed or is not available in this workspace.</p>
-      <a class="button primary" routerLink="/teacher-dashboard">Back to batches</a>
+      <a class="button primary" routerLink="/teacher/dashboard">Back to batches</a>
     </section>
   }
 </main>

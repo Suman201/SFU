@@ -15,8 +15,15 @@ export class AuthController {
   @ApiOperation({ summary: 'Register a classroom user' })
   @ApiBody({ type: RegisterDto })
   @ApiOkResponse({
-    description: 'JWT token pair',
-    schema: { example: { accessToken: 'jwt-access-token', refreshToken: 'jwt-refresh-token', expiresIn: '15m' } }
+    description: 'JWT token pair and authenticated user',
+    schema: {
+      example: {
+        accessToken: 'jwt-access-token',
+        refreshToken: 'jwt-refresh-token',
+        expiresIn: '15m',
+        user: { id: 'user-id', name: 'User Name', email: 'user@example.com', role: 'teacher' }
+      }
+    }
   })
   register(@Body() body: RegisterDto, @Ip() ipAddress: string, @Req() request: Request): Promise<TokenPair> {
     return this.auth.register(body, { ipAddress, userAgent: request.headers['user-agent'] });
@@ -27,8 +34,15 @@ export class AuthController {
   @ApiOperation({ summary: 'Login with email and password' })
   @ApiBody({ type: LoginDto })
   @ApiOkResponse({
-    description: 'JWT token pair',
-    schema: { example: { accessToken: 'jwt-access-token', refreshToken: 'jwt-refresh-token', expiresIn: '15m' } }
+    description: 'JWT token pair and authenticated user',
+    schema: {
+      example: {
+        accessToken: 'jwt-access-token',
+        refreshToken: 'jwt-refresh-token',
+        expiresIn: '15m',
+        user: { id: 'user-id', name: 'User Name', email: 'user@example.com', role: 'teacher' }
+      }
+    }
   })
   login(@Body() body: LoginDto, @Ip() ipAddress: string, @Req() request: Request): Promise<TokenPair> {
     return this.auth.login(body, { ipAddress, userAgent: request.headers['user-agent'] });

@@ -219,7 +219,7 @@ export class BatchDetails {
   }
 
   protected async copyProfileLink(student: TeacherBatchStudent): Promise<void> {
-    const profileLink = `${globalThis.location.origin}/teacher-dashboard/batches/${this.batchId()}?studentId=${encodeURIComponent(student.id)}`;
+    const profileLink = `${globalThis.location.origin}/teacher/dashboard/batches/${this.batchId()}?studentId=${encodeURIComponent(student.id)}`;
     this.closeStudentMenu();
 
     try {

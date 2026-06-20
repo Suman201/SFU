@@ -6,11 +6,18 @@
 
   <nav aria-label="Primary">
     <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Home</a>
-    <a routerLink="/teacher-dashboard" routerLinkActive="active">Teacher</a>
-    <a routerLink="/student/explore" routerLinkActive="active">Explore</a>
-    <a routerLink="/student/dashboard" routerLinkActive="active">Dashboard</a>
-    <a routerLink="/student/profile" routerLinkActive="active">Profile</a>
-    <a routerLink="/sfu-forms" routerLinkActive="active">Class forms</a>
+    @if (auth.role() === 'teacher') {
+      <a routerLink="/teacher/dashboard" routerLinkActive="active">Dashboard</a>
+      <a routerLink="/teacher/profile" routerLinkActive="active">Profile</a>
+      <a routerLink="/sfu-forms" routerLinkActive="active">Class forms</a>
+    } @else if (auth.role() === 'student') {
+      <a routerLink="/student/explore" routerLinkActive="active">Explore</a>
+      <a routerLink="/student/dashboard" routerLinkActive="active">Dashboard</a>
+      <a routerLink="/student/profile" routerLinkActive="active">Profile</a>
+      <a routerLink="/sfu-forms" routerLinkActive="active">Class forms</a>
+    } @else {
+      <a routerLink="/teachers/ananya-sen" routerLinkActive="active">Teachers</a>
+    }
     <button
       class="theme-toggle"
       type="button"
@@ -25,7 +32,8 @@
       </span>
     </button>
     @if (!auth.authenticated()) {
-      <a routerLink="/login" routerLinkActive="active">Login</a>
+      <a routerLink="/teacher/login" routerLinkActive="active">Teacher login</a>
+      <a routerLink="/student/login" routerLinkActive="active">Student login</a>
       <a routerLink="/register" routerLinkActive="active">Register</a>
     } @else {
       <button type="button" (click)="logout()">Sign out</button>

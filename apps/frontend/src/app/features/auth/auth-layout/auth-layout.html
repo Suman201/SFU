@@ -1,0 +1,23 @@
+<sfu-header />
+
+<main class="auth-layout">
+  <section class="auth-hero" aria-label="Authentication overview">
+    <p class="eyebrow">{{ roleLabel }} portal</p>
+    <h1>{{ title }}</h1>
+    <p>{{ subtitle }}</p>
+
+    <div class="hero-card">
+      <span>{{ roleLabel.slice(0, 1) }}</span>
+      <div>
+        <strong>{{ dashboardLabel }}</strong>
+        <small>{{ role === 'teacher' ? 'Manage batches, students, and live sessions.' : 'Track classes, teachers, and upcoming sessions.' }}</small>
+      </div>
+    </div>
+  </section>
+
+  <section class="auth-card">
+    <ng-content />
+  </section>
+</main>
+
+<sfu-footer />

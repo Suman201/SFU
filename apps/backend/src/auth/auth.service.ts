@@ -21,6 +21,16 @@ export interface TokenPair {
   accessToken: string;
   refreshToken: string;
   expiresIn: string;
+  user: AuthResponseUser;
+}
+
+export interface AuthResponseUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'teacher' | 'student';
+  roles: string[];
+  permissions: string[];
 }
 
 export interface JwtPayload {
@@ -155,7 +165,13 @@ export class AuthService {
   }
 
   async me(userId: string): Promise<Record<string, unknown>> {
-    return this.sanitizeUser(await this.findActiveUser(userId));
+    const user = await this.findActiveUser(userId);
+    const roles = user.roles?.length ? user.roles : ['STUDENT'];
+    const permissions = user.permissions?.length ? user.permissions : this.permissionsForRoles(roles);
+    return {
+      ...this.sanitizeUser(user),
+      ...this.authResponseUser(user, roles, permissions)
+    };
   }
 
   async verifyAccessToken(token: string): Promise<JwtPayload> {
@@ -165,29 +181,37 @@ export class AuthService {
       audience: this.config.getOrThrow<string>('jwt.audience')
     });
     await this.findActiveUser(payload.sub);
+    const activeSession = await this.sessions.exists({
+      userId: payload.sub,
+      refreshTokenJti: payload.tokenId,
+      revokedAt: { $exists: false },
+      expiresAt: { $gt: new Date() }
+    });
+    if (!activeSession) {
+      throw new UnauthorizedException('Session is no longer active');
+    }
     return payload;
   }
 
   private async issueTokens(user: UserMongoDocument, context: RequestContext): Promise<TokenPair> {
-    const refreshTokenId = randomUUID();
-    const accessTokenId = randomUUID();
+    const sessionTokenId = randomUUID();
     const accessTtl = this.config.get<string>('jwt.accessTtl', '15m') as never;
     const refreshTtl = this.config.get<string>('jwt.refreshTtl', '7d') as never;
     const roles = user.roles?.length ? user.roles : ['STUDENT'];
     const permissions = user.permissions?.length ? user.permissions : this.permissionsForRoles(roles);
     const payload = { sub: user.id, email: user.email, roles, permissions };
-    const refreshToken = await this.jwt.signAsync({ ...payload, tokenId: refreshTokenId }, { ...this.refreshVerifyOptions(), expiresIn: refreshTtl });
+    const refreshToken = await this.jwt.signAsync({ ...payload, tokenId: sessionTokenId }, { ...this.refreshVerifyOptions(), expiresIn: refreshTtl });
     await this.sessions.create({
       userId: user.id,
       refreshTokenHash: await bcrypt.hash(refreshToken, 12),
-      refreshTokenJti: refreshTokenId,
+      refreshTokenJti: sessionTokenId,
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
       expiresAt: this.refreshExpiryDate()
     });
     return {
       accessToken: await this.jwt.signAsync(
-        { ...payload, tokenId: accessTokenId },
+        { ...payload, tokenId: sessionTokenId },
         {
           secret: this.config.getOrThrow<string>('jwt.accessSecret'),
           expiresIn: accessTtl,
@@ -196,7 +220,8 @@ export class AuthService {
         }
       ),
       refreshToken,
-      expiresIn: this.config.get<string>('jwt.accessTtl', '15m')
+      expiresIn: this.config.get<string>('jwt.accessTtl', '15m'),
+      user: this.authResponseUser(user, roles, permissions)
     };
   }
 
@@ -222,6 +247,18 @@ export class AuthService {
       lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt
+    };
+  }
+
+  private authResponseUser(user: UserMongoDocument, roles: string[], permissions: string[]): AuthResponseUser {
+    const normalizedRoles = roles.map((role) => role.toLowerCase());
+    return {
+      id: user.id,
+      name: user.name ?? user.displayName,
+      email: user.email,
+      role: normalizedRoles.some((role) => role === 'teacher' || role === 'admin' || role === 'super_admin') ? 'teacher' : 'student',
+      roles: normalizedRoles,
+      permissions
     };
   }
 

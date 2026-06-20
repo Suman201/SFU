@@ -4,7 +4,7 @@
   <form class="auth-panel" [formRoot]="form" (submit)="submit($event)">
     <header>
       <h1>Register</h1>
-      <a routerLink="/login">Use login</a>
+      <a routerLink="/student/login">Use login</a>
     </header>
 
     <label>
@@ -22,7 +22,7 @@
       <input type="password" [formField]="form.password" autocomplete="new-password">
     </label>
 
-    <button class="primary" type="submit" [disabled]="form().invalid() || busy()">Register</button>
+    <button class="primary" type="submit" [disabled]="form().invalid() || busy()">{{ busy() ? 'Creating...' : 'Register' }}</button>
 
     @if (error()) {
       <p class="error">{{ error() }}</p>
