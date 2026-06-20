@@ -32,8 +32,12 @@ describe('AuthService', () => {
     const request = http.expectOne(`${API_BASE_URL}/auth/login`);
     expect(request.request.method).toBe('POST');
     request.flush({
-      accessToken: jwt({ sub: 'teacher-1', email: 'teacher@example.com', roles: ['TEACHER'], permissions: [], exp: futureExp() }),
-      user: { id: 'teacher-1', name: 'Teacher One', email: 'teacher@example.com', role: 'teacher' }
+      success: true,
+      message: 'OK',
+      data: {
+        accessToken: jwt({ sub: 'teacher-1', email: 'teacher@example.com', roles: ['TEACHER'], permissions: [], exp: futureExp() }),
+        user: { id: 'teacher-1', name: 'Teacher One', email: 'teacher@example.com', role: 'teacher' }
+      }
     });
 
     expect(role).toBe('teacher');
@@ -52,8 +56,12 @@ describe('AuthService', () => {
     });
 
     http.expectOne(`${API_BASE_URL}/auth/login`).flush({
-      accessToken: jwt({ sub: 'teacher-1', email: 'teacher@example.com', roles: ['TEACHER'], permissions: [], exp: futureExp() }),
-      user: { id: 'teacher-1', name: 'Teacher One', email: 'teacher@example.com', role: 'teacher' }
+      success: true,
+      message: 'OK',
+      data: {
+        accessToken: jwt({ sub: 'teacher-1', email: 'teacher@example.com', roles: ['TEACHER'], permissions: [], exp: futureExp() }),
+        user: { id: 'teacher-1', name: 'Teacher One', email: 'teacher@example.com', role: 'teacher' }
+      }
     });
 
     expect(message).toBe('This account is registered as teacher. Use the teacher login.');
@@ -79,12 +87,16 @@ describe('AuthService', () => {
     });
 
     http.expectOne(`${API_BASE_URL}/auth/me`).flush({
-      id: 'student-1',
-      name: 'Student One',
-      email: 'student@example.com',
-      role: 'student',
-      roles: ['STUDENT'],
-      permissions: []
+      success: true,
+      message: 'OK',
+      data: {
+        id: 'student-1',
+        name: 'Student One',
+        email: 'student@example.com',
+        role: 'student',
+        roles: ['STUDENT'],
+        permissions: []
+      }
     });
 
     expect(role).toBe('student');

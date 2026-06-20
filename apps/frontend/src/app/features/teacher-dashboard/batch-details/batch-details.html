@@ -10,7 +10,7 @@
         <div class="hero-meta">
           <span>{{ batch.courseName }}</span>
           <span>{{ batch.cohortCode }}</span>
-          <span>{{ weekdayLabel(batch.weeklyDay) }} at {{ batch.startTime }}</span>
+          <span>{{ scheduleLabel(batch.schedule) }}</span>
         </div>
       </div>
       <div class="hero-actions">
@@ -23,7 +23,7 @@
 
     <section class="summary-grid" aria-label="Batch summary">
       <article>
-        <span>{{ students().length }}/{{ batch.capacity }}</span>
+        <span>{{ batch.enrolledCount }}/{{ batch.maxCapacity }}</span>
         <p>Students</p>
       </article>
       <article>
@@ -58,7 +58,7 @@
         </div>
         <div>
           <strong>Weekly schedule</strong>
-          <span>{{ weekdayLabel(batch.weeklyDay) }} at {{ batch.startTime }}</span>
+          <span>{{ scheduleLabel(batch.schedule) }}</span>
         </div>
         <div>
           <strong>Total sessions</strong>
@@ -219,28 +219,64 @@
         </div>
       </header>
 
-      <div class="session-list">
-        @for (session of sessions(); track session.id) {
-          <article class="session-row" [class.live]="session.status === 'live'" [class.completed]="session.status === 'completed'">
-            <div class="session-index">{{ session.sessionNumber }}</div>
-            <div class="session-copy">
-              <strong>{{ session.title }}</strong>
-              <span>{{ formatDateTime(session.scheduledAt) }} - {{ session.durationMinutes }} minutes</span>
-            </div>
-            <span class="status-pill" [class.live]="session.status === 'live'" [class.completed]="session.status === 'completed'">
-              {{ statusLabel(session.status) }}
-            </span>
-            <div class="session-actions">
-              @if (session.status === 'live') {
-                <button type="button" (click)="openSession(session)">Open</button>
-                <button type="button" (click)="completeSession(session)">Complete</button>
-              } @else if (session.status === 'scheduled') {
-                <button class="primary" type="button" (click)="startSession(session)">Start session</button>
+      @if (sessions().length) {
+        <div class="data-table-wrap">
+          <table class="data-table sessions-table" style="--data-table-min-width: 860px">
+            <thead>
+              <tr>
+                <th scope="col">Session</th>
+                <th scope="col">Scheduled</th>
+                <th scope="col">Duration</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (session of sessions(); track session.id) {
+                <tr class="session-row" [class.live]="session.status === 'live'" [class.completed]="session.status === 'completed'">
+                  <td>
+                    <div class="session-copy">
+                      <strong>Session {{ session.sessionNumber }} · {{ session.title }}</strong>
+                    </div>
+                  </td>
+                  <td>{{ formatDateTime(session.scheduledAt) }}</td>
+                  <td>{{ session.durationMinutes }} minutes</td>
+                  <td>
+                    <span class="status-pill" [class.live]="session.status === 'live'" [class.completed]="session.status === 'completed'">
+                      {{ statusLabel(session.status) }}
+                    </span>
+                  </td>
+                  <td class="row-menu-cell session-actions">
+                    @if (sessionActionItems(session).length) {
+                      <button
+                        class="table-menu-button"
+                        type="button"
+                        aria-label="Open session actions"
+                        [attr.aria-expanded]="openSessionMenuId() === session.id"
+                        (click)="toggleSessionMenu(session.id, $event)"
+                      >
+                        ⋯
+                      </button>
+                      @if (openSessionMenuId() === session.id) {
+                        <div class="table-row-menu" role="menu" [class.open-up]="openSessionMenuPosition() === 'above'" [class.open-down]="openSessionMenuPosition() === 'below'">
+                          @for (action of sessionActionItems(session); track action.label) {
+                            <button type="button" role="menuitem" (click)="action.handler(session)">{{ action.label }}</button>
+                          }
+                        </div>
+                      }
+                    }
+                  </td>
+                </tr>
               }
-            </div>
-          </article>
-        }
-      </div>
+            </tbody>
+          </table>
+        </div>
+      } @else {
+        <div class="empty-state compact">
+          <h3>No sessions scheduled</h3>
+          <p>Weekly sessions will appear once they are created.</p>
+        </div>
+      }
     </section>
   } @else {
     <section class="empty-state">

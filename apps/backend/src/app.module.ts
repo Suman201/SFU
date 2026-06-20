@@ -24,6 +24,7 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { RbacModule } from './rbac/rbac.module';
 import { RolesModule } from './roles/roles.module';
 import { SessionsModule } from './sessions/sessions.module';
+import { TeacherBatchesModule } from './teacher-batches/teacher-batches.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -145,6 +146,7 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     RolesModule,
     PermissionsModule,
+    TeacherBatchesModule,
     SessionsModule,
     RoomsModule,
     MediaApiModule,

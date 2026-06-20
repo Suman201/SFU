@@ -201,7 +201,10 @@ label {
 
 .form-grid label:nth-child(1),
 .form-grid label:nth-child(2),
-.form-grid label:nth-child(3) {
+.form-grid label:nth-child(3),
+.form-alert,
+.year-range,
+.schedule-picker {
   grid-column: 1 / -1;
 }
 
@@ -211,6 +214,72 @@ label {
   min-width: 0;
   font-size: 13px;
   font-weight: 650;
+}
+
+.form-alert {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgb(242 96 118 / 34%);
+  border-radius: 8px;
+  background: rgb(242 96 118 / 10%);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.year-range {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
+.year-range span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.schedule-picker {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+
+.schedule-picker legend {
+  padding: 0 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.schedule-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(120px, 160px);
+  align-items: center;
+  gap: 10px;
+}
+
+.weekday-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.weekday-check input {
+  width: 16px;
+  height: 16px;
 }
 
 @media (max-width: 920px) {
@@ -236,7 +305,14 @@ label {
 
   .form-grid label:nth-child(1),
   .form-grid label:nth-child(2),
-  .form-grid label:nth-child(3) {
+  .form-grid label:nth-child(3),
+  .form-alert,
+  .year-range,
+  .schedule-picker {
     grid-column: auto;
+  }
+
+  .schedule-row {
+    grid-template-columns: 1fr;
   }
 }

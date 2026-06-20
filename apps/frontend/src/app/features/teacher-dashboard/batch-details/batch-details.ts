@@ -7,6 +7,7 @@ import { Header } from '../../../shared/header/header';
 import {
   TeacherDashboardStore,
   type TeacherBatch,
+  type TeacherBatchSchedule,
   type TeacherBatchStudent,
   type TeacherBatchStudentStatus,
   type TeacherSession,
@@ -63,6 +64,8 @@ export class BatchDetails {
     return averageAttendance === null ? 'N/A' : `${averageAttendance}%`;
   });
   protected readonly openStudentMenuId = signal<string | null>(null);
+  protected readonly openSessionMenuId = signal<string | null>(null);
+  protected readonly openSessionMenuPosition = signal<'above' | 'below'>('below');
   protected readonly messageTargetId = signal<string | null>(null);
   protected readonly actionNotice = signal('');
   protected readonly messageModel = signal<MessageFormModel>({ message: '' });
@@ -74,6 +77,10 @@ export class BatchDetails {
     const targetId = this.messageTargetId();
     return targetId ? this.students().find((student) => student.id === targetId) ?? null : null;
   });
+
+  constructor() {
+    this.dashboard.loadBatches();
+  }
 
   protected async startSession(session: TeacherSession): Promise<void> {
     const startedSession = this.dashboard.startSession(session.id);
@@ -145,6 +152,14 @@ export class BatchDetails {
     return this.weekdays.find((weekday) => weekday.value === value)?.label ?? 'Weekly';
   }
 
+  protected scheduleLabel(schedule: TeacherBatchSchedule[]): string {
+    return schedule.map((item) => `${this.dayLabel(item.dayOfWeek)} at ${item.startTime}`).join(', ');
+  }
+
+  private dayLabel(value: TeacherBatchSchedule['dayOfWeek']): string {
+    return value[0] + value.slice(1).toLowerCase();
+  }
+
   protected formatDateTime(value: string): string {
     return new Intl.DateTimeFormat(undefined, {
       weekday: 'short',
@@ -173,6 +188,74 @@ export class BatchDetails {
 
   protected toggleStudentMenu(studentId: string): void {
     this.openStudentMenuId.update((openId) => (openId === studentId ? null : studentId));
+  }
+
+  protected toggleSessionMenu(sessionId: string, event: MouseEvent): void {
+    const button = event.currentTarget as HTMLElement | null;
+    const openId = this.openSessionMenuId();
+
+    if (openId === sessionId) {
+      this.openSessionMenuId.set(null);
+      return;
+    }
+
+    const preferredDirection: 'above' | 'below' = (() => {
+      if (!button) {
+        return 'below';
+      }
+      const rect = button.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      return spaceBelow < 200 && spaceAbove > spaceBelow ? 'above' : 'below';
+    })();
+
+    this.openSessionMenuPosition.set(preferredDirection);
+    this.openSessionMenuId.set(sessionId);
+  }
+
+  protected closeSessionMenu(): void {
+    this.openSessionMenuId.set(null);
+    this.openSessionMenuPosition.set('below');
+  }
+
+  protected async rescheduleSession(session: TeacherSession): Promise<void> {
+    this.closeSessionMenu();
+    await this.router.navigate([`/teacher/dashboard/batches`, session.batchId], {
+      queryParams: { action: 'reschedule', sessionId: session.id }
+    });
+  }
+
+  protected cancelSession(session: TeacherSession): void {
+    this.closeSessionMenu();
+    this.dashboard.cancelSession(session.id);
+    this.actionNotice.set(`Session ${session.sessionNumber} has been cancelled.`);
+  }
+
+  protected sessionActionItems(session: TeacherSession): Array<{ label: string; handler: (session: TeacherSession) => void | Promise<void> }> {
+    const actions = [] as Array<{ label: string; handler: (session: TeacherSession) => void | Promise<void> }>;
+
+    if (session.status === 'live') {
+      actions.push({ label: 'Open', handler: async (session) => {
+        this.closeSessionMenu();
+        await this.openSession(session);
+      }});
+      actions.push({ label: 'Complete', handler: (session) => {
+        this.completeSession(session);
+        this.closeSessionMenu();
+      }});
+      actions.push({ label: 'Cancel', handler: (session) => this.cancelSession(session) });
+    }
+
+    if (session.status === 'scheduled') {
+      actions.push({ label: 'Start session', handler: async (session) => {
+        await this.startSession(session);
+        this.closeSessionMenu();
+      }});
+      actions.push({ label: 'Reschedule', handler: async (session) => this.rescheduleSession(session) });
+      actions.push({ label: 'Cancel', handler: (session) => this.cancelSession(session) });
+    }
+
+    return actions;
   }
 
   protected closeStudentMenu(): void {

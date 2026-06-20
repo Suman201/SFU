@@ -1,6 +1,6 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, signal } from '@angular/core';
-import { Observable, catchError, finalize, map, of, shareReplay, tap, throwError } from 'rxjs';
+import { Observable, catchError, finalize, map, of, shareReplay, throwError } from 'rxjs';
 import { API_BASE_URL } from './app-environment';
 
 export type AuthRole = 'teacher' | 'student';
@@ -27,6 +27,12 @@ interface BackendLoginResponse {
   refreshToken?: string;
   expiresIn?: string;
   user?: BackendUser;
+}
+
+interface ApiEnvelope<T> {
+  success?: boolean;
+  message?: string;
+  data?: T;
 }
 
 interface BackendUser {
@@ -70,8 +76,8 @@ export class AuthService {
   login(email: string, password: string, expectedRole?: AuthRole): Observable<LoginResult> {
     this.statusSignal.set('checking');
     this.sessionNoticeSignal.set('');
-    return this.http.post<BackendLoginResponse>(`${API_BASE_URL}/auth/login`, { email, password }).pipe(
-      map((response) => this.storeLoginResponse(response, expectedRole)),
+    return this.http.post<BackendLoginResponse | ApiEnvelope<BackendLoginResponse>>(`${API_BASE_URL}/auth/login`, { email, password }).pipe(
+      map((response) => this.storeLoginResponse(this.unwrapResponse(response), expectedRole)),
       catchError((error) => {
         this.clearSession();
         return throwError(() => this.toAuthError(error));
@@ -82,8 +88,8 @@ export class AuthService {
   register(displayName: string, email: string, password: string): Observable<LoginResult> {
     this.statusSignal.set('checking');
     this.sessionNoticeSignal.set('');
-    return this.http.post<BackendLoginResponse>(`${API_BASE_URL}/auth/register`, { displayName, email, password }).pipe(
-      map((response) => this.storeLoginResponse(response)),
+    return this.http.post<BackendLoginResponse | ApiEnvelope<BackendLoginResponse>>(`${API_BASE_URL}/auth/register`, { displayName, email, password }).pipe(
+      map((response) => this.storeLoginResponse(this.unwrapResponse(response))),
       catchError((error) => {
         this.clearSession();
         return throwError(() => this.toAuthError(error));
@@ -111,8 +117,8 @@ export class AuthService {
     }
 
     this.statusSignal.set('checking');
-    this.restoreRequest = this.http.get<BackendUser>(`${API_BASE_URL}/auth/me`).pipe(
-      map((profile) => this.applyUser(this.normalizeUser(profile, this.decodeToken(token)))),
+    this.restoreRequest = this.http.get<BackendUser | ApiEnvelope<BackendUser>>(`${API_BASE_URL}/auth/me`).pipe(
+      map((profile) => this.applyUser(this.normalizeUser(this.unwrapResponse(profile), this.decodeToken(token)))),
       catchError(() => {
         this.clearSession('We could not verify your session. Please sign in again.');
         return of(null);
@@ -160,6 +166,9 @@ export class AuthService {
   }
 
   private storeLoginResponse(response: BackendLoginResponse, expectedRole?: AuthRole): LoginResult {
+    if (!response.accessToken) {
+      throw new Error('Login response did not include an access token.');
+    }
     this.writeStorage(ACCESS_TOKEN_KEY, response.accessToken);
     if (response.refreshToken) {
       this.writeStorage(REFRESH_TOKEN_KEY, response.refreshToken);
@@ -190,6 +199,16 @@ export class AuthService {
     this.statusSignal.set('authenticated');
     this.sessionNoticeSignal.set('');
     return user;
+  }
+
+  private unwrapResponse<T>(response: T | ApiEnvelope<T>): T {
+    if (response && typeof response === 'object' && 'data' in response) {
+      const data = (response as ApiEnvelope<T>).data;
+      if (data !== undefined && data !== null) {
+        return data;
+      }
+    }
+    return response as T;
   }
 
   private normalizeUser(user: BackendUser | undefined, payload: JwtPayload | null): AuthUser {

@@ -5,6 +5,10 @@ import {
   AccessPermissionSchema,
   AuditLogDocument,
   AuditLogSchema,
+  BatchDocument,
+  BatchScheduleDocument,
+  BatchScheduleSchema,
+  BatchSchema,
   ChatMessageDocument,
   ChatMessageSchema,
   ConsumerDocument,
@@ -51,6 +55,8 @@ import {
   imports: [
     MongooseModule.forFeature([
       { name: UserDocument.name, schema: UserSchema },
+      { name: BatchDocument.name, schema: BatchSchema },
+      { name: BatchScheduleDocument.name, schema: BatchScheduleSchema },
       { name: RoleDocument.name, schema: RoleSchema },
       { name: AccessPermissionDocument.name, schema: AccessPermissionSchema },
       { name: RolePermissionDocument.name, schema: RolePermissionSchema },

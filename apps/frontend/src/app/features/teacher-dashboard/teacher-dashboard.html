@@ -20,7 +20,12 @@
       <button type="button" (click)="openCreateDrawer()">Add new batch</button>
     </header>
 
-    @if (batches().length) {
+    @if (loading()) {
+      <div class="empty-state">
+        <h3>Loading batches</h3>
+        <p>Checking your teacher workspace.</p>
+      </div>
+    } @else if (batches().length) {
       <div class="data-table-shell">
         <div class="data-table-toolbar">
           <div class="table-view-tabs" aria-label="Batch view mode">
@@ -72,8 +77,8 @@
                     </a>
                   </td>
                   <td>{{ batch.courseName }}</td>
-                  <td>{{ batch.students.length }}/{{ batch.capacity }}</td>
-                  <td>{{ weekdayLabel(batch.weeklyDay) }} at {{ batch.startTime }}</td>
+                  <td>{{ batch.enrolledCount }}/{{ batch.maxCapacity }}</td>
+                  <td>{{ scheduleLabel(batch) }}</td>
                   <td>
                     @if (nextSession(batch); as session) {
                       <span>{{ formatDateTime(session.scheduledAt) }}</span>
@@ -123,7 +128,7 @@
   }
 
   <aside class="batch-drawer" [attr.aria-hidden]="!createDrawerOpen()" aria-label="Add new batch">
-    <form class="drawer-panel" [formRoot]="batchForm" (submit)="createBatch($event)">
+    <form class="drawer-panel" (submit)="createBatch($event)">
       <header>
         <div>
           <p class="eyebrow">Create</p>
@@ -133,59 +138,76 @@
       </header>
 
       <div class="form-grid">
+        @if (backendError()) {
+          <div class="form-alert">{{ backendError() }}</div>
+        } @else if (dashboard.error()) {
+          <div class="form-alert">{{ dashboard.error() }}</div>
+        }
+
+        @if (showValidation() && formErrors().length) {
+          <div class="form-alert validation-list">
+            @for (error of formErrors(); track error) {
+              <span>{{ error }}</span>
+            }
+          </div>
+        }
+
         <label>
           Batch name
-          <input [formField]="batchForm.name" autocomplete="off" />
+          <input [ngModel]="batchModel().name" (ngModelChange)="updateModel('name', $event)" name="name" autocomplete="off" />
         </label>
         <label>
           Course
-          <input [formField]="batchForm.courseName" autocomplete="off" />
+          <input [ngModel]="batchModel().courseName" (ngModelChange)="updateModel('courseName', $event)" name="courseName" autocomplete="off" placeholder="Optional until course catalog is connected" />
         </label>
         <label>
-          Batch code
-          <input [formField]="batchForm.cohortCode" autocomplete="off" />
+          Course ID
+          <input [ngModel]="batchModel().courseId" (ngModelChange)="updateModel('courseId', $event)" name="courseId" autocomplete="off" placeholder="Optional course UUID" />
         </label>
         <label>
-          Capacity
-          <input type="number" [formField]="batchForm.capacity" />
+          Year
+          <input type="number" min="2000" max="2100" [ngModel]="batchModel().year" (ngModelChange)="updateModel('year', +$event)" name="year" />
         </label>
         <label>
-          Enrolled students
-          <input type="number" [formField]="batchForm.enrolledCount" />
+          Max Capacity
+          <input type="number" min="1" [ngModel]="batchModel().maxCapacity" (ngModelChange)="updateModel('maxCapacity', +$event)" name="maxCapacity" />
         </label>
-        <label>
-          First available date
-          <input type="date" [formField]="batchForm.startDate" />
-        </label>
-        <label>
-          Weekly day
-          <select [formField]="batchForm.weeklyDay">
-            @for (weekday of weekdays; track weekday.value) {
-              <option [value]="weekday.value">{{ weekday.label }}</option>
-            }
-          </select>
-        </label>
-        <label>
-          Start time
-          <input type="time" [formField]="batchForm.startTime" />
-        </label>
-        <label>
-          Duration
-          <select [formField]="batchForm.durationMinutes">
-            @for (duration of durations; track duration) {
-              <option [value]="duration">{{ duration }} minutes</option>
-            }
-          </select>
-        </label>
-        <label>
-          Total weeks
-          <input type="number" [formField]="batchForm.totalWeeks" />
-        </label>
+
+        <div class="year-range">
+          <strong>Batch duration</strong>
+          <span>{{ dateRangeLabel() }}</span>
+        </div>
+
+        <fieldset class="schedule-picker">
+          <legend>Weekly schedule</legend>
+          @for (weekday of weekdays; track weekday.value) {
+            <div class="schedule-row">
+              <label class="weekday-check">
+                <input
+                  type="checkbox"
+                  [checked]="isWeekdaySelected(weekday.value)"
+                  (change)="toggleWeekday(weekday.value, $any($event.target).checked)"
+                />
+                {{ weekday.label }}
+              </label>
+              @if (isWeekdaySelected(weekday.value)) {
+                <input
+                  type="time"
+                  [value]="weekdayTime(weekday.value)"
+                  (input)="setScheduleTime(weekday.value, $any($event.target).value)"
+                  [attr.aria-label]="weekday.label + ' start time'"
+                />
+              }
+            </div>
+          }
+        </fieldset>
       </div>
 
       <footer>
-        <button type="button" (click)="closeCreateDrawer()">Cancel</button>
-        <button class="primary" type="submit" [disabled]="batchForm().invalid()">Create batch</button>
+        <button type="button" [disabled]="saving()" (click)="closeCreateDrawer()">Cancel</button>
+        <button class="primary" type="submit" [disabled]="saving() || formInvalid()">
+          {{ saving() ? 'Creating...' : 'Create batch' }}
+        </button>
       </footer>
     </form>
   </aside>

@@ -231,9 +231,15 @@ textarea {
   flex-wrap: wrap;
 }
 
+.table-actions {
+  justify-content: flex-end;
+}
+
 .row-menu-cell {
   position: relative;
   width: 56px;
+  text-align: right;
+  overflow: visible;
 }
 
 .data-table-toolbar,
@@ -293,6 +299,7 @@ textarea {
 
 .data-table-wrap {
   overflow-x: auto;
+  overflow-y: visible;
   border: 1px solid var(--line-soft);
   border-radius: 6px;
   background: var(--panel);
@@ -308,7 +315,7 @@ textarea {
 
 .data-table th,
 .data-table td {
-  height: 42px;
+  min-height: 42px;
   padding: 9px 12px;
   border-right: 1px solid var(--line-soft);
   border-bottom: 1px solid var(--line-soft);
@@ -380,9 +387,8 @@ textarea {
 
 .table-row-menu {
   position: absolute;
-  top: calc(100% - 3px);
   right: 8px;
-  z-index: 12;
+  z-index: 9999;
   display: grid;
   width: 178px;
   padding: 6px;
@@ -390,6 +396,16 @@ textarea {
   border-radius: 8px;
   background: var(--panel-elevated);
   box-shadow: var(--shadow-md);
+}
+
+.table-row-menu.open-down {
+  top: calc(100% + 4px);
+  bottom: auto;
+}
+
+.table-row-menu.open-up {
+  top: auto;
+  bottom: calc(100% + 4px);
 }
 
 .table-row-menu button {

@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@native-sfu/contracts": [
+        "../../packages/contracts/dist/index"
+      ],
+      "@native-sfu/sfu-core": [
+        "../../packages/sfu-core/dist/index"
+      ],
+      "@native-sfu/nest-sfu": [
+        "../../packages/nest-sfu/dist/index"
+      ]
+    }
+  }
+}

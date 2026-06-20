@@ -223,56 +223,56 @@ h3 {
   color: var(--text);
 }
 
-.session-list {
-  display: grid;
-  gap: 12px;
+.sessions-panel .data-table-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
-.session-row {
+.sessions-panel .sessions-table th,
+.sessions-panel .sessions-table td {
+  vertical-align: middle;
+  padding: 12px 14px;
+}
+
+.sessions-panel .session-copy {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto minmax(136px, auto);
+  gap: 4px;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.sessions-panel .session-copy strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessions-panel .session-copy span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sessions-panel .session-actions {
+  display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel);
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.session-row.live {
-  border-color: var(--accent-border);
+.sessions-panel .sessions-table tbody tr.completed {
+  opacity: 0.72;
+}
+
+.sessions-panel .sessions-table tbody tr.live {
   background:
     linear-gradient(135deg, var(--accent-soft), transparent 42%),
     var(--panel);
 }
 
-.session-row.completed {
-  opacity: 0.72;
-}
-
-.session-index {
-  display: inline-grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-muted);
-  color: var(--accent);
-  font-weight: 900;
-}
-
-.session-copy {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.session-copy strong,
-.session-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.sessions-panel .status-pill {
+  margin: 0;
 }
 
 .status-pill {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import {
@@ -10,6 +11,8 @@ import {
 } from '@native-sfu/contracts';
 
 export type UserMongoDocument = HydratedDocument<UserDocument>;
+export type BatchMongoDocument = HydratedDocument<BatchDocument>;
+export type BatchScheduleMongoDocument = HydratedDocument<BatchScheduleDocument>;
 export type RoomMongoDocument = HydratedDocument<RoomDocument>;
 export type RoomIncidentEventMongoDocument = HydratedDocument<RoomIncidentEventDocument>;
 export type RoomSnapshotBundleMongoDocument = HydratedDocument<RoomSnapshotBundleDocument>;
@@ -80,6 +83,79 @@ export class UserDocument {
 export const UserSchema = SchemaFactory.createForClass(UserDocument);
 UserSchema.index({ disabled: 1 });
 UserSchema.index({ status: 1, deletedAt: 1 });
+
+export const BATCH_STATUSES = ['ACTIVE', 'INACTIVE', 'COMPLETED', 'CANCELLED'] as const;
+export type BatchStatus = (typeof BATCH_STATUSES)[number];
+
+export const BATCH_WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'] as const;
+export type BatchWeekday = (typeof BATCH_WEEKDAYS)[number];
+
+@Schema({ collection: 'batches', timestamps: true })
+export class BatchDocument {
+  @Prop({ type: String, default: randomUUID })
+  _id!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 120 })
+  name!: string;
+
+  @Prop({ trim: true })
+  courseId?: string;
+
+  @Prop({ trim: true, maxlength: 120 })
+  courseName?: string;
+
+  @Prop({ required: true, index: true })
+  teacherId!: string;
+
+  @Prop({ required: true, min: 2000, max: 2100, index: true })
+  year!: number;
+
+  @Prop({ required: true, type: Date })
+  startDate!: Date;
+
+  @Prop({ required: true, type: Date })
+  endDate!: Date;
+
+  @Prop({ required: true, min: 1 })
+  maxCapacity!: number;
+
+  @Prop({ required: true, enum: BATCH_STATUSES, default: 'ACTIVE', index: true })
+  status!: BatchStatus;
+
+  @Prop({ type: Date, index: true })
+  deletedAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const BatchSchema = SchemaFactory.createForClass(BatchDocument);
+BatchSchema.index(
+  { teacherId: 1, name: 1, year: 1 },
+  { unique: true, partialFilterExpression: { deletedAt: { $exists: false } } }
+);
+BatchSchema.index({ teacherId: 1, deletedAt: 1, createdAt: -1 });
+
+@Schema({ collection: 'batch_schedules', timestamps: true })
+export class BatchScheduleDocument {
+  @Prop({ type: String, default: randomUUID })
+  _id!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ required: true, enum: BATCH_WEEKDAYS })
+  dayOfWeek!: BatchWeekday;
+
+  @Prop({ required: true, match: /^([01]\d|2[0-3]):[0-5]\d$/ })
+  startTime!: string;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const BatchScheduleSchema = SchemaFactory.createForClass(BatchScheduleDocument);
+BatchScheduleSchema.index({ batchId: 1, dayOfWeek: 1 }, { unique: true });
 
 @Schema({ collection: 'roles', timestamps: true })
 export class RoleDocument {

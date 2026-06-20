@@ -1,19 +1,26 @@
-import { Injectable, computed, effect, signal } from '@angular/core';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { Observable, catchError, finalize, map, tap, throwError } from 'rxjs';
+import { API_BASE_URL } from '../../core/services/app-environment';
 
+export type BatchDayOfWeek = 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY';
+export type TeacherBatchStatus = 'ACTIVE' | 'INACTIVE' | 'COMPLETED' | 'CANCELLED';
 export type TeacherSessionStatus = 'scheduled' | 'live' | 'completed' | 'cancelled';
 export type TeacherBatchStudentStatus = 'active' | 'invited' | 'paused' | 'suspended' | 'blocked';
 
+export interface TeacherBatchSchedule {
+  id?: string;
+  dayOfWeek: BatchDayOfWeek;
+  startTime: string;
+}
+
 export interface CreateTeacherBatchInput {
   name: string;
-  courseName: string;
-  cohortCode: string;
-  capacity: number;
-  enrolledCount: number;
-  startDate: string;
-  weeklyDay: number;
-  startTime: string;
-  durationMinutes: number;
-  totalWeeks: number;
+  courseId?: string;
+  courseName?: string;
+  year: number;
+  maxCapacity: number;
+  schedule: TeacherBatchSchedule[];
 }
 
 export interface TeacherSession {
@@ -40,32 +47,75 @@ export interface TeacherBatchStudent {
 export interface TeacherBatch {
   id: string;
   name: string;
+  courseId?: string;
   courseName: string;
   cohortCode: string;
+  year: number;
+  startDate: string;
+  endDate: string;
+  maxCapacity: number;
   capacity: number;
   enrolledCount: number;
+  status: TeacherBatchStatus;
+  schedule: TeacherBatchSchedule[];
   weeklyDay: number;
   startTime: string;
   durationMinutes: number;
   totalWeeks: number;
   createdAt: string;
+  updatedAt?: string;
   students: TeacherBatchStudent[];
   sessions: TeacherSession[];
 }
 
-interface TeacherDashboardState {
-  batches: TeacherBatch[];
+interface BackendTeacherBatch {
+  id: string;
+  name: string;
+  courseId?: string;
+  courseName?: string;
+  year: number;
+  startDate: string;
+  endDate: string;
+  maxCapacity: number;
+  enrolledCount: number;
+  status: TeacherBatchStatus;
+  schedule: TeacherBatchSchedule[];
+  createdAt: string;
+  updatedAt?: string;
 }
 
-const STORAGE_KEY = 'native-sfu-teacher-dashboard';
+interface ApiEnvelope<T> {
+  success?: boolean;
+  message?: string;
+  data?: T;
+}
+
+const DAY_INDEX: Record<BatchDayOfWeek, number> = {
+  SUNDAY: 0,
+  MONDAY: 1,
+  TUESDAY: 2,
+  WEDNESDAY: 3,
+  THURSDAY: 4,
+  FRIDAY: 5,
+  SATURDAY: 6
+};
+
+const SESSION_DURATION_MINUTES = 60;
 const WEEK_IN_DAYS = 7;
 
 @Injectable({ providedIn: 'root' })
 export class TeacherDashboardStore {
-  private readonly state = signal<TeacherDashboardState>(this.loadState());
+  private readonly http = inject(HttpClient);
+  private readonly batchesSignal = signal<TeacherBatch[]>([]);
+  private readonly loadingSignal = signal(false);
+  private readonly savingSignal = signal(false);
+  private readonly errorSignal = signal('');
 
+  readonly loading = this.loadingSignal.asReadonly();
+  readonly saving = this.savingSignal.asReadonly();
+  readonly error = this.errorSignal.asReadonly();
   readonly batches = computed(() =>
-    [...this.state().batches].sort((left, right) => this.nextSessionTime(left) - this.nextSessionTime(right))
+    [...this.batchesSignal()].sort((left, right) => this.nextSessionTime(left) - this.nextSessionTime(right))
   );
   readonly sessions = computed(() =>
     this.batches()
@@ -75,38 +125,48 @@ export class TeacherDashboardStore {
   readonly liveSession = computed(() => this.sessions().find((session) => session.status === 'live') ?? null);
   readonly upcomingSessions = computed(() => this.sessions().filter((session) => session.status === 'scheduled').slice(0, 6));
 
-  constructor() {
-    effect(() => this.persistState(this.state()));
+  loadBatches(): void {
+    this.loadingSignal.set(true);
+    this.errorSignal.set('');
+    this.http.get<BackendTeacherBatch[] | ApiEnvelope<BackendTeacherBatch[]>>(`${API_BASE_URL}/teacher/batches`).pipe(
+      map((response) => this.unwrapResponse(response).map((batch) => this.normalizeBatch(batch))),
+      catchError((error) => {
+        this.errorSignal.set(this.errorMessage(error));
+        return throwError(() => error);
+      })
+    ).subscribe({
+      next: (batches) => this.batchesSignal.set(batches),
+      error: () => this.loadingSignal.set(false),
+      complete: () => this.loadingSignal.set(false)
+    });
   }
 
-  createBatch(input: CreateTeacherBatchInput): TeacherBatch {
-    const now = new Date().toISOString();
-    const batchId = this.createId('batch');
-    const enrolledCount = Math.min(input.enrolledCount, input.capacity);
-    const batch: TeacherBatch = {
-      id: batchId,
-      name: input.name.trim(),
-      courseName: input.courseName.trim(),
-      cohortCode: input.cohortCode.trim(),
-      capacity: input.capacity,
-      enrolledCount,
-      weeklyDay: input.weeklyDay,
-      startTime: input.startTime,
-      durationMinutes: input.durationMinutes,
-      totalWeeks: input.totalWeeks,
-      createdAt: now,
-      students: this.createStudents(batchId, enrolledCount, now),
-      sessions: this.createWeeklySessions(batchId, input)
-    };
-    this.state.update((state) => ({ batches: [batch, ...state.batches] }));
-    return batch;
+  createBatch(input: CreateTeacherBatchInput): Observable<TeacherBatch> {
+    this.savingSignal.set(true);
+    this.errorSignal.set('');
+    return this.http.post<BackendTeacherBatch | ApiEnvelope<BackendTeacherBatch>>(`${API_BASE_URL}/teacher/batches`, input).pipe(
+      map((response) => this.normalizeBatch(this.unwrapResponse(response))),
+      tap((batch) => this.batchesSignal.update((batches) => [batch, ...batches.filter((item) => item.id !== batch.id)])),
+      catchError((error) => {
+        this.errorSignal.set(this.errorMessage(error));
+        return throwError(() => error);
+      }),
+      finalize(() => this.savingSignal.set(false))
+    );
+  }
+
+  deleteBatch(batchId: string): void {
+    this.http.delete<void | ApiEnvelope<void>>(`${API_BASE_URL}/teacher/batches/${encodeURIComponent(batchId)}`).subscribe({
+      next: () => this.batchesSignal.update((batches) => batches.filter((batch) => batch.id !== batchId)),
+      error: (error) => this.errorSignal.set(this.errorMessage(error))
+    });
   }
 
   startSession(sessionId: string): TeacherSession | null {
     let startedSession: TeacherSession | null = null;
     const startedAt = new Date().toISOString();
-    this.state.update((state) => ({
-      batches: state.batches.map((batch) => ({
+    this.batchesSignal.update((batches) =>
+      batches.map((batch) => ({
         ...batch,
         sessions: batch.sessions.map((session) => {
           if (session.status === 'live' && session.id !== sessionId) {
@@ -119,29 +179,37 @@ export class TeacherDashboardStore {
           return startedSession;
         })
       }))
-    }));
+    );
     return startedSession;
   }
 
   completeSession(sessionId: string): void {
     const completedAt = new Date().toISOString();
-    this.state.update((state) => ({
-      batches: state.batches.map((batch) => ({
+    this.batchesSignal.update((batches) =>
+      batches.map((batch) => ({
         ...batch,
         sessions: batch.sessions.map((session) =>
           session.id === sessionId ? { ...session, status: 'completed', completedAt } : session
         )
       }))
-    }));
+    );
   }
 
-  deleteBatch(batchId: string): void {
-    this.state.update((state) => ({ batches: state.batches.filter((batch) => batch.id !== batchId) }));
+  cancelSession(sessionId: string): void {
+    const cancelledAt = new Date().toISOString();
+    this.batchesSignal.update((batches) =>
+      batches.map((batch) => ({
+        ...batch,
+        sessions: batch.sessions.map((session) =>
+          session.id === sessionId ? { ...session, status: 'cancelled', completedAt: cancelledAt } : session
+        )
+      }))
+    );
   }
 
   updateStudentStatus(batchId: string, studentId: string, status: TeacherBatchStudentStatus): void {
-    this.state.update((state) => ({
-      batches: state.batches.map((batch) =>
+    this.batchesSignal.update((batches) =>
+      batches.map((batch) =>
         batch.id === batchId
           ? {
               ...batch,
@@ -149,7 +217,7 @@ export class TeacherDashboardStore {
             }
           : batch
       )
-    }));
+    );
   }
 
   sessionBatch(sessionId: string): TeacherBatch | null {
@@ -168,148 +236,113 @@ export class TeacherDashboardStore {
     if (!batch.students.length) {
       return null;
     }
-
     const total = batch.students.reduce((sum, student) => sum + student.attendanceRate, 0);
     return Math.round(total / batch.students.length);
   }
 
-  private createWeeklySessions(batchId: string, input: CreateTeacherBatchInput): TeacherSession[] {
-    const firstSessionAt = this.firstWeeklyDate(input.startDate, input.weeklyDay, input.startTime);
-    return Array.from({ length: input.totalWeeks }, (_, index) => {
-      const scheduledAt = new Date(firstSessionAt);
-      scheduledAt.setDate(firstSessionAt.getDate() + index * WEEK_IN_DAYS);
-      return {
-        id: this.createId('session'),
-        batchId,
-        title: `${input.name.trim()} - Week ${index + 1}`,
-        sessionNumber: index + 1,
-        scheduledAt: scheduledAt.toISOString(),
-        durationMinutes: input.durationMinutes,
-        status: 'scheduled' as const
-      };
-    });
+  private normalizeBatch(batch: BackendTeacherBatch): TeacherBatch {
+    const schedule = [...(batch.schedule ?? [])].sort((left, right) => DAY_INDEX[left.dayOfWeek] - DAY_INDEX[right.dayOfWeek]);
+    const sessions = this.createSessions(batch, schedule);
+    const capacity = Number(batch.maxCapacity) || 0;
+    const enrolledCount = Math.min(Number(batch.enrolledCount) || 0, capacity);
+    const createdAt = batch.createdAt ?? new Date().toISOString();
+
+    return {
+      id: batch.id,
+      name: batch.name,
+      courseId: batch.courseId,
+      courseName: batch.courseName ?? 'General course',
+      cohortCode: `${batch.year}`,
+      year: batch.year,
+      startDate: batch.startDate,
+      endDate: batch.endDate,
+      maxCapacity: capacity,
+      capacity,
+      enrolledCount,
+      status: batch.status,
+      schedule,
+      weeklyDay: schedule.length ? DAY_INDEX[schedule[0]!.dayOfWeek] : 1,
+      startTime: schedule[0]?.startTime ?? '',
+      durationMinutes: SESSION_DURATION_MINUTES,
+      totalWeeks: sessions.length,
+      createdAt,
+      updatedAt: batch.updatedAt,
+      students: [],
+      sessions
+    };
   }
 
-  private firstWeeklyDate(startDate: string, weeklyDay: number, startTime: string): Date {
-    const firstDate = new Date(`${startDate}T00:00:00`);
-    const [hours = 0, minutes = 0] = startTime.split(':').map(Number);
-    const dayOffset = (weeklyDay - firstDate.getDay() + WEEK_IN_DAYS) % WEEK_IN_DAYS;
-    firstDate.setDate(firstDate.getDate() + dayOffset);
-    firstDate.setHours(hours, minutes, 0, 0);
-    return firstDate;
+  private createSessions(batch: BackendTeacherBatch, schedule: TeacherBatchSchedule[]): TeacherSession[] {
+    const start = new Date(`${batch.startDate}T00:00:00`);
+    const end = new Date(`${batch.endDate}T23:59:59`);
+    const sessions: TeacherSession[] = [];
+
+    for (const item of schedule) {
+      const current = new Date(start);
+      const dayOffset = (DAY_INDEX[item.dayOfWeek] - current.getDay() + WEEK_IN_DAYS) % WEEK_IN_DAYS;
+      current.setDate(current.getDate() + dayOffset);
+      const [hours = 0, minutes = 0] = item.startTime.split(':').map(Number);
+      current.setHours(hours, minutes, 0, 0);
+
+      while (current <= end) {
+        sessions.push({
+          id: `${batch.id}-${item.dayOfWeek}-${current.toISOString().slice(0, 10)}`,
+          batchId: batch.id,
+          title: `${batch.name} - ${this.dayLabel(item.dayOfWeek)}`,
+          sessionNumber: 0,
+          scheduledAt: current.toISOString(),
+          durationMinutes: SESSION_DURATION_MINUTES,
+          status: 'scheduled'
+        });
+        current.setDate(current.getDate() + WEEK_IN_DAYS);
+      }
+    }
+
+    return sessions
+      .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime())
+      .map((session, index) => ({
+        ...session,
+        title: `${batch.name} - Session ${index + 1}`,
+        sessionNumber: index + 1
+      }));
   }
 
   private nextSessionTime(batch: TeacherBatch): number {
     return new Date(this.nextSession(batch)?.scheduledAt ?? batch.createdAt).getTime();
   }
 
-  private createStudents(batchId: string, count: number, joinedAt: string): TeacherBatchStudent[] {
-    const names = [
-      'Aarav Sharma',
-      'Mia Patel',
-      'Rohan Das',
-      'Sophia Roy',
-      'Kabir Mehta',
-      'Ananya Sen',
-      'Ishaan Gupta',
-      'Diya Nair',
-      'Vihaan Rao',
-      'Zara Khan',
-      'Arjun Iyer',
-      'Sara Thomas',
-      'Neil Kapoor',
-      'Ira Bose',
-      'Reyansh Jain',
-      'Tara Malhotra',
-      'Dev Menon',
-      'Nisha Reddy',
-      'Yash Verma',
-      'Aisha Ali'
-    ];
-
-    return Array.from({ length: count }, (_, index) => {
-      const baseName = names[index % names.length]!;
-      const displayName = index < names.length ? baseName : `${baseName} ${Math.floor(index / names.length) + 1}`;
-      const slug = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/(^\.|\.$)/g, '');
-      return {
-        id: `${batchId}-student-${index + 1}`,
-        displayName,
-        email: `${slug}@student.example.com`,
-        attendanceRate: 72 + ((index * 7) % 27),
-        joinedAt,
-        status: this.studentStatus(index)
-      };
-    });
+  private dayLabel(day: BatchDayOfWeek): string {
+    return day[0] + day.slice(1).toLowerCase();
   }
 
-  private studentStatus(index: number): TeacherBatchStudentStatus {
-    if ((index + 1) % 13 === 0) {
-      return 'paused';
-    }
-    if ((index + 1) % 9 === 0) {
-      return 'invited';
-    }
-    return 'active';
-  }
-
-  private normalizeBatch(batch: TeacherBatch): TeacherBatch {
-    const capacity = Number(batch.capacity) || 0;
-    const enrolledCount = Math.min(Number(batch.enrolledCount) || 0, capacity);
-    const createdAt = batch.createdAt ?? new Date().toISOString();
-    const id = batch.id ?? this.createId('batch');
-    const students = Array.isArray(batch.students)
-      ? batch.students.map((student, index) => this.normalizeStudent(student, id, createdAt, index)).slice(0, capacity)
-      : this.createStudents(id, enrolledCount, createdAt);
-
-    return {
-      ...batch,
-      id,
-      capacity,
-      enrolledCount: students.length || enrolledCount,
-      createdAt,
-      students,
-      sessions: Array.isArray(batch.sessions) ? batch.sessions : []
-    };
-  }
-
-  private normalizeStudent(
-    student: TeacherBatchStudent,
-    batchId: string,
-    joinedAt: string,
-    index: number
-  ): TeacherBatchStudent {
-    return {
-      id: student.id ?? `${batchId}-student-${index + 1}`,
-      displayName: student.displayName ?? `Student ${index + 1}`,
-      email: student.email ?? `student.${index + 1}@student.example.com`,
-      attendanceRate: Number.isFinite(student.attendanceRate) ? student.attendanceRate : 0,
-      joinedAt: student.joinedAt ?? joinedAt,
-      status: student.status ?? 'active'
-    };
-  }
-
-  private loadState(): TeacherDashboardState {
-    try {
-      const storedState = localStorage.getItem(STORAGE_KEY);
-      if (!storedState) {
-        return { batches: [] };
+  private unwrapResponse<T>(response: T | ApiEnvelope<T>): T {
+    if (response && typeof response === 'object' && 'data' in response) {
+      const data = (response as ApiEnvelope<T>).data;
+      if (data !== undefined && data !== null) {
+        return data;
       }
-      const parsed = JSON.parse(storedState) as TeacherDashboardState;
-      return Array.isArray(parsed.batches) ? { batches: parsed.batches.map((batch) => this.normalizeBatch(batch)) } : { batches: [] };
-    } catch {
-      return { batches: [] };
     }
+    return response as T;
   }
 
-  private persistState(state: TeacherDashboardState): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // The dashboard remains usable in memory if storage is unavailable.
+  private errorMessage(error: unknown): string {
+    if (error instanceof HttpErrorResponse) {
+      const backendMessage = this.backendMessage(error.error);
+      if (backendMessage) return backendMessage;
+      if (error.status === 0) return 'Unable to reach the server. Please check your connection and try again.';
+      if (error.status === 409) return 'A batch with this name already exists for the selected year.';
+      if (error.status === 403) return 'Only teacher accounts can manage batches.';
+      return 'Unable to save the batch right now. Please try again.';
     }
+    return 'Unable to save the batch right now. Please try again.';
   }
 
-  private createId(prefix: string): string {
-    return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+  private backendMessage(error: unknown): string {
+    if (!error || typeof error !== 'object') return '';
+    const body = error as { message?: unknown; error?: unknown };
+    if (typeof body.message === 'string') return body.message;
+    if (Array.isArray(body.message)) return body.message.map((item) => this.backendMessage(item) || String(item)).filter(Boolean).join(' ');
+    if (Array.isArray(body.error)) return body.error.map((item) => this.backendMessage(item) || String(item)).filter(Boolean).join(' ');
+    return '';
   }
 }

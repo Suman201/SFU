@@ -29,9 +29,80 @@ Both return:
 {
   "accessToken": "...",
   "refreshToken": "...",
-  "expiresIn": "15m"
+  "expiresIn": "15m",
+  "user": {
+    "id": "user-id",
+    "name": "User Name",
+    "email": "user@example.com",
+    "role": "teacher"
+  }
 }
 ```
+
+## Teacher Batches
+
+All teacher batch endpoints require bearer auth for a `TEACHER` role user. The backend derives `teacherId` from the access token and never accepts it from the request body.
+
+The feature persists data in MongoDB collections named `batches` and `batch_schedules`. Batch IDs and schedule IDs are UUID strings. Batch creation and schedule replacement use a Mongo session transaction when the deployment supports transactions; local standalone Mongo falls back to ordered writes for developer convenience.
+
+`POST /teacher/batches`
+
+Creates a calendar-year batch. `startDate` is always January 1 of `year`; `endDate` is always December 31 of `year`.
+
+```json
+{
+  "name": "Laravel Morning Batch 2026",
+  "courseId": "course_uuid",
+  "courseName": "Laravel",
+  "year": 2026,
+  "maxCapacity": 30,
+  "schedule": [
+    {
+      "dayOfWeek": "MONDAY",
+      "startTime": "10:00"
+    },
+    {
+      "dayOfWeek": "WEDNESDAY",
+      "startTime": "14:00"
+    }
+  ]
+}
+```
+
+Validation rules:
+
+- `name`, `year`, `maxCapacity`, and `schedule` are required.
+- `maxCapacity` must be greater than zero.
+- `schedule` must include at least one weekday.
+- `startTime` must use `HH:mm` 24-hour time.
+- Duplicate `dayOfWeek` values are rejected.
+- A teacher cannot create two active batches with the same `name` and `year`.
+
+`GET /teacher/batches`
+
+Lists only the logged-in teacher's non-deleted batches. Each item includes `id`, `name`, optional course fields, `year`, `startDate`, `endDate`, `maxCapacity`, `enrolledCount`, `status`, `schedule`, and timestamps. `enrolledCount` is currently `0` until enrollment persistence is added.
+
+`GET /teacher/batches/:id`
+
+Returns one batch owned by the logged-in teacher. Batches owned by another teacher return `404`.
+
+`PATCH /teacher/batches/:id`
+
+Updates batch details and optionally replaces the schedule. The backend still derives ownership from the token, recomputes the date range if `year` changes, rejects duplicate weekdays, and prevents `maxCapacity` from dropping below the enrolled student count once enrollment persistence exists.
+
+`PATCH /teacher/batches/:id/status`
+
+```json
+{
+  "status": "ACTIVE"
+}
+```
+
+Supported statuses are `ACTIVE`, `INACTIVE`, `COMPLETED`, and `CANCELLED`.
+
+`DELETE /teacher/batches/:id`
+
+Soft deletes a batch owned by the logged-in teacher and marks it `CANCELLED`.
 
 ## Rooms
 
