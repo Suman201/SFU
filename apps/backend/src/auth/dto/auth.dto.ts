@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsJWT, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 export class RegisterDto {
@@ -7,6 +7,12 @@ export class RegisterDto {
   @MinLength(2)
   @MaxLength(120)
   displayName!: string;
+
+  @ApiPropertyOptional({ example: '+15551234567' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  phone?: string;
 
   @ApiProperty({ example: 'teacher@example.com' })
   @IsEmail()
@@ -65,4 +71,18 @@ export class ResetPasswordDto {
   @MinLength(8)
   @MaxLength(128)
   password!: string;
+}
+
+export class ChangePasswordDto {
+  @ApiProperty({ example: 'CurrentStrongPassword@123', minLength: 8 })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(128)
+  currentPassword!: string;
+
+  @ApiProperty({ example: 'NewStrongPassword@123', minLength: 8 })
+  @IsString()
+  @MinLength(8)
+  @MaxLength(128)
+  newPassword!: string;
 }

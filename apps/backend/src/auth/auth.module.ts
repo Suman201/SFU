@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
-import { MongooseModule } from '@nestjs/mongoose';
-import { UserDocument, UserSchema } from '../database/schemas';
+import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { DatabaseModule } from '../database/database.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 @Module({
-  imports: [JwtModule.register({}), MongooseModule.forFeature([{ name: UserDocument.name, schema: UserSchema }])],
+  imports: [JwtModule.register({}), DatabaseModule, AuditLogsModule],
   controllers: [AuthController],
   providers: [AuthService, JwtAuthGuard],
   exports: [AuthService, JwtAuthGuard]

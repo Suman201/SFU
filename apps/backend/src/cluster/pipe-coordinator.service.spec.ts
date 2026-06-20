@@ -1764,6 +1764,17 @@ function producerCreate(pipeTransportId: string, producerId: string): PipeProduc
   };
 }
 
+function _producerClose(pipeTransportId: string, producerId: string): PipeProducerCloseMessage {
+  return {
+    type: 'pipe:producer:close',
+    roomId: 'room-1',
+    pipeTransportId,
+    ownerClaimedAt: CLAIMED_AT,
+    producerId,
+    reason: 'producer_closed'
+  };
+}
+
 function rtcpMessage(): PipeRtcpMessage {
   return {
     type: 'pipe:rtcp',
