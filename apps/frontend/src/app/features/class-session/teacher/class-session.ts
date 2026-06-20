@@ -36,13 +36,13 @@ export class TeacherClassSession {
     {
       participantId: 'student-1',
       displayName: 'Student 1',
-      color: '#2563eb',
+      color: '#0f5bf1',
       position: { x: 260, y: 140 }
     },
     {
       participantId: 'student-3',
       displayName: 'Student 3',
-      color: '#b94141',
+      color: '#14924f',
       position: { x: 440, y: 270 }
     }
   ]);

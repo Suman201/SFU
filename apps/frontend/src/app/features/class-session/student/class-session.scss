@@ -7,9 +7,9 @@
   min-height: 100vh;
   overflow: hidden;
   background:
-    radial-gradient(circle at 20% 16%, rgba(72, 210, 170, 0.18), transparent 28%),
-    radial-gradient(circle at 82% 26%, rgba(141, 182, 255, 0.16), transparent 26%),
-    #070d0b;
+    radial-gradient(circle at 20% 16%, rgba(20, 146, 79, 0.2), transparent 28%),
+    radial-gradient(circle at 82% 26%, rgba(15, 91, 241, 0.22), transparent 26%),
+    #020b1a;
   color: var(--video-text);
 }
 
@@ -26,7 +26,7 @@
   place-items: center;
   overflow: hidden;
   background:
-    linear-gradient(135deg, rgba(16, 28, 25, 0.94), rgba(32, 83, 91, 0.84) 45%, rgba(8, 12, 16, 0.98)),
+    linear-gradient(135deg, rgba(6, 27, 68, 0.94), rgba(15, 91, 241, 0.7) 45%, rgba(2, 11, 26, 0.98)),
     var(--video-bg);
 }
 
@@ -37,7 +37,7 @@
   border-radius: 50%;
   background:
     radial-gradient(circle at 36% 28%, rgba(255, 255, 255, 0.34), transparent 14%),
-    linear-gradient(135deg, #204b45, #6fa39b);
+    linear-gradient(135deg, var(--brand-blue), var(--brand-green));
   box-shadow: 0 28px 120px rgba(0, 0, 0, 0.38);
   content: '';
 }
@@ -103,7 +103,7 @@
 }
 
 .speaker-badge span {
-  color: #8ee8c9;
+  color: #9deec4;
   font-size: 13px;
   font-weight: 800;
 }

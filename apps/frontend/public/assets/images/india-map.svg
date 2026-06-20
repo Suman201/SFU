@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 560" role="img" aria-labelledby="title desc">
+  <title id="title">India education network map</title>
+  <desc id="desc">A dotted India map with connection arcs and location markers.</desc>
+  <defs>
+    <clipPath id="india">
+      <path d="M236 12 305 34 337 84 421 101 416 165 374 204 423 259 340 306 323 404 277 548 221 432 184 360 115 331 139 251 56 205 126 150 146 72Z"/>
+    </clipPath>
+    <pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse">
+      <circle cx="4" cy="4" r="3" fill="#0f5bf1"/>
+    </pattern>
+    <linearGradient id="pin" x1="0" x2="1" y1="0" y2="1">
+      <stop stop-color="#1fb765"/>
+      <stop offset="1" stop-color="#087a43"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="#14924f" stroke-dasharray="5 8" stroke-linecap="round" opacity=".34">
+    <path d="M260 265C144 258 82 296 44 412"/>
+    <path d="M260 265C378 254 448 294 491 416"/>
+    <path d="M260 265C208 340 204 428 248 516"/>
+    <path d="M260 265C320 344 330 426 300 520"/>
+  </g>
+  <path clip-path="url(#india)" fill="url(#dots)" d="M0 0h520v560H0z"/>
+  <path d="M236 12 305 34 337 84 421 101 416 165 374 204 423 259 340 306 323 404 277 548 221 432 184 360 115 331 139 251 56 205 126 150 146 72Z" fill="none" stroke="#8db7ff" stroke-width="2" opacity=".42"/>
+  <g fill="url(#pin)" stroke="#fff" stroke-width="7">
+    <path d="M203 166c0-18 14-32 32-32s32 14 32 32c0 24-32 58-32 58s-32-34-32-58Z"/>
+    <path d="M279 246c0-18 14-32 32-32s32 14 32 32c0 24-32 58-32 58s-32-34-32-58Z"/>
+    <path d="M170 310c0-18 14-32 32-32s32 14 32 32c0 24-32 58-32 58s-32-34-32-58Z"/>
+    <path d="M253 380c0-18 14-32 32-32s32 14 32 32c0 24-32 58-32 58s-32-34-32-58Z"/>
+    <path d="M332 326c0-18 14-32 32-32s32 14 32 32c0 24-32 58-32 58s-32-34-32-58Z"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="235" cy="166" r="10"/>
+    <circle cx="311" cy="246" r="10"/>
+    <circle cx="202" cy="310" r="10"/>
+    <circle cx="285" cy="380" r="10"/>
+    <circle cx="364" cy="326" r="10"/>
+  </g>
+</svg>

@@ -202,13 +202,13 @@ import { WaitingRoomComponent } from './components/waiting-room/waiting-room.com
       }
 
       .quality-chip.warn {
-        border-color: #ffd150;
-        background: color-mix(in srgb, #ffd150 22%, var(--panel-elevated) 78%);
+        border-color: var(--warning);
+        background: color-mix(in srgb, var(--warning) 22%, var(--panel-elevated) 78%);
       }
 
       .quality-chip.critical {
-        border-color: #f26076;
-        background: color-mix(in srgb, #f26076 18%, var(--panel-elevated) 82%);
+        border-color: var(--danger);
+        background: color-mix(in srgb, var(--danger) 18%, var(--panel-elevated) 82%);
       }
 
       code {

@@ -162,11 +162,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly colorMenuOpen = signal(false);
   protected readonly brushMenuOpen = signal(false);
   protected readonly menuOpen = signal(false);
-  protected readonly strokeColor = signal('#17201b');
+  protected readonly strokeColor = signal('#071c41');
   protected readonly fillEnabled = signal(false);
   protected readonly strokeWidth = signal(4);
   protected readonly fontSize = signal(28);
-  protected readonly colors = ['#17201b', '#19715a', '#b06a20', '#b94141', '#2563eb'];
+  protected readonly colors = ['#071c41', '#0f5bf1', '#14924f', '#ffbf30', '#ec4f82'];
   protected readonly brushSizes = [3, 6, 10, 14];
   protected readonly zoom = signal(1);
   protected readonly panX = signal(0);
@@ -994,15 +994,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       }
     }
     context.save();
-    context.fillStyle = this.cssVariable('--canvas-document-bg', '#f8faf8');
-    context.strokeStyle = this.cssVariable('--canvas-document-line', '#cfd8d2');
+    context.fillStyle = this.cssVariable('--canvas-document-bg', '#f8fbff');
+    context.strokeStyle = this.cssVariable('--canvas-document-line', '#d7e3f4');
     context.lineWidth = 1;
     context.fillRect(element.position.x, element.position.y, element.width, element.height);
     context.strokeRect(element.position.x, element.position.y, element.width, element.height);
-    context.fillStyle = this.cssVariable('--accent', '#19715a');
+    context.fillStyle = this.cssVariable('--accent', '#0f5bf1');
     context.font = '700 18px Inter, ui-sans-serif, system-ui, sans-serif';
     context.fillText(element.kind === 'document' ? 'PDF' : 'Image', element.position.x + 16, element.position.y + 20);
-    context.fillStyle = this.cssVariable('--text', '#17201b');
+    context.fillStyle = this.cssVariable('--text', '#071c41');
     context.font = '14px Inter, ui-sans-serif, system-ui, sans-serif';
     context.fillText(element.fileName.slice(0, 26), element.position.x + 16, element.position.y + 56);
     context.restore();
@@ -1183,11 +1183,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     context.save();
     context.setLineDash([6, 5]);
     context.lineWidth = 1.5;
-    context.strokeStyle = this.cssVariable('--accent', '#19715a');
+    context.strokeStyle = this.cssVariable('--accent', '#0f5bf1');
     context.strokeRect(bounds.x - 6, bounds.y - 6, bounds.width + 12, bounds.height + 12);
     context.setLineDash([]);
     context.fillStyle = this.cssVariable('--canvas-selection-fill', '#ffffff');
-    context.strokeStyle = this.cssVariable('--accent', '#19715a');
+    context.strokeStyle = this.cssVariable('--accent', '#0f5bf1');
     for (const handle of this.transformHandles(bounds)) {
       context.fillRect(handle.x - 5, handle.y - 5, 10, 10);
       context.strokeRect(handle.x - 5, handle.y - 5, 10, 10);

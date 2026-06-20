@@ -1,10 +1,21 @@
 <header class="site-header">
-  <a class="brand" routerLink="/">
-    <span class="eyebrow">Open live learning</span>
-    <span>Teach any student</span>
+  <a class="brand" routerLink="/" aria-label="EDCONNECTION home">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 64 64" focusable="false">
+        <path class="cap" d="M8 18 32 6l24 12-24 13L8 18Z" />
+        <path class="book-left" d="M15 35c8 0 13 3 17 9V30c-4-5-10-8-17-8v13Z" />
+        <path class="book-right" d="M49 35c-8 0-13 3-17 9V30c4-5 10-8 17-8v13Z" />
+        <path class="stem" d="M32 30v18" />
+        <circle cx="32" cy="31" r="4" />
+      </svg>
+    </span>
+    <span class="brand-copy">
+      <strong><span>ED</span>CONNECTION</strong>
+      <small>Teach. Learn. Grow Together.</small>
+    </span>
   </a>
 
-  <nav aria-label="Primary">
+  <nav class="primary-nav" aria-label="Primary">
     <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Home</a>
     @if (auth.role() === 'teacher') {
       <a routerLink="/teacher/dashboard" routerLinkActive="active">Dashboard</a>
@@ -16,8 +27,16 @@
       <a routerLink="/student/profile" routerLinkActive="active">Profile</a>
       <a routerLink="/sfu-forms" routerLinkActive="active">Class forms</a>
     } @else {
-      <a routerLink="/teachers/ananya-sen" routerLinkActive="active">Teachers</a>
+      <a routerLink="/" fragment="teachers">For Teachers</a>
+      <a routerLink="/" fragment="learners">For Learners</a>
+      <a routerLink="/student/explore">Courses</a>
+      <a routerLink="/" fragment="how-it-works">How It Works</a>
+      <a routerLink="/" fragment="pricing">Pricing</a>
+      <a routerLink="/" fragment="resources">Resources <span aria-hidden="true">v</span></a>
     }
+  </nav>
+
+  <div class="header-actions">
     <button
       class="theme-toggle"
       type="button"
@@ -31,12 +50,12 @@
         <span class="theme-toggle-thumb"></span>
       </span>
     </button>
+
     @if (!auth.authenticated()) {
-      <a routerLink="/teacher/login" routerLinkActive="active">Teacher login</a>
-      <a routerLink="/student/login" routerLinkActive="active">Student login</a>
-      <a routerLink="/register" routerLinkActive="active">Register</a>
+      <a class="login-link" routerLink="/student/login" routerLinkActive="active">Log In</a>
+      <a class="signup-link" routerLink="/register" routerLinkActive="active">Sign Up</a>
     } @else {
-      <button type="button" (click)="logout()">Sign out</button>
+      <button class="signout-button" type="button" (click)="logout()">Sign out</button>
     }
-  </nav>
+  </div>
 </header>

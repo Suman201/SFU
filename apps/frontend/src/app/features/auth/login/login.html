@@ -13,10 +13,34 @@
       <input [formField]="form.email" autocomplete="email">
     </label>
 
-    <label>
+    <label class="password-field">
       Password
-      <input type="password" [formField]="form.password" autocomplete="current-password">
+      <div class="password-input-wrap">
+        <input
+          [type]="showPassword() ? 'text' : 'password'"
+          [formField]="form.password"
+          autocomplete="current-password"
+        >
+        <button
+          type="button"
+          class="password-toggle"
+          (click)="togglePasswordVisibility()"
+          [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'"
+          [attr.aria-pressed]="showPassword()"
+        >
+          <span aria-hidden="true">
+            {{ showPassword() ? '🙈' : '👁' }}
+          </span>
+        </button>
+      </div>
     </label>
+
+    <div class="remember-row">
+      <label class="checkbox-row">
+        <input type="checkbox" [checked]="rememberMe()" (change)="updateRememberMe($event)">
+        <span>Remember me</span>
+      </label>
+    </div>
 
     <button class="primary" type="submit" [disabled]="form().invalid() || busy()">
       {{ busy() ? 'Checking...' : 'Login' }}

@@ -46,8 +46,8 @@ import { ThemeService } from './core/services/theme.service';
       .loader {
         width: 28px;
         height: 28px;
-        border: 3px solid color-mix(in srgb, #458b73 20%, var(--line));
-        border-top-color: #f26076;
+        border: 3px solid color-mix(in srgb, var(--success) 20%, var(--line));
+        border-top-color: var(--accent);
         border-radius: 50%;
         animation: auth-spin 800ms linear infinite;
       }

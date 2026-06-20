@@ -24,6 +24,8 @@ export class Login {
 
   protected readonly busy = signal(false);
   protected readonly error = signal('');
+  protected readonly showPassword = signal(false);
+  protected readonly rememberMe = signal(false);
   protected readonly expectedRole = (this.route.snapshot.data['role'] as AuthRole | undefined) ?? 'student';
   protected readonly alternateRole: AuthRole = this.expectedRole === 'teacher' ? 'student' : 'teacher';
   protected readonly title = `${this.roleLabel(this.expectedRole)} login`;
@@ -54,7 +56,7 @@ export class Login {
     this.busy.set(true);
     this.error.set('');
     const value = this.formModel();
-    this.auth.login(value.email, value.password, this.expectedRole).subscribe({
+    this.auth.login(value.email, value.password, this.expectedRole, this.rememberMe()).subscribe({
       next: ({ user }) => {
         const returnUrl = this.safeReturnUrl(user.role);
         void this.router.navigateByUrl(returnUrl ?? this.auth.redirectPathFor(user.role));
@@ -65,6 +67,14 @@ export class Login {
       },
       complete: () => this.busy.set(false)
     });
+  }
+
+  protected togglePasswordVisibility(): void {
+    this.showPassword.update((value) => !value);
+  }
+
+  protected updateRememberMe(event: Event): void {
+    this.rememberMe.set((event.target as HTMLInputElement | null)?.checked ?? false);
   }
 
   private safeReturnUrl(role: AuthRole): string | null {

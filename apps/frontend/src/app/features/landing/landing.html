@@ -1,180 +1,268 @@
 <sfu-header />
-<main class="landing-shell">
-  <section class="hero-section" aria-labelledby="landing-title">
+
+<main class="ed-page">
+  <ng-template #edIcon let-name="name" let-className="className">
+    <svg [class]="className" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+      @switch (name) {
+        @case ('cap') {
+          <path d="M4 17 24 7l20 10-20 10L4 17Z" />
+          <path d="M13 24v9c4 5 18 5 22 0v-9" />
+          <path d="M41 19v12" />
+        }
+        @case ('users') {
+          <path d="M24 23a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z" />
+          <path d="M10 42c2-9 8-14 14-14s12 5 14 14" />
+          <path d="M10 25a6 6 0 1 0 0-12M38 25a6 6 0 1 1 0-12" />
+        }
+        @case ('play') {
+          <path d="M18 12v24l20-12-20-12Z" />
+        }
+        @case ('book') {
+          <path d="M8 10h14c4 0 6 2 6 6v24c0-4-2-6-6-6H8V10Z" />
+          <path d="M40 10H28v30c0-4 2-6 6-6h6V10Z" />
+        }
+        @case ('star') {
+          <path d="m24 5 5.6 12 13.1 1.6-9.6 9 2.5 13-11.6-6.5-11.6 6.5 2.5-13-9.6-9L18.4 17 24 5Z" />
+        }
+        @case ('globe') {
+          <circle cx="24" cy="24" r="18" />
+          <path d="M6 24h36M24 6c6 7 6 29 0 36M24 6c-6 7-6 29 0 36" />
+        }
+        @case ('bridge') {
+          <path d="M7 34h34M10 34c2-11 8-18 14-18s12 7 14 18M14 34V20M34 34V20" />
+        }
+        @case ('rupee') {
+          <path d="M15 10h20M15 18h20M16 10h9c12 0 12 16 0 16h-8l16 14" />
+        }
+        @case ('screen') {
+          <rect x="8" y="10" width="32" height="22" rx="3" />
+          <path d="M18 40h12M24 32v8" />
+        }
+        @case ('bars') {
+          <path d="M11 37V25M24 37V13M37 37V19" />
+        }
+        @case ('home') {
+          <path d="m7 23 17-14 17 14" />
+          <path d="M13 21v20h22V21" />
+        }
+        @case ('video') {
+          <rect x="7" y="14" width="25" height="20" rx="4" />
+          <path d="m32 20 9-5v18l-9-5" />
+        }
+        @case ('community') {
+          <path d="M16 21a6 6 0 1 0 0-12 6 6 0 0 0 0 12ZM32 21a6 6 0 1 0 0-12 6 6 0 0 0 0 12ZM24 28a6 6 0 1 0 0-12" />
+          <path d="M7 40c1-8 6-12 12-12M41 40c-1-8-6-12-12-12M14 42c2-7 6-11 10-11s8 4 10 11" />
+        }
+        @case ('person-add') {
+          <path d="M20 23a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM7 41c2-9 7-14 13-14 4 0 8 2 10 5M36 22v16M28 30h16" />
+        }
+        @case ('id-card') {
+          <rect x="8" y="10" width="32" height="28" rx="4" />
+          <path d="M17 27a5 5 0 1 0 0-10 5 5 0 0 0 0 10ZM12 34c1-4 3-6 5-6s4 2 5 6M27 19h8M27 27h8" />
+        }
+        @case ('camera') {
+          <rect x="8" y="15" width="25" height="18" rx="4" />
+          <path d="m33 21 8-5v16l-8-5" />
+        }
+        @case ('group') {
+          <path d="M17 22a6 6 0 1 0 0-12M31 22a6 6 0 1 0 0-12M24 24a7 7 0 1 0 0-14" />
+          <path d="M8 40c1-7 5-11 10-11M40 40c-1-7-5-11-10-11M14 42c2-8 6-12 10-12s8 4 10 12" />
+        }
+        @case ('badge') {
+          <path d="m24 5 5 5 7-1 2 7 6 4-4 6 1 7-7 2-5 6-5-5-7 1-2-7-6-4 4-6-1-7 7-2 5-6Z" />
+          <path d="m17 24 5 5 10-11" />
+        }
+        @case ('gears') {
+          <circle cx="18" cy="19" r="7" />
+          <circle cx="32" cy="31" r="6" />
+          <path d="M18 8v4M18 26v4M7 19h4M25 19h4M32 22v3M32 37v3M24 31h3M37 31h3" />
+        }
+        @case ('signal') {
+          <path d="M8 29c9-9 23-9 32 0M15 36c5-5 13-5 18 0M22 42h4M4 22c11-12 29-12 40 0" />
+        }
+        @case ('briefcase') {
+          <rect x="7" y="16" width="34" height="22" rx="4" />
+          <path d="M18 16v-4h12v4M7 25h34" />
+        }
+        @case ('village') {
+          <path d="M6 24 18 13l12 11M18 14v27M30 23l8-7 8 7M10 24v17h16V24M34 24v17h9V24" />
+        }
+        @case ('leaf') {
+          <path d="M39 8C22 9 11 18 11 31c0 6 5 10 11 10 13 0 20-15 17-33Z" />
+          <path d="M12 39c6-10 14-16 24-22" />
+        }
+      }
+    </svg>
+  </ng-template>
+
+  <section class="hero-section" id="teachers" aria-labelledby="landing-title">
     <div class="hero-copy">
-      <p class="section-kicker">Open live learning marketplace</p>
-      <h1 id="landing-title">Any teacher can teach any student, live.</h1>
+      <p class="hero-kicker"><span aria-hidden="true"></span> Empowering Digital India</p>
+      <h1 id="landing-title">
+        Bridging India's Education Gap -
+        <span>Connecting Teachers and Learners Nationwide</span>
+      </h1>
       <p class="hero-lede">
-        Create classes around any skill, publish available batches, and help students discover the right teacher without geography, subject, or institution getting in the way.
+        Teach from anywhere. Learn from anywhere. We provide the platform, you focus on education.
       </p>
 
       <div class="hero-actions" aria-label="Landing page actions">
-        <a class="landing-button primary" routerLink="/teacher/dashboard">Start teaching</a>
-        <a class="landing-button secondary" routerLink="/student/explore">Find a teacher</a>
+        <a class="ed-button primary" routerLink="/teacher/dashboard">
+          <ng-container [ngTemplateOutlet]="edIcon" [ngTemplateOutletContext]="{ name: 'users', className: 'button-icon' }" />
+          Join as a Teacher
+          <span aria-hidden="true">-></span>
+        </a>
+        <a class="ed-button secondary" routerLink="/student/explore">
+          <ng-container [ngTemplateOutlet]="edIcon" [ngTemplateOutletContext]="{ name: 'cap', className: 'button-icon' }" />
+          Join as a Learner
+          <span aria-hidden="true">-></span>
+        </a>
       </div>
 
-      <div class="hero-stats" aria-label="Platform highlights">
-        @for (stat of heroStats; track stat.label) {
-          <div class="hero-stat">
-            <strong>{{ stat.value }}</strong>
-            <span>{{ stat.label }}</span>
-          </div>
-        }
-      </div>
-    </div>
-
-    <article class="classroom-preview" aria-label="Live classroom product preview">
-      <header class="preview-topbar">
-        <div>
-          <span class="window-dot rose" aria-hidden="true"></span>
-          <span class="window-dot amber" aria-hidden="true"></span>
-          <span class="window-dot green" aria-hidden="true"></span>
-        </div>
-        <strong>Spoken English Trial Class</strong>
-        <span class="live-badge">Live now</span>
-      </header>
-
-      <div class="preview-status-row" aria-label="Classroom status">
-        @for (signal of roomSignals; track signal) {
-          <span>{{ signal }}</span>
-        }
-      </div>
-
-      <div class="preview-grid">
-        <section class="video-tile" aria-label="Teacher video preview">
-          <div class="video-frame">
-            <span class="teacher-avatar">MS</span>
-            <span class="signal-bars" aria-hidden="true"><i></i><i></i><i></i></span>
-          </div>
-          <footer>
-            <span>Meera Shah</span>
-            <strong>Screen + camera</strong>
-          </footer>
-        </section>
-
-        <section class="whiteboard-panel" aria-label="Whiteboard preview">
-          <header>
-            <strong>Whiteboard</strong>
-            <span>Saved 2 min ago</span>
-          </header>
-          <div class="board-canvas" aria-hidden="true">
-            <span class="board-node node-a">Goal</span>
-            <span class="board-node node-b">Practice</span>
-            <span class="board-node node-c">Review</span>
-            <span class="board-line line-a"></span>
-            <span class="board-line line-b"></span>
-            <span class="board-stroke stroke-a"></span>
-            <span class="board-stroke stroke-b"></span>
-          </div>
-        </section>
-
-        <aside class="preview-rail" aria-label="Classroom side panels">
-          <section class="mini-panel participants-panel">
-            <header>
-              <strong>Students</strong>
-              <span>18</span>
-            </header>
-            <div class="participant-stack" aria-hidden="true">
-              <span>AR</span>
-              <span>NK</span>
-              <span>JB</span>
-              <span>+15</span>
-            </div>
-          </section>
-
-          <section class="mini-panel chat-panel">
-            <header>
-              <strong>Chat</strong>
-              <span>Synced</span>
-            </header>
-            <p><b>Riya</b> asked for pronunciation feedback.</p>
-            <p><b>Dev</b> shared today&apos;s practice goal.</p>
-          </section>
-
-          <section class="mini-panel schedule-panel">
-            <header>
-              <strong>Next</strong>
-              <span>Today</span>
-            </header>
-            <p>Doubt clearing - 8:00 PM</p>
-          </section>
-        </aside>
-      </div>
-    </article>
-  </section>
-
-  <section class="feature-strip" aria-label="Platform capabilities">
-    @for (feature of quickFeatures; track feature.label) {
-      <article>
-        <span aria-hidden="true"></span>
-        <div>
-          <h2>{{ feature.label }}</h2>
-          <p>{{ feature.detail }}</p>
-        </div>
-      </article>
-    }
-  </section>
-
-  <section class="value-grid" aria-label="Teacher and student value">
-    @for (block of valueBlocks; track block.eyebrow) {
-      <article class="value-card">
-        <p class="section-kicker">{{ block.eyebrow }}</p>
-        <h2>{{ block.title }}</h2>
-        <p>{{ block.body }}</p>
-        <ul>
-          @for (point of block.points; track point) {
-            <li>{{ point }}</li>
+      <div class="rating-row" aria-label="Platform rating">
+        <div class="avatar-stack" aria-hidden="true">
+          @for (avatar of avatars; track avatar) {
+            <span>{{ avatar }}</span>
           }
-        </ul>
-        <a class="text-link" [routerLink]="block.route">{{ block.cta }}</a>
+        </div>
+        <span class="stars" aria-hidden="true">*****</span>
+        <strong>4.8/5</strong>
+        <small>Trusted by 10K+ Teachers and Learners</small>
+      </div>
+    </div>
+
+    <div class="hero-visual" aria-label="Teacher connecting with learners across India">
+      <img class="hero-banner-image" [src]="heroBannerImage" alt="Teacher connecting learners across India through online classes" />
+
+      <div class="learner-stack" aria-label="Learners from different Indian states">
+        @for (learner of learnerCards; track learner.state) {
+          <article class="learner-mini" [attr.data-tone]="learner.tone">
+            <img [src]="learner.image" [alt]="'Student learning online in ' + learner.state" />
+            <p><span></span>{{ learner.state }}</p>
+          </article>
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="stats-strip" aria-label="Platform stats">
+    @for (stat of stats; track stat.label) {
+      <article class="stat-card" [attr.data-tone]="stat.tone">
+        <ng-container [ngTemplateOutlet]="edIcon" [ngTemplateOutletContext]="{ name: stat.icon, className: 'stat-icon' }" />
+        <div>
+          <strong>{{ stat.value }}</strong>
+          <small>{{ stat.label }}</small>
+        </div>
       </article>
     }
   </section>
 
-  <section class="batches-section" aria-labelledby="featured-batches-title">
+  <section class="benefits-section" id="learners" aria-labelledby="benefits-title">
     <div class="section-heading">
-      <p class="section-kicker">Featured classes</p>
-      <h2 id="featured-batches-title">Learn from real teachers across subjects.</h2>
+      <h2 id="benefits-title">Why Choose <span>EDCONNECTION?</span></h2>
     </div>
 
-    <div class="batch-preview-grid">
-      @for (batch of featuredBatches; track batch.title) {
-        <article class="batch-preview-card" [attr.data-tone]="batch.tone">
-          <header>
-            <span>{{ batch.status }}</span>
-            <strong>{{ batch.seats }}</strong>
-          </header>
-          <h3>{{ batch.title }}</h3>
-          <p>{{ batch.teacher }}</p>
-          <footer>
-            <span>{{ batch.schedule }}</span>
-            <a routerLink="/student/explore">View</a>
-          </footer>
+    <div class="benefit-grid">
+      @for (benefit of benefits; track benefit.title) {
+        <article class="benefit-card" [attr.data-tone]="benefit.tone">
+          <ng-container [ngTemplateOutlet]="edIcon" [ngTemplateOutletContext]="{ name: benefit.icon, className: 'feature-icon' }" />
+          <h3>{{ benefit.title }}</h3>
+          <p>{{ benefit.body }}</p>
         </article>
       }
     </div>
   </section>
 
-  <section class="platform-summary" aria-label="Platform stats">
-    <div class="summary-stats">
-      @for (stat of platformStats; track stat.label) {
-        <div>
-          <strong>{{ stat.value }}</strong>
-          <span>{{ stat.label }}</span>
-        </div>
-      }
+  <section class="steps-section" id="how-it-works" aria-labelledby="steps-title">
+    <div class="section-heading compact">
+      <h2 id="steps-title">How It Works</h2>
     </div>
 
-    <div class="final-cta">
-      <div>
-        <p class="section-kicker">For open learning</p>
-        <h2>Bring teachers and students together in one reliable live classroom.</h2>
-      </div>
-      <div class="hero-actions">
-        <a class="landing-button primary" routerLink="/teacher/dashboard">Start teaching</a>
-        <a class="landing-button secondary" routerLink="/student/explore">Browse classes</a>
-      </div>
+    <div class="steps-row">
+      @for (step of steps; track step.title; let index = $index) {
+        <article class="step-card" [attr.data-tone]="step.tone">
+          <ng-container [ngTemplateOutlet]="edIcon" [ngTemplateOutletContext]="{ name: step.icon, className: 'step-icon' }" />
+          <h3>{{ index + 1 }}. {{ step.title }}</h3>
+          <p>{{ step.body }}</p>
+        </article>
+      }
     </div>
   </section>
+
+  <section class="india-section" id="pricing" aria-labelledby="india-title">
+    <div class="india-copy">
+      <h2 id="india-title">One Platform. Thousands of Teachers. Millions of Learners.</h2>
+      <p>Making education accessible, affordable, and impactful across India.</p>
+      <a class="ed-button primary" routerLink="/register">
+        Be a Part of the Change
+        <span aria-hidden="true">-></span>
+      </a>
+    </div>
+
+    <div class="india-map" aria-hidden="true">
+      <img [src]="indiaMapImage" alt="" />
+      <span class="map-marker marker-1"></span>
+      <span class="map-marker marker-2"></span>
+      <span class="map-marker marker-3"></span>
+      <span class="map-marker marker-4"></span>
+      <span class="map-marker marker-5"></span>
+      <span class="map-arc arc-1"></span>
+      <span class="map-arc arc-2"></span>
+      <span class="map-arc arc-3"></span>
+    </div>
+
+    <div class="platform-benefits" aria-label="Platform benefits">
+      @for (benefit of platformBenefits; track benefit.label) {
+        <article [attr.data-tone]="benefit.tone">
+          <ng-container [ngTemplateOutlet]="edIcon" [ngTemplateOutletContext]="{ name: benefit.icon, className: 'feature-icon small' }" />
+          <strong>{{ benefit.label }}</strong>
+        </article>
+      }
+    </div>
+  </section>
+
+  <section class="testimonials-section" id="resources" aria-labelledby="testimonials-title">
+    <div class="section-heading compact">
+      <h2 id="testimonials-title">Voices That Inspire</h2>
+    </div>
+
+    <button class="testimonial-arrow prev" type="button" aria-label="Previous testimonial">&lt;</button>
+    <div class="testimonial-grid">
+      @for (testimonial of testimonials; track testimonial.name) {
+        <article class="testimonial-card" [attr.data-tone]="testimonial.tone">
+          <span class="quote-mark" aria-hidden="true">"</span>
+          <p>{{ testimonial.quote }}</p>
+          <footer>
+            <img class="testimonial-avatar" [src]="testimonial.image" [alt]="testimonial.name" />
+            <div>
+              <strong>{{ testimonial.name }}</strong>
+              <small>{{ testimonial.role }}</small>
+              <em>{{ testimonial.badge }}</em>
+            </div>
+          </footer>
+        </article>
+      }
+    </div>
+    <button class="testimonial-arrow next" type="button" aria-label="Next testimonial">&gt;</button>
+  </section>
+
+  <section class="cta-section" aria-labelledby="cta-title">
+    <div class="cta-illustration" aria-hidden="true">
+      <span class="line-teacher"></span>
+      <span class="line-laptop"></span>
+      <span class="orbit orbit-a"></span>
+      <span class="orbit orbit-b"></span>
+    </div>
+    <div class="cta-copy">
+      <h2 id="cta-title">Ready to Start Your Journey?</h2>
+      <p>Join our mission to empower India through education.</p>
+      <div class="hero-actions">
+        <a class="ed-button green" routerLink="/teacher/dashboard">Join as a Teacher <span aria-hidden="true">-></span></a>
+        <a class="ed-button light" routerLink="/student/explore">Join as a Learner <span aria-hidden="true">-></span></a>
+      </div>
+    </div>
+    <img class="student-photo" [src]="ctaImage" alt="Students learning together on a laptop" />
+  </section>
 </main>
+
 <sfu-footer />

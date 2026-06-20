@@ -10,6 +10,8 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
+    clearAuthCookies();
     TestBed.configureTestingModule({
       providers: [provideHttpClient(), provideHttpClientTesting()]
     });
@@ -20,6 +22,8 @@ describe('AuthService', () => {
   afterEach(() => {
     http.verify();
     sessionStorage.clear();
+    localStorage.clear();
+    clearAuthCookies();
   });
 
   it('stores a teacher login and exposes the teacher role', () => {
@@ -44,6 +48,33 @@ describe('AuthService', () => {
     expect(service.authenticated()).toBe(true);
     expect(service.role()).toBe('teacher');
     expect(service.accessToken()).toBeTruthy();
+  });
+
+  it('stores a remembered login in cookies when remember me is enabled', () => {
+    let role = '';
+
+    service.login('student@example.com', 'Password@12345', 'student', true).subscribe((result) => {
+      role = result.user.role;
+    });
+
+    const request = http.expectOne(`${API_BASE_URL}/auth/login`);
+    expect(request.request.method).toBe('POST');
+    request.flush({
+      success: true,
+      message: 'OK',
+      data: {
+        accessToken: jwt({ sub: 'student-1', email: 'student@example.com', roles: ['STUDENT'], permissions: [], exp: futureExp() }),
+        refreshToken: 'refresh-token',
+        user: { id: 'student-1', name: 'Student One', email: 'student@example.com', role: 'student' }
+      }
+    });
+
+    expect(role).toBe('student');
+    expect(service.authenticated()).toBe(true);
+    expect(readCookie('native-sfu.auth.accessToken')).toBeTruthy();
+    expect(readCookie('native-sfu.auth.refreshToken')).toBe('refresh-token');
+    expect(localStorage.getItem('native-sfu.auth.accessToken')).toBeNull();
+    expect(sessionStorage.getItem('native-sfu.auth.accessToken')).toBeNull();
   });
 
   it('rejects a teacher account on the student login flow', () => {
@@ -118,6 +149,17 @@ describe('AuthService', () => {
 
 function futureExp(): number {
   return Math.floor(Date.now() / 1000) + 3600;
+}
+
+function readCookie(key: string): string | null {
+  const cookie = document.cookie.split('; ').find((entry) => entry.startsWith(`${encodeURIComponent(key)}=`));
+  return cookie ? decodeURIComponent(cookie.slice(cookie.indexOf('=') + 1)) : null;
+}
+
+function clearAuthCookies(): void {
+  for (const key of ['native-sfu.auth.accessToken', 'native-sfu.auth.refreshToken']) {
+    document.cookie = `${encodeURIComponent(key)}=; Max-Age=0; Path=/; SameSite=Lax`;
+  }
 }
 
 function jwt(payload: Record<string, unknown>): string {

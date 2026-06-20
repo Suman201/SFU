@@ -27,13 +27,13 @@ const PROFILE_TABS: TeacherProfileTabItem[] = [
   { id: 'batches', label: 'Batches' }
 ];
 
-const DEFAULT_VISUAL_PALETTE: TeacherVisualPalette = { primary: '#2557d6', secondary: '#18b6a6', accent: '#f6c451', ink: '#eff6ff' };
+const DEFAULT_VISUAL_PALETTE: TeacherVisualPalette = { primary: '#061b44', secondary: '#0f5bf1', accent: '#14924f', ink: '#eff6ff' };
 
 const VISUAL_PALETTES: Record<string, TeacherVisualPalette> = {
   'ananya-sen': DEFAULT_VISUAL_PALETTE,
-  'rahul-mehta': { primary: '#2f4b7c', secondary: '#ef6c57', accent: '#8bd3ff', ink: '#f8fbff' },
-  'mira-kapoor': { primary: '#7c3aed', secondary: '#ec4899', accent: '#7dd3fc', ink: '#fff7fb' },
-  'dev-arora': { primary: '#0f766e', secondary: '#334155', accent: '#f59e0b', ink: '#f8fafc' }
+  'rahul-mehta': { primary: '#08295f', secondary: '#14924f', accent: '#17b8d5', ink: '#f8fbff' },
+  'mira-kapoor': { primary: '#0f5bf1', secondary: '#061b44', accent: '#ffbf30', ink: '#f8fbff' },
+  'dev-arora': { primary: '#061b44', secondary: '#087a43', accent: '#ff8f2c', ink: '#f8fafc' }
 };
 
 @Component({

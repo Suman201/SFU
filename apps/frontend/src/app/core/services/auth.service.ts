@@ -56,6 +56,7 @@ interface JwtPayload {
 
 const ACCESS_TOKEN_KEY = 'native-sfu.auth.accessToken';
 const REFRESH_TOKEN_KEY = 'native-sfu.auth.refreshToken';
+const REMEMBERED_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -73,11 +74,11 @@ export class AuthService {
 
   constructor(private readonly http: HttpClient) {}
 
-  login(email: string, password: string, expectedRole?: AuthRole): Observable<LoginResult> {
+  login(email: string, password: string, expectedRole?: AuthRole, rememberMe = false): Observable<LoginResult> {
     this.statusSignal.set('checking');
     this.sessionNoticeSignal.set('');
     return this.http.post<BackendLoginResponse | ApiEnvelope<BackendLoginResponse>>(`${API_BASE_URL}/auth/login`, { email, password }).pipe(
-      map((response) => this.storeLoginResponse(this.unwrapResponse(response), expectedRole)),
+      map((response) => this.storeLoginResponse(this.unwrapResponse(response), expectedRole, rememberMe)),
       catchError((error) => {
         this.clearSession();
         return throwError(() => this.toAuthError(error));
@@ -149,7 +150,7 @@ export class AuthService {
     return this.userSignal()?.role === role;
   }
 
-  redirectPathFor(role = this.role()): string {
+  redirectPathFor(role: AuthRole): string {
     return role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard';
   }
 
@@ -165,13 +166,15 @@ export class AuthService {
     return this.toAuthError(error).message;
   }
 
-  private storeLoginResponse(response: BackendLoginResponse, expectedRole?: AuthRole): LoginResult {
+  private storeLoginResponse(response: BackendLoginResponse, expectedRole?: AuthRole, rememberMe = false): LoginResult {
     if (!response.accessToken) {
       throw new Error('Login response did not include an access token.');
     }
-    this.writeStorage(ACCESS_TOKEN_KEY, response.accessToken);
+    this.removeStorage(ACCESS_TOKEN_KEY);
+    this.removeStorage(REFRESH_TOKEN_KEY);
+    this.writeStorage(ACCESS_TOKEN_KEY, response.accessToken, rememberMe);
     if (response.refreshToken) {
-      this.writeStorage(REFRESH_TOKEN_KEY, response.refreshToken);
+      this.writeStorage(REFRESH_TOKEN_KEY, response.refreshToken, rememberMe);
     } else {
       this.removeStorage(REFRESH_TOKEN_KEY);
     }
@@ -303,15 +306,27 @@ export class AuthService {
 
   private readStorage(key: string): string | null {
     try {
-      return sessionStorage.getItem(key);
+      const sessionValue = sessionStorage.getItem(key);
+      if (sessionValue) {
+        return sessionValue;
+      }
+      return this.readCookie(key);
     } catch {
       return null;
     }
   }
 
-  private writeStorage(key: string, value: string): void {
+  private writeStorage(key: string, value: string, rememberMe = false): void {
     try {
-      sessionStorage.setItem(key, value);
+      if (rememberMe) {
+        this.writeCookie(key, value, REMEMBERED_SESSION_MAX_AGE_SECONDS);
+        sessionStorage.removeItem(key);
+        localStorage.removeItem(key);
+      } else {
+        sessionStorage.setItem(key, value);
+        this.removeCookie(key);
+        localStorage.removeItem(key);
+      }
     } catch {
       // Session persistence is best-effort; auth state still lives in memory.
     }
@@ -320,8 +335,39 @@ export class AuthService {
   private removeStorage(key: string): void {
     try {
       sessionStorage.removeItem(key);
+      this.removeCookie(key);
+      localStorage.removeItem(key);
     } catch {
       // Nothing to do when storage is unavailable.
     }
+  }
+
+  private readCookie(key: string): string | null {
+    if (typeof document === 'undefined') {
+      return null;
+    }
+    const cookie = document.cookie
+      .split('; ')
+      .find((entry) => entry.startsWith(`${encodeURIComponent(key)}=`));
+    if (!cookie) {
+      return null;
+    }
+    return decodeURIComponent(cookie.slice(cookie.indexOf('=') + 1));
+  }
+
+  private writeCookie(key: string, value: string, maxAgeSeconds: number): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const secure = globalThis.location?.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `${encodeURIComponent(key)}=${encodeURIComponent(value)}; Max-Age=${maxAgeSeconds}; Path=/; SameSite=Lax${secure}`;
+  }
+
+  private removeCookie(key: string): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const secure = globalThis.location?.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `${encodeURIComponent(key)}=; Max-Age=0; Path=/; SameSite=Lax${secure}`;
   }
 }

@@ -116,9 +116,9 @@ const PROFILE: TeacherSelfProfile = {
 };
 
 const VISUAL_PALETTE: TeacherVisualPalette = {
-  primary: '#1d4ed8',
-  secondary: '#0f766e',
-  accent: '#f59e0b',
+  primary: '#061b44',
+  secondary: '#0f5bf1',
+  accent: '#14924f',
   ink: '#f8fafc'
 };
 

@@ -25,8 +25,9 @@
   padding: 28px;
   overflow: hidden;
   background:
-    linear-gradient(135deg, color-mix(in srgb, #458b73 18%, transparent), transparent 48%),
-    linear-gradient(160deg, color-mix(in srgb, #f26076 12%, var(--panel-elevated)), var(--panel-elevated));
+    radial-gradient(circle at 74% 18%, rgba(15, 91, 241, 0.18), transparent 34%),
+    linear-gradient(135deg, var(--success-soft), transparent 48%),
+    linear-gradient(160deg, var(--accent-soft), var(--panel-elevated));
 }
 
 .eyebrow,
@@ -36,7 +37,7 @@ p {
 }
 
 .eyebrow {
-  color: #458b73;
+  color: var(--success);
   font-size: 12px;
   font-weight: 850;
   letter-spacing: 0;
@@ -73,7 +74,7 @@ p {
   height: 44px;
   place-items: center;
   border-radius: 8px;
-  background: #f26076;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
   color: white;
   font-weight: 900;
 }
