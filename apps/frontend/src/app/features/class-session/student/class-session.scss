@@ -1,4 +1,15 @@
 .student-session-shell {
+  --student-base: #458B73;
+  --student-action: #F26076;
+  --student-live: #FF9760;
+  --student-attention: #FFD150;
+  --student-edge: 24px;
+  --student-control-height: 64px;
+  --student-bottom-rail: calc(var(--student-edge) + var(--student-control-height) + 18px);
+  --student-pip-width: clamp(180px, 22vw, 280px);
+  --student-pip-bottom: var(--student-bottom-rail);
+  --student-stage-pad: 14px;
+  --student-screen-safe-bottom: calc(var(--student-bottom-rail) + 24px);
   position: relative;
   box-sizing: border-box;
   display: grid;
@@ -7,10 +18,41 @@
   min-height: 100vh;
   overflow: hidden;
   background:
-    radial-gradient(circle at 20% 16%, rgba(20, 146, 79, 0.2), transparent 28%),
-    radial-gradient(circle at 82% 26%, rgba(15, 91, 241, 0.22), transparent 26%),
-    #020b1a;
+    linear-gradient(135deg, color-mix(in srgb, var(--student-base) 18%, transparent), transparent 42%),
+    linear-gradient(220deg, color-mix(in srgb, var(--student-action) 14%, transparent), transparent 46%),
+    #06110f;
   color: var(--video-text);
+}
+
+.student-session-state {
+  --student-base: #458B73;
+  --student-action: #F26076;
+  box-sizing: border-box;
+  display: grid;
+  min-height: 100vh;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--panel-elevated) 88%, var(--student-base) 12%), color-mix(in srgb, var(--panel) 92%, var(--student-action) 8%)),
+    var(--panel);
+}
+
+.student-session-state h1,
+.student-session-state p {
+  margin: 0;
+}
+
+.student-session-state h1 {
+  color: var(--text);
+  font-size: 28px;
+}
+
+.student-session-state p {
+  max-width: 560px;
+  color: var(--muted);
 }
 
 .video-stage {
@@ -26,35 +68,107 @@
   place-items: center;
   overflow: hidden;
   background:
-    linear-gradient(135deg, rgba(6, 27, 68, 0.94), rgba(15, 91, 241, 0.7) 45%, rgba(2, 11, 26, 0.98)),
+    linear-gradient(145deg, rgba(8, 30, 25, 0.96), color-mix(in srgb, var(--student-base) 38%, #06110f) 46%, rgba(5, 12, 10, 0.98)),
     var(--video-bg);
 }
 
 .video-frame::before {
   position: absolute;
-  width: min(44vw, 420px);
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 36% 28%, rgba(255, 255, 255, 0.34), transparent 14%),
-    linear-gradient(135deg, var(--brand-blue), var(--brand-green));
-  box-shadow: 0 28px 120px rgba(0, 0, 0, 0.38);
-  content: '';
-}
-
-.video-noise {
-  position: absolute;
   inset: 0;
   background:
-    linear-gradient(120deg, transparent 18%, rgba(255, 255, 255, 0.08), transparent 58%),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 4px);
-  opacity: 0.64;
+    linear-gradient(120deg, transparent 18%, rgba(255, 255, 255, 0.06), transparent 58%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 72px),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.02) 0 1px, transparent 1px 72px);
+  content: '';
+  opacity: 0.62;
+  pointer-events: none;
+}
+
+.video-frame.empty .speaker-badge {
+  display: none;
+}
+
+.teacher-reconnect-banner {
+  position: absolute;
+  left: 50%;
+  top: 24px;
+  z-index: 6;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  width: min(420px, calc(100vw - 48px));
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--student-attention) 42%, transparent);
+  border-radius: 8px;
+  background: rgba(13, 18, 14, 0.84);
+  box-shadow: var(--shadow-md);
+  color: var(--video-text);
+  text-align: center;
+  transform: translateX(-50%);
+  backdrop-filter: blur(14px);
+}
+
+.teacher-reconnect-banner strong {
+  color: var(--student-attention);
+  font-size: 14px;
+}
+
+.teacher-reconnect-banner span {
+  color: rgba(247, 250, 245, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stage-video {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  background: #050706;
+  object-fit: cover;
+}
+
+.video-frame.screen-mode .stage-video {
+  inset: var(--student-stage-pad) var(--student-stage-pad) var(--student-screen-safe-bottom);
+  width: auto;
+  height: auto;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.28);
+  object-fit: contain;
+}
+
+.video-placeholder {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  width: min(420px, calc(100vw - 48px));
+  padding: 26px;
+  text-align: center;
+  color: rgba(247, 250, 245, 0.82);
+}
+
+.video-placeholder strong {
+  color: var(--video-text);
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.video-placeholder span:last-child {
+  max-width: 320px;
+  color: rgba(247, 250, 245, 0.66);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .speaker-badge {
   position: absolute;
   left: 28px;
-  bottom: 28px;
+  top: 28px;
+  z-index: 4;
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
   align-items: center;
@@ -83,6 +197,18 @@
   height: 48px;
 }
 
+.speaker-avatar.large {
+  width: 76px;
+  height: 76px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--student-action) 92%, transparent), color-mix(in srgb, var(--student-live) 90%, transparent)),
+    var(--avatar-bg);
+  color: #16090b;
+  font-size: 22px;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.26);
+}
+
 .speaker-badge div,
 .participant-row div {
   display: grid;
@@ -103,9 +229,511 @@
 }
 
 .speaker-badge span {
-  color: #9deec4;
+  color: var(--student-live);
   font-size: 13px;
   font-weight: 800;
+}
+
+.teacher-pip {
+  position: absolute;
+  right: 24px;
+  bottom: var(--student-pip-bottom);
+  z-index: 5;
+  width: var(--student-pip-width);
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: #07110f;
+  box-shadow: 0 26px 90px rgba(0, 0, 0, 0.42);
+}
+
+.teacher-pip video,
+.pip-placeholder {
+  width: 100%;
+  height: 100%;
+}
+
+.teacher-pip video {
+  display: block;
+  object-fit: cover;
+}
+
+.pip-placeholder {
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--student-base) 92%, transparent), color-mix(in srgb, var(--student-live) 68%, transparent)),
+    #07110f;
+}
+
+.teacher-pip footer {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(7, 13, 11, 0.76);
+  color: var(--video-text);
+  font-size: 12px;
+  backdrop-filter: blur(12px);
+}
+
+.teacher-pip footer strong,
+.teacher-pip footer span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teacher-pip footer span {
+  color: var(--student-live);
+  font-weight: 800;
+}
+
+.teacher-audio {
+  display: none;
+}
+
+.student-prejoin-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 7, 6, 0.58);
+  backdrop-filter: blur(10px);
+}
+
+.student-prejoin-modal {
+  display: grid;
+  gap: 14px;
+  width: min(620px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(12, 28, 24, 0.98), rgba(10, 15, 13, 0.98)),
+    #09110f;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
+  color: var(--video-text);
+}
+
+.student-prejoin-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.student-prejoin-header p,
+.student-prejoin-header h1 {
+  margin: 0;
+}
+
+.student-prejoin-header p {
+  color: var(--student-live);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.student-prejoin-header h1 {
+  margin-top: 2px;
+  font-size: clamp(24px, 4vw, 34px);
+  line-height: 1.05;
+}
+
+.prejoin-status {
+  flex: 0 0 auto;
+  max-width: 230px;
+  padding: 8px 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(247, 250, 245, 0.78);
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prejoin-preview {
+  position: relative;
+  display: grid;
+  min-height: 260px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--student-base) 48%, transparent), rgba(5, 10, 9, 0.98)),
+    #07110f;
+}
+
+.prejoin-preview video {
+  width: 100%;
+  height: 100%;
+  min-height: 260px;
+  display: block;
+  object-fit: cover;
+}
+
+.prejoin-preview-placeholder {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px;
+  color: rgba(247, 250, 245, 0.76);
+}
+
+.prejoin-preview-placeholder strong {
+  max-width: min(320px, 100%);
+  overflow: hidden;
+  color: var(--video-text);
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prejoin-media-controls.student-media-controls {
+  position: static;
+  display: grid;
+  grid-template-areas:
+    'audio mic camera video refresh'
+    'problem problem problem problem problem';
+  grid-template-columns: minmax(0, 1fr) 42px 42px minmax(0, 1fr) 36px;
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: none;
+  transform: none;
+}
+
+.student-prejoin-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.prejoin-join-button {
+  min-width: 148px;
+  min-height: 44px;
+  border-color: color-mix(in srgb, var(--student-action) 72%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--student-action) 92%, #ffffff 8%), color-mix(in srgb, var(--student-live) 72%, var(--student-action))),
+    var(--student-action);
+  color: #21080d;
+  font-weight: 950;
+}
+
+.student-media-controls {
+  position: fixed;
+  left: 50%;
+  bottom: var(--student-edge);
+  z-index: 22;
+  display: inline-grid;
+  grid-template-areas:
+    'audio mic camera video refresh status'
+    'problem problem problem problem problem problem';
+  grid-template-columns: minmax(132px, 176px) 42px 42px minmax(132px, 176px) 36px minmax(92px, auto);
+  align-items: center;
+  gap: 6px 8px;
+  max-width: min(840px, calc(100vw - 48px));
+  min-height: 52px;
+  padding: 5px 10px 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 24px;
+  background: rgba(7, 13, 11, 0.76);
+  color: var(--video-text);
+  box-shadow: var(--shadow-md);
+  transform: translateX(-50%);
+  backdrop-filter: blur(16px);
+}
+
+.student-media-controls.problem {
+  border-color: color-mix(in srgb, var(--student-action) 42%, transparent);
+}
+
+.student-media-controls.teacher-moderated {
+  border-color: color-mix(in srgb, var(--student-attention) 54%, transparent);
+}
+
+.student-device-select {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  color: rgba(247, 250, 245, 0.58);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.student-device-select::after {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 7px;
+  height: 7px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  content: '';
+  pointer-events: none;
+  transform: rotate(45deg);
+}
+
+.student-device-select select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 26px 0 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  appearance: none;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--student-base) 24%, transparent), color-mix(in srgb, var(--student-live) 10%, transparent)),
+    rgba(255, 255, 255, 0.07);
+  color: var(--video-text);
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.student-device-select select:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
+}
+
+.student-device-select.teacher-disabled {
+  color: color-mix(in srgb, var(--student-attention) 74%, rgba(247, 250, 245, 0.58));
+}
+
+.student-device-select select:focus-visible,
+.student-device-refresh:focus-visible,
+.student-media-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--student-attention) 90%, transparent);
+  outline-offset: 2px;
+}
+
+.audio-device {
+  grid-area: audio;
+}
+
+.video-device {
+  grid-area: video;
+}
+
+.student-media-toggle {
+  position: relative;
+  display: inline-grid;
+  width: 42px;
+  height: 42px;
+  min-height: 42px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--student-base) 86%, transparent);
+  color: #f7faf5;
+}
+
+.student-media-toggle:hover:not(:disabled) {
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  transform: translateY(-1px);
+}
+
+.student-media-toggle.off {
+  background: color-mix(in srgb, var(--student-action) 88%, transparent);
+}
+
+.student-media-toggle.teacher-disabled {
+  border-color: color-mix(in srgb, var(--student-attention) 56%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--student-attention) 20%, transparent);
+}
+
+.student-media-toggle.switching {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--student-attention) 20%, transparent);
+}
+
+.student-media-toggle.switching .student-media-icon,
+.student-device-refresh.refreshing span {
+  animation: student-device-spin 780ms linear infinite;
+}
+
+.student-media-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.student-media-toggle.off::after {
+  position: absolute;
+  width: 26px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  content: '';
+  transform: rotate(-42deg);
+}
+
+.student-media-icon {
+  position: relative;
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+}
+
+.student-media-icon.mic-icon::before {
+  position: absolute;
+  top: 2px;
+  left: 7px;
+  width: 8px;
+  height: 13px;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  content: '';
+}
+
+.student-media-icon.mic-icon::after {
+  position: absolute;
+  left: 5px;
+  bottom: 2px;
+  width: 12px;
+  height: 8px;
+  border: solid currentColor;
+  border-width: 0 2px 2px;
+  border-radius: 0 0 9px 9px;
+  content: '';
+}
+
+.student-media-icon.camera-icon::before {
+  position: absolute;
+  top: 5px;
+  left: 2px;
+  width: 13px;
+  height: 11px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+  content: '';
+}
+
+.student-media-icon.camera-icon::after {
+  position: absolute;
+  top: 8px;
+  right: 1px;
+  width: 8px;
+  height: 7px;
+  background: currentColor;
+  clip-path: polygon(0 18%, 100% 0, 100% 100%, 0 82%);
+  content: '';
+}
+
+.mic-toggle {
+  grid-area: mic;
+}
+
+.camera-toggle {
+  grid-area: camera;
+}
+
+.student-device-refresh {
+  position: relative;
+  display: inline-grid;
+  grid-area: refresh;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(247, 250, 245, 0.86);
+}
+
+.student-device-refresh:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--student-live) 24%, transparent);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  transform: translateY(-1px);
+}
+
+.student-device-refresh:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
+}
+
+.student-device-refresh span {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-left-color: transparent;
+  border-radius: 50%;
+}
+
+.student-device-refresh span::after {
+  position: absolute;
+  right: -3px;
+  bottom: 1px;
+  width: 7px;
+  height: 7px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  content: '';
+  transform: rotate(-12deg);
+}
+
+.local-media-status {
+  grid-area: status;
+  min-width: 0;
+  max-width: 240px;
+  overflow: hidden;
+  color: rgba(247, 250, 245, 0.78);
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.student-media-controls.problem .local-media-status {
+  color: color-mix(in srgb, var(--student-action) 42%, #ffffff);
+}
+
+.device-problem-message {
+  grid-area: problem;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px 1px;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--student-action) 42%, #ffffff);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes student-device-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .participants-button {
@@ -275,6 +903,11 @@
   background: var(--accent-soft);
 }
 
+.participant-row.reconnecting {
+  border-color: color-mix(in srgb, var(--student-attention) 42%, transparent);
+  background: color-mix(in srgb, var(--student-attention) 14%, transparent);
+}
+
 .participant-avatar {
   width: 44px;
   height: 44px;
@@ -299,19 +932,121 @@
 }
 
 sfu-session-chat {
-  right: 24px;
-  bottom: 24px;
+  left: 24px;
+  right: auto;
+  bottom: calc(24px + 64px + 18px);
+  width: min(380px, calc(100vw - 48px));
 }
 
 @media (max-width: 720px) {
+  .student-session-shell {
+    --student-edge: 16px;
+    --student-control-height: 112px;
+    --student-bottom-rail: 146px;
+    --student-pip-width: min(44vw, 176px);
+    --student-pip-bottom: 210px;
+    --student-stage-pad: 10px;
+    --student-screen-safe-bottom: 160px;
+  }
+
   .speaker-badge {
     left: 16px;
-    bottom: 16px;
-    max-width: calc(100vw - 96px);
+    right: 92px;
+    top: 16px;
+    max-width: none;
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .speaker-avatar {
+    width: 40px;
+    height: 40px;
   }
 
   .participants-button {
     top: 16px;
     right: 16px;
+  }
+
+  .teacher-pip {
+    right: 16px;
+    bottom: var(--student-pip-bottom);
+    width: var(--student-pip-width);
+  }
+
+  sfu-session-chat {
+    left: 16px;
+    right: 16px;
+    bottom: 144px;
+    width: auto;
+  }
+
+  .student-media-controls {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    grid-template-areas:
+      'mic camera refresh status'
+      'audio audio video video'
+      'problem problem problem problem';
+    grid-template-columns: 42px 42px 36px minmax(0, 1fr);
+    max-width: none;
+    padding: 5px 8px 6px;
+    transform: none;
+  }
+
+  .student-prejoin-backdrop {
+    padding: 16px;
+  }
+
+  .student-prejoin-modal {
+    width: 100%;
+    max-height: calc(100vh - 32px);
+    padding: 14px;
+  }
+
+  .student-prejoin-header {
+    display: grid;
+  }
+
+  .prejoin-status {
+    max-width: 100%;
+  }
+
+  .prejoin-preview,
+  .prejoin-preview video {
+    min-height: 210px;
+  }
+
+  .prejoin-media-controls.student-media-controls {
+    left: auto;
+    right: auto;
+    bottom: auto;
+    grid-template-areas:
+      'mic camera refresh'
+      'audio audio audio'
+      'video video video'
+      'problem problem problem';
+    grid-template-columns: 42px 42px 36px;
+    justify-content: center;
+    max-width: none;
+    padding: 8px;
+  }
+
+  .student-prejoin-actions {
+    justify-content: stretch;
+  }
+
+  .prejoin-join-button {
+    width: 100%;
+  }
+
+  .local-media-status {
+    max-width: none;
+  }
+
+  .device-problem-message {
+    white-space: normal;
   }
 }

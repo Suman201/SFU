@@ -8,6 +8,7 @@ import { NestSfuModule, type TurnServerOptions } from '@native-sfu/nest-sfu';
 import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
+import { ClassSessionsModule } from './class-sessions/class-sessions.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { appConfig } from './config/app.config';
 import { validateConfig } from './config/env.validation';
@@ -24,6 +25,7 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { RbacModule } from './rbac/rbac.module';
 import { RolesModule } from './roles/roles.module';
 import { SessionsModule } from './sessions/sessions.module';
+import { StudentEnrollmentsModule } from './student-enrollments/student-enrollments.module';
 import { TeacherBatchesModule } from './teacher-batches/teacher-batches.module';
 import { UsersModule } from './users/users.module';
 
@@ -146,7 +148,9 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     RolesModule,
     PermissionsModule,
+    StudentEnrollmentsModule,
     TeacherBatchesModule,
+    ClassSessionsModule,
     SessionsModule,
     RoomsModule,
     MediaApiModule,

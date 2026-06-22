@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
@@ -12,13 +12,22 @@ import { StudentEnrollmentStore, type StudentBatch } from '../student-enrollment
   styleUrl: './explore.scss',
   changeDetection: ChangeDetectionStrategy.Eager
 })
-export class StudentExplore {
+export class StudentExplore implements OnInit {
   protected readonly enrollment = inject(StudentEnrollmentStore);
   protected readonly batches = this.enrollment.batches;
   protected readonly enrolledCount = computed(() => this.enrollment.enrolledBatches().length);
 
+  ngOnInit(): void {
+    this.enrollment.loadAvailableBatches();
+    this.enrollment.loadEnrolledBatches();
+  }
+
   protected enroll(batch: StudentBatch): void {
     this.enrollment.enroll(batch.id);
+  }
+
+  protected isEnrollmentPending(batch: StudentBatch): boolean {
+    return this.enrollment.enrollmentActionBatchId() === batch.id;
   }
 
   protected isEnrolled(batch: StudentBatch): boolean {

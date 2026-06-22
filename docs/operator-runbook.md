@@ -85,7 +85,7 @@ When cross-node media setup fails:
 
 If diagnostics show repeated setup rejection or zero active transports, treat it as a control-plane or exposure problem before investigating browser behavior.
 
-## Eventing and Webhook Triage
+## Eventing, Webhook, and Redis Stream Triage
 
 When an operator asks whether an event was emitted or whether a webhook actually fired:
 
@@ -99,18 +99,48 @@ When an operator asks whether an event was emitted or whether a webhook actually
 5. If delivery exists but failed:
    - inspect `lastResponseStatusCode`
    - inspect `lastError`
+   - inspect `lastFailureCategory`
+   - inspect `lastDeliveryReference` when the adapter reports one
    - inspect the attempt history
 6. If the delivery is `exhausted`, fix the receiver and replay either:
    - `POST /api/v1/events/deliveries/<deliveryId>/replay`
    - `POST /api/v1/events/log/<eventId>/endpoints/<endpointId>/replay`
 
+Lifecycle notes:
+
+- Local environments may leave `OPERATIONS_TOKEN` empty for validation convenience. Production should not.
+- `POST /api/v1/events/deliveries/<deliveryId>/replay` is intentionally limited to `cancelled` and `exhausted` records.
+- `queued`, `retrying`, and `dispatching` rows are already in flight or scheduled and should not be manually replayed.
+- Disabling an endpoint cancels queued/retrying rows immediately.
+- Re-enabling an endpoint only affects future queue activity; it does not resurrect cancelled rows.
+- Endpoint URL, subscription, room-filter, timeout, and retry-policy edits should be treated as forward-looking operational changes.
+- A queued delivery keeps an immutable endpoint snapshot. That frozen snapshot is what later retries execute unless the row is cancelled.
+- Delivery replay keeps the original frozen snapshot.
+- Event-to-endpoint replay intentionally uses the endpoint's current state and is the right tool when an operator wants to resend with updated configuration.
+- Redis stream endpoints do not expose a signing secret. Their execution truth is the persisted stream key plus the returned Redis stream entry id.
+- Non-retryable adapter failures, such as webhook auth failures or Redis stream configuration/auth failures, move directly to `exhausted` rather than consuming the full retry budget.
+- Backlog fairness is lane-based across `adapterKind + endpointId`, so a single noisy adapter should no longer starve other healthy endpoints in the same backlog.
+
 Useful metrics in this workflow:
 
 - `sfu_platform_events_emitted_total`
 - `sfu_platform_event_queries_total`
+- `sfu_event_delivery_attempts_total`
+- `sfu_event_deliveries_succeeded_total`
+- `sfu_event_deliveries_failed_total`
+- `sfu_event_delivery_failures_by_category_total`
+- `sfu_event_deliveries_exhausted_total`
+- `sfu_event_deliveries_cancelled_total`
+- `sfu_event_retries_scheduled_total`
+- `sfu_event_delivery_replays_total`
+- `sfu_event_delivery_endpoint_count`
+- `sfu_event_delivery_queue`
+- `sfu_event_delivery_duration_ms`
+- `sfu_event_delivery_active_dispatches`
 - `sfu_webhook_delivery_attempts_total`
 - `sfu_webhook_deliveries_succeeded_total`
 - `sfu_webhook_deliveries_failed_total`
+- `sfu_webhook_delivery_failures_by_category_total`
 - `sfu_webhook_deliveries_exhausted_total`
 - `sfu_webhook_deliveries_cancelled_total`
 - `sfu_webhook_retries_scheduled_total`
@@ -118,6 +148,12 @@ Useful metrics in this workflow:
 - `sfu_webhook_endpoint_count`
 - `sfu_webhook_delivery_queue`
 - `sfu_webhook_delivery_duration_ms`
+- `sfu_event_delivery_adapter_executions_total`
+- `sfu_event_delivery_snapshot_source_usage_total`
+- `sfu_webhook_active_dispatches`
+- `sfu_event_delivery_oldest_age_ms`
+- `sfu_event_delivery_backlog_concentration_ratio`
+- `sfu_event_delivery_lane_count`
 
 Delivery behavior notes:
 
@@ -127,8 +163,27 @@ Delivery behavior notes:
 - delivery id header: `X-Native-Sfu-Delivery-Id`
 - event type header: `X-Native-Sfu-Event-Type`
 - non-2xx responses are failures
+- Redis stream publishes return a stream entry id that is stored as the delivery reference
 - exhausted deliveries remain queryable until normal data-retention cleanup
 - replay creates a fresh delivery record; it does not mutate the original failed attempt history
+- production webhook endpoints should use `https` and must not point at localhost or wildcard hosts
+- production should configure a dedicated `WEBHOOK_SECRET_ENCRYPTION_KEY`
+- dispatch throughput/fairness tuning is controlled by:
+  - `WEBHOOK_DELIVERY_CONCURRENCY`
+  - `WEBHOOK_DELIVERY_MAX_BATCH_PER_PUMP`
+  - `WEBHOOK_DELIVERY_MAX_CONCURRENT_PER_ENDPOINT`
+- `/api/v1/events/diagnostics/summary` now includes:
+  - per-adapter endpoint counts
+  - per-adapter delivery-state counts
+  - active dispatches by adapter
+  - active vs expired delivery leases
+  - backlog aging overall and per adapter
+  - hottest-lane concentration / share
+  - top backlog lanes with `adapterKind`
+- default retention windows are:
+  - `EVENT_LOG_RETENTION_DAYS=30`
+  - `WEBHOOK_DELIVERY_RETENTION_DAYS=14`
+  - `WEBHOOK_EXHAUSTED_DELIVERY_RETENTION_DAYS=30`
 
 ## Room Autopilot Triage
 

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Footer } from '../../../shared/footer/footer';
@@ -44,7 +44,7 @@ const VISUAL_PALETTES: Record<string, TeacherVisualPalette> = {
   styleUrl: './public-teacher-profile.scss',
   changeDetection: ChangeDetectionStrategy.Eager
 })
-export class PublicTeacherProfile {
+export class PublicTeacherProfile implements OnInit {
   private readonly route = inject(ActivatedRoute);
   protected readonly enrollment = inject(StudentEnrollmentStore);
 
@@ -56,6 +56,11 @@ export class PublicTeacherProfile {
   protected readonly totalEnrolled = computed(() => this.batches().reduce((total, batch) => total + this.enrollment.enrollmentCount(batch), 0));
   protected readonly activeTab = signal<TeacherProfileTab>('batches');
   protected readonly tabs = PROFILE_TABS;
+
+  ngOnInit(): void {
+    this.enrollment.loadAvailableBatches();
+    this.enrollment.loadEnrolledBatches();
+  }
 
   protected selectTab(tab: TeacherProfileTab): void {
     this.activeTab.set(tab);
@@ -96,6 +101,10 @@ export class PublicTeacherProfile {
 
   protected enroll(batch: StudentBatch): void {
     this.enrollment.enroll(batch.id);
+  }
+
+  protected isEnrollmentPending(batch: StudentBatch): boolean {
+    return this.enrollment.enrollmentActionBatchId() === batch.id;
   }
 
   protected profileImage(teacher: TeacherProfile): string {

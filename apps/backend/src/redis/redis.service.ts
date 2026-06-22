@@ -15,6 +15,15 @@ interface DurableConsumerHandle {
   loop?: Promise<void>;
 }
 
+export interface RoomSocketPresence {
+  roomId: string;
+  participantId: string;
+  socketId: string;
+  userId?: string;
+  nodeId?: string;
+  lastSeenAt: string;
+}
+
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
@@ -184,12 +193,61 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return (await this.client.set(key, value, 'EX', ttlSeconds, 'NX')) === 'OK';
   }
 
-  async markPresence(roomId: string, participantId: string, socketId: string): Promise<void> {
-    await this.client.hset(`presence:${roomId}`, participantId, socketId);
+  async markPresence(roomId: string, participantId: string, socketId: string, metadata: { userId?: string; nodeId?: string } = {}): Promise<void> {
+    const presence: RoomSocketPresence = {
+      roomId,
+      participantId,
+      socketId,
+      ...(metadata.userId ? { userId: metadata.userId } : {}),
+      ...(metadata.nodeId ? { nodeId: metadata.nodeId } : {}),
+      lastSeenAt: new Date().toISOString()
+    };
+    await this.client.hset(`presence:${roomId}`, socketId, JSON.stringify(presence));
   }
 
-  async removePresence(roomId: string, participantId: string): Promise<void> {
-    await this.client.hdel(`presence:${roomId}`, participantId);
+  async removePresence(roomId: string, participantId: string, socketId?: string): Promise<void> {
+    const key = `presence:${roomId}`;
+    if (socketId) {
+      await this.client.hdel(key, socketId);
+      const legacySocketId = await this.client.hget(key, participantId);
+      if (legacySocketId === socketId) {
+        await this.client.hdel(key, participantId);
+      }
+      return;
+    }
+    const entries = await this.roomPresence(roomId);
+    const staleSocketIds = entries.filter((entry) => entry.participantId === participantId).map((entry) => entry.socketId);
+    if (staleSocketIds.length) {
+      await this.client.hdel(key, ...staleSocketIds);
+    }
+  }
+
+  async roomPresence(roomId: string): Promise<RoomSocketPresence[]> {
+    const values = await this.client.hgetall(`presence:${roomId}`);
+    const entries: RoomSocketPresence[] = [];
+    for (const [socketId, value] of Object.entries(values)) {
+      const parsed = this.parsePresenceValue(roomId, socketId, value);
+      if (parsed) {
+        entries.push(parsed);
+      }
+    }
+    return entries;
+  }
+
+  async participantPresence(roomId: string, participantId: string): Promise<RoomSocketPresence[]> {
+    return (await this.roomPresence(roomId)).filter((entry) => entry.participantId === participantId);
+  }
+
+  async participantsPresence(roomId: string, participantIds: readonly string[]): Promise<RoomSocketPresence[]> {
+    const participantIdSet = new Set(participantIds);
+    if (!participantIdSet.size) {
+      return [];
+    }
+    return (await this.roomPresence(roomId)).filter((entry) => participantIdSet.has(entry.participantId));
+  }
+
+  async userPresence(roomId: string, userId: string): Promise<RoomSocketPresence[]> {
+    return (await this.roomPresence(roomId)).filter((entry) => entry.userId === userId);
   }
 
   async ping(): Promise<'PONG'> {
@@ -212,6 +270,31 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     client.on('reconnecting', () => this.logger.warn(`Redis ${name} reconnecting`));
     client.on('ready', () => this.logger.log(`Redis ${name} ready`));
     return client;
+  }
+
+  private parsePresenceValue(roomId: string, socketId: string, value: string): RoomSocketPresence | null {
+    try {
+      const parsed = JSON.parse(value) as Partial<RoomSocketPresence>;
+      if (!parsed.participantId) {
+        return null;
+      }
+      return {
+        roomId: parsed.roomId ?? roomId,
+        participantId: parsed.participantId,
+        socketId: parsed.socketId ?? socketId,
+        ...(parsed.userId ? { userId: parsed.userId } : {}),
+        ...(parsed.nodeId ? { nodeId: parsed.nodeId } : {}),
+        lastSeenAt: parsed.lastSeenAt ?? new Date(0).toISOString()
+      };
+    } catch {
+      // Legacy presence stored participantId -> socketId. Preserve it long enough for rolling deploys.
+      return {
+        roomId,
+        participantId: socketId,
+        socketId: value,
+        lastSeenAt: new Date(0).toISOString()
+      };
+    }
   }
 }
 

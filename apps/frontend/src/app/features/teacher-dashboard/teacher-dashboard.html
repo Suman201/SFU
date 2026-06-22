@@ -26,6 +26,9 @@
         <p>Checking your teacher workspace.</p>
       </div>
     } @else if (batches().length) {
+      @if (dashboard.error()) {
+        <div class="form-alert">{{ dashboard.error() }}</div>
+      }
       <div class="data-table-shell">
         <div class="data-table-toolbar">
           <div class="table-view-tabs" aria-label="Batch view mode">
@@ -88,8 +91,8 @@
                   </td>
                   <td><span class="data-pill auth">{{ averageAttendanceLabel(batch) }}</span></td>
                   <td>
-                    <button class="table-action primary" type="button" [disabled]="!nextSession(batch)" (click)="runSessionAction(batch)">
-                      {{ sessionActionLabel(batch) }}
+                    <button class="table-action primary" type="button" [disabled]="!nextSession(batch) || sessionActionLoadingId() === nextSession(batch)?.id" (click)="runSessionAction(batch)">
+                      {{ sessionActionLoadingId() === nextSession(batch)?.id ? 'Starting...' : sessionActionLabel(batch) }}
                     </button>
                   </td>
                   <td>

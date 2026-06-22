@@ -2,10 +2,11 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Observable, catchError, finalize, map, tap, throwError } from 'rxjs';
 import { API_BASE_URL } from '../../core/services/app-environment';
+import { ClassSessionService, type ClassroomPayload, type ClassSessionStatus } from '../class-session/class-session.service';
 
 export type BatchDayOfWeek = 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY';
 export type TeacherBatchStatus = 'ACTIVE' | 'INACTIVE' | 'COMPLETED' | 'CANCELLED';
-export type TeacherSessionStatus = 'scheduled' | 'live' | 'completed' | 'cancelled';
+export type TeacherSessionStatus = ClassSessionStatus;
 export type TeacherBatchStudentStatus = 'active' | 'invited' | 'paused' | 'suspended' | 'blocked';
 
 export interface TeacherBatchSchedule {
@@ -31,6 +32,9 @@ export interface TeacherSession {
   scheduledAt: string;
   durationMinutes: number;
   status: TeacherSessionStatus;
+  roomId?: string;
+  chatChannelId?: string;
+  whiteboardChannelId?: string;
   startedAt?: string;
   completedAt?: string;
 }
@@ -80,8 +84,34 @@ interface BackendTeacherBatch {
   enrolledCount: number;
   status: TeacherBatchStatus;
   schedule: TeacherBatchSchedule[];
+  students?: BackendTeacherBatchStudent[];
+  sessions?: BackendTeacherSession[];
   createdAt: string;
   updatedAt?: string;
+}
+
+interface BackendTeacherBatchStudent {
+  id: string;
+  displayName: string;
+  email: string;
+  attendanceRate?: number;
+  joinedAt?: string;
+  status?: 'active' | 'invited' | 'paused' | 'suspended' | 'blocked' | 'pending' | 'completed' | 'cancelled';
+}
+
+interface BackendTeacherSession {
+  id: string;
+  batchId: string;
+  title: string;
+  sessionNumber: number;
+  scheduledAt: string;
+  durationMinutes: number;
+  status: TeacherSessionStatus;
+  roomId?: string;
+  chatChannelId?: string;
+  whiteboardChannelId?: string;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 interface ApiEnvelope<T> {
@@ -106,13 +136,16 @@ const WEEK_IN_DAYS = 7;
 @Injectable({ providedIn: 'root' })
 export class TeacherDashboardStore {
   private readonly http = inject(HttpClient);
+  private readonly classSessions = inject(ClassSessionService);
   private readonly batchesSignal = signal<TeacherBatch[]>([]);
   private readonly loadingSignal = signal(false);
   private readonly savingSignal = signal(false);
+  private readonly sessionActionLoadingIdSignal = signal<string | null>(null);
   private readonly errorSignal = signal('');
 
   readonly loading = this.loadingSignal.asReadonly();
   readonly saving = this.savingSignal.asReadonly();
+  readonly sessionActionLoadingId = this.sessionActionLoadingIdSignal.asReadonly();
   readonly error = this.errorSignal.asReadonly();
   readonly batches = computed(() =>
     [...this.batchesSignal()].sort((left, right) => this.nextSessionTime(left) - this.nextSessionTime(right))
@@ -162,36 +195,29 @@ export class TeacherDashboardStore {
     });
   }
 
-  startSession(sessionId: string): TeacherSession | null {
-    let startedSession: TeacherSession | null = null;
-    const startedAt = new Date().toISOString();
-    this.batchesSignal.update((batches) =>
-      batches.map((batch) => ({
-        ...batch,
-        sessions: batch.sessions.map((session) => {
-          if (session.status === 'live' && session.id !== sessionId) {
-            return { ...session, status: 'completed', completedAt: startedAt };
-          }
-          if (session.id !== sessionId || session.status === 'completed' || session.status === 'cancelled') {
-            return session;
-          }
-          startedSession = { ...session, status: 'live', startedAt };
-          return startedSession;
-        })
-      }))
+  startSession(session: TeacherSession): Observable<ClassroomPayload> {
+    this.sessionActionLoadingIdSignal.set(session.id);
+    this.errorSignal.set('');
+    return this.classSessions.startSession(session.id, session.batchId).pipe(
+      tap((payload) => this.applySessionPayload(payload)),
+      catchError((error) => {
+        this.errorSignal.set(this.classSessions.errorMessage(error));
+        return throwError(() => error);
+      }),
+      finalize(() => this.sessionActionLoadingIdSignal.set(null))
     );
-    return startedSession;
   }
 
-  completeSession(sessionId: string): void {
-    const completedAt = new Date().toISOString();
-    this.batchesSignal.update((batches) =>
-      batches.map((batch) => ({
-        ...batch,
-        sessions: batch.sessions.map((session) =>
-          session.id === sessionId ? { ...session, status: 'completed', completedAt } : session
-        )
-      }))
+  completeSession(session: TeacherSession): Observable<ClassroomPayload> {
+    this.sessionActionLoadingIdSignal.set(session.id);
+    this.errorSignal.set('');
+    return this.classSessions.endSession(session.id).pipe(
+      tap((payload) => this.applySessionPayload(payload)),
+      catchError((error) => {
+        this.errorSignal.set(this.classSessions.errorMessage(error));
+        return throwError(() => error);
+      }),
+      finalize(() => this.sessionActionLoadingIdSignal.set(null))
     );
   }
 
@@ -242,7 +268,7 @@ export class TeacherDashboardStore {
 
   private normalizeBatch(batch: BackendTeacherBatch): TeacherBatch {
     const schedule = [...(batch.schedule ?? [])].sort((left, right) => DAY_INDEX[left.dayOfWeek] - DAY_INDEX[right.dayOfWeek]);
-    const sessions = this.createSessions(batch, schedule);
+    const sessions = batch.sessions?.length ? batch.sessions.map((session) => this.normalizeSession(session)) : this.createSessions(batch, schedule);
     const capacity = Number(batch.maxCapacity) || 0;
     const enrolledCount = Math.min(Number(batch.enrolledCount) || 0, capacity);
     const createdAt = batch.createdAt ?? new Date().toISOString();
@@ -267,8 +293,85 @@ export class TeacherDashboardStore {
       totalWeeks: sessions.length,
       createdAt,
       updatedAt: batch.updatedAt,
-      students: [],
+      students: (batch.students ?? []).map((student) => this.normalizeStudent(student)),
       sessions
+    };
+  }
+
+  private normalizeStudent(student: BackendTeacherBatchStudent): TeacherBatchStudent {
+    return {
+      id: student.id,
+      displayName: student.displayName,
+      email: student.email,
+      attendanceRate: Number(student.attendanceRate) || 0,
+      joinedAt: student.joinedAt ?? new Date().toISOString(),
+      status: this.normalizeStudentStatus(student.status)
+    };
+  }
+
+  private normalizeStudentStatus(status: BackendTeacherBatchStudent['status']): TeacherBatchStudentStatus {
+    if (status === 'pending') {
+      return 'invited';
+    }
+    if (status === 'cancelled') {
+      return 'blocked';
+    }
+    if (status === 'completed') {
+      return 'paused';
+    }
+    if (status === 'active' || status === 'invited' || status === 'paused' || status === 'suspended' || status === 'blocked') {
+      return status;
+    }
+    return 'active';
+  }
+
+  private normalizeSession(session: BackendTeacherSession): TeacherSession {
+    return {
+      id: session.id,
+      batchId: session.batchId,
+      title: session.title,
+      sessionNumber: session.sessionNumber,
+      scheduledAt: session.scheduledAt,
+      durationMinutes: session.durationMinutes,
+      status: session.status,
+      roomId: session.roomId,
+      chatChannelId: session.chatChannelId,
+      whiteboardChannelId: session.whiteboardChannelId,
+      startedAt: session.startedAt,
+      completedAt: session.completedAt
+    };
+  }
+
+  private applySessionPayload(payload: ClassroomPayload): void {
+    this.batchesSignal.update((batches) =>
+      batches.map((batch) => {
+        if (batch.id !== payload.batchId) {
+          return batch;
+        }
+        const nextSession = this.sessionFromPayload(payload, batch.sessions.find((session) => session.id === payload.sessionId));
+        const hasSession = batch.sessions.some((session) => session.id === payload.sessionId);
+        const sessions = hasSession
+          ? batch.sessions.map((session) => (session.id === payload.sessionId ? nextSession : session))
+          : [...batch.sessions, nextSession].sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime());
+        return { ...batch, sessions };
+      })
+    );
+  }
+
+  private sessionFromPayload(payload: ClassroomPayload, existing?: TeacherSession): TeacherSession {
+    return {
+      id: payload.sessionId,
+      batchId: payload.batchId,
+      title: payload.title,
+      sessionNumber: payload.sessionNumber,
+      scheduledAt: payload.scheduledAt,
+      durationMinutes: payload.durationMinutes,
+      status: payload.status,
+      roomId: payload.roomId,
+      chatChannelId: payload.chatChannelId,
+      whiteboardChannelId: payload.whiteboardChannelId,
+      startedAt: payload.startedAt ?? existing?.startedAt,
+      completedAt: payload.completedAt ?? existing?.completedAt
     };
   }
 

@@ -87,6 +87,9 @@
       @if (actionNotice()) {
         <p class="action-notice">{{ actionNotice() }}</p>
       }
+      @if (actionError()) {
+        <p class="form-alert">{{ actionError() }}</p>
+      }
 
       @if (messageTarget(); as target) {
         <aside class="message-composer" aria-label="Send student message">
@@ -260,7 +263,9 @@
                       @if (openSessionMenuId() === session.id) {
                         <div class="table-row-menu" role="menu" [class.open-up]="openSessionMenuPosition() === 'above'" [class.open-down]="openSessionMenuPosition() === 'below'">
                           @for (action of sessionActionItems(session); track action.label) {
-                            <button type="button" role="menuitem" (click)="action.handler(session)">{{ action.label }}</button>
+                            <button type="button" role="menuitem" [disabled]="sessionActionLoadingId() === session.id" (click)="action.handler(session)">
+                              {{ sessionActionLoadingId() === session.id ? 'Working...' : action.label }}
+                            </button>
                           }
                         </div>
                       }

@@ -1,6 +1,6 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { DEFAULT_PARTICIPANT_PERMISSIONS, Role, type ConsumerLayerEvent, type RoomQualityState, type RoomQualitySummaryState } from '@native-sfu/contracts';
-import { RoomsService } from './rooms.service';
+import { CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS, RoomsService, type SocketUser } from './rooms.service';
 import { defaultConsumerLayers, defaultConsumerPriority, defaultProducerPriority, resolveRoomMediaProfile } from './room-policy';
 
 describe('RoomsService', () => {
@@ -77,9 +77,696 @@ describe('RoomsService', () => {
       undefined,
       persistedHostId
     );
-    expect(redisService.markPresence).toHaveBeenCalledWith('room-1', persistedHostId, 'socket-1');
+    expect(redisService.markPresence).toHaveBeenCalledWith('room-1', persistedHostId, 'socket-1', { userId: undefined, nodeId: 'node-a' });
     expect(metricsService.activeRooms.inc).toHaveBeenCalled();
     expect(room.hostId).toBe(persistedHostId);
+  });
+
+  it('creates and claims a real classroom-profile room for a class session', async () => {
+    const { service, rooms, classSessions, nodeRegistry, metrics } = createService();
+    const roomDoc = {
+      id: 'room-1',
+      hostId: 'placeholder-host',
+      mediaProfile: { id: 'classroom' },
+      save: jest.fn(async () => undefined)
+    };
+
+    classSessions.findById.mockResolvedValue(null);
+    rooms.create.mockResolvedValue(roomDoc);
+    jest.spyOn(service as any, 'getRoom').mockResolvedValue({
+      id: 'room-1',
+      hostId: 'placeholder-host',
+      mediaProfile: { id: 'classroom' },
+      participants: []
+    });
+
+    const room = await service.ensureClassSessionRoom({
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      title: 'Classroom Session',
+      teacherId: 'teacher-1'
+    });
+
+    const createdPayload = rooms.create.mock.calls[0]?.[0];
+    expect(createdPayload.name).toBe('Classroom Session');
+    expect(createdPayload.settings.visibility).toBe('private');
+    expect(createdPayload.settings.waitingRoomEnabled).toBe(false);
+    expect(createdPayload.settings.joinApprovalRequired).toBe(false);
+    expect(createdPayload.mediaProfile.id).toBe('classroom');
+    expect(nodeRegistry.claimRoom).toHaveBeenCalledWith('room-1');
+    expect(metrics.activeRooms.inc).toHaveBeenCalled();
+    expect(metrics.roomProfileDistribution.labels).toHaveBeenCalledWith('classroom');
+    expect(room.id).toBe('room-1');
+  });
+
+  const nonLiveClassSessionJoinCases: Array<{ status: 'scheduled' | 'completed'; message: string }> = [
+    { status: 'scheduled', message: 'The teacher has not started this class session yet.' },
+    { status: 'completed', message: 'This class session has ended.' }
+  ];
+  for (const { status, message } of nonLiveClassSessionJoinCases) {
+    it(`rejects socket joins for ${status} class-session rooms`, async () => {
+      const { service, rooms, classSessions } = createService();
+      classSessions.findOne.mockResolvedValue({
+        id: 'session-1',
+        roomId: 'room-1',
+        teacherId: 'teacher-1',
+        status
+      });
+
+      let thrown: unknown;
+      try {
+        await service.joinRoom(
+          {
+            id: 'student-1',
+            email: 'student@example.test',
+            roles: ['STUDENT']
+          },
+          'socket-1',
+          { roomId: 'room-1', displayName: 'Student One' }
+        );
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(ConflictException);
+      expect((thrown as Error | undefined)?.message).toBe(message);
+      expect(rooms.findById).not.toHaveBeenCalled();
+    });
+  }
+
+  it('joins students to live class-session rooms with audio/video publish permissions only', async () => {
+    const { service, rooms, classSessions, participants, redis } = createService();
+    const room = {
+      id: 'room-1',
+      hostId: 'host-placeholder',
+      closedAt: undefined,
+      invitedUserIds: [],
+      settings: {
+        locked: false,
+        waitingRoomEnabled: false,
+        joinApprovalRequired: false,
+        visibility: 'private',
+        maxParticipants: 8
+      },
+      mediaProfile: { id: 'classroom' }
+    };
+    const participant = { id: 'participant-1', admitted: true };
+
+    classSessions.findOne.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      teacherId: 'teacher-1',
+      status: 'live'
+    });
+    rooms.findById.mockResolvedValue(room);
+    participants.findOne.mockResolvedValue(null);
+    participants.countDocuments.mockResolvedValue(0);
+    jest.spyOn(service as any, 'requireRoomOwnerLookup').mockResolvedValue(ownerLookup(true));
+    jest.spyOn(service as any, 'assertNotBanned').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'getRoomPolicyContext').mockResolvedValue({ room, summary: summaryState() });
+    jest.spyOn(service as any, 'createParticipant').mockResolvedValue(participant);
+    jest.spyOn(service as any, 'getRoom').mockResolvedValue({
+      id: 'room-1',
+      participants: [{ id: 'participant-1', admitted: true }]
+    });
+
+    const response = await service.joinRoom(
+      {
+        id: 'student-1',
+        email: 'student@example.test',
+        roles: ['STUDENT']
+      },
+      'socket-1',
+      { roomId: 'room-1', displayName: 'Student One' }
+    );
+
+    expect((service as any).createParticipant).toHaveBeenCalledWith(
+      'room-1',
+      {
+        id: 'student-1',
+        email: 'student@example.test',
+        roles: ['STUDENT']
+      },
+      'socket-1',
+      Role.PARTICIPANT,
+      {
+        canPublishAudio: true,
+        canPublishVideo: true,
+        canShareScreen: false,
+        canChat: true
+      },
+      true,
+      'Student One'
+    );
+    expect(redis.markPresence).toHaveBeenCalledWith('room-1', 'participant-1', 'socket-1', { userId: undefined, nodeId: 'node-a' });
+    expect(response.admitted).toBe(true);
+  });
+
+  it('rejects socket joins for non-enrolled students in live class-session rooms', async () => {
+    const { service, rooms, classSessions, studentEnrollments } = createService();
+    classSessions.findOne.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      teacherId: 'teacher-1',
+      status: 'live'
+    });
+    studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(false);
+    const createParticipant = jest.spyOn(service as any, 'createParticipant');
+
+    let thrown: unknown;
+    try {
+      await service.joinRoom(
+        {
+          id: 'student-2',
+          email: 'student.two@example.test',
+          roles: ['STUDENT']
+        },
+        'socket-2',
+        { roomId: 'room-1', displayName: 'Student Two' }
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(studentEnrollments.isStudentEnrolledInBatch).toHaveBeenCalledWith('student-2', 'batch-1');
+    expect(rooms.findById).not.toHaveBeenCalled();
+    expect(createParticipant).not.toHaveBeenCalled();
+  });
+
+  it('lets the batch teacher watch class-session lifecycle events', async () => {
+    const { service, classSessions, studentEnrollments } = createService();
+    classSessions.findById.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      teacherId: 'teacher-1'
+    });
+
+    await service.assertCanWatchClassSession('session-1', {
+      id: 'teacher-1',
+      email: 'teacher@example.test',
+      roles: ['TEACHER']
+    });
+
+    expect(studentEnrollments.isStudentEnrolledInBatch).not.toHaveBeenCalled();
+  });
+
+  it('lets admins watch class-session lifecycle events', async () => {
+    const { service, classSessions, studentEnrollments } = createService();
+    classSessions.findById.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      teacherId: 'teacher-1'
+    });
+
+    await service.assertCanWatchClassSession('session-1', {
+      id: 'admin-1',
+      email: 'admin@example.test',
+      roles: ['ADMIN']
+    });
+    await service.assertCanWatchClassSession('session-1', {
+      id: 'super-admin-1',
+      email: 'super.admin@example.test',
+      roles: ['SUPER_ADMIN']
+    });
+
+    expect(studentEnrollments.isStudentEnrolledInBatch).not.toHaveBeenCalled();
+  });
+
+  it('lets active enrolled students watch class-session lifecycle events', async () => {
+    const { service, classSessions, studentEnrollments } = createService();
+    classSessions.findById.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      teacherId: 'teacher-1'
+    });
+    studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(true);
+
+    await service.assertCanWatchClassSession('session-1', {
+      id: 'student-1',
+      email: 'student@example.test',
+      roles: ['STUDENT']
+    });
+
+    expect(studentEnrollments.isStudentEnrolledInBatch).toHaveBeenCalledWith('student-1', 'batch-1');
+  });
+
+  it('blocks non-enrolled students from watching class-session lifecycle events', async () => {
+    const { service, classSessions, studentEnrollments } = createService();
+    classSessions.findById.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      teacherId: 'teacher-1'
+    });
+    studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(false);
+
+    let thrown: unknown;
+    try {
+      await service.assertCanWatchClassSession('session-1', {
+        id: 'student-2',
+        email: 'student.two@example.test',
+        roles: ['STUDENT']
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(studentEnrollments.isStudentEnrolledInBatch).toHaveBeenCalledWith('student-2', 'batch-1');
+  });
+
+  for (const status of ['pending', 'suspended', 'cancelled', 'completed', 'deleted']) {
+    it(`blocks ${status} student enrollments from watching class-session lifecycle events`, async () => {
+      const { service, classSessions, studentEnrollments } = createService();
+      classSessions.findById.mockResolvedValue({
+        id: 'session-1',
+        batchId: 'batch-1',
+        teacherId: 'teacher-1'
+      });
+      studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(false);
+
+      let thrown: unknown;
+      try {
+        await service.assertCanWatchClassSession('session-1', {
+          id: `student-${status}`,
+          email: `${status}.student@example.test`,
+          roles: ['STUDENT']
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(ForbiddenException);
+    });
+  }
+
+  it('rejects lifecycle watch for unknown class sessions', async () => {
+    const { service, classSessions, batches } = createService();
+    classSessions.findById.mockResolvedValue(null);
+    batches.find.mockResolvedValue([]);
+
+    let thrown: unknown;
+    try {
+      await service.assertCanWatchClassSession('missing-session', {
+        id: 'student-1',
+        email: 'student@example.test',
+        roles: ['STUDENT']
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(NotFoundException);
+  });
+
+  const classSessionModeratorJoinCases: Array<{
+    label: string;
+    user: SocketUser;
+    expectedRole: Role;
+    shouldClaimHost: boolean;
+  }> = [
+    { label: 'teacher', user: { id: 'teacher-1', email: 'teacher@example.test', roles: ['TEACHER'] }, expectedRole: Role.HOST, shouldClaimHost: true },
+    { label: 'admin', user: { id: 'admin-1', email: 'admin@example.test', roles: ['ADMIN'] }, expectedRole: Role.CO_HOST, shouldClaimHost: false }
+  ];
+  for (const { label, user, expectedRole, shouldClaimHost } of classSessionModeratorJoinCases) {
+    it(`joins class-session ${label} with moderator entitlement intact`, async () => {
+      const { service, rooms, classSessions, participants } = createService();
+      const room = {
+        id: 'room-1',
+        hostId: 'host-placeholder',
+        closedAt: undefined,
+        invitedUserIds: [],
+        settings: {
+          locked: false,
+          waitingRoomEnabled: false,
+          joinApprovalRequired: false,
+          visibility: 'private',
+          maxParticipants: 8
+        },
+        mediaProfile: { id: 'classroom' }
+      };
+      const participant = { id: `${user.id}-participant`, admitted: true };
+
+      classSessions.findOne.mockResolvedValue({
+        id: 'session-1',
+        batchId: 'batch-1',
+        roomId: 'room-1',
+        teacherId: 'teacher-1',
+        status: 'live'
+      });
+      rooms.findById.mockResolvedValue(room);
+      participants.findOne.mockResolvedValue(null);
+      participants.countDocuments.mockResolvedValue(0);
+      jest.spyOn(service as any, 'requireRoomOwnerLookup').mockResolvedValue(ownerLookup(true));
+      jest.spyOn(service as any, 'assertNotBanned').mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'getRoomPolicyContext').mockResolvedValue({ room, summary: summaryState() });
+      jest.spyOn(service as any, 'createParticipant').mockResolvedValue(participant);
+      jest.spyOn(service as any, 'getRoom').mockResolvedValue({
+        id: 'room-1',
+        hostId: shouldClaimHost ? participant.id : room.hostId,
+        participants: [{ id: participant.id, admitted: true, role: expectedRole }]
+      });
+
+      await service.joinRoom(user, 'socket-1', { roomId: 'room-1', displayName: user.email });
+
+      expect((service as any).createParticipant).toHaveBeenCalledWith(
+        'room-1',
+        user,
+        'socket-1',
+        expectedRole,
+        DEFAULT_PARTICIPANT_PERMISSIONS,
+        true,
+        user.email
+      );
+      if (shouldClaimHost) {
+        expect(rooms.updateOne).toHaveBeenCalledWith({ _id: 'room-1' }, { $set: { hostId: participant.id } });
+      } else {
+        expect(rooms.updateOne).not.toHaveBeenCalled();
+      }
+    });
+  }
+
+  it('keeps a live class-session room open when the teacher socket disconnects', async () => {
+    jest.useFakeTimers();
+    try {
+      const { service, rooms, classSessions, participants, producers, consumers, redis, media } = createService();
+      const teacher = fakeParticipantDoc({
+        id: 'teacher-participant',
+        userId: 'teacher-1',
+        socketId: 'teacher-socket',
+        role: Role.HOST,
+        displayName: 'Teacher One',
+        screenSharing: true
+      });
+      classSessions.findOne.mockResolvedValue(fakeClassSessionDoc());
+      rooms.findById.mockResolvedValue(fakeRoomDoc());
+      participants.findOne.mockResolvedValue(teacher);
+      participants.find.mockResolvedValue([teacher]);
+      producers.find.mockResolvedValueOnce([fakeProducerDoc({ id: 'teacher-video', participantId: 'teacher-participant' })]).mockResolvedValue([]);
+      consumers.find.mockResolvedValue([]);
+
+      const result = await service.leaveRoomForSocket('room-1', 'teacher-participant', 'teacher-socket');
+
+      expect(result.closed).toBe(false);
+      expect(result.left).toBe(true);
+      expect(result.reconnecting).toBe(true);
+      expect(result.participantPatch).toEqual({
+        connected: false,
+        screenSharing: false
+      });
+      const closeRoomCall = rooms.updateOne.mock.calls.find(([, update]) => Boolean(update?.closedAt));
+      expect(closeRoomCall).toBeUndefined();
+      expect(media.closeRoom).not.toHaveBeenCalled();
+      expect(redis.removePresence).toHaveBeenCalledWith('room-1', 'teacher-participant');
+      expect(media.closeParticipantTransports).toHaveBeenCalledWith('teacher-participant');
+      expect(producers.updateMany.mock.calls[0]?.[0]).toEqual({ roomId: 'room-1', participantId: 'teacher-participant', status: { $ne: 'closed' } });
+      expect(producers.updateMany.mock.calls[0]?.[1]?.status).toBe('closed');
+      expect(producers.updateMany.mock.calls[0]?.[1]?.closedAt).toBeInstanceOf(Date);
+      expect(classSessions.findOneAndUpdate).not.toHaveBeenCalled();
+      service.cancelClassSessionTeacherReconnectGrace('session-1');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('auto-completes a live class session when the teacher does not reconnect before grace expires', async () => {
+    jest.useFakeTimers();
+    try {
+      const { service, rooms, classSessions, participants, producers, consumers, media, platformEvents } = createService();
+      const lifecycleEvents: Array<{ event: string; payload: unknown }> = [];
+      const teacherConnected = fakeParticipantDoc({
+        id: 'teacher-participant',
+        userId: 'teacher-1',
+        socketId: 'teacher-socket',
+        role: Role.HOST,
+        displayName: 'Teacher One'
+      });
+      const teacherDisconnected = fakeParticipantDoc({
+        id: 'teacher-participant',
+        userId: 'teacher-1',
+        socketId: '',
+        role: Role.HOST,
+        displayName: 'Teacher One'
+      });
+      const liveSession = fakeClassSessionDoc();
+      const completedSession = fakeClassSessionDoc({
+        status: 'completed',
+        completedAt: new Date('2026-06-22T10:05:00.000Z')
+      });
+      classSessions.findOne.mockResolvedValue(liveSession);
+      classSessions.findById.mockResolvedValue(liveSession);
+      classSessions.findOneAndUpdate.mockResolvedValue(completedSession);
+      rooms.findById.mockResolvedValue(fakeRoomDoc());
+      participants.findOne.mockResolvedValueOnce(teacherConnected).mockResolvedValueOnce(teacherDisconnected);
+      participants.find.mockResolvedValue([teacherDisconnected]);
+      producers.find.mockResolvedValueOnce([fakeProducerDoc({ id: 'teacher-video', participantId: 'teacher-participant' })]).mockResolvedValue([]);
+      consumers.find.mockResolvedValue([]);
+      media.closeRoom.mockResolvedValue({
+        participantIds: ['teacher-participant'],
+        transportCount: 1,
+        consumerCount: 0,
+        producerCounts: { video: 1 },
+        pipeTransportCount: 0
+      });
+      service.onClassSessionLifecycleEvent((event, payload) => lifecycleEvents.push({ event, payload }));
+
+      await service.leaveRoomForSocket('room-1', 'teacher-participant', 'teacher-socket');
+      await jest.advanceTimersByTimeAsync(CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS);
+
+      expect(classSessions.findOneAndUpdate.mock.calls[0]?.[0]).toEqual({ _id: 'session-1', status: 'live' });
+      expect(classSessions.findOneAndUpdate.mock.calls[0]?.[1]?.$set.status).toBe('completed');
+      expect(classSessions.findOneAndUpdate.mock.calls[0]?.[1]?.$set.completedAt).toBeInstanceOf(Date);
+      expect(classSessions.findOneAndUpdate.mock.calls[0]?.[2]).toEqual({ new: true });
+      expect(media.closeRoom).toHaveBeenCalledWith('room-1');
+      const closeOrder = media.closeRoom.mock.invocationCallOrder[0];
+      const updateOrder = classSessions.findOneAndUpdate.mock.invocationCallOrder[0];
+      expect(closeOrder).toBeDefined();
+      expect(updateOrder).toBeDefined();
+      expect(closeOrder as number).toBeLessThan(updateOrder as number);
+      expect(platformEvents.appendEvent.mock.calls.some(([event]) => event.type === 'room.closed')).toBe(true);
+      expect(lifecycleEvents).toEqual([
+        {
+          event: 'session:ended',
+          payload: {
+            sessionId: 'session-1',
+            batchId: 'batch-1',
+            roomId: 'room-1',
+            status: 'completed',
+            startedAt: '2026-06-22T10:00:00.000Z',
+            completedAt: '2026-06-22T10:05:00.000Z'
+          }
+        }
+      ]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('cancels pending class-session auto-end when the teacher rejoins during grace', async () => {
+    jest.useFakeTimers();
+    try {
+      const { service, rooms, classSessions, participants, producers, consumers } = createService();
+      const teacherConnected = fakeParticipantDoc({
+        id: 'teacher-participant',
+        userId: 'teacher-1',
+        socketId: 'teacher-socket',
+        role: Role.HOST,
+        displayName: 'Teacher One'
+      });
+      const teacherDisconnected = fakeParticipantDoc({
+        id: 'teacher-participant',
+        userId: 'teacher-1',
+        socketId: '',
+        role: Role.HOST,
+        displayName: 'Teacher One'
+      });
+      classSessions.findOne.mockResolvedValue(fakeClassSessionDoc());
+      rooms.findById.mockResolvedValue(fakeRoomDoc());
+      participants.findOne.mockResolvedValueOnce(teacherConnected).mockResolvedValue(teacherDisconnected);
+      participants.find.mockResolvedValue([teacherDisconnected]);
+      producers.find.mockResolvedValueOnce([fakeProducerDoc({ id: 'teacher-video', participantId: 'teacher-participant' })]).mockResolvedValue([]);
+      consumers.find.mockResolvedValue([]);
+      jest.spyOn(service, 'replaceParticipantSocket').mockResolvedValue(undefined);
+
+      await service.leaveRoomForSocket('room-1', 'teacher-participant', 'teacher-socket');
+      await service.joinRoom(
+        { id: 'teacher-1', email: 'teacher@example.test', roles: ['TEACHER'] },
+        'teacher-new-socket',
+        { roomId: 'room-1', displayName: 'Teacher One' }
+      );
+      await jest.advanceTimersByTimeAsync(CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS);
+
+      expect(classSessions.findOneAndUpdate).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('does not complete a teacher reconnect timeout when room close fails', async () => {
+    jest.useFakeTimers();
+    try {
+      const { service, rooms, classSessions, participants, producers, consumers, media } = createService();
+      const lifecycleEvents: Array<{ event: string; payload: unknown }> = [];
+      const teacherConnected = fakeParticipantDoc({
+        id: 'teacher-participant',
+        userId: 'teacher-1',
+        socketId: 'teacher-socket',
+        role: Role.HOST,
+        displayName: 'Teacher One'
+      });
+      const teacherDisconnected = fakeParticipantDoc({
+        id: 'teacher-participant',
+        userId: 'teacher-1',
+        socketId: '',
+        role: Role.HOST,
+        displayName: 'Teacher One'
+      });
+      const liveSession = fakeClassSessionDoc();
+      classSessions.findOne.mockResolvedValue(liveSession);
+      classSessions.findById.mockResolvedValue(liveSession);
+      rooms.findById.mockResolvedValue(fakeRoomDoc());
+      participants.findOne.mockResolvedValueOnce(teacherConnected).mockResolvedValueOnce(teacherDisconnected);
+      participants.find.mockResolvedValue([teacherDisconnected]);
+      producers.find.mockResolvedValueOnce([fakeProducerDoc({ id: 'teacher-video', participantId: 'teacher-participant' })]).mockResolvedValue([]);
+      consumers.find.mockResolvedValue([]);
+      media.closeRoom.mockRejectedValue(new Error('media close failed'));
+      service.onClassSessionLifecycleEvent((event, payload) => lifecycleEvents.push({ event, payload }));
+
+      await service.leaveRoomForSocket('room-1', 'teacher-participant', 'teacher-socket');
+      await jest.advanceTimersByTimeAsync(CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS);
+
+      expect(classSessions.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(lifecycleEvents).toEqual([]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('manual class-session room close cancels a pending teacher disconnect grace timer', async () => {
+    jest.useFakeTimers();
+    try {
+      const { service, rooms, classSessions, participants, producers, consumers, media } = createService();
+      const teacher = fakeParticipantDoc({
+        id: 'teacher-participant',
+        userId: 'teacher-1',
+        socketId: 'teacher-socket',
+        role: Role.HOST,
+        displayName: 'Teacher One'
+      });
+      classSessions.findOne.mockResolvedValue(fakeClassSessionDoc());
+      rooms.findById.mockResolvedValue(fakeRoomDoc());
+      participants.findOne.mockResolvedValue(teacher);
+      participants.find.mockResolvedValue([teacher]);
+      producers.find.mockResolvedValueOnce([fakeProducerDoc({ id: 'teacher-video', participantId: 'teacher-participant' })]).mockResolvedValue([]);
+      consumers.find.mockResolvedValue([]);
+      media.closeRoom.mockResolvedValue({
+        participantIds: ['teacher-participant'],
+        transportCount: 1,
+        consumerCount: 0,
+        producerCounts: { video: 1 },
+        pipeTransportCount: 0
+      });
+
+      await service.leaveRoomForSocket('room-1', 'teacher-participant', 'teacher-socket');
+      await service.closeClassSessionRoom({
+        roomId: 'room-1',
+        actorUserId: 'teacher-1',
+        actorLabel: 'teacher@example.test'
+      });
+      await jest.advanceTimersByTimeAsync(CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS);
+
+      expect(classSessions.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(media.closeRoom).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('does not start teacher reconnect grace for non-teacher class-session disconnects', async () => {
+    jest.useFakeTimers();
+    try {
+      const { service, classSessions, participants } = createService();
+      const student = fakeParticipantDoc({
+        id: 'student-participant',
+        userId: 'student-1',
+        socketId: 'student-socket',
+        role: Role.PARTICIPANT,
+        displayName: 'Student One'
+      });
+      classSessions.findOne.mockResolvedValue(fakeClassSessionDoc());
+      participants.findOne.mockResolvedValue(student);
+      const leaveRoom = jest.spyOn(service, 'leaveRoom').mockResolvedValue({ closed: false });
+
+      const result = await service.leaveRoomForSocket('room-1', 'student-participant', 'student-socket');
+      await jest.advanceTimersByTimeAsync(CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS);
+
+      expect(result).toEqual({ closed: false, left: true });
+      expect(leaveRoom).toHaveBeenCalledWith('room-1', 'student-participant');
+      expect(classSessions.findOneAndUpdate).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps a participant active when only one of multiple sockets disconnects', async () => {
+    const { service, participants, redis, classSessions } = createService();
+    const participant = fakeParticipantDoc({
+      id: 'participant-1',
+      userId: 'user-1',
+      socketId: 'socket-old',
+      nodeId: 'node-a',
+      role: Role.PARTICIPANT
+    });
+    participants.findOne.mockResolvedValue(participant);
+    redis.participantPresence.mockResolvedValue([
+      {
+        roomId: 'room-1',
+        participantId: 'participant-1',
+        socketId: 'socket-new',
+        userId: 'user-1',
+        nodeId: 'node-b',
+        lastSeenAt: '2026-06-22T10:02:00.000Z'
+      }
+    ]);
+
+    const result = await service.leaveRoomForSocket('room-1', 'participant-1', 'socket-old');
+    const participantUpdate = participants.updateOne.mock.calls[0]?.[1] as { $set?: { lastSeenAt?: unknown } };
+
+    expect(redis.removePresence).toHaveBeenCalledWith('room-1', 'participant-1', 'socket-old');
+    expect(participants.updateOne).toHaveBeenCalledWith(
+      { _id: 'participant-1', roomId: 'room-1' },
+      {
+        $set: {
+          socketId: 'socket-new',
+          nodeId: 'node-b',
+          lastSeenAt: participantUpdate.$set?.lastSeenAt
+        }
+      }
+    );
+    expect(participantUpdate.$set?.lastSeenAt).toBeInstanceOf(Date);
+    expect(classSessions.findOne).not.toHaveBeenCalled();
+    expect(result).toEqual({ closed: false, left: false });
+  });
+
+  it('keeps normal non-class host disconnect close behavior', async () => {
+    const { service, classSessions, participants } = createService();
+    classSessions.findOne.mockResolvedValue(null);
+    participants.findOne.mockResolvedValue(
+      fakeParticipantDoc({
+        id: 'host-participant',
+        userId: 'host-1',
+        socketId: 'host-socket',
+        role: Role.HOST
+      })
+    );
+    const leaveRoom = jest.spyOn(service, 'leaveRoom').mockResolvedValue({ closed: true });
+
+    const result = await service.leaveRoomForSocket('room-1', 'host-participant', 'host-socket');
+
+    expect(result).toEqual({ closed: true, left: true });
+    expect(leaveRoom).toHaveBeenCalledWith('room-1', 'host-participant');
   });
 
   it('keeps profile-soft-throttled joins pending even without an explicit waiting room', async () => {
@@ -151,7 +838,7 @@ describe('RoomsService', () => {
       false,
       'Student One'
     );
-    expect(redis.markPresence).toHaveBeenCalledWith('room-1', 'participant-1', 'socket-1');
+    expect(redis.markPresence).toHaveBeenCalledWith('room-1', 'participant-1', 'socket-1', { userId: undefined, nodeId: 'node-a' });
     expect(metrics.roomJoinDuration.observe).toHaveBeenCalled();
     expect(response.admitted).toBe(false);
     expect(response.admissionDecision?.action).toBe(joinDecision.action);
@@ -501,6 +1188,1005 @@ describe('RoomsService', () => {
 
     expect(thrown).toBeInstanceOf(ForbiddenException);
     expect(media.setProducerPriority).not.toHaveBeenCalled();
+  });
+
+  it('persists class-session chat with server-derived sender and session metadata', async () => {
+    const { service, classSessions, participants, chat } = createService();
+    const createdAt = new Date('2026-06-22T10:05:00.000Z');
+    participants.findOne.mockImplementation(async (filter: Record<string, unknown>) => {
+      if (filter['_id'] === 'student-participant') {
+        return {
+          id: 'student-participant',
+          userId: 'student-1',
+          socketId: 'student-socket',
+          roomId: 'room-1',
+          role: Role.PARTICIPANT,
+          displayName: 'Student One',
+          admitted: true
+        };
+      }
+      if (filter['userId'] === 'teacher-1') {
+        return {
+          id: 'teacher-participant',
+          userId: 'teacher-1',
+          socketId: 'teacher-socket',
+          roomId: 'room-1',
+          role: Role.HOST,
+          displayName: 'Teacher One',
+          admitted: true
+        };
+      }
+      return null;
+    });
+    classSessions.findOne.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      teacherId: 'teacher-1',
+      roomId: 'room-1',
+      status: 'live',
+      chatChannelId: 'classroom:session-1:chat'
+    });
+    chat.create.mockImplementation(async (payload: Record<string, unknown>) => ({
+      id: 'chat-1',
+      createdAt,
+      updatedAt: createdAt,
+      ...payload
+    }));
+
+    const result = await service.sendChat({ roomId: 'room-1', message: '  Hello class  ', scope: 'broadcast', recipientId: 'student-two' }, 'student-participant');
+
+    expect(chat.create.mock.calls[0]?.[0]).toEqual({
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      channelId: 'classroom:session-1:chat',
+      chatChannelId: 'classroom:session-1:chat',
+      senderId: 'student-participant',
+      senderName: 'Student One',
+      senderRole: 'student',
+      recipientId: 'teacher-participant',
+      scope: 'private',
+      threadKey: 'session-1:teacher:teacher-1:student:student-1',
+      message: 'Hello class',
+      shadowMuted: false
+    });
+    const message = result.message;
+    expect(result.targetSocketIds).toEqual(['student-socket', 'teacher-socket']);
+    expect(result.broadcastRoomId).toBeUndefined();
+    expect(message.id).toBe('chat-1');
+    expect(message.sessionId).toBe('session-1');
+    expect(message.batchId).toBe('batch-1');
+    expect(message.roomId).toBe('room-1');
+    expect(message.senderId).toBe('student-participant');
+    expect(message.senderName).toBe('Student One');
+    expect(message.senderRole).toBe('student');
+    expect(message.recipientId).toBe('teacher-participant');
+    expect(message.scope).toBe('private');
+    expect(message.message).toBe('Hello class');
+    expect(message.createdAt).toBe(createdAt.toISOString());
+  });
+
+  it('targets all active sender and teacher sockets for private class-session chat', async () => {
+    const { service, classSessions, participants, chat, redis } = createService();
+    const createdAt = new Date('2026-06-22T10:05:30.000Z');
+    participants.findOne.mockImplementation(async (filter: Record<string, unknown>) => {
+      if (filter['_id'] === 'student-participant') {
+        return {
+          id: 'student-participant',
+          userId: 'student-1',
+          socketId: 'student-socket-a',
+          roomId: 'room-1',
+          role: Role.PARTICIPANT,
+          displayName: 'Student One',
+          admitted: true
+        };
+      }
+      if (filter['userId'] === 'teacher-1') {
+        return {
+          id: 'teacher-participant',
+          userId: 'teacher-1',
+          socketId: 'teacher-socket-a',
+          roomId: 'room-1',
+          role: Role.HOST,
+          displayName: 'Teacher One',
+          admitted: true
+        };
+      }
+      return null;
+    });
+    redis.participantsPresence.mockResolvedValue([
+      {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        socketId: 'student-socket-a',
+        userId: 'student-1',
+        nodeId: 'node-a',
+        lastSeenAt: '2026-06-22T10:04:00.000Z'
+      },
+      {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        socketId: 'student-socket-b',
+        userId: 'student-1',
+        nodeId: 'node-b',
+        lastSeenAt: '2026-06-22T10:04:01.000Z'
+      },
+      {
+        roomId: 'room-1',
+        participantId: 'teacher-participant',
+        socketId: 'teacher-socket-a',
+        userId: 'teacher-1',
+        nodeId: 'node-a',
+        lastSeenAt: '2026-06-22T10:04:02.000Z'
+      },
+      {
+        roomId: 'room-1',
+        participantId: 'teacher-participant',
+        socketId: 'teacher-socket-b',
+        userId: 'teacher-1',
+        nodeId: 'node-b',
+        lastSeenAt: '2026-06-22T10:04:03.000Z'
+      }
+    ]);
+    classSessions.findOne.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      teacherId: 'teacher-1',
+      roomId: 'room-1',
+      status: 'live',
+      chatChannelId: 'classroom:session-1:chat'
+    });
+    chat.create.mockImplementation(async (payload: Record<string, unknown>) => ({
+      id: 'chat-1',
+      createdAt,
+      updatedAt: createdAt,
+      ...payload
+    }));
+
+    const result = await service.sendChat({ roomId: 'room-1', message: 'I need help' }, 'student-participant');
+
+    expect(result.targetSocketIds).toEqual(['student-socket-a', 'student-socket-b', 'teacher-socket-a', 'teacher-socket-b']);
+    expect(result.targets).toEqual([
+      {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        socketId: 'student-socket-a',
+        userId: 'student-1',
+        nodeId: 'node-a'
+      },
+      {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        socketId: 'student-socket-b',
+        userId: 'student-1',
+        nodeId: 'node-b'
+      },
+      {
+        roomId: 'room-1',
+        participantId: 'teacher-participant',
+        socketId: 'teacher-socket-a',
+        userId: 'teacher-1',
+        nodeId: 'node-a'
+      },
+      {
+        roomId: 'room-1',
+        participantId: 'teacher-participant',
+        socketId: 'teacher-socket-b',
+        userId: 'teacher-1',
+        nodeId: 'node-b'
+      }
+    ]);
+    expect(result.targetSocketIds).not.toContain('student-two-socket');
+  });
+
+  it('rejects class-session chat from non-enrolled students before persistence', async () => {
+    const { service, classSessions, participants, studentEnrollments, chat } = createService();
+    participants.findOne.mockResolvedValue({
+      id: 'student-two-participant',
+      userId: 'student-2',
+      socketId: 'student-two-socket',
+      roomId: 'room-1',
+      role: Role.PARTICIPANT,
+      displayName: 'Student Two',
+      admitted: true
+    });
+    classSessions.findOne.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      teacherId: 'teacher-1',
+      roomId: 'room-1',
+      status: 'live',
+      chatChannelId: 'classroom:session-1:chat'
+    });
+    studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(false);
+
+    let thrown: unknown;
+    try {
+      await service.sendChat({ roomId: 'room-1', message: 'I should not enter chat' }, 'student-two-participant');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(studentEnrollments.isStudentEnrolledInBatch).toHaveBeenCalledWith('student-2', 'batch-1');
+    expect(chat.create).not.toHaveBeenCalled();
+  });
+
+  it('persists teacher private replies only for the selected student thread', async () => {
+    const { service, classSessions, participants, chat } = createService();
+    const createdAt = new Date('2026-06-22T10:06:00.000Z');
+    participants.findOne.mockImplementation(async (filter: Record<string, unknown>) => {
+      if (filter['_id'] === 'teacher-participant') {
+        return {
+          id: 'teacher-participant',
+          userId: 'teacher-1',
+          socketId: 'teacher-socket',
+          roomId: 'room-1',
+          role: Role.HOST,
+          displayName: 'Teacher One',
+          admitted: true
+        };
+      }
+      if (filter['_id'] === 'student-one') {
+        return {
+          id: 'student-one',
+          userId: 'student-1',
+          socketId: 'student-one-socket',
+          roomId: 'room-1',
+          role: Role.PARTICIPANT,
+          displayName: 'Student One',
+          admitted: true
+        };
+      }
+      return null;
+    });
+    classSessions.findOne.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      teacherId: 'teacher-1',
+      roomId: 'room-1',
+      status: 'live',
+      chatChannelId: 'classroom:session-1:chat'
+    });
+    chat.create.mockImplementation(async (payload: Record<string, unknown>) => ({
+      id: 'chat-2',
+      createdAt,
+      updatedAt: createdAt,
+      ...payload
+    }));
+
+    const result = await service.sendChat({ roomId: 'room-1', message: 'Stay with this problem', scope: 'private', recipientId: 'student-one' }, 'teacher-participant');
+
+    const payload = chat.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload['senderId']).toBe('teacher-participant');
+    expect(payload['recipientId']).toBe('student-one');
+    expect(payload['scope']).toBe('private');
+    expect(payload['threadKey']).toBe('session-1:teacher:teacher-1:student:student-1');
+    expect(payload['message']).toBe('Stay with this problem');
+    expect(result.targetSocketIds).toEqual(['teacher-socket', 'student-one-socket']);
+    expect(result.broadcastRoomId).toBeUndefined();
+    expect(result.message.recipientId).toBe('student-one');
+    expect(result.message.scope).toBe('private');
+  });
+
+  it('allows teacher broadcasts as explicit class-session room messages', async () => {
+    const { service, classSessions, participants, chat } = createService();
+    const createdAt = new Date('2026-06-22T10:07:00.000Z');
+    participants.findOne.mockResolvedValue({
+      id: 'teacher-participant',
+      userId: 'teacher-1',
+      socketId: 'teacher-socket',
+      roomId: 'room-1',
+      role: Role.HOST,
+      displayName: 'Teacher One',
+      admitted: true
+    });
+    classSessions.findOne.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      teacherId: 'teacher-1',
+      roomId: 'room-1',
+      status: 'live',
+      chatChannelId: 'classroom:session-1:chat'
+    });
+    chat.create.mockImplementation(async (payload: Record<string, unknown>) => ({
+      id: 'chat-3',
+      createdAt,
+      updatedAt: createdAt,
+      ...payload
+    }));
+
+    const result = await service.sendChat({ roomId: 'room-1', message: 'Wrap up in five minutes', scope: 'broadcast' }, 'teacher-participant');
+
+    const payload = chat.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload['senderId']).toBe('teacher-participant');
+    expect(payload['recipientId']).toBeUndefined();
+    expect(payload['scope']).toBe('broadcast');
+    expect(payload['message']).toBe('Wrap up in five minutes');
+    expect(result.broadcastRoomId).toBe('room-1');
+    expect(result.targetSocketIds).toBeUndefined();
+    expect(result.message.scope).toBe('broadcast');
+  });
+
+  it('rejects teacher private replies without a student recipient', async () => {
+    const { service, classSessions, participants, chat } = createService();
+    participants.findOne.mockResolvedValue({
+      id: 'teacher-participant',
+      userId: 'teacher-1',
+      roomId: 'room-1',
+      role: Role.HOST,
+      displayName: 'Teacher One',
+      admitted: true
+    });
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', batchId: 'batch-1', teacherId: 'teacher-1', roomId: 'room-1', status: 'live' });
+
+    let thrown: unknown;
+    try {
+      await service.sendChat({ roomId: 'room-1', message: 'Private note', scope: 'private' }, 'teacher-participant');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(BadRequestException);
+    expect(chat.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects class-session chat sends when the session is not live', async () => {
+    const { service, classSessions, participants, chat } = createService();
+    participants.findOne.mockResolvedValue({
+      id: 'student-participant',
+      roomId: 'room-1',
+      role: Role.PARTICIPANT,
+      displayName: 'Student One',
+      admitted: true
+    });
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', roomId: 'room-1', status: 'completed' });
+
+    let thrown: unknown;
+    try {
+      await service.sendChat({ roomId: 'room-1', message: 'After class' }, 'student-participant');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ConflictException);
+    expect(chat.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects chat sends when participant chat permission is disabled', async () => {
+    const { service, participants, permissions, chat } = createService();
+    participants.findOne.mockResolvedValue({
+      id: 'participant-1',
+      roomId: 'room-1',
+      role: Role.PARTICIPANT,
+      displayName: 'Muted Student',
+      admitted: true
+    });
+    permissions.findOne.mockResolvedValue({
+      canPublishAudio: true,
+      canPublishVideo: true,
+      canShareScreen: false,
+      canChat: false
+    });
+
+    let thrown: unknown;
+    try {
+      await service.sendChat({ roomId: 'room-1', message: 'Blocked' }, 'participant-1');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(chat.create).not.toHaveBeenCalled();
+  });
+
+  it('returns chat history oldest-to-newest with cursor pagination metadata', async () => {
+    const { service, chat } = createService();
+    const newest = fakeChatDoc({
+      id: 'chat-new',
+      message: 'Newer',
+      createdAt: new Date('2026-06-22T10:10:00.000Z')
+    });
+    const older = fakeChatDoc({
+      id: 'chat-old',
+      message: 'Older',
+      createdAt: new Date('2026-06-22T10:05:00.000Z')
+    });
+    const extra = fakeChatDoc({
+      id: 'chat-extra',
+      message: 'Extra',
+      createdAt: new Date('2026-06-22T10:00:00.000Z')
+    });
+    const exec = jest.fn(async () => [newest, older, extra]);
+    const limit = jest.fn((_limit: number) => ({ exec }));
+    const sort = jest.fn((_sort: Record<string, number>) => ({ limit }));
+    chat.find.mockReturnValue({ sort });
+
+    const history = await service.getChatHistory({
+      sessionId: 'session-1',
+      before: '2026-06-22T10:15:00.000Z',
+      limit: 2
+    });
+
+    expect(chat.find).toHaveBeenCalledWith({
+      deletedAt: { $exists: false },
+      sessionId: 'session-1',
+      createdAt: { $lt: new Date('2026-06-22T10:15:00.000Z') }
+    });
+    expect(sort.mock.calls[0]?.[0]).toEqual({ createdAt: -1 });
+    expect(limit.mock.calls[0]?.[0]).toBe(3);
+    expect(history.messages.map((message) => message.id)).toEqual(['chat-old', 'chat-new']);
+    expect(history.nextBefore).toBe('2026-06-22T10:05:00.000Z');
+  });
+
+  it('loads student class-session history with only broadcasts and their teacher thread', async () => {
+    const { service, participants, chat } = createService();
+    participants.findOne.mockImplementation(async (filter: Record<string, unknown>) => {
+      if (filter['userId'] === 'student-1') {
+        return {
+          id: 'student-one',
+          userId: 'student-1',
+          roomId: 'room-1',
+          role: Role.PARTICIPANT,
+          displayName: 'Student One',
+          admitted: true
+        };
+      }
+      return null;
+    });
+    const exec = jest.fn(async () => [
+      fakeChatDoc({ id: 'broadcast-1', scope: 'broadcast', message: 'Announcement', createdAt: new Date('2026-06-22T10:10:00.000Z') }),
+      fakeChatDoc({
+        id: 'private-1',
+        scope: 'private',
+        threadKey: 'session-1:teacher:teacher-1:student:student-1',
+        message: 'Private',
+        createdAt: new Date('2026-06-22T10:05:00.000Z')
+      })
+    ]);
+    const limit = jest.fn((_limit: number) => ({ exec }));
+    const sort = jest.fn((_sort: Record<string, number>) => ({ limit }));
+    chat.find.mockReturnValue({ sort });
+
+    const history = await service.getClassSessionChatHistory({
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      channelId: 'classroom:session-1:chat',
+      teacherId: 'teacher-1',
+      requesterUserId: 'student-1',
+      requesterRole: 'student',
+      limit: 20
+    });
+
+    expect(chat.find).toHaveBeenCalledWith({
+      deletedAt: { $exists: false },
+      sessionId: 'session-1',
+      $or: [{ scope: 'broadcast' }, { scope: 'private', threadKey: 'session-1:teacher:teacher-1:student:student-1' }]
+    });
+    expect(history.messages.map((message) => message.id)).toEqual(['private-1', 'broadcast-1']);
+  });
+
+  it('loads teacher history for a selected student private thread', async () => {
+    const { service, participants, chat } = createService();
+    participants.findOne.mockImplementation(async (filter: Record<string, unknown>) => {
+      const idMatches =
+        filter['_id'] === 'student-one' ||
+        ((filter['$or'] as Array<Record<string, string>> | undefined) ?? []).some((condition) => condition['_id'] === 'student-one' || condition['userId'] === 'student-one');
+      if (idMatches) {
+        return {
+          id: 'student-one',
+          userId: 'student-1',
+          roomId: 'room-1',
+          role: Role.PARTICIPANT,
+          displayName: 'Student One',
+          admitted: true
+        };
+      }
+      return null;
+    });
+    const exec = jest.fn(async () => [
+      fakeChatDoc({
+        id: 'private-1',
+        scope: 'private',
+        threadKey: 'session-1:teacher:teacher-1:student:student-1',
+        message: 'Private',
+        createdAt: new Date('2026-06-22T10:05:00.000Z')
+      })
+    ]);
+    const limit = jest.fn((_limit: number) => ({ exec }));
+    const sort = jest.fn((_sort: Record<string, number>) => ({ limit }));
+    chat.find.mockReturnValue({ sort });
+
+    const history = await service.getClassSessionChatHistory({
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      channelId: 'classroom:session-1:chat',
+      teacherId: 'teacher-1',
+      requesterUserId: 'teacher-1',
+      requesterRole: 'teacher',
+      participantId: 'student-one',
+      scope: 'private'
+    });
+
+    expect(chat.find).toHaveBeenCalledWith({
+      deletedAt: { $exists: false },
+      sessionId: 'session-1',
+      threadKey: 'session-1:teacher:teacher-1:student:student-1',
+      scope: 'private'
+    });
+    expect(history.messages.map((message) => message.id)).toEqual(['private-1']);
+  });
+
+  it('marks student read state for their own private teacher thread', async () => {
+    const { service, participants, chatReadStates } = createService();
+    const readAt = new Date('2026-06-22T10:12:00.000Z');
+    participants.findOne.mockImplementation(async (filter: Record<string, unknown>) => {
+      if (filter['userId'] === 'student-1') {
+        return {
+          id: 'student-one',
+          userId: 'student-1',
+          roomId: 'room-1',
+          role: Role.PARTICIPANT,
+          displayName: 'Student One',
+          admitted: true
+        };
+      }
+      return null;
+    });
+    chatReadStates.findOneAndUpdate.mockImplementation(async (_filter: Record<string, unknown>, update: { $set: Record<string, unknown> }) => ({
+      id: 'read-1',
+      ...update.$set,
+      updatedAt: readAt
+    }));
+
+    const state = await service.markClassSessionChatRead({
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      channelId: 'classroom:session-1:chat',
+      teacherId: 'teacher-1',
+      requesterUserId: 'student-1',
+      requesterRole: 'student',
+      participantId: 'student-two',
+      scope: 'private',
+      readAt: readAt.toISOString()
+    });
+
+    const update = chatReadStates.findOneAndUpdate.mock.calls[0]?.[1] as { $set: Record<string, unknown> };
+    expect(update.$set['batchId']).toBe('batch-1');
+    expect(update.$set['channelId']).toBe('classroom:session-1:chat');
+    expect(update.$set['chatChannelId']).toBe('classroom:session-1:chat');
+    expect(update.$set['participantId']).toBe('student-one');
+    expect(update.$set['threadKey']).toBe('session-1:teacher:teacher-1:student:student-1');
+    expect(state.batchId).toBe('batch-1');
+    expect(state.channelId).toBe('classroom:session-1:chat');
+    expect(state.chatChannelId).toBe('classroom:session-1:chat');
+    expect(state.participantId).toBe('student-one');
+    expect(state.threadKey).toBe('session-1:teacher:teacher-1:student:student-1');
+    expect(state.lastReadAt).toBe(readAt.toISOString());
+  });
+
+  it('clamps future chat read timestamps to server time', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-06-22T10:12:00.000Z'));
+    try {
+      const { service, participants, chatReadStates } = createService();
+      participants.findOne.mockResolvedValue({
+        id: 'student-one',
+        userId: 'student-1',
+        roomId: 'room-1',
+        role: Role.PARTICIPANT,
+        displayName: 'Student One',
+        admitted: true
+      });
+      chatReadStates.findOneAndUpdate.mockImplementation(async (_filter: Record<string, unknown>, update: { $set: Record<string, unknown> }) => ({
+        id: 'read-1',
+        ...update.$set,
+        updatedAt: update.$set['lastReadAt']
+      }));
+
+      const state = await service.markClassSessionChatRead({
+        sessionId: 'session-1',
+        batchId: 'batch-1',
+        roomId: 'room-1',
+        channelId: 'classroom:session-1:chat',
+        teacherId: 'teacher-1',
+        requesterUserId: 'student-1',
+        requesterRole: 'student',
+        scope: 'private',
+        readAt: '2026-06-23T10:12:00.000Z'
+      });
+
+      expect(state.lastReadAt).toBe('2026-06-22T10:12:00.000Z');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('builds teacher private thread summaries with unread counts per student', async () => {
+    const { service, participants, chat, chatReadStates, studentEnrollments } = createService();
+    const studentOne = {
+      id: 'student-one',
+      userId: 'student-1',
+      roomId: 'room-1',
+      role: Role.PARTICIPANT,
+      displayName: 'Student One',
+      admitted: true
+    };
+    const studentTwo = {
+      id: 'student-two',
+      userId: 'student-2',
+      roomId: 'room-1',
+      role: Role.PARTICIPANT,
+      displayName: 'Student Two',
+      admitted: true
+    };
+    participants.find.mockResolvedValue([studentOne, studentTwo]);
+    studentEnrollments.listBatchRoster.mockResolvedValue([
+      {
+        id: 'student-1',
+        userId: 'student-1',
+        enrollmentId: 'enrollment-1',
+        displayName: 'Student One',
+        email: 'student.one@example.test',
+        status: 'active',
+        joinedAt: '2026-01-01T00:00:00.000Z'
+      },
+      {
+        id: 'student-2',
+        userId: 'student-2',
+        enrollmentId: 'enrollment-2',
+        displayName: 'Student Two',
+        email: 'student.two@example.test',
+        status: 'active',
+        joinedAt: '2026-01-01T00:00:00.000Z'
+      }
+    ]);
+    chatReadStates.find.mockResolvedValue([
+      fakeChatReadStateDoc({
+        threadKey: 'session-1:teacher:teacher-1:student:student-1',
+        lastReadAt: new Date('2026-06-22T10:04:00.000Z')
+      })
+    ]);
+    chat.find.mockImplementation((filter: Record<string, unknown>) => ({
+      sort: jest.fn(() => ({
+        limit: jest.fn(() => ({
+          exec: jest.fn(async () =>
+            filter['threadKey'] === 'session-1:teacher:teacher-1:student:student-1'
+              ? [
+                  fakeChatDoc({
+                    id: 'chat-student-one',
+                    senderId: 'student-one',
+                    scope: 'private',
+                    threadKey: 'session-1:teacher:teacher-1:student:student-1',
+                    message: 'I need help',
+                    createdAt: new Date('2026-06-22T10:10:00.000Z')
+                  })
+                ]
+              : []
+          )
+        }))
+      }))
+    }));
+    chat.countDocuments.mockImplementation(async (filter: Record<string, unknown>) =>
+      filter['threadKey'] === 'session-1:teacher:teacher-1:student:student-1' && filter['senderRole'] === 'student' ? 2 : 0
+    );
+
+    const summary = await service.getClassSessionChatSummary({
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      channelId: 'classroom:session-1:chat',
+      teacherId: 'teacher-1',
+      requesterUserId: 'teacher-1',
+      requesterRole: 'teacher'
+    });
+
+    const studentOneThread = summary.threads.find((thread) => thread.participantId === 'student-one');
+    const studentTwoThread = summary.threads.find((thread) => thread.participantId === 'student-two');
+    expect(studentOneThread?.unreadCount).toBe(2);
+    expect(studentOneThread?.lastMessagePreview).toBe('I need help');
+    expect(studentTwoThread?.unreadCount).toBe(0);
+    expect(summary.broadcast?.scope).toBe('broadcast');
+  });
+
+  it('moderates a live class-session student microphone by pausing the audio producer', async () => {
+    const { service, classSessions, participants, permissions, producers, media, redis } = createService();
+    const actor = { id: 'teacher-participant', roomId: 'room-1', role: Role.HOST };
+    const target = { id: 'student-participant', roomId: 'room-1', role: Role.PARTICIPANT, socketId: 'student-socket' };
+    const producer = fakeProducerDoc({
+      id: 'producer-audio',
+      participantId: 'student-participant',
+      kind: 'audio'
+    });
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', roomId: 'room-1', status: 'live' });
+    jest.spyOn(service as any, 'assertModerator').mockResolvedValue(actor);
+    jest.spyOn(service as any, 'assertParticipant').mockResolvedValue(target);
+    jest.spyOn(service as any, 'assertCanControlProducer').mockResolvedValue(actor);
+    jest.spyOn(service as any, 'addModeration').mockResolvedValue({ actor, participant: target });
+    producers.findOne.mockReturnValue({ sort: jest.fn(async () => producer) });
+    producers.findById.mockResolvedValue(producer);
+    jest.spyOn(service as any, 'requireRoomOwnerLookup').mockResolvedValue(ownerLookup(true));
+    redis.participantsPresence.mockResolvedValue([
+      {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        socketId: 'student-socket',
+        userId: 'student-1',
+        nodeId: 'node-a',
+        lastSeenAt: '2026-06-22T10:04:00.000Z'
+      },
+      {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        socketId: 'student-socket-tab-2',
+        userId: 'student-1',
+        nodeId: 'node-b',
+        lastSeenAt: '2026-06-22T10:04:01.000Z'
+      }
+    ]);
+
+    const result = await service.moderateStudentMedia('room-1', 'teacher-participant', 'student-participant', 'mute-mic');
+
+    expect(media.setProducerPaused).toHaveBeenCalledWith('producer-audio', true);
+    expect(participants.updateOne).toHaveBeenCalledWith(
+      { _id: 'student-participant', roomId: 'room-1' },
+      { audioEnabled: false }
+    );
+    expect(permissions.updateOne).toHaveBeenCalledWith(
+      { roomId: 'room-1', participantId: 'student-participant' },
+      {
+        $set: {
+          canPublishAudio: false,
+          canPublishVideo: true,
+          canShareScreen: true,
+          canChat: true
+        }
+      },
+      { upsert: true }
+    );
+    expect((service as any).addModeration).toHaveBeenCalledWith('room-1', 'teacher-participant', 'student-participant', 'force-mute');
+    expect(result.event).toEqual({
+      roomId: 'room-1',
+      participantId: 'student-participant',
+      producerId: 'producer-audio',
+      kind: 'audio',
+      action: 'mute-mic',
+      moderatedByParticipantId: 'teacher-participant',
+      permissions: {
+        canPublishAudio: false,
+        canPublishVideo: true,
+        canShareScreen: true,
+        canChat: true
+      },
+      message: 'Teacher muted your microphone.'
+    });
+    expect(result.producer?.id).toBe('producer-audio');
+    expect(result.producer?.status).toBe('paused');
+    expect(result.producer?.kind).toBe('audio');
+    expect(result.permissions).toEqual({
+      canPublishAudio: false,
+      canPublishVideo: true,
+      canShareScreen: true,
+      canChat: true
+    });
+    expect(result.targetSocketId).toBe('student-socket');
+    expect(result.targetSocketIds).toEqual(['student-socket', 'student-socket-tab-2']);
+    expect(result.targets).toEqual([
+      {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        socketId: 'student-socket',
+        userId: 'student-1',
+        nodeId: 'node-a'
+      },
+      {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        socketId: 'student-socket-tab-2',
+        userId: 'student-1',
+        nodeId: 'node-b'
+      }
+    ]);
+  });
+
+  it('allows a teacher to unmute a class-session student microphone without resuming media', async () => {
+    const { service, classSessions, participants, permissions, producers, moderation } = createService();
+    const actor = { id: 'teacher-participant', roomId: 'room-1', role: Role.HOST };
+    const target = { id: 'student-participant', roomId: 'room-1', role: Role.PARTICIPANT, socketId: 'student-socket' };
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', roomId: 'room-1', status: 'live' });
+    jest.spyOn(service as any, 'assertModerator').mockResolvedValue(actor);
+    jest.spyOn(service as any, 'assertParticipant').mockResolvedValue(target);
+    permissions.findOne.mockResolvedValue({
+      roomId: 'room-1',
+      participantId: 'student-participant',
+      canPublishAudio: false,
+      canPublishVideo: true,
+      canShareScreen: true,
+      canChat: true
+    });
+
+    const result = await service.moderateStudentMedia('room-1', 'teacher-participant', 'student-participant', 'unmute-mic');
+
+    expect(producers.findOne).not.toHaveBeenCalled();
+    expect(participants.updateOne).not.toHaveBeenCalled();
+    expect(permissions.updateOne).toHaveBeenCalledWith(
+      { roomId: 'room-1', participantId: 'student-participant' },
+      {
+        $set: {
+          canPublishAudio: true,
+          canPublishVideo: true,
+          canShareScreen: true,
+          canChat: true
+        }
+      },
+      { upsert: true }
+    );
+    expect(moderation.updateMany).toHaveBeenCalledWith(
+      { roomId: 'room-1', participantId: 'student-participant', action: 'force-mute', active: true },
+      { active: false }
+    );
+    expect(result.event.action).toBe('unmute-mic');
+    expect(result.event.kind).toBe('audio');
+    expect(result.event.permissions?.canPublishAudio).toBe(true);
+    expect(result.producer).toBeUndefined();
+  });
+
+  it('moderates a live class-session student camera by pausing the video producer', async () => {
+    const { service, classSessions, participants, permissions, producers, media } = createService();
+    const actor = { id: 'teacher-participant', roomId: 'room-1', role: Role.HOST };
+    const target = { id: 'student-participant', roomId: 'room-1', role: Role.PARTICIPANT, socketId: 'student-socket' };
+    const producer = fakeProducerDoc({
+      id: 'producer-video',
+      participantId: 'student-participant',
+      kind: 'video'
+    });
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', roomId: 'room-1', status: 'live' });
+    jest.spyOn(service as any, 'assertModerator').mockResolvedValue(actor);
+    jest.spyOn(service as any, 'assertParticipant').mockResolvedValue(target);
+    jest.spyOn(service as any, 'assertCanControlProducer').mockResolvedValue(actor);
+    jest.spyOn(service as any, 'addModeration').mockResolvedValue({ actor, participant: target });
+    producers.findOne.mockReturnValue({ sort: jest.fn(async () => producer) });
+    producers.findById.mockResolvedValue(producer);
+    jest.spyOn(service as any, 'requireRoomOwnerLookup').mockResolvedValue(ownerLookup(true));
+
+    const result = await service.moderateStudentMedia('room-1', 'teacher-participant', 'student-participant', 'stop-camera');
+
+    expect(media.setProducerPaused).toHaveBeenCalledWith('producer-video', true);
+    expect(participants.updateOne).toHaveBeenCalledWith(
+      { _id: 'student-participant', roomId: 'room-1' },
+      { videoEnabled: false }
+    );
+    expect(permissions.updateOne).toHaveBeenCalledWith(
+      { roomId: 'room-1', participantId: 'student-participant' },
+      {
+        $set: {
+          canPublishAudio: true,
+          canPublishVideo: false,
+          canShareScreen: true,
+          canChat: true
+        }
+      },
+      { upsert: true }
+    );
+    expect((service as any).addModeration).toHaveBeenCalledWith('room-1', 'teacher-participant', 'student-participant', 'disable-camera');
+    expect(result.event.action).toBe('stop-camera');
+    expect(result.event.kind).toBe('video');
+    expect(result.producer?.status).toBe('paused');
+  });
+
+  it('allows a teacher to restore a class-session student camera without resuming media', async () => {
+    const { service, classSessions, participants, permissions, producers, moderation } = createService();
+    const actor = { id: 'teacher-participant', roomId: 'room-1', role: Role.HOST };
+    const target = { id: 'student-participant', roomId: 'room-1', role: Role.PARTICIPANT, socketId: 'student-socket' };
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', roomId: 'room-1', status: 'live' });
+    jest.spyOn(service as any, 'assertModerator').mockResolvedValue(actor);
+    jest.spyOn(service as any, 'assertParticipant').mockResolvedValue(target);
+    permissions.findOne.mockResolvedValue({
+      roomId: 'room-1',
+      participantId: 'student-participant',
+      canPublishAudio: true,
+      canPublishVideo: false,
+      canShareScreen: true,
+      canChat: true
+    });
+
+    const result = await service.moderateStudentMedia('room-1', 'teacher-participant', 'student-participant', 'restore-camera');
+
+    expect(producers.findOne).not.toHaveBeenCalled();
+    expect(participants.updateOne).not.toHaveBeenCalled();
+    expect(permissions.updateOne).toHaveBeenCalledWith(
+      { roomId: 'room-1', participantId: 'student-participant' },
+      {
+        $set: {
+          canPublishAudio: true,
+          canPublishVideo: true,
+          canShareScreen: true,
+          canChat: true
+        }
+      },
+      { upsert: true }
+    );
+    expect(moderation.updateMany).toHaveBeenCalledWith(
+      { roomId: 'room-1', participantId: 'student-participant', action: 'disable-camera', active: true },
+      { active: false }
+    );
+    expect(result.event.action).toBe('restore-camera');
+    expect(result.event.kind).toBe('video');
+    expect(result.event.permissions?.canPublishVideo).toBe(true);
+    expect(result.producer).toBeUndefined();
+  });
+
+  it('rejects student media moderation outside a class-session room', async () => {
+    const { service, classSessions, producers } = createService();
+    classSessions.findOne.mockResolvedValue(null);
+
+    let thrown: unknown;
+    try {
+      await service.moderateStudentMedia('room-1', 'teacher-participant', 'student-participant', 'mute-mic');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(NotFoundException);
+    expect(producers.findOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects student media moderation after a class session has ended', async () => {
+    const { service, classSessions, producers } = createService();
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', roomId: 'room-1', status: 'completed' });
+
+    let thrown: unknown;
+    try {
+      await service.moderateStudentMedia('room-1', 'teacher-participant', 'student-participant', 'stop-camera');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ConflictException);
+    expect((thrown as Error | undefined)?.message).toBe('This class session has ended.');
+    expect(producers.findOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects student media moderation from non-moderators', async () => {
+    const { service, classSessions, participants, producers } = createService();
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', roomId: 'room-1', status: 'live' });
+    participants.findOne.mockResolvedValue({
+      id: 'student-actor',
+      roomId: 'room-1',
+      role: Role.PARTICIPANT,
+      admitted: true
+    });
+
+    let thrown: unknown;
+    try {
+      await service.moderateStudentMedia('room-1', 'student-actor', 'student-participant', 'mute-mic');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(producers.findOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects student media moderation for targets outside the room', async () => {
+    const { service, classSessions, participants, producers } = createService();
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', roomId: 'room-1', status: 'live' });
+    participants.findOne
+      .mockResolvedValueOnce({ id: 'teacher-participant', roomId: 'room-1', role: Role.HOST, admitted: true })
+      .mockResolvedValueOnce(null);
+
+    let thrown: unknown;
+    try {
+      await service.moderateStudentMedia('room-1', 'teacher-participant', 'missing-participant', 'mute-mic');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(producers.findOne).not.toHaveBeenCalled();
   });
 
   it('backfills a legacy producer nodeId from the local media registry before saving status changes', async () => {
@@ -1373,6 +3059,76 @@ describe('RoomsService', () => {
     expect(metrics.activeRooms.dec).toHaveBeenCalledTimes(1);
   });
 
+  it('blocks generic room close for live class-session rooms', async () => {
+    const { service, classSessions, nodeRegistry, media } = createService();
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', roomId: 'room-1', status: 'live' });
+    nodeRegistry.assertLocalRoomOwner.mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'assertModerator').mockResolvedValue(undefined);
+
+    let thrown: unknown;
+    try {
+      await service.closeRoom('room-1', 'host-1');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(BadRequestException);
+    expect(media.closeRoom).not.toHaveBeenCalled();
+  });
+
+  it('closes and notifies class-session media rooms when a live class is ended', async () => {
+    const { service, rooms, participants, producers, consumers, media, nodeRegistry, pipeCoordinator, platformEvents } = createService();
+    const closedRoomIds: string[] = [];
+    const room = {
+      id: 'room-1',
+      name: 'Class Session',
+      mediaProfile: { id: 'classroom' },
+      closedAt: undefined
+    };
+    rooms.findById.mockResolvedValue(room);
+    participants.find.mockResolvedValue([{ id: 'teacher-participant', nodeId: 'node-a' }, { id: 'student-participant', nodeId: 'node-a' }]);
+    media.closeRoom.mockResolvedValue({
+      participantIds: ['teacher-participant', 'student-participant'],
+      transportCount: 2,
+      consumerCount: 1,
+      producerCounts: { video: 1, audio: 1 },
+      pipeTransportCount: 0
+    });
+    service.onRoomClosed((roomId) => {
+      closedRoomIds.push(roomId);
+    });
+
+    const closed = await service.closeClassSessionRoom({
+      roomId: 'room-1',
+      actorUserId: 'teacher-1',
+      actorLabel: 'teacher@example.test'
+    });
+
+    expect(closed).toBe(true);
+    expect(nodeRegistry.assertLocalRoomOwner).toHaveBeenCalledWith('room-1');
+    expect(rooms.updateOne.mock.calls[0]?.[0]).toEqual({ _id: 'room-1' });
+    expect(rooms.updateOne.mock.calls[0]?.[1]?.closedAt).toBeInstanceOf(Date);
+    expect(participants.updateMany.mock.calls[0]?.[0]).toEqual({ roomId: 'room-1', leftAt: { $exists: false } });
+    expect(participants.updateMany.mock.calls[0]?.[1]?.leftAt).toBeInstanceOf(Date);
+    expect(producers.updateMany.mock.calls[0]?.[0]).toEqual({ roomId: 'room-1', status: { $ne: 'closed' } });
+    expect(producers.updateMany.mock.calls[0]?.[1]?.status).toBe('closed');
+    expect(producers.updateMany.mock.calls[0]?.[1]?.closedAt).toBeInstanceOf(Date);
+    expect(consumers.updateMany.mock.calls[0]?.[0]).toEqual({ roomId: 'room-1', status: { $ne: 'closed' } });
+    expect(consumers.updateMany.mock.calls[0]?.[1]?.status).toBe('closed');
+    expect(consumers.updateMany.mock.calls[0]?.[1]?.closedAt).toBeInstanceOf(Date);
+    expect(pipeCoordinator.closeRoomBindings).toHaveBeenCalledWith('room-1');
+    expect(media.closeRoom).toHaveBeenCalledWith('room-1');
+    const roomClosedEvent = platformEvents.appendEvent.mock.calls.find(([event]) => event.type === 'room.closed')?.[0];
+    expect(roomClosedEvent?.type).toBe('room.closed');
+    expect(roomClosedEvent?.roomId).toBe('room-1');
+    expect(roomClosedEvent?.actor).toEqual({
+      type: 'operator',
+      userId: 'teacher-1',
+      label: 'teacher@example.test'
+    });
+    expect(closedRoomIds).toEqual(['room-1']);
+  });
+
   it('clears worker-room quarantine after room failure cleanup completes', async () => {
     const { service, rooms, participants, producers, consumers, redis, media, nodeRegistry, pipeCoordinator, metrics } = createService();
     const summary = summaryState();
@@ -1423,11 +3179,19 @@ describe('RoomsService', () => {
 
 function createService(): {
   service: RoomsService;
-  rooms: { findById: jest.Mock; updateOne: jest.Mock };
-  participants: { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; countDocuments: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
-  producers: { findById: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
+  rooms: { create: jest.Mock; findById: jest.Mock; updateOne: jest.Mock };
+  batches: { find: jest.Mock };
+  studentEnrollments: { isStudentEnrolledInBatch: jest.Mock; listBatchRoster: jest.Mock };
+  batchSchedules: { find: jest.Mock };
+  classSessions: { findById: jest.Mock; findOne: jest.Mock; findOneAndUpdate: jest.Mock };
+  participants: { create: jest.Mock; findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; countDocuments: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
+  permissions: { create: jest.Mock; find: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock };
+  producers: { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   consumers: { findById: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
-  redis: { markPresence: jest.Mock; removePresence: jest.Mock };
+  moderation: { create: jest.Mock; exists: jest.Mock; updateMany: jest.Mock };
+  chat: { create: jest.Mock; find: jest.Mock; countDocuments: jest.Mock };
+  chatReadStates: { find: jest.Mock; findOneAndUpdate: jest.Mock };
+  redis: { markPresence: jest.Mock; removePresence: jest.Mock; participantPresence: jest.Mock; participantsPresence: jest.Mock };
   media: {
     onConsumerLayerEvent: jest.Mock;
     onProducerDynacastEvent: jest.Mock;
@@ -1463,6 +3227,8 @@ function createService(): {
     localNodeId: jest.Mock;
     assertLocalCanOwnNewRoom: jest.Mock;
     assertLocalRoomOwner: jest.Mock;
+    claimRoom: jest.Mock;
+    getRoomOwner: jest.Mock;
     releaseRoom: jest.Mock;
   };
   pipeCoordinator: {
@@ -1510,8 +3276,24 @@ function createService(): {
   };
 } {
   const rooms = {
+    create: jest.fn(),
     findById: jest.fn(),
     updateOne: jest.fn()
+  };
+  const batches = {
+    find: jest.fn(async () => [])
+  };
+  const studentEnrollments = {
+    isStudentEnrolledInBatch: jest.fn(async () => true),
+    listBatchRoster: jest.fn(async () => [])
+  };
+  const batchSchedules = {
+    find: jest.fn(() => ({ sort: jest.fn(async () => []) }))
+  };
+  const classSessions = {
+    findById: jest.fn(async () => null),
+    findOne: jest.fn(async () => null),
+    findOneAndUpdate: jest.fn()
   };
   const roomIncidentEvents = {
     find: jest.fn(() => ({ sort: jest.fn(() => ({ limit: jest.fn(async () => []) })) })),
@@ -1532,6 +3314,7 @@ function createService(): {
     }))
   };
   const participants = {
+    create: jest.fn(),
     findById: jest.fn(),
     findOne: jest.fn(),
     find: jest.fn(async () => []),
@@ -1539,8 +3322,15 @@ function createService(): {
     updateOne: jest.fn(),
     updateMany: jest.fn()
   };
+  const permissions = {
+    create: jest.fn(),
+    find: jest.fn(async () => []),
+    findOne: jest.fn(async () => null),
+    updateOne: jest.fn(async () => ({ modifiedCount: 1 }))
+  };
   const producers = {
     findById: jest.fn(),
+    findOne: jest.fn(),
     find: jest.fn(async () => []),
     updateOne: jest.fn(async () => ({ modifiedCount: 1 })),
     updateMany: jest.fn()
@@ -1551,9 +3341,31 @@ function createService(): {
     updateOne: jest.fn(async () => ({ modifiedCount: 0 })),
     updateMany: jest.fn()
   };
+  const moderation = {
+    create: jest.fn(async (payload: Record<string, unknown>) => ({ id: 'moderation-1', ...payload })),
+    exists: jest.fn(async () => null),
+    updateMany: jest.fn(async () => ({ modifiedCount: 0 }))
+  };
+  const chat = {
+    create: jest.fn(),
+    find: jest.fn(() => ({
+      sort: jest.fn(() => ({
+        limit: jest.fn(() => ({
+          exec: jest.fn(async () => [])
+        }))
+      }))
+    })),
+    countDocuments: jest.fn(async () => 0)
+  };
+  const chatReadStates = {
+    find: jest.fn(async () => []),
+    findOneAndUpdate: jest.fn()
+  };
   const redis = {
     markPresence: jest.fn(async () => undefined),
-    removePresence: jest.fn()
+    removePresence: jest.fn(),
+    participantPresence: jest.fn(async () => []),
+    participantsPresence: jest.fn(async () => [])
   };
   let signalListener: ((signal: { sourceNodeId: string; roomId: string; event: string; payload: unknown[] }) => void) | undefined;
   const media = {
@@ -1597,6 +3409,8 @@ function createService(): {
     localNodeId: jest.fn(() => 'node-a'),
     assertLocalCanOwnNewRoom: jest.fn(),
     assertLocalRoomOwner: jest.fn(),
+    claimRoom: jest.fn(async () => ownerLookup(true).owner),
+    getRoomOwner: jest.fn(async () => ownerLookup(true).owner),
     lookupRoomOwner: jest.fn(async () => ownerLookup(true)),
     snapshot: jest.fn(async () => ({
       localNode: { nodeId: 'node-a', region: 'test', zone: 'test-a', health: 'healthy', draining: false, capacity: { capacityScore: 0.1 } },
@@ -1717,26 +3531,39 @@ function createService(): {
   return {
     service: new RoomsService(
       rooms as never,
+      batches as never,
+      batchSchedules as never,
+      classSessions as never,
       roomIncidentEvents as never,
       roomSnapshotBundles as never,
       participants as never,
-      {} as never,
+      permissions as never,
       producers as never,
       consumers as never,
-      {} as never,
-      {} as never,
+      moderation as never,
+      chat as never,
+      chatReadStates as never,
       redis as never,
       media as never,
       nodeRegistry as never,
       pipeCoordinator as never,
       metrics as never,
       signals as never,
-      platformEvents as never
+      platformEvents as never,
+      studentEnrollments as never
     ),
     rooms,
+    batches,
+    studentEnrollments,
+    batchSchedules,
+    classSessions,
     participants,
+    permissions,
     producers,
     consumers,
+    moderation,
+    chat,
+    chatReadStates,
     redis,
     media,
     nodeRegistry,
@@ -1762,6 +3589,63 @@ function ownerLookup(local: boolean) {
   };
 }
 
+function fakeRoomDoc(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'room-1',
+    name: 'Class Session',
+    hostId: 'teacher-participant',
+    settings: {
+      locked: false,
+      waitingRoomEnabled: false,
+      joinApprovalRequired: false,
+      visibility: 'private',
+      maxParticipants: 100,
+      recordingEnabled: false,
+      chatEnabled: true
+    },
+    mediaProfile: { id: 'classroom', updatedAt: new Date('2026-06-22T10:00:00.000Z') },
+    mediaState: { status: 'active' },
+    createdAt: new Date('2026-06-22T10:00:00.000Z'),
+    closedAt: undefined,
+    ...overrides
+  };
+}
+
+function fakeClassSessionDoc(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'session-1',
+    _id: 'session-1',
+    batchId: 'batch-1',
+    teacherId: 'teacher-1',
+    roomId: 'room-1',
+    status: 'live',
+    startedAt: new Date('2026-06-22T10:00:00.000Z'),
+    chatChannelId: 'classroom:session-1:chat',
+    whiteboardChannelId: 'classroom:session-1:whiteboard',
+    ...overrides
+  };
+}
+
+function fakeParticipantDoc(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'participant-1',
+    _id: 'participant-1',
+    userId: 'user-1',
+    displayName: 'Participant One',
+    socketId: 'socket-1',
+    roomId: 'room-1',
+    role: Role.PARTICIPANT,
+    audioEnabled: true,
+    videoEnabled: true,
+    screenSharing: false,
+    handRaised: false,
+    admitted: true,
+    joinedAt: new Date('2026-06-22T10:00:00.000Z'),
+    lastSeenAt: new Date('2026-06-22T10:00:00.000Z'),
+    ...overrides
+  };
+}
+
 function fakeProducerDoc(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: 'producer-1',
@@ -1782,6 +3666,48 @@ function fakeProducerDoc(overrides: Partial<Record<string, unknown>> = {}) {
     preferredLayers: undefined,
     preferredSvcLayers: undefined,
     save: jest.fn().mockResolvedValue(undefined),
+    ...overrides
+  };
+}
+
+function fakeChatDoc(overrides: Partial<Record<string, unknown>> = {}) {
+  const createdAt = new Date('2026-06-22T10:00:00.000Z');
+  return {
+    id: 'chat-1',
+    sessionId: 'session-1',
+    batchId: 'batch-1',
+    roomId: 'room-1',
+    channelId: 'classroom:session-1:chat',
+    chatChannelId: 'classroom:session-1:chat',
+    senderId: 'participant-1',
+    senderName: 'Student One',
+    senderRole: 'student',
+    scope: 'private',
+    message: 'Hello',
+    shadowMuted: false,
+    createdAt,
+    updatedAt: createdAt,
+    ...overrides
+  };
+}
+
+function fakeChatReadStateDoc(overrides: Partial<Record<string, unknown>> = {}) {
+  const updatedAt = new Date('2026-06-22T10:00:00.000Z');
+  return {
+    id: 'read-1',
+    readStateKey: 'session-1:teacher-1:private:session-1:teacher:teacher-1:student:student-1',
+    sessionId: 'session-1',
+    batchId: 'batch-1',
+    roomId: 'room-1',
+    channelId: 'classroom:session-1:chat',
+    chatChannelId: 'classroom:session-1:chat',
+    userId: 'teacher-1',
+    participantId: 'student-one',
+    scope: 'private',
+    threadKey: 'session-1:teacher:teacher-1:student:student-1',
+    lastReadAt: updatedAt,
+    createdAt: updatedAt,
+    updatedAt,
     ...overrides
   };
 }

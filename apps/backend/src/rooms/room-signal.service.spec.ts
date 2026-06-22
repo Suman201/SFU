@@ -17,6 +17,24 @@ describe('RoomSignalService', () => {
     expect(typeof payload.eventId).toBe('string');
   });
 
+  it('publishes targeted room events with target metadata intact', async () => {
+    const harness = createHarness('node-a');
+    const target = {
+      socketIds: ['student-socket-a', 'teacher-socket'],
+      participantIds: ['student-participant', 'teacher-participant'],
+      userIds: ['student-1', 'teacher-1']
+    };
+
+    await harness.service.publishTargeted('room-1', target, 'chat:message', { id: 'chat-1' });
+
+    expect(harness.redis.publishDurable).toHaveBeenCalledTimes(1);
+    const [, payload] = harness.redis.publishDurable.mock.calls[0]!;
+    expect(payload.roomId).toBe('room-1');
+    expect(payload.event).toBe('chat:message');
+    expect(payload.payload).toEqual([{ id: 'chat-1' }]);
+    expect(payload.target).toEqual(target);
+  });
+
   it('suppresses local echo events from the same node', async () => {
     const harness = createHarness('node-a');
     const listener = jest.fn();

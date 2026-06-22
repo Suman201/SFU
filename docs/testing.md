@@ -16,6 +16,16 @@ npm run test -w @native-sfu/sfu-core
 npm run test -w @native-sfu/backend
 ```
 
+For the eventing adapter surface specifically, the focused U5 regression slice is:
+
+```bash
+npm test -w @native-sfu/backend -- \
+  src/events/platform-events.service.spec.ts \
+  src/events/adapters/webhook-delivery.adapter.spec.ts \
+  src/events/adapters/redis-stream-delivery.adapter.spec.ts \
+  src/events/adapters/event-delivery-adapter.registry.spec.ts
+```
+
 ## Integration Tests
 
 Use Docker Compose to run MongoDB and Redis, then execute backend e2e tests.
@@ -193,3 +203,33 @@ NODE_B_URL=http://127.0.0.1:3002 \
 OPERATIONS_TOKEN=... \
 npm run test:live-soak
 ```
+
+The mixed-adapter eventing backlog and fairness harness lives in `tests/load/eventing-mixed-backlog-soak.mjs`:
+
+```bash
+npm run docker:up
+npm run seed:dummy-users
+
+NODE_A_URL=http://127.0.0.1:3000 \
+NODE_B_URL=http://127.0.0.1:3002 \
+SEED_USER_PASSWORD=Password@12345 \
+OPERATIONS_TOKEN=... \
+WEBHOOK_ENDPOINT_BASE_URL=http://127.0.0.1:4319 \
+npm run test:eventing:soak
+```
+
+What this U5A slice proves:
+
+- real room/producer/consumer lifecycle events drive the platform event log
+- mixed webhook + Redis stream endpoints share the same persisted queue
+- slow and failing webhook destinations create real retry / exhaustion pressure
+- Redis stream deliveries write real `XADD` entries and preserve delivery references
+- queue drain, backlog aging, and top-lane concentration are observable through `GET /api/v1/events/diagnostics/summary`
+- per-node fairness can be checked from the per-node `/metrics` scrape plus the final JSON report
+
+Important local notes:
+
+- `infra/docker-compose.dev.yml` now exposes Redis on host port `6379` and MongoDB on host port `27018`, which the harness uses for the direct Redis / Mongo evidence slice.
+- For a backend running inside Docker, `WEBHOOK_ENDPOINT_BASE_URL=http://host.docker.internal:4319` is usually the truthful setting so the container can reach the host webhook receiver.
+- For a backend running directly on the host, `WEBHOOK_ENDPOINT_BASE_URL=http://127.0.0.1:4319` is fine.
+- Full U5A fairness signoff needs two distinct backend nodes. Reusing the same URL for `NODE_A_URL` and `NODE_B_URL` is useful for backlog smoke-testing, but it is not honest distributed fairness evidence.

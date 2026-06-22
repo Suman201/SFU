@@ -1,17 +1,284 @@
-<main class="student-session-shell">
+@if (loading()) {
+  <main class="student-session-state">
+    <h1>Checking class status</h1>
+    <p>Looking for a live session.</p>
+  </main>
+} @else if (error()) {
+  <main class="student-session-state">
+    <h1>Class unavailable</h1>
+    <p>{{ error() }}</p>
+    <a class="button primary" routerLink="/student/dashboard">Back to dashboard</a>
+  </main>
+} @else if (!sessionLive()) {
+  <main class="student-session-state">
+    <h1>{{ session()?.status === 'completed' ? 'Class ended' : 'Waiting room' }}</h1>
+    <p>{{ blockedMessage() }}</p>
+    <a class="button primary" routerLink="/student/dashboard">Back to dashboard</a>
+  </main>
+} @else {
+<main class="student-session-shell" [class.has-pip]="pipProducer()" [class.prejoin-open]="!roomJoined()">
   <section class="video-stage" aria-label="Class video">
-    <div class="video-frame">
-      <span class="video-noise" aria-hidden="true"></span>
+    <div class="video-frame" [class.screen-mode]="hasScreenShare()" [class.empty]="!stageStream()">
+      @if (teacherReconnecting()) {
+        <div class="teacher-reconnect-banner" role="status">
+          <strong>Teacher reconnecting</strong>
+          <span>The class is still live. Please stay here.</span>
+        </div>
+      }
+      @if (stageStream(); as stream) {
+        <video class="stage-video" autoplay muted playsinline [sfuMediaStream]="stream"></video>
+      } @else {
+        <div class="video-placeholder" aria-live="polite">
+          <span class="speaker-avatar large">{{ stageInitials() }}</span>
+          <strong>{{ stageTitle() }}</strong>
+          <span>{{ stageStatusText() }}</span>
+        </div>
+      }
       <div class="speaker-badge">
-        <span class="speaker-avatar">TR</span>
+        <span class="speaker-avatar">{{ stageInitials() }}</span>
         <div>
-          <strong>Teacher</strong>
-          <span>Live</span>
+          <strong>{{ stageTitle() }}</strong>
+          <span>{{ stageStatusText() }}</span>
         </div>
       </div>
+
+      @if (pipProducer()) {
+        <aside class="teacher-pip" aria-label="Teacher camera">
+          @if (pipStream(); as stream) {
+            <video autoplay muted playsinline [sfuMediaStream]="stream"></video>
+          } @else {
+            <div class="pip-placeholder">
+              <span class="speaker-avatar">{{ stageInitials() }}</span>
+            </div>
+          }
+          <footer>
+            <strong>{{ teacherName() }}</strong>
+            <span>Camera</span>
+          </footer>
+        </aside>
+      }
     </div>
   </section>
 
+  @if (teacherAudioStream(); as audioStream) {
+    <audio class="teacher-audio" autoplay [sfuMediaStream]="audioStream"></audio>
+  }
+
+  @if (!roomJoined()) {
+    <section class="student-prejoin-backdrop" aria-labelledby="student-prejoin-title" aria-modal="true" role="dialog">
+      <article class="student-prejoin-modal">
+        <header class="student-prejoin-header">
+          <div>
+            <p>Live class</p>
+            <h1 id="student-prejoin-title">Ready to join?</h1>
+          </div>
+          <span class="prejoin-status" aria-live="polite">{{ localMediaStatus() }}</span>
+        </header>
+
+        <div class="prejoin-preview" [class.camera-off]="!localVideoPreviewStream()">
+          @if (localVideoPreviewStream(); as stream) {
+            <video autoplay muted playsinline [sfuMediaStream]="stream"></video>
+          } @else {
+            <div class="prejoin-preview-placeholder">
+              <span class="speaker-avatar large">{{ studentInitials() }}</span>
+              <strong>{{ chatDisplayName() }}</strong>
+            </div>
+          }
+        </div>
+
+        <div
+          class="student-media-controls prejoin-media-controls"
+          [class.problem]="mediaDeviceProblem()"
+          [class.teacher-moderated]="teacherModerationMessage()"
+          aria-label="Pre-join microphone and camera controls"
+        >
+          <label class="student-device-select audio-device" [class.teacher-disabled]="teacherDisabledAudio()">
+            <span>Mic</span>
+            <select
+              [value]="selectedAudioDeviceId()"
+              [disabled]="!canSwitchAudioDevice()"
+              [title]="teacherDisabledAudio() ? 'Teacher muted your microphone' : 'Choose microphone'"
+              [attr.aria-busy]="switchingAudioDevice()"
+              aria-label="Choose microphone"
+              (change)="switchMicrophone($any($event.target).value)"
+            >
+              <option value="">System default</option>
+              @if (audioInputs().length) {
+                @for (device of audioInputs(); track $index) {
+                  <option [value]="device.id">{{ device.label }}</option>
+                }
+              } @else {
+                <option value="" disabled>No microphones</option>
+              }
+            </select>
+          </label>
+          <button
+            class="student-media-toggle mic-toggle"
+            type="button"
+            [class.off]="!localAudioEnabled()"
+            [class.switching]="switchingAudioDevice()"
+            [class.teacher-disabled]="teacherDisabledAudio()"
+            [disabled]="publishingStudentMedia() || switchingAudioDevice()"
+            [title]="teacherDisabledAudio() ? 'Teacher muted your microphone' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
+            [attr.aria-label]="teacherDisabledAudio() ? 'Teacher muted your microphone' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
+            [attr.aria-pressed]="localAudioEnabled()"
+            (click)="toggleMicrophone()"
+          >
+            <span class="student-media-icon mic-icon" aria-hidden="true"></span>
+          </button>
+          <button
+            class="student-media-toggle camera-toggle"
+            type="button"
+            [class.off]="!localVideoEnabled()"
+            [class.switching]="switchingVideoDevice()"
+            [class.teacher-disabled]="teacherDisabledVideo()"
+            [disabled]="publishingStudentMedia() || switchingVideoDevice()"
+            [title]="teacherDisabledVideo() ? 'Teacher stopped your camera' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
+            [attr.aria-label]="teacherDisabledVideo() ? 'Teacher stopped your camera' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
+            [attr.aria-pressed]="localVideoEnabled()"
+            (click)="toggleCamera()"
+          >
+            <span class="student-media-icon camera-icon" aria-hidden="true"></span>
+          </button>
+          <label class="student-device-select video-device" [class.teacher-disabled]="teacherDisabledVideo()">
+            <span>Camera</span>
+            <select
+              [value]="selectedVideoDeviceId()"
+              [disabled]="!canSwitchVideoDevice()"
+              [title]="teacherDisabledVideo() ? 'Teacher stopped your camera' : 'Choose camera'"
+              [attr.aria-busy]="switchingVideoDevice()"
+              aria-label="Choose camera"
+              (change)="switchCamera($any($event.target).value)"
+            >
+              <option value="">System default</option>
+              @if (videoInputs().length) {
+                @for (device of videoInputs(); track $index) {
+                  <option [value]="device.id">{{ device.label }}</option>
+                }
+              } @else {
+                <option value="" disabled>No cameras</option>
+              }
+            </select>
+          </label>
+          <button
+            class="student-device-refresh"
+            type="button"
+            [class.refreshing]="refreshingDevices()"
+            [disabled]="refreshingDevices() || publishingStudentMedia()"
+            title="Refresh devices"
+            aria-label="Refresh camera and microphone devices"
+            (click)="refreshMediaDevices()"
+          >
+            <span aria-hidden="true"></span>
+          </button>
+          @if (mediaDeviceProblem(); as message) {
+            <span class="device-problem-message" role="alert">{{ message }}</span>
+          }
+        </div>
+
+        <footer class="student-prejoin-actions">
+          <button class="button primary prejoin-join-button" type="button" [disabled]="joiningMedia()" (click)="joinClass()">
+            {{ joiningMedia() ? 'Joining...' : 'Join Class' }}
+          </button>
+        </footer>
+      </article>
+    </section>
+  }
+
+  @if (roomJoined()) {
+  <div
+    class="student-media-controls"
+    [class.problem]="mediaDeviceProblem()"
+    [class.teacher-moderated]="teacherModerationMessage()"
+    aria-label="Your microphone and camera controls"
+  >
+    <label class="student-device-select audio-device" [class.teacher-disabled]="teacherDisabledAudio()">
+      <span>Mic</span>
+      <select
+        [value]="selectedAudioDeviceId()"
+        [disabled]="!canSwitchAudioDevice()"
+        [title]="teacherDisabledAudio() ? 'Teacher muted your microphone' : 'Choose microphone'"
+        [attr.aria-busy]="switchingAudioDevice()"
+        aria-label="Choose microphone"
+        (change)="switchMicrophone($any($event.target).value)"
+      >
+        <option value="">System default</option>
+        @if (audioInputs().length) {
+          @for (device of audioInputs(); track $index) {
+            <option [value]="device.id">{{ device.label }}</option>
+          }
+        } @else {
+          <option value="" disabled>No microphones</option>
+        }
+      </select>
+    </label>
+    <button
+      class="student-media-toggle mic-toggle"
+      type="button"
+      [class.off]="!localAudioEnabled()"
+      [class.switching]="switchingAudioDevice()"
+      [class.teacher-disabled]="teacherDisabledAudio()"
+      [disabled]="publishingStudentMedia() || switchingAudioDevice()"
+      [title]="teacherDisabledAudio() ? 'Teacher muted your microphone' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
+      [attr.aria-label]="teacherDisabledAudio() ? 'Teacher muted your microphone' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
+      [attr.aria-pressed]="localAudioEnabled()"
+      (click)="toggleMicrophone()"
+    >
+      <span class="student-media-icon mic-icon" aria-hidden="true"></span>
+    </button>
+    <button
+      class="student-media-toggle camera-toggle"
+      type="button"
+      [class.off]="!localVideoEnabled()"
+      [class.switching]="switchingVideoDevice()"
+      [class.teacher-disabled]="teacherDisabledVideo()"
+      [disabled]="publishingStudentMedia() || switchingVideoDevice()"
+      [title]="teacherDisabledVideo() ? 'Teacher stopped your camera' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
+      [attr.aria-label]="teacherDisabledVideo() ? 'Teacher stopped your camera' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
+      [attr.aria-pressed]="localVideoEnabled()"
+      (click)="toggleCamera()"
+    >
+      <span class="student-media-icon camera-icon" aria-hidden="true"></span>
+    </button>
+    <label class="student-device-select video-device" [class.teacher-disabled]="teacherDisabledVideo()">
+      <span>Camera</span>
+      <select
+        [value]="selectedVideoDeviceId()"
+        [disabled]="!canSwitchVideoDevice()"
+        [title]="teacherDisabledVideo() ? 'Teacher stopped your camera' : 'Choose camera'"
+        [attr.aria-busy]="switchingVideoDevice()"
+        aria-label="Choose camera"
+        (change)="switchCamera($any($event.target).value)"
+      >
+        <option value="">System default</option>
+        @if (videoInputs().length) {
+          @for (device of videoInputs(); track $index) {
+            <option [value]="device.id">{{ device.label }}</option>
+          }
+        } @else {
+          <option value="" disabled>No cameras</option>
+        }
+      </select>
+    </label>
+    <button
+      class="student-device-refresh"
+      type="button"
+      [class.refreshing]="refreshingDevices()"
+      [disabled]="refreshingDevices() || publishingStudentMedia()"
+      title="Refresh devices"
+      aria-label="Refresh camera and microphone devices"
+      (click)="refreshMediaDevices()"
+    >
+      <span aria-hidden="true"></span>
+    </button>
+    <span class="local-media-status" aria-live="polite">{{ localMediaStatus() }}</span>
+    @if (mediaDeviceProblem(); as message) {
+      <span class="device-problem-message" role="alert">{{ message }}</span>
+    }
+  </div>
+  }
+
+  @if (roomJoined()) {
   <button
     class="participants-button"
     type="button"
@@ -47,11 +314,11 @@
 
     <div class="participant-list">
       @for (participant of participants(); track participant.id) {
-        <article class="participant-row" [class.speaking]="participant.speaking">
+        <article class="participant-row" [class.speaking]="participant.speaking" [class.reconnecting]="participant.reconnecting">
           <span class="participant-avatar">{{ participant.initials }}</span>
           <div>
             <strong>{{ participant.name }}</strong>
-            <span>{{ participant.role }}</span>
+            <span>{{ participant.reconnecting ? 'Reconnecting' : participant.role }}</span>
           </div>
           @if (participant.speaking) {
             <span class="speaking-dot" aria-label="Speaking"></span>
@@ -60,5 +327,15 @@
       }
     </div>
   </aside>
+  }
 </main>
-<sfu-session-chat currentUser="Student" currentRole="Student" />
+<sfu-session-chat
+  [currentUser]="chatDisplayName()"
+  currentRole="Student"
+  [sessionId]="session()?.sessionId ?? ''"
+  [batchId]="session()?.batchId ?? ''"
+  [roomId]="session()?.roomId ?? ''"
+  [live]="sessionLive()"
+  [joined]="roomJoined()"
+/>
+}

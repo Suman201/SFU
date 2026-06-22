@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import {
+  DELIVERY_SNAPSHOT_SOURCES,
+  EVENT_DELIVERY_ADAPTER_KINDS,
+  EVENT_DELIVERY_FAILURE_CATEGORIES,
   PLATFORM_EVENT_ACTOR_TYPES,
   PLATFORM_EVENT_SCHEMA_VERSION,
   PLATFORM_EVENT_TYPES,
@@ -12,12 +15,15 @@ import {
 
 export type UserMongoDocument = HydratedDocument<UserDocument>;
 export type BatchMongoDocument = HydratedDocument<BatchDocument>;
+export type StudentEnrollmentMongoDocument = HydratedDocument<StudentEnrollmentDocument>;
 export type BatchScheduleMongoDocument = HydratedDocument<BatchScheduleDocument>;
+export type ClassSessionMongoDocument = HydratedDocument<ClassSessionDocument>;
 export type RoomMongoDocument = HydratedDocument<RoomDocument>;
 export type RoomIncidentEventMongoDocument = HydratedDocument<RoomIncidentEventDocument>;
 export type RoomSnapshotBundleMongoDocument = HydratedDocument<RoomSnapshotBundleDocument>;
 export type PlatformEventMongoDocument = HydratedDocument<PlatformEventDocument>;
 export type WebhookEndpointMongoDocument = HydratedDocument<WebhookEndpointDocument>;
+export type RedisStreamEndpointMongoDocument = HydratedDocument<RedisStreamEndpointDocument>;
 export type WebhookDeliveryMongoDocument = HydratedDocument<WebhookDeliveryDocument>;
 export type ParticipantMongoDocument = HydratedDocument<ParticipantDocument>;
 export type ProducerMongoDocument = HydratedDocument<ProducerDocument>;
@@ -33,6 +39,7 @@ export type EmailVerificationTokenMongoDocument = HydratedDocument<EmailVerifica
 export type AuditLogMongoDocument = HydratedDocument<AuditLogDocument>;
 export type ModerationMongoDocument = HydratedDocument<ModerationDocument>;
 export type ChatMessageMongoDocument = HydratedDocument<ChatMessageDocument>;
+export type ChatReadStateMongoDocument = HydratedDocument<ChatReadStateDocument>;
 export type RecordingMongoDocument = HydratedDocument<RecordingDocument>;
 
 @Schema({ collection: 'users', timestamps: true })
@@ -89,6 +96,8 @@ export type BatchStatus = (typeof BATCH_STATUSES)[number];
 
 export const BATCH_WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'] as const;
 export type BatchWeekday = (typeof BATCH_WEEKDAYS)[number];
+export const CLASS_SESSION_STATUSES = ['scheduled', 'live', 'completed', 'cancelled'] as const;
+export type ClassSessionStatus = (typeof CLASS_SESSION_STATUSES)[number];
 
 @Schema({ collection: 'batches', timestamps: true })
 export class BatchDocument {
@@ -136,6 +145,79 @@ BatchSchema.index(
 );
 BatchSchema.index({ teacherId: 1, deletedAt: 1, createdAt: -1 });
 
+export const STUDENT_ENROLLMENT_STATUSES = ['active', 'pending', 'completed', 'cancelled', 'suspended'] as const;
+export type StudentEnrollmentStatus = (typeof STUDENT_ENROLLMENT_STATUSES)[number];
+
+@Schema({ collection: 'student_enrollments', timestamps: true })
+export class StudentEnrollmentDocument {
+  @Prop({ type: String, default: randomUUID })
+  _id!: string;
+
+  @Prop({ required: true, index: true })
+  studentId!: string;
+
+  @Prop({ trim: true, maxlength: 120 })
+  studentName?: string;
+
+  @Prop({ lowercase: true, trim: true, maxlength: 254 })
+  studentEmail?: string;
+
+  @Prop({ trim: true })
+  courseId?: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ trim: true, maxlength: 120 })
+  batchName?: string;
+
+  @Prop({ trim: true, index: true })
+  teacherId?: string;
+
+  @Prop({ required: true, enum: STUDENT_ENROLLMENT_STATUSES, default: 'active', index: true })
+  status!: StudentEnrollmentStatus;
+
+  @Prop({ type: Date })
+  enrolledAt?: Date;
+
+  @Prop({ type: Date })
+  completedAt?: Date;
+
+  @Prop({ type: Date })
+  cancelledAt?: Date;
+
+  @Prop({ type: Date })
+  suspendedAt?: Date;
+
+  @Prop({ trim: true })
+  createdBy?: string;
+
+  @Prop({ trim: true })
+  updatedBy?: string;
+
+  @Prop({ type: Date, index: true })
+  deletedAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const StudentEnrollmentSchema = SchemaFactory.createForClass(StudentEnrollmentDocument);
+StudentEnrollmentSchema.index(
+  { studentId: 1, batchId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      deletedAt: { $exists: false },
+      status: 'active'
+    }
+  }
+);
+StudentEnrollmentSchema.index({ batchId: 1, status: 1, updatedAt: -1 });
+StudentEnrollmentSchema.index({ studentId: 1, status: 1, updatedAt: -1 });
+StudentEnrollmentSchema.index({ courseId: 1, status: 1, updatedAt: -1 });
+StudentEnrollmentSchema.index({ teacherId: 1, status: 1, updatedAt: -1 });
+
 @Schema({ collection: 'batch_schedules', timestamps: true })
 export class BatchScheduleDocument {
   @Prop({ type: String, default: randomUUID })
@@ -156,6 +238,67 @@ export class BatchScheduleDocument {
 
 export const BatchScheduleSchema = SchemaFactory.createForClass(BatchScheduleDocument);
 BatchScheduleSchema.index({ batchId: 1, dayOfWeek: 1 }, { unique: true });
+
+@Schema({ collection: 'class_sessions', timestamps: true })
+export class ClassSessionDocument {
+  @Prop({ type: String, default: randomUUID })
+  _id!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ required: true, index: true })
+  teacherId!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 180 })
+  title!: string;
+
+  @Prop({ required: true, min: 1 })
+  sessionNumber!: number;
+
+  @Prop({ required: true, type: Date, index: true })
+  scheduledAt!: Date;
+
+  @Prop({ required: true, min: 1, default: 60 })
+  durationMinutes!: number;
+
+  @Prop({ required: true, enum: CLASS_SESSION_STATUSES, default: 'scheduled', index: true })
+  status!: ClassSessionStatus;
+
+  @Prop({ required: true, trim: true, index: true })
+  roomId!: string;
+
+  @Prop({ required: true, trim: true })
+  chatChannelId!: string;
+
+  @Prop({ required: true, trim: true })
+  whiteboardChannelId!: string;
+
+  @Prop({ type: Date })
+  startedAt?: Date;
+
+  @Prop({ type: Date })
+  completedAt?: Date;
+
+  @Prop({ type: Date })
+  cancelledAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const ClassSessionSchema = SchemaFactory.createForClass(ClassSessionDocument);
+ClassSessionSchema.index({ batchId: 1, scheduledAt: 1 });
+ClassSessionSchema.index({ batchId: 1, status: 1, scheduledAt: 1 });
+ClassSessionSchema.index({ teacherId: 1, status: 1, scheduledAt: 1 });
+ClassSessionSchema.index(
+  { batchId: 1, status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'live' },
+    name: 'uniq_live_class_session_per_batch'
+  }
+);
 
 @Schema({ collection: 'roles', timestamps: true })
 export class RoleDocument {
@@ -800,6 +943,12 @@ export class WebhookEndpointHealthDocument {
   @Prop({ trim: true, maxlength: 2000 })
   lastError?: string;
 
+  @Prop({ type: String, enum: EVENT_DELIVERY_FAILURE_CATEGORIES })
+  lastFailureCategory?: (typeof EVENT_DELIVERY_FAILURE_CATEGORIES)[number];
+
+  @Prop({ trim: true, maxlength: 2000 })
+  lastDeliveryReference?: string;
+
   @Prop({ required: true, min: 0, default: 0 })
   consecutiveFailures!: number;
 }
@@ -808,6 +957,9 @@ export const WebhookEndpointHealthSchema = SchemaFactory.createForClass(WebhookE
 
 @Schema({ collection: 'webhook_endpoints', timestamps: true })
 export class WebhookEndpointDocument {
+  @Prop({ type: String, required: true, enum: ['webhook'], default: 'webhook', index: true })
+  adapterKind!: 'webhook';
+
   @Prop({ required: true, trim: true, maxlength: 160 })
   name!: string;
 
@@ -861,6 +1013,49 @@ export const WebhookEndpointSchema = SchemaFactory.createForClass(WebhookEndpoin
 WebhookEndpointSchema.index({ enabled: 1, updatedAt: -1 });
 WebhookEndpointSchema.index({ subscribedEventTypes: 1, enabled: 1 });
 
+@Schema({ collection: 'redis_stream_endpoints', timestamps: true })
+export class RedisStreamEndpointDocument {
+  @Prop({ type: String, required: true, enum: ['redis-stream'], default: 'redis-stream', index: true })
+  adapterKind!: 'redis-stream';
+
+  @Prop({ required: true, trim: true, maxlength: 160 })
+  name!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 200, index: true })
+  streamKey!: string;
+
+  @Prop({ min: 1, max: 5_000_000 })
+  maxLen?: number;
+
+  @Prop({ required: true, default: true, index: true })
+  enabled!: boolean;
+
+  @Prop({ type: [String], enum: PLATFORM_EVENT_TYPES, required: true, default: [] })
+  subscribedEventTypes!: Array<(typeof PLATFORM_EVENT_TYPES)[number]>;
+
+  @Prop({ type: [String], default: [] })
+  roomFilterIds!: string[];
+
+  @Prop({ required: true, min: 100, max: 30000, default: 2000 })
+  timeoutMs!: number;
+
+  @Prop({ required: true, min: 1, max: 10, default: 3 })
+  maxAttempts!: number;
+
+  @Prop({ required: true, min: 250, max: 3_600_000, default: 1000 })
+  initialBackoffMs!: number;
+
+  @Prop({ type: WebhookEndpointHealthSchema, default: () => ({ status: 'healthy', consecutiveFailures: 0 }) })
+  health!: WebhookEndpointHealthDocument;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const RedisStreamEndpointSchema = SchemaFactory.createForClass(RedisStreamEndpointDocument);
+RedisStreamEndpointSchema.index({ enabled: 1, updatedAt: -1 });
+RedisStreamEndpointSchema.index({ subscribedEventTypes: 1, enabled: 1 });
+
 @Schema({ _id: false })
 export class WebhookDeliveryAttemptDocument {
   @Prop({ required: true, min: 1 })
@@ -883,6 +1078,12 @@ export class WebhookDeliveryAttemptDocument {
 
   @Prop({ trim: true, maxlength: 4000 })
   error?: string;
+
+  @Prop({ type: String, enum: EVENT_DELIVERY_FAILURE_CATEGORIES })
+  failureCategory?: (typeof EVENT_DELIVERY_FAILURE_CATEGORIES)[number];
+
+  @Prop({ trim: true, maxlength: 2000 })
+  deliveryReference?: string;
 
   @Prop()
   nextAttemptAt?: Date;
@@ -913,8 +1114,65 @@ export class WebhookReplayActorDocument {
 
 export const WebhookReplayActorSchema = SchemaFactory.createForClass(WebhookReplayActorDocument);
 
+@Schema({ _id: false })
+export class WebhookEndpointSnapshotDocument {
+  @Prop({ type: String, required: true, enum: EVENT_DELIVERY_ADAPTER_KINDS, default: 'webhook' })
+  adapterKind!: (typeof EVENT_DELIVERY_ADAPTER_KINDS)[number];
+
+  @Prop({ trim: true, maxlength: 2000 })
+  url?: string;
+
+  @Prop({ type: String, enum: ['hmac-sha256'], default: 'hmac-sha256' })
+  signingAlgorithm?: 'hmac-sha256';
+
+  @Prop({ trim: true, maxlength: 80 })
+  secretFingerprint?: string;
+
+  @Prop()
+  secretLastRotatedAt?: Date;
+
+  @Prop()
+  endpointUpdatedAt?: Date;
+
+  @Prop({ trim: true, maxlength: 200 })
+  streamKey?: string;
+
+  @Prop({ min: 1, max: 5_000_000 })
+  maxLen?: number;
+
+  @Prop({ required: true, min: 100, max: 30000 })
+  timeoutMs!: number;
+
+  @Prop({ required: true, min: 1, max: 10 })
+  maxAttempts!: number;
+
+  @Prop({ required: true, min: 250, max: 3_600_000 })
+  initialBackoffMs!: number;
+
+  @Prop({ type: [String], enum: PLATFORM_EVENT_TYPES, required: true, default: [] })
+  subscribedEventTypes!: Array<(typeof PLATFORM_EVENT_TYPES)[number]>;
+
+  @Prop({ type: [String], default: [] })
+  roomFilterIds!: string[];
+
+  @Prop({ select: false })
+  signingSecretCiphertext?: string;
+
+  @Prop({ select: false })
+  signingSecretIv?: string;
+
+  @Prop({ select: false })
+  signingSecretAuthTag?: string;
+
+}
+
+export const WebhookEndpointSnapshotSchema = SchemaFactory.createForClass(WebhookEndpointSnapshotDocument);
+
 @Schema({ collection: 'webhook_deliveries', timestamps: true })
 export class WebhookDeliveryDocument {
+  @Prop({ type: String, required: true, enum: EVENT_DELIVERY_ADAPTER_KINDS, default: 'webhook', index: true })
+  adapterKind!: (typeof EVENT_DELIVERY_ADAPTER_KINDS)[number];
+
   @Prop({ required: true, index: true })
   endpointId!: string;
 
@@ -930,6 +1188,12 @@ export class WebhookDeliveryDocument {
   @Prop({ type: String, required: true, enum: WEBHOOK_DELIVERY_STATUSES, default: 'queued', index: true })
   status!: (typeof WEBHOOK_DELIVERY_STATUSES)[number];
 
+  @Prop({ type: String, required: true, enum: DELIVERY_SNAPSHOT_SOURCES, default: 'queued_endpoint_state', index: true })
+  snapshotSource!: (typeof DELIVERY_SNAPSHOT_SOURCES)[number];
+
+  @Prop({ type: WebhookEndpointSnapshotSchema, required: true })
+  endpointSnapshot!: WebhookEndpointSnapshotDocument;
+
   @Prop({ required: true, min: 0, default: 0 })
   attemptCount!: number;
 
@@ -938,6 +1202,12 @@ export class WebhookDeliveryDocument {
 
   @Prop({ trim: true, maxlength: 4000 })
   lastError?: string;
+
+  @Prop({ type: String, enum: EVENT_DELIVERY_FAILURE_CATEGORIES, index: true })
+  lastFailureCategory?: (typeof EVENT_DELIVERY_FAILURE_CATEGORIES)[number];
+
+  @Prop({ trim: true, maxlength: 2000 })
+  lastDeliveryReference?: string;
 
   @Prop({ required: true, type: Date, default: Date.now, index: true })
   nextAttemptAt!: Date;
@@ -974,8 +1244,18 @@ export const WebhookDeliverySchema = SchemaFactory.createForClass(WebhookDeliver
 WebhookDeliverySchema.index({ endpointId: 1, createdAt: -1 });
 WebhookDeliverySchema.index({ eventId: 1, endpointId: 1, createdAt: -1 });
 WebhookDeliverySchema.index({ roomId: 1, createdAt: -1 });
-WebhookDeliverySchema.index({ status: 1, nextAttemptAt: 1, lockedUntil: 1 });
+WebhookDeliverySchema.index({ status: 1, nextAttemptAt: 1, lockedUntil: 1, createdAt: 1 });
 WebhookDeliverySchema.index({ endpointId: 1, status: 1, nextAttemptAt: 1 });
+WebhookDeliverySchema.index({ adapterKind: 1, endpointId: 1, status: 1, lockedUntil: 1, nextAttemptAt: 1, createdAt: 1 });
+WebhookDeliverySchema.index(
+  { adapterKind: 1, eventId: 1, endpointId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: { $in: ['queued', 'retrying', 'dispatching'] }
+    }
+  }
+);
 
 @Schema({ collection: 'participants', timestamps: true })
 export class ParticipantDocument {
@@ -1197,14 +1477,38 @@ ModerationSchema.index({ roomId: 1, userId: 1, action: 1, active: 1 });
 
 @Schema({ collection: 'chat', timestamps: true })
 export class ChatMessageDocument {
+  @Prop({ index: true })
+  sessionId?: string;
+
+  @Prop({ index: true })
+  batchId?: string;
+
   @Prop({ required: true, index: true })
   roomId!: string;
+
+  @Prop({ index: true })
+  channelId?: string;
+
+  @Prop({ index: true })
+  chatChannelId?: string;
 
   @Prop({ required: true, index: true })
   senderId!: string;
 
+  @Prop({ required: true, trim: true, maxlength: 160 })
+  senderName!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 40 })
+  senderRole!: string;
+
   @Prop({ index: true })
   recipientId?: string;
+
+  @Prop({ required: true, enum: ['private', 'broadcast'], default: 'broadcast', index: true })
+  scope!: 'private' | 'broadcast';
+
+  @Prop({ index: true })
+  threadKey?: string;
 
   @Prop({ required: true, trim: true, maxlength: 4000 })
   message!: string;
@@ -1212,14 +1516,67 @@ export class ChatMessageDocument {
   @Prop({ default: false })
   shadowMuted!: boolean;
 
+  @Prop()
+  deletedAt?: Date;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
 
 export const ChatMessageSchema = SchemaFactory.createForClass(ChatMessageDocument);
 ChatMessageSchema.index({ roomId: 1, createdAt: -1 });
+ChatMessageSchema.index({ sessionId: 1, createdAt: -1 });
+ChatMessageSchema.index({ chatChannelId: 1, createdAt: -1 });
+ChatMessageSchema.index({ sessionId: 1, senderId: 1, recipientId: 1, createdAt: -1 });
+ChatMessageSchema.index({ sessionId: 1, threadKey: 1, createdAt: -1 });
 ChatMessageSchema.index({ roomId: 1, senderId: 1, createdAt: -1 });
 ChatMessageSchema.index({ roomId: 1, recipientId: 1, createdAt: -1 });
+ChatMessageSchema.index({ roomId: 1, scope: 1, createdAt: -1 });
+
+@Schema({ collection: 'chat_read_states', timestamps: true })
+export class ChatReadStateDocument {
+  @Prop({ required: true, unique: true, index: true })
+  readStateKey!: string;
+
+  @Prop({ required: true, index: true })
+  sessionId!: string;
+
+  @Prop({ index: true })
+  batchId?: string;
+
+  @Prop({ required: true, index: true })
+  roomId!: string;
+
+  @Prop({ index: true })
+  channelId?: string;
+
+  @Prop({ index: true })
+  chatChannelId?: string;
+
+  @Prop({ required: true, index: true })
+  userId!: string;
+
+  @Prop({ index: true })
+  participantId?: string;
+
+  @Prop({ required: true, enum: ['private', 'broadcast'], index: true })
+  scope!: 'private' | 'broadcast';
+
+  @Prop({ index: true })
+  threadKey?: string;
+
+  @Prop({ required: true, type: Date, index: true })
+  lastReadAt!: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const ChatReadStateSchema = SchemaFactory.createForClass(ChatReadStateDocument);
+ChatReadStateSchema.index({ sessionId: 1, userId: 1, scope: 1, threadKey: 1 }, { unique: true });
+ChatReadStateSchema.index({ sessionId: 1, userId: 1 });
+ChatReadStateSchema.index({ roomId: 1, userId: 1, updatedAt: -1 });
+ChatReadStateSchema.index({ sessionId: 1, threadKey: 1, updatedAt: -1 });
 
 @Schema({ collection: 'recordings', timestamps: true })
 export class RecordingDocument {

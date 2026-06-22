@@ -169,6 +169,9 @@
           }
 
           @case ('batches') {
+            @if (enrollment.enrollmentError()) {
+              <div class="form-alert">{{ enrollment.enrollmentError() }}</div>
+            }
             @if (batches().length) {
               <div class="batch-list">
                 @for (batch of batches(); track batch.id) {
@@ -188,7 +191,9 @@
                       @if (isEnrolled(batch)) {
                         <a routerLink="/student/dashboard">Enrolled</a>
                       } @else {
-                        <button class="primary" type="button" (click)="enroll(batch)">Enroll</button>
+                        <button class="primary" type="button" [disabled]="isEnrollmentPending(batch)" (click)="enroll(batch)">
+                          {{ isEnrollmentPending(batch) ? 'Enrolling...' : 'Enroll' }}
+                        </button>
                       }
                     </footer>
                   </article>

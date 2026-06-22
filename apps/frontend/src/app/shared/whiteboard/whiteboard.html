@@ -1,15 +1,8 @@
 <section class="whiteboard-pane" aria-label="Class whiteboard">
   <div class="whiteboard-toolbar">
-    <!-- <div>
-      <p class="eyebrow">{{ eyebrow() }}</p>
-      <h1>{{ title() }}</h1>
-    </div> -->
-
-
     <div class="board-actions" aria-label="Whiteboard tools">
       <div class="menu-group-container">
         <button class="history-button" type="button" title="Menu" aria-label="Menu" (click)="toggleMenu($event)">
-          <!-- <img src="icons/menu.svg" alt=""> -->
           <svg width="800px" height="800px" viewBox="0 0 24 24" fill="none">
             <path d="M4 6H20M7 12H17M9 18H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round" />
@@ -87,6 +80,8 @@
         }
       </div>
 
+      <span class="tool-divider" aria-hidden="true"></span>
+
       @if (!readOnly()) {
       <button class="icon-button tool-button" [class.active]="activeTool() === 'select'" type="button"
         title="Select and move" aria-label="Select and move" [attr.aria-pressed]="activeTool() === 'select'"
@@ -111,6 +106,8 @@
         (click)="selectTool('laser')">
         <span class="tool-icon laser-icon" aria-hidden="true"></span>
       </button>
+
+      <span class="tool-divider short" aria-hidden="true"></span>
 
       <div class="shape-group-container">
         <button class="icon-button tool-button main-shape-btn" [class.active]="isShapeTool(activeTool())" type="button"
@@ -150,6 +147,27 @@
         aria-label="Fill shape" [attr.aria-pressed]="fillEnabled()" (click)="toggleFill()">
         <span class="tool-icon fill-icon" aria-hidden="true"></span>
       </button>
+
+      <div class="fill-color-group-container">
+        <button class="color-swatch fill-color-btn" [class.active]="fillEnabled()" [style.background]="fillColor()"
+          type="button" title="Fill color" aria-label="Fill color" (click)="toggleFillColorMenu($event)">
+          <span class="chevron-icon"></span>
+        </button>
+
+        @if (fillColorMenuOpen()) {
+        <div class="shape-dropdown-overlay" (click)="fillColorMenuOpen.set(false)"></div>
+        <div class="color-dropdown fill-color-dropdown">
+          @for (color of colors; track color) {
+          <button class="color-swatch" [class.active]="fillColor() === color" [style.background]="color" type="button"
+            title="Fill color" aria-label="Fill color" (click)="selectFillColor(color)"></button>
+          }
+          <label class="custom-color-picker" title="Custom fill color" aria-label="Custom fill color">
+            <input type="color" [value]="fillColor()" (change)="setCustomFillColor($event)" />
+            <span aria-hidden="true"></span>
+          </label>
+        </div>
+        }
+      </div>
       <button class="icon-button tool-button" [class.active]="snapToGrid()" type="button" title="Snap to grid"
         aria-label="Snap to grid" [attr.aria-pressed]="snapToGrid()" (click)="toggleSnapToGrid()">
         <span class="tool-icon snap-icon" aria-hidden="true"></span>
@@ -166,6 +184,8 @@
       </button>
       }
 
+      <span class="tool-divider short" aria-hidden="true"></span>
+
       <button class="icon-button tool-button" [class.active]="activeTool() === 'pan'" type="button" title="Pan"
         aria-label="Pan" [attr.aria-pressed]="activeTool() === 'pan'" (click)="selectTool('pan')">
         <!-- <span class="tool-icon pan-icon" aria-hidden="true"></span> -->
@@ -179,6 +199,8 @@
       </button>
 
       @if (!readOnly()) {
+      <span class="tool-divider short" aria-hidden="true"></span>
+
       <div class="color-group-container">
         <button class="color-swatch main-color-btn" [style.background]="strokeColor()" type="button"
           title="Drawing color" aria-label="Drawing color" (click)="toggleColorMenu($event)">
@@ -192,6 +214,10 @@
           <button class="color-swatch" [class.active]="strokeColor() === color" [style.background]="color" type="button"
             title="Drawing color" aria-label="Drawing color" (click)="selectColor(color)"></button>
           }
+          <label class="custom-color-picker" title="Custom drawing color" aria-label="Custom drawing color">
+            <input type="color" [value]="strokeColor()" (change)="setCustomStrokeColor($event)" />
+            <span aria-hidden="true"></span>
+          </label>
         </div>
         }
       </div>
@@ -228,14 +254,19 @@
 
   <div class="pan">
     <div class="page-tabs" aria-label="Whiteboard pages">
-      @for (page of pages(); track page.id) {
-      <button type="button" [class.active]="page.id === activePageId()" (click)="selectPage(page.id)">{{ page.title
-        }}</button>
-      }
-      @if (!readOnly()) {
-      <button type="button" aria-label="Add board page" title="Add board page" (click)="addPage()">+</button>
-      <button type="button" aria-label="Remove current board page" title="Remove current board page"
-        [disabled]="pages().length <= 1" (click)="removeActivePage()">-</button>
+      <div class="page-tab-list">
+        @for (page of pages(); track page.id) {
+        <button type="button" [class.active]="page.id === activePageId()" (click)="selectPage(page.id)">{{ page.title
+          }}</button>
+        }
+        @if (!readOnly()) {
+        <button type="button" aria-label="Add board page" title="Add board page" (click)="addPage()">+</button>
+        <button type="button" aria-label="Remove current board page" title="Remove current board page"
+          [disabled]="pages().length <= 1" (click)="removeActivePage()">-</button>
+        }
+      </div>
+      @if (showEndSession()) {
+      <button class="end-session-button" type="button" (click)="requestEndSession()">End session</button>
       }
     </div>
 
@@ -267,6 +298,12 @@
         }
       </div>
 
+      <div class="canvas-hud" aria-label="Whiteboard status">
+        <span>{{ activeToolLabel() }}</span>
+        <span>{{ zoomPercent() }}</span>
+        <span>{{ elementCount() }} objects</span>
+      </div>
+
       @if (contextMenu(); as menu) {
       <div class="context-menu" [style.left.px]="menu.x" [style.top.px]="menu.y" role="menu"
         aria-label="Element actions">
@@ -274,11 +311,18 @@
         <button type="button" role="menuitem" (click)="groupSelected()">Group</button>
         <button type="button" role="menuitem" (click)="ungroupSelected()">Ungroup</button>
         <button type="button" role="menuitem" (click)="duplicateSelected()">Duplicate</button>
+        <span class="context-menu-divider" aria-hidden="true"></span>
+        <button type="button" role="menuitem" (click)="flipSelected('left')">Flip left</button>
+        <button type="button" role="menuitem" (click)="flipSelected('right')">Flip right</button>
         <button type="button" role="menuitem" (click)="flipSelected('horizontal')">Flip horizontal</button>
         <button type="button" role="menuitem" (click)="flipSelected('vertical')">Flip vertical</button>
+        <span class="context-menu-divider" aria-hidden="true"></span>
+        <button type="button" role="menuitem" (click)="bringSelectedToFront()">Bring to front</button>
         <button type="button" role="menuitem" (click)="bringSelectedForward()">Bring forward</button>
         <button type="button" role="menuitem" (click)="sendSelectedBackward()">Send backward</button>
-        <button class="danger-item" type="button" role="menuitem" (click)="deleteSelected()">Delete</button>
+        <button type="button" role="menuitem" (click)="sendSelectedToBack()">Send to back</button>
+        <span class="context-menu-divider" aria-hidden="true"></span>
+        <button class="danger-item" type="button" role="menuitem" (click)="removeSelected()">Remove</button>
       </div>
       }
     </div>

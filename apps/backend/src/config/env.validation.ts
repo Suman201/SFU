@@ -63,6 +63,13 @@ const schema = Joi.object({
   WEBHOOK_DEFAULT_INITIAL_BACKOFF_MS: Joi.number().integer().min(250).max(3_600_000).default(2000),
   WEBHOOK_DELIVERY_POLL_INTERVAL_MS: Joi.number().integer().min(250).max(60_000).default(1000),
   WEBHOOK_DELIVERY_LEASE_MS: Joi.number().integer().min(1000).max(300_000).default(30000),
+  WEBHOOK_DELIVERY_CONCURRENCY: Joi.number().integer().min(1).max(64).default(4),
+  WEBHOOK_DELIVERY_MAX_BATCH_PER_PUMP: Joi.number().integer().min(1).max(256).default(16),
+  WEBHOOK_DELIVERY_MAX_CONCURRENT_PER_ENDPOINT: Joi.number().integer().min(1).max(32).default(2),
+  EVENT_LOG_RETENTION_DAYS: Joi.number().integer().min(1).max(3650).default(30),
+  WEBHOOK_DELIVERY_RETENTION_DAYS: Joi.number().integer().min(1).max(3650).default(14),
+  WEBHOOK_EXHAUSTED_DELIVERY_RETENTION_DAYS: Joi.number().integer().min(1).max(3650).default(30),
+  EVENT_RETENTION_CLEANUP_INTERVAL_MS: Joi.number().integer().min(60_000).max(86_400_000).default(3_600_000),
   S3_ENDPOINT: Joi.string().allow('').optional(),
   S3_BUCKET: Joi.string().allow('').optional(),
   S3_ACCESS_KEY_ID: Joi.string().allow('').optional(),
@@ -114,6 +121,25 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
     semanticErrors.push('MEDIA_WORKER_HEARTBEAT_TIMEOUT_MS must be greater than MEDIA_WORKER_HEARTBEAT_INTERVAL_MS');
   }
 
+  const eventRetentionDays = Number(validated.EVENT_LOG_RETENTION_DAYS);
+  const deliveryRetentionDays = Number(validated.WEBHOOK_DELIVERY_RETENTION_DAYS);
+  const exhaustedDeliveryRetentionDays = Number(validated.WEBHOOK_EXHAUSTED_DELIVERY_RETENTION_DAYS);
+  const webhookDeliveryConcurrency = Number(validated.WEBHOOK_DELIVERY_CONCURRENCY);
+  const webhookDeliveryMaxBatchPerPump = Number(validated.WEBHOOK_DELIVERY_MAX_BATCH_PER_PUMP);
+  const webhookMaxConcurrentPerEndpoint = Number(validated.WEBHOOK_DELIVERY_MAX_CONCURRENT_PER_ENDPOINT);
+  if (eventRetentionDays < deliveryRetentionDays) {
+    semanticErrors.push('EVENT_LOG_RETENTION_DAYS must be greater than or equal to WEBHOOK_DELIVERY_RETENTION_DAYS');
+  }
+  if (eventRetentionDays < exhaustedDeliveryRetentionDays) {
+    semanticErrors.push('EVENT_LOG_RETENTION_DAYS must be greater than or equal to WEBHOOK_EXHAUSTED_DELIVERY_RETENTION_DAYS');
+  }
+  if (webhookDeliveryMaxBatchPerPump < webhookDeliveryConcurrency) {
+    semanticErrors.push('WEBHOOK_DELIVERY_MAX_BATCH_PER_PUMP must be greater than or equal to WEBHOOK_DELIVERY_CONCURRENCY');
+  }
+  if (webhookMaxConcurrentPerEndpoint > webhookDeliveryConcurrency) {
+    semanticErrors.push('WEBHOOK_DELIVERY_MAX_CONCURRENT_PER_ENDPOINT must be less than or equal to WEBHOOK_DELIVERY_CONCURRENCY');
+  }
+
   const nodeEnv = String(validated.NODE_ENV ?? 'development');
   if (nodeEnv === 'production') {
     validatePublicUrl(validated.PUBLIC_URL, 'PUBLIC_URL', semanticErrors);
@@ -126,6 +152,10 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
 
     if (!String(validated.OPERATIONS_TOKEN ?? '').trim()) {
       semanticErrors.push('OPERATIONS_TOKEN is required in production');
+    }
+
+    if (validated.WEBHOOK_DELIVERY_ENABLED === true && !String(validated.WEBHOOK_SECRET_ENCRYPTION_KEY ?? '').trim()) {
+      semanticErrors.push('WEBHOOK_SECRET_ENCRYPTION_KEY is required in production when webhook delivery is enabled');
     }
   }
 

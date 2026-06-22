@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  HostListener,
   OnDestroy,
   ViewChild,
   computed,
@@ -28,6 +29,7 @@ interface WhiteboardElementBase {
 export interface WhiteboardStrokeElement extends WhiteboardElementBase {
   type: 'stroke';
   color: string;
+  fillColor?: string | null;
   width: number;
   points: WhiteboardPoint[];
 }
@@ -108,6 +110,7 @@ interface TextDraft {
 }
 
 type TransformHandle = 'nw' | 'ne' | 'sw' | 'se';
+type FlipDirection = 'horizontal' | 'vertical' | 'left' | 'right';
 
 interface ElementBounds {
   x: number;
@@ -133,8 +136,32 @@ interface AlignmentGuide {
   position: number;
 }
 
+interface SelectionMarquee {
+  start: WhiteboardPoint;
+  current: WhiteboardPoint;
+  append: boolean;
+  initialIds: string[];
+}
+
+interface StrokeFillPath {
+  points: WhiteboardPoint[];
+}
+
 const GRID_SIZE = 24;
 const ALIGNMENT_TOLERANCE = 6;
+const TOOL_LABELS: Record<WhiteboardTool, string> = {
+  select: 'Select',
+  pen: 'Pen',
+  eraser: 'Erase',
+  line: 'Line',
+  arrow: 'Arrow',
+  rectangle: 'Rectangle',
+  ellipse: 'Ellipse',
+  star: 'Star',
+  text: 'Text',
+  laser: 'Laser',
+  pan: 'Pan'
+};
 
 @Component({
   selector: 'sfu-whiteboard',
@@ -147,9 +174,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   readonly title = input('Whiteboard');
   readonly eyebrow = input('Teacher session');
   readonly readOnly = input(false);
+  readonly showEndSession = input(false);
   readonly cursors = input<WhiteboardCursor[]>([]);
   readonly commandCommitted = output<WhiteboardCommand>();
   readonly cursorMoved = output<WhiteboardCursor>();
+  readonly endSession = output<void>();
 
   @ViewChild('whiteboardSurface') private readonly whiteboardSurface?: ElementRef<HTMLDivElement>;
   @ViewChild('whiteboardCanvas') private readonly whiteboardCanvas?: ElementRef<HTMLCanvasElement>;
@@ -160,13 +189,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly activeShapeTool = signal<WhiteboardShapeTool>('rectangle');
   protected readonly shapeMenuOpen = signal(false);
   protected readonly colorMenuOpen = signal(false);
+  protected readonly fillColorMenuOpen = signal(false);
   protected readonly brushMenuOpen = signal(false);
   protected readonly menuOpen = signal(false);
   protected readonly strokeColor = signal('#071c41');
+  protected readonly fillColor = signal('#FFD150');
   protected readonly fillEnabled = signal(false);
   protected readonly strokeWidth = signal(4);
   protected readonly fontSize = signal(28);
-  protected readonly colors = ['#071c41', '#0f5bf1', '#14924f', '#ffbf30', '#ec4f82'];
+  protected readonly colors = ['#071c41', '#458B73', '#F26076', '#FF9760', '#FFD150'];
   protected readonly brushSizes = [3, 6, 10, 14];
   protected readonly zoom = signal(1);
   protected readonly panX = signal(0);
@@ -176,6 +207,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly contextMenu = signal<ContextMenuState | null>(null);
   protected readonly laserPoint = signal<WhiteboardPoint | null>(null);
   protected readonly alignmentGuides = signal<AlignmentGuide[]>([]);
+  protected readonly selectionMarquee = signal<SelectionMarquee | null>(null);
   protected readonly snapToGrid = signal(false);
   protected readonly showGrid = signal(true);
   protected readonly pages = signal<WhiteboardPage[]>([this.createPage('Board 1')]);
@@ -184,12 +216,16 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly activePage = computed(() => this.pages().find((page) => page.id === this.activePageId()) ?? this.pages()[0]!);
   protected readonly boardTransform = computed(() => `translate(${this.panX()}px, ${this.panY()}px) scale(${this.zoom()})`);
   protected readonly zoomPercent = computed(() => `${Math.round(this.zoom() * 100)}%`);
+  protected readonly activeToolLabel = computed(() => TOOL_LABELS[this.activeTool()]);
+  protected readonly elementCount = computed(() => this.activePage().elements.length);
   protected readonly canUndo = computed(() => this.historyVersion() >= 0 && this.historyPast.length > 0);
   protected readonly canRedo = computed(() => this.historyVersion() >= 0 && this.historyFuture.length > 0);
 
   private context: CanvasRenderingContext2D | null = null;
   private previewElement: WhiteboardElement | null = null;
   private drawing = false;
+  private erasing = false;
+  private eraseHistoryPushed = false;
   private lastPoint: WhiteboardPoint | null = null;
   private shapeStart: WhiteboardPoint | null = null;
   private panStart: PanStart | null = null;
@@ -198,6 +234,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   private pendingCommands: WhiteboardCommand[] = [];
   private resizeObserver?: ResizeObserver;
   private imageCache = new Map<string, HTMLImageElement>();
+  private clipboardElements: WhiteboardElement[] = [];
+  private clipboardPasteCount = 0;
   private historyPast: WhiteboardPage[][] = [];
   private historyFuture: WhiteboardPage[][] = [];
   private laserTimeout?: number;
@@ -222,6 +260,75 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.resizeObserver?.disconnect();
     if (this.laserTimeout) {
       window.clearTimeout(this.laserTimeout);
+    }
+  }
+
+  @HostListener('window:keydown', ['$event'])
+  protected handleKeyboardShortcut(event: KeyboardEvent): void {
+    const editableTarget = this.isEditableShortcutTarget(event.target);
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.cancelKeyboardState();
+      return;
+    }
+
+    if (editableTarget) {
+      return;
+    }
+
+    const key = event.key.toLowerCase();
+    const usesModifier = event.ctrlKey || event.metaKey;
+
+    if (!this.readOnly() && usesModifier && key === 'z') {
+      event.preventDefault();
+      if (event.shiftKey) {
+        this.redo();
+      } else {
+        this.undo();
+      }
+      return;
+    }
+
+    if (!this.readOnly() && usesModifier && key === 'y') {
+      event.preventDefault();
+      this.redo();
+      return;
+    }
+
+    if (!this.readOnly() && usesModifier && key === 'c' && this.selectedElementIds().length) {
+      event.preventDefault();
+      this.copySelected();
+      return;
+    }
+
+    if (!this.readOnly() && usesModifier && key === 'v' && this.clipboardElements.length) {
+      event.preventDefault();
+      this.pasteClipboard();
+      return;
+    }
+
+    if (!this.readOnly() && usesModifier && key === 'd' && this.selectedElementIds().length) {
+      event.preventDefault();
+      this.duplicateSelected();
+      return;
+    }
+
+    if (usesModifier && this.isZoomInShortcut(event)) {
+      event.preventDefault();
+      this.zoomIn();
+      return;
+    }
+
+    if (usesModifier && this.isZoomOutShortcut(event)) {
+      event.preventDefault();
+      this.zoomOut();
+      return;
+    }
+
+    if (!this.readOnly() && (event.key === 'Delete' || event.key === 'Backspace') && this.selectedElementIds().length) {
+      event.preventDefault();
+      this.deleteSelected();
     }
   }
 
@@ -296,11 +403,42 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
     this.strokeColor.set(color);
     this.colorMenuOpen.set(false);
+    this.applyStrokeToSelection(color);
+  }
+
+  protected setCustomStrokeColor(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    this.selectColor(inputElement.value);
   }
 
   protected toggleColorMenu(event: MouseEvent): void {
     event.stopPropagation();
+    this.fillColorMenuOpen.set(false);
     this.colorMenuOpen.update((open) => !open);
+  }
+
+  protected toggleFillColorMenu(event: MouseEvent): void {
+    if (this.readOnly()) {
+      return;
+    }
+    event.stopPropagation();
+    this.colorMenuOpen.set(false);
+    this.fillColorMenuOpen.update((open) => !open);
+  }
+
+  protected selectFillColor(color: string): void {
+    if (this.readOnly()) {
+      return;
+    }
+    this.fillColor.set(color);
+    this.fillEnabled.set(true);
+    this.fillColorMenuOpen.set(false);
+    this.applyFillToSelection(color);
+  }
+
+  protected setCustomFillColor(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    this.selectFillColor(inputElement.value);
   }
 
   protected toggleBrushMenu(event: MouseEvent): void {
@@ -317,7 +455,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (this.readOnly()) {
       return;
     }
-    this.fillEnabled.update((enabled) => !enabled);
+    const nextEnabled = !this.fillEnabled();
+    this.fillEnabled.set(nextEnabled);
+    this.applyFillToSelection(nextEnabled ? this.fillColor() : null);
   }
 
   protected toggleSnapToGrid(): void {
@@ -405,6 +545,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.activePageId.set(nextPages[0]!.id);
     this.selectedElementIds.set([]);
     this.render();
+  }
+
+  protected requestEndSession(): void {
+    this.endSession.emit();
   }
 
   protected clearWhiteboard(): void {
@@ -506,6 +650,36 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.contextMenu.set(null);
   }
 
+  private cancelKeyboardState(): void {
+    this.shapeMenuOpen.set(false);
+    this.colorMenuOpen.set(false);
+    this.fillColorMenuOpen.set(false);
+    this.brushMenuOpen.set(false);
+    this.menuOpen.set(false);
+    this.contextMenu.set(null);
+    this.textDraft.set(null);
+    this.previewElement = null;
+    this.alignmentGuides.set([]);
+    this.selectionMarquee.set(null);
+    this.setSelection([]);
+  }
+
+  private isEditableShortcutTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    const tagName = target.tagName.toLowerCase();
+    return target.isContentEditable || tagName === 'input' || tagName === 'select' || tagName === 'textarea';
+  }
+
+  private isZoomInShortcut(event: KeyboardEvent): boolean {
+    return event.key === '+' || event.key === '=' || event.code === 'NumpadAdd';
+  }
+
+  private isZoomOutShortcut(event: KeyboardEvent): boolean {
+    return event.key === '-' || event.key === '_' || event.code === 'NumpadSubtract';
+  }
+
   protected activateTransform(): void {
     this.activeTool.set('select');
     this.closeContextMenu();
@@ -583,17 +757,30 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  protected flipSelected(direction: 'horizontal' | 'vertical'): void {
+  protected removeSelected(): void {
+    this.deleteSelected();
+  }
+
+  protected flipSelected(direction: FlipDirection): void {
     const selectedIds = this.selectedElementIds();
     if (!selectedIds.length) {
       return;
     }
     this.pushHistory();
     const bounds = this.boundsForElements(selectedIds);
-    this.elements = this.elements.map((element) => (selectedIds.includes(element.id) ? this.flipElement(element, bounds, direction) : element));
+    this.elements = this.elements.map((element) => {
+      if (!selectedIds.includes(element.id)) {
+        return element;
+      }
+      return direction === 'left' || direction === 'right' ? this.rotateElement(element, bounds, direction) : this.flipElement(element, bounds, direction);
+    });
     this.closeContextMenu();
     this.emitSelectionUpserts();
     this.render();
+  }
+
+  protected bringSelectedToFront(): void {
+    this.reorderSelectedToEdge('front');
   }
 
   protected bringSelectedForward(): void {
@@ -602,6 +789,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   protected sendSelectedBackward(): void {
     this.reorderSelected(-1);
+  }
+
+  protected sendSelectedToBack(): void {
+    this.reorderSelectedToEdge('back');
   }
 
   protected cursorTransform(cursor: WhiteboardCursor): string {
@@ -650,7 +841,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         this.movingSelection = true;
         this.pushHistory();
       } else if (!event.shiftKey) {
-        this.setSelection([]);
+        this.selectedElementIds.set([]);
+      }
+      if (!element) {
+        this.selectionMarquee.set({
+          start: point,
+          current: point,
+          append: event.shiftKey,
+          initialIds: this.selectedElementIds()
+        });
       }
       this.lastPoint = point;
       this.render();
@@ -658,17 +857,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
 
     if (this.activeTool() === 'eraser') {
-      const element = this.hitTest(point);
-      if (element) {
-        this.pushHistory();
-        const ids = this.selectionIdsForElement(element);
-        this.elements = this.elements.filter((item) => !ids.includes(item.id));
-        this.setSelection([]);
-        this.render();
-        for (const elementId of ids) {
-          this.commandCommitted.emit({ type: 'delete', elementId, pageId: this.activePageId() });
-        }
-      }
+      this.erasing = true;
+      this.lastPoint = point;
+      this.eraseAlongPath(point, point);
+      this.render();
       return;
     }
 
@@ -708,6 +900,21 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (this.activeTool() === 'laser' && !this.readOnly()) {
       event.preventDefault();
       this.showLaser(point);
+      return;
+    }
+
+    if (this.selectionMarquee()) {
+      event.preventDefault();
+      this.updateSelectionMarquee(point);
+      this.render();
+      return;
+    }
+
+    if (this.erasing && this.lastPoint) {
+      event.preventDefault();
+      this.eraseAlongPath(this.lastPoint, point);
+      this.lastPoint = point;
+      this.render();
       return;
     }
 
@@ -751,7 +958,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       canvas.releasePointerCapture(event.pointerId);
     }
 
-    if (this.movingSelection || this.transformStart) {
+    if (this.selectionMarquee()) {
+      this.selectionMarquee.set(null);
+    } else if (this.movingSelection || this.transformStart) {
       this.emitSelectionUpserts();
     } else if (this.previewElement && !this.isTinyElement(this.previewElement)) {
       this.pushHistory();
@@ -763,6 +972,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.shapeStart = null;
     this.previewElement = null;
     this.panStart = null;
+    this.erasing = false;
+    this.eraseHistoryPushed = false;
+    this.selectionMarquee.set(null);
     this.movingSelection = false;
     this.transformStart = null;
     this.alignmentGuides.set([]);
@@ -832,6 +1044,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (includeOverlays) {
       this.drawAlignmentGuides();
       this.drawSelection();
+      this.drawSelectionMarquee();
     }
   }
 
@@ -939,6 +1152,19 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       context.restore();
       return;
     }
+
+    const fillPath = element.fillColor ? this.strokeFillPath(element) : null;
+    if (element.fillColor && fillPath) {
+      context.beginPath();
+      context.moveTo(fillPath.points[0]!.x, fillPath.points[0]!.y);
+      for (const point of fillPath.points.slice(1)) {
+        context.lineTo(point.x, point.y);
+      }
+      context.closePath();
+      context.fillStyle = element.fillColor;
+      context.fill('evenodd');
+    }
+
     context.beginPath();
     context.moveTo(element.points[0]!.x, element.points[0]!.y);
     for (const point of element.points.slice(1)) {
@@ -1066,6 +1292,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       id: this.createElementId(),
       type: 'stroke',
       color: this.strokeColor(),
+      fillColor: this.fillEnabled() ? this.fillColor() : null,
       width: this.strokeWidth(),
       points
     };
@@ -1077,7 +1304,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       type: 'shape',
       shape,
       strokeColor: this.strokeColor(),
-      fillColor: this.fillEnabled() && this.isFillableShape(shape) ? this.strokeColor() : null,
+      fillColor: this.fillEnabled() && this.isFillableShape(shape) ? this.fillColor() : null,
       width: this.strokeWidth(),
       from,
       to
@@ -1141,6 +1368,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         return true;
       }
     }
+    const fillPath = this.strokeFillPath(element);
+    if (fillPath && this.pointInPolygon(point, fillPath.points)) {
+      return true;
+    }
     return element.points.some((item) => this.distance(point, item) <= tolerance);
   }
 
@@ -1171,6 +1402,281 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       element.position = { x: element.position.x + deltaX, y: element.position.y + deltaY };
     }
     return element;
+  }
+
+  private copySelected(): void {
+    const selectedIds = this.selectedElementIds();
+    if (!selectedIds.length) {
+      return;
+    }
+    this.clipboardElements = this.elements.filter((element) => selectedIds.includes(element.id)).map((element) => this.cloneElement(element));
+    this.clipboardPasteCount = 0;
+  }
+
+  private pasteClipboard(): void {
+    if (!this.clipboardElements.length) {
+      return;
+    }
+    this.pushHistory();
+    this.clipboardPasteCount += 1;
+    const offset = 24 * this.clipboardPasteCount;
+    const pasted = this.cloneElementsForPaste(this.clipboardElements, offset);
+    this.elements = [...this.elements, ...pasted];
+    this.setSelection(pasted.map((element) => element.id));
+    for (const element of pasted) {
+      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+    }
+    this.render();
+  }
+
+  private cloneElementsForPaste(elements: WhiteboardElement[], offset: number): WhiteboardElement[] {
+    const groupMap = new Map<string, string>();
+    return elements.map((element) => {
+      const next = this.cloneElement(element);
+      next.id = this.createElementId();
+      if (next.groupId) {
+        const groupId = groupMap.get(next.groupId) ?? this.createElementId();
+        groupMap.set(next.groupId, groupId);
+        next.groupId = groupId;
+      }
+      this.translateElement(next, offset, offset);
+      return next;
+    });
+  }
+
+  private updateSelectionMarquee(point: WhiteboardPoint): void {
+    const marquee = this.selectionMarquee();
+    if (!marquee) {
+      return;
+    }
+    const nextMarquee = { ...marquee, current: point };
+    const bounds = this.boundsFromAnchor(nextMarquee.start, nextMarquee.current);
+    const marqueeIds = this.elements.filter((element) => this.boundsIntersect(this.boundsForElement(element), bounds)).flatMap((element) => this.selectionIdsForElement(element));
+    this.selectionMarquee.set(nextMarquee);
+    this.selectedElementIds.set(nextMarquee.append ? [...new Set([...nextMarquee.initialIds, ...marqueeIds])] : [...new Set(marqueeIds)]);
+  }
+
+  private drawSelectionMarquee(): void {
+    const context = this.context;
+    const marquee = this.selectionMarquee();
+    if (!context || !marquee) {
+      return;
+    }
+    const bounds = this.boundsFromAnchor(marquee.start, marquee.current);
+    if (bounds.width < 2 && bounds.height < 2) {
+      return;
+    }
+    context.save();
+    context.fillStyle = this.cssVariable('--accent-soft', 'rgba(15, 91, 241, 0.12)');
+    context.strokeStyle = this.cssVariable('--accent', '#0f5bf1');
+    context.lineWidth = 1.4;
+    context.setLineDash([7, 5]);
+    context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    context.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    context.restore();
+  }
+
+  private boundsIntersect(a: ElementBounds, b: ElementBounds): boolean {
+    return a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y;
+  }
+
+  private applyStrokeToSelection(color: string): void {
+    const selectedIds = this.selectedElementIds();
+    if (!selectedIds.length) {
+      return;
+    }
+
+    const changedElements: WhiteboardElement[] = [];
+    const nextElements = this.elements.map((element) => {
+      if (!selectedIds.includes(element.id) || element.type === 'file') {
+        return element;
+      }
+
+      let nextElement: WhiteboardElement;
+      let currentColor: string;
+      if (element.type === 'shape') {
+        currentColor = element.strokeColor;
+        nextElement = { ...element, strokeColor: color };
+      } else {
+        currentColor = element.color;
+        nextElement = { ...element, color };
+      }
+
+      if (currentColor === color) {
+        return element;
+      }
+
+      changedElements.push(nextElement);
+      return nextElement;
+    });
+
+    if (!changedElements.length) {
+      return;
+    }
+
+    this.pushHistory();
+    this.elements = nextElements;
+    for (const element of changedElements) {
+      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+    }
+    this.render();
+  }
+
+  private applyFillToSelection(fillColor: string | null): void {
+    const selectedIds = this.selectedElementIds();
+    if (!selectedIds.length) {
+      return;
+    }
+
+    const changedElements: WhiteboardElement[] = [];
+    const nextElements = this.elements.map((element) => {
+      if (!selectedIds.includes(element.id) || !this.canElementReceiveFill(element)) {
+        return element;
+      }
+      const nextElement = { ...element, fillColor } as WhiteboardElement;
+      const currentFill = 'fillColor' in element ? element.fillColor ?? null : null;
+      if (currentFill === fillColor) {
+        return element;
+      }
+      changedElements.push(nextElement);
+      return nextElement;
+    });
+
+    if (!changedElements.length) {
+      return;
+    }
+
+    this.pushHistory();
+    this.elements = nextElements;
+    for (const element of changedElements) {
+      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+    }
+    this.render();
+  }
+
+  private canElementReceiveFill(element: WhiteboardElement): element is WhiteboardStrokeElement | WhiteboardShapeElement {
+    return (element.type === 'stroke' && !!this.strokeFillPath(element)) || (element.type === 'shape' && this.isFillableShape(element.shape));
+  }
+
+  private eraseAlongPath(from: WhiteboardPoint, to: WhiteboardPoint): void {
+    const radius = this.eraserRadius();
+    const nextElements: WhiteboardElement[] = [];
+    const commands: WhiteboardCommand[] = [];
+    let changed = false;
+
+    for (const element of this.elements) {
+      if (element.type === 'stroke') {
+        const fragments = this.eraseStroke(element, from, to, radius);
+        if (!fragments) {
+          nextElements.push(element);
+          continue;
+        }
+        changed = true;
+        commands.push({ type: 'delete', elementId: element.id, pageId: this.activePageId() });
+        nextElements.push(...fragments);
+        for (const fragment of fragments) {
+          commands.push({ type: 'upsert', element: this.cloneElement(fragment), pageId: this.activePageId() });
+        }
+        continue;
+      }
+
+      if (this.elementIntersectsEraser(element, from, to, radius)) {
+        changed = true;
+        commands.push({ type: 'delete', elementId: element.id, pageId: this.activePageId() });
+        continue;
+      }
+
+      nextElements.push(element);
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    if (!this.eraseHistoryPushed) {
+      this.pushHistory();
+      this.eraseHistoryPushed = true;
+    }
+
+    this.elements = nextElements;
+    this.selectedElementIds.update((ids) => ids.filter((id) => nextElements.some((element) => element.id === id)));
+    for (const command of commands) {
+      this.commandCommitted.emit(command);
+    }
+  }
+
+  private eraseStroke(element: WhiteboardStrokeElement, from: WhiteboardPoint, to: WhiteboardPoint, radius: number): WhiteboardStrokeElement[] | null {
+    const threshold = radius + element.width / 2;
+    if (element.points.length <= 1) {
+      return this.distanceToSegment(element.points[0]!, from, to) <= threshold ? [] : null;
+    }
+
+    const fragments: WhiteboardPoint[][] = [];
+    let current: WhiteboardPoint[] = [];
+    let changed = false;
+
+    for (let index = 0; index < element.points.length - 1; index += 1) {
+      const start = element.points[index]!;
+      const end = element.points[index + 1]!;
+      const segmentErased = this.segmentDistance(start, end, from, to) <= threshold;
+      const startErased = this.distanceToSegment(start, from, to) <= threshold;
+      const endErased = this.distanceToSegment(end, from, to) <= threshold;
+
+      if (!startErased && current.length === 0) {
+        current.push(start);
+      }
+
+      if (segmentErased || startErased || endErased) {
+        changed = true;
+        if (current.length > 1) {
+          fragments.push(current);
+        }
+        current = [];
+        continue;
+      }
+
+      current.push(end);
+    }
+
+    if (current.length > 1) {
+      fragments.push(current);
+    }
+
+    if (!changed) {
+      return null;
+    }
+
+    return fragments.map((points) => ({
+      ...element,
+      id: this.createElementId(),
+      points: points.map((point) => ({ ...point }))
+    }));
+  }
+
+  private elementIntersectsEraser(element: Exclude<WhiteboardElement, WhiteboardStrokeElement>, from: WhiteboardPoint, to: WhiteboardPoint, radius: number): boolean {
+    if (element.type === 'shape' && (element.shape === 'line' || element.shape === 'arrow')) {
+      return this.segmentDistance(element.from, element.to, from, to) <= radius + element.width / 2;
+    }
+    return this.pathIntersectsBounds(from, to, this.expandBounds(this.boundsForElement(element), radius));
+  }
+
+  private eraserRadius(): number {
+    return Math.max(14, this.strokeWidth() * 2.4);
+  }
+
+  private pathIntersectsBounds(from: WhiteboardPoint, to: WhiteboardPoint, bounds: ElementBounds): boolean {
+    const topLeft = { x: bounds.x, y: bounds.y };
+    const topRight = { x: bounds.x + bounds.width, y: bounds.y };
+    const bottomRight = { x: bounds.x + bounds.width, y: bounds.y + bounds.height };
+    const bottomLeft = { x: bounds.x, y: bounds.y + bounds.height };
+    return (
+      this.rectContainsPoint(bounds, from) ||
+      this.rectContainsPoint(bounds, to) ||
+      this.segmentsIntersect(from, to, topLeft, topRight) ||
+      this.segmentsIntersect(from, to, topRight, bottomRight) ||
+      this.segmentsIntersect(from, to, bottomRight, bottomLeft) ||
+      this.segmentsIntersect(from, to, bottomLeft, topLeft)
+    );
   }
 
   private drawSelection(): void {
@@ -1359,6 +1865,50 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return next;
   }
 
+  private rotateElement(element: WhiteboardElement, bounds: ElementBounds, direction: 'left' | 'right'): WhiteboardElement {
+    const next = this.cloneElement(element);
+    const rotatePoint = (point: WhiteboardPoint): WhiteboardPoint => this.rotatePoint(point, bounds, direction);
+    if (next.type === 'stroke') {
+      next.points = next.points.map(rotatePoint);
+      return next;
+    }
+    if (next.type === 'shape') {
+      next.from = rotatePoint(next.from);
+      next.to = rotatePoint(next.to);
+      return next;
+    }
+
+    const elementBounds = this.boundsForElement(next);
+    const center = rotatePoint({
+      x: elementBounds.x + elementBounds.width / 2,
+      y: elementBounds.y + elementBounds.height / 2
+    });
+    if (next.type === 'file') {
+      const width = next.height;
+      const height = next.width;
+      next.width = width;
+      next.height = height;
+      next.position = { x: center.x - width / 2, y: center.y - height / 2 };
+      return next;
+    }
+
+    next.position = {
+      x: center.x - elementBounds.width / 2,
+      y: center.y - elementBounds.height / 2
+    };
+    return next;
+  }
+
+  private rotatePoint(point: WhiteboardPoint, bounds: ElementBounds, direction: 'left' | 'right'): WhiteboardPoint {
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
+    const deltaX = point.x - centerX;
+    const deltaY = point.y - centerY;
+    return direction === 'right'
+      ? { x: centerX - deltaY, y: centerY + deltaX }
+      : { x: centerX + deltaY, y: centerY - deltaX };
+  }
+
   private reorderSelected(direction: 1 | -1): void {
     const selectedIds = this.selectedElementIds();
     if (!selectedIds.length) {
@@ -1376,6 +1926,27 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       [elements[index], elements[target]] = [elements[target]!, elements[index]!];
     }
     this.elements = elements;
+    this.closeContextMenu();
+    this.emitSelectionUpserts();
+    this.render();
+  }
+
+  private reorderSelectedToEdge(edge: 'front' | 'back'): void {
+    const selectedIds = this.selectedElementIds();
+    if (!selectedIds.length) {
+      return;
+    }
+    this.pushHistory();
+    const selected: WhiteboardElement[] = [];
+    const unselected: WhiteboardElement[] = [];
+    for (const element of this.elements) {
+      if (selectedIds.includes(element.id)) {
+        selected.push(element);
+      } else {
+        unselected.push(element);
+      }
+    }
+    this.elements = edge === 'front' ? [...unselected, ...selected] : [...selected, ...unselected];
     this.closeContextMenu();
     this.emitSelectionUpserts();
     this.render();
@@ -1517,6 +2088,54 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     });
   }
 
+  private segmentDistance(a: WhiteboardPoint, b: WhiteboardPoint, c: WhiteboardPoint, d: WhiteboardPoint): number {
+    if (this.segmentsIntersect(a, b, c, d)) {
+      return 0;
+    }
+    return Math.min(
+      this.distanceToSegment(a, c, d),
+      this.distanceToSegment(b, c, d),
+      this.distanceToSegment(c, a, b),
+      this.distanceToSegment(d, a, b)
+    );
+  }
+
+  private segmentsIntersect(a: WhiteboardPoint, b: WhiteboardPoint, c: WhiteboardPoint, d: WhiteboardPoint): boolean {
+    const orientationA = this.segmentOrientation(a, b, c);
+    const orientationB = this.segmentOrientation(a, b, d);
+    const orientationC = this.segmentOrientation(c, d, a);
+    const orientationD = this.segmentOrientation(c, d, b);
+
+    if (orientationA !== orientationB && orientationC !== orientationD) {
+      return true;
+    }
+
+    return (
+      (orientationA === 0 && this.pointOnSegment(c, a, b)) ||
+      (orientationB === 0 && this.pointOnSegment(d, a, b)) ||
+      (orientationC === 0 && this.pointOnSegment(a, c, d)) ||
+      (orientationD === 0 && this.pointOnSegment(b, c, d))
+    );
+  }
+
+  private segmentOrientation(a: WhiteboardPoint, b: WhiteboardPoint, c: WhiteboardPoint): -1 | 0 | 1 {
+    const value = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    if (Math.abs(value) < 0.001) {
+      return 0;
+    }
+    return value > 0 ? 1 : -1;
+  }
+
+  private pointOnSegment(point: WhiteboardPoint, start: WhiteboardPoint, end: WhiteboardPoint): boolean {
+    const epsilon = 0.001;
+    return (
+      point.x >= Math.min(start.x, end.x) - epsilon &&
+      point.x <= Math.max(start.x, end.x) + epsilon &&
+      point.y >= Math.min(start.y, end.y) - epsilon &&
+      point.y <= Math.max(start.y, end.y) + epsilon
+    );
+  }
+
   private distance(a: WhiteboardPoint, b: WhiteboardPoint): number {
     return Math.hypot(a.x - b.x, a.y - b.y);
   }
@@ -1545,6 +2164,131 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   private isFillableShape(shape: WhiteboardShapeTool): boolean {
     return shape === 'rectangle' || shape === 'ellipse' || shape === 'star';
+  }
+
+  private strokeFillPath(element: WhiteboardStrokeElement): StrokeFillPath | null {
+    const points = element.points;
+    if (points.length < 3) {
+      return null;
+    }
+
+    const closeThreshold = Math.max(18, element.width * 3);
+    const minimumArea = Math.max(36, element.width * element.width * 3);
+    const first = points[0]!;
+    const last = points[points.length - 1]!;
+
+    if (this.distance(first, last) <= closeThreshold && Math.abs(this.polygonArea(points)) >= minimumArea) {
+      return { points: points.map((point) => ({ ...point })) };
+    }
+
+    const endpointLoop = this.endpointClosedStrokePath(points, closeThreshold, minimumArea);
+    if (endpointLoop) {
+      return endpointLoop;
+    }
+
+    return this.selfIntersectingStrokePath(points, minimumArea);
+  }
+
+  private endpointClosedStrokePath(points: WhiteboardPoint[], closeThreshold: number, minimumArea: number): StrokeFillPath | null {
+    const last = points[points.length - 1]!;
+    let bestPath: StrokeFillPath | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (let index = 0; index < points.length - 2; index += 1) {
+      const start = points[index]!;
+      const end = points[index + 1]!;
+      const closePoint = this.closestPointOnSegment(last, start, end);
+      const distance = this.distance(last, closePoint);
+      if (distance > closeThreshold || distance >= bestDistance) {
+        continue;
+      }
+      const loopPoints = [closePoint, ...points.slice(index + 1), closePoint];
+      if (Math.abs(this.polygonArea(loopPoints)) < minimumArea) {
+        continue;
+      }
+      bestDistance = distance;
+      bestPath = { points: loopPoints };
+    }
+
+    return bestPath;
+  }
+
+  private selfIntersectingStrokePath(points: WhiteboardPoint[], minimumArea: number): StrokeFillPath | null {
+    let bestPath: StrokeFillPath | null = null;
+    let bestArea = 0;
+
+    for (let firstIndex = 0; firstIndex < points.length - 1; firstIndex += 1) {
+      for (let secondIndex = firstIndex + 2; secondIndex < points.length - 1; secondIndex += 1) {
+        const firstStart = points[firstIndex]!;
+        const firstEnd = points[firstIndex + 1]!;
+        const secondStart = points[secondIndex]!;
+        const secondEnd = points[secondIndex + 1]!;
+        if (!this.segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd)) {
+          continue;
+        }
+        const intersection = this.segmentIntersectionPoint(firstStart, firstEnd, secondStart, secondEnd) ?? firstEnd;
+        const loopPoints = [intersection, ...points.slice(firstIndex + 1, secondIndex + 1), intersection];
+        const area = Math.abs(this.polygonArea(loopPoints));
+        if (area >= minimumArea && area > bestArea) {
+          bestArea = area;
+          bestPath = { points: loopPoints };
+        }
+      }
+    }
+
+    return bestPath;
+  }
+
+  private polygonArea(points: WhiteboardPoint[]): number {
+    let area = 0;
+    for (let index = 0; index < points.length; index += 1) {
+      const current = points[index]!;
+      const next = points[(index + 1) % points.length]!;
+      area += current.x * next.y - next.x * current.y;
+    }
+    return area / 2;
+  }
+
+  private pointInPolygon(point: WhiteboardPoint, polygon: WhiteboardPoint[]): boolean {
+    let inside = false;
+    for (let index = 0, previousIndex = polygon.length - 1; index < polygon.length; previousIndex = index, index += 1) {
+      const current = polygon[index]!;
+      const previous = polygon[previousIndex]!;
+      const crossesY = current.y > point.y !== previous.y > point.y;
+      if (!crossesY) {
+        continue;
+      }
+      const xAtY = ((previous.x - current.x) * (point.y - current.y)) / (previous.y - current.y) + current.x;
+      if (point.x < xAtY) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  private closestPointOnSegment(point: WhiteboardPoint, start: WhiteboardPoint, end: WhiteboardPoint): WhiteboardPoint {
+    const lengthSquared = (end.x - start.x) ** 2 + (end.y - start.y) ** 2;
+    if (lengthSquared === 0) {
+      return { ...start };
+    }
+    const ratio = Math.max(0, Math.min(1, ((point.x - start.x) * (end.x - start.x) + (point.y - start.y) * (end.y - start.y)) / lengthSquared));
+    return {
+      x: start.x + ratio * (end.x - start.x),
+      y: start.y + ratio * (end.y - start.y)
+    };
+  }
+
+  private segmentIntersectionPoint(a: WhiteboardPoint, b: WhiteboardPoint, c: WhiteboardPoint, d: WhiteboardPoint): WhiteboardPoint | null {
+    const denominator = (a.x - b.x) * (c.y - d.y) - (a.y - b.y) * (c.x - d.x);
+    if (Math.abs(denominator) < 0.001) {
+      return null;
+    }
+    const aCrossB = a.x * b.y - a.y * b.x;
+    const cCrossD = c.x * d.y - c.y * d.x;
+    return {
+      x: (aCrossB * (c.x - d.x) - (a.x - b.x) * cCrossD) / denominator,
+      y: (aCrossB * (c.y - d.y) - (a.y - b.y) * cCrossD) / denominator
+    };
   }
 
   private isTinyElement(element: WhiteboardElement): boolean {

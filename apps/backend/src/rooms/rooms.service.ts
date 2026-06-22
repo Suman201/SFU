@@ -1,10 +1,16 @@
-import { ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomBytes } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { Model, Types } from 'mongoose';
 import {
   ChatMessage,
+  type ChatMessageScope,
+  ChatReadState,
+  ChatThreadSummary,
+  ChatThreadSummaryResponse,
+  ChatHistoryResponse,
+  type ClassSessionLifecycleEvent,
   Consumer,
   ConsumerQualityState,
   ConsumerLayerEvent,
@@ -34,6 +40,7 @@ import {
   IncidentProducerSummary,
   IncidentTransportSummary,
   Participant,
+  ParticipantPatch,
   Permissions,
   Producer,
   ProducerQualityState,
@@ -59,6 +66,8 @@ import {
   RtpParameters,
   TransportIncidentSnapshot,
   SvcLayerSelection,
+  StudentMediaModerationEvent,
+  StudentMediaModerationAction,
   TransportQualityState,
   Room,
   TransportOptions,
@@ -67,8 +76,16 @@ import {
 } from '@native-sfu/contracts';
 import type { RoomOwnerLookupResponse } from '@native-sfu/contracts';
 import {
+  BatchDocument,
+  BatchMongoDocument,
+  BatchScheduleDocument,
+  BatchScheduleMongoDocument,
   ChatMessageDocument,
   ChatMessageMongoDocument,
+  ChatReadStateDocument,
+  ChatReadStateMongoDocument,
+  ClassSessionDocument,
+  ClassSessionMongoDocument,
   ConsumerDocument,
   ConsumerMongoDocument,
   ModerationDocument,
@@ -88,13 +105,17 @@ import {
   RoomSnapshotBundleDocument,
   RoomSnapshotBundleMongoDocument
 } from '../database/schemas';
+import { StudentEnrollmentsService, type StudentEnrollmentRosterItem } from '../student-enrollments/student-enrollments.service';
+
+const CHAT_MESSAGE_MAX_LENGTH = 2000;
 import { NodeRegistryService } from '../cluster/node-registry.service';
 import { PipeCoordinatorService } from '../cluster/pipe-coordinator.service';
 import { MediaService, type MediaWorkerRoomFailureEvent } from '@native-sfu/nest-sfu';
 import { MetricsService } from '../metrics/metrics.service';
-import { RedisService } from '../redis/redis.service';
+import { RedisService, type RoomSocketPresence } from '../redis/redis.service';
 import { PlatformEventsService } from '../events/platform-events.service';
 import { RoomSignalService, type RoomSignalEnvelope } from './room-signal.service';
+import { planClassSessions } from '../class-sessions/class-session-planner';
 import {
   applyProfileBitratePolicy,
   buildRoomQualitySummary,
@@ -107,7 +128,67 @@ import {
 export interface SocketUser {
   id: string;
   email: string;
-  roles: Role[];
+  roles: string[];
+}
+
+export interface ChatDeliveryResult {
+  message: ChatMessage;
+  broadcastRoomId?: string;
+  targetSocketIds?: string[];
+  targets?: SocketDeliveryTarget[];
+}
+
+export interface SocketDeliveryTarget {
+  roomId: string;
+  participantId: string;
+  socketId: string;
+  userId?: string;
+  nodeId?: string;
+}
+
+interface ClassSessionChatContext {
+  sessionId: string;
+  batchId: string;
+  roomId: string;
+  channelId: string;
+  teacherId: string;
+  requesterUserId: string;
+  requesterRole: 'teacher' | 'student' | 'admin';
+  participantId?: string;
+  scope?: ChatMessageScope;
+}
+
+interface ClassSessionReadTarget {
+  scope: ChatMessageScope;
+  threadKey?: string;
+  participantId?: string;
+  student?: ParticipantMongoDocument;
+}
+
+export interface EnsureClassSessionRoomRequest {
+  sessionId: string;
+  batchId: string;
+  title: string;
+  teacherId: string;
+}
+
+export interface CloseClassSessionRoomRequest {
+  roomId: string;
+  actorUserId: string;
+  actorLabel?: string;
+}
+
+export type ClassSessionLifecycleEventName = 'session:started' | 'session:ended';
+
+export const CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS = 5 * 60 * 1000;
+
+export interface StudentMediaModerationResult {
+  event: StudentMediaModerationEvent;
+  permissions: Permissions;
+  producer?: Producer;
+  targetSocketId?: string;
+  targetSocketIds?: string[];
+  targets?: SocketDeliveryTarget[];
 }
 
 export interface ProducerDynacastSignalTarget {
@@ -116,9 +197,23 @@ export interface ProducerDynacastSignalTarget {
   suppressedSubscribers: number;
 }
 
+export interface LeaveRoomForSocketResult {
+  closed: boolean;
+  left: boolean;
+  reconnecting?: boolean;
+  participantPatch?: ParticipantPatch;
+  room?: Room;
+}
+
 const ROOM_QUALITY_SIGNAL_STALE_MS = 15_000;
 const DISTRIBUTED_QUALITY_STALE_MS = 15_000;
 const OBSERVABILITY_TOMBSTONE_TTL_MS = 60_000;
+const CLASS_SESSION_STUDENT_PERMISSIONS: Permissions = {
+  canPublishAudio: true,
+  canPublishVideo: true,
+  canShareScreen: false,
+  canChat: true
+};
 
 class RoomPolicyViolationError extends ForbiddenException {
   constructor(message: string, readonly details: RoomAutopilotDecision) {
@@ -239,6 +334,10 @@ export class RoomsService {
   private readonly roomIncidentStateEventListeners = new Set<(state: RoomIncidentState) => void>();
   private readonly roomIncidentTimelineEventListeners = new Set<(event: RoomIncidentTimelineEvent) => void>();
   private readonly roomSnapshotGeneratedEventListeners = new Set<(summary: RoomSnapshotBundleSummary) => void>();
+  private readonly roomClosedEventListeners = new Set<(roomId: string) => void>();
+  private readonly classSessionLifecycleEventListeners = new Set<
+    (event: ClassSessionLifecycleEventName, payload: ClassSessionLifecycleEvent) => void
+  >();
   private readonly roomQualitySummaryStates = new Map<string, RoomQualitySummaryState>();
   private readonly distributedRoomQualityStates = new Map<string, RoomQualityState>();
   private readonly distributedRoomQualityObservedAt = new Map<string, number>();
@@ -252,9 +351,13 @@ export class RoomsService {
   private readonly distributedConsumerTombstones = new Map<string, number>();
   private readonly distributedProducerTombstones = new Map<string, number>();
   private readonly appliedRoomProfileSignatures = new Map<string, string>();
+  private readonly classSessionTeacherReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     @InjectModel(RoomDocument.name) private readonly rooms: Model<RoomMongoDocument>,
+    @InjectModel(BatchDocument.name) private readonly batches: Model<BatchMongoDocument>,
+    @InjectModel(BatchScheduleDocument.name) private readonly batchSchedules: Model<BatchScheduleMongoDocument>,
+    @InjectModel(ClassSessionDocument.name) private readonly classSessions: Model<ClassSessionMongoDocument>,
     @InjectModel(RoomIncidentEventDocument.name) private readonly roomIncidentEvents: Model<RoomIncidentEventMongoDocument>,
     @InjectModel(RoomSnapshotBundleDocument.name) private readonly roomSnapshotBundles: Model<RoomSnapshotBundleMongoDocument>,
     @InjectModel(ParticipantDocument.name) private readonly participants: Model<ParticipantMongoDocument>,
@@ -263,13 +366,15 @@ export class RoomsService {
     @InjectModel(ConsumerDocument.name) private readonly consumers: Model<ConsumerMongoDocument>,
     @InjectModel(ModerationDocument.name) private readonly moderation: Model<ModerationMongoDocument>,
     @InjectModel(ChatMessageDocument.name) private readonly chat: Model<ChatMessageMongoDocument>,
+    @InjectModel(ChatReadStateDocument.name) private readonly chatReadStates: Model<ChatReadStateMongoDocument>,
     private readonly redis: RedisService,
     private readonly media: MediaService,
     private readonly nodeRegistry: NodeRegistryService,
     private readonly pipeCoordinator: PipeCoordinatorService,
     private readonly metrics: MetricsService,
     private readonly signals: RoomSignalService,
-    private readonly platformEvents: PlatformEventsService
+    private readonly platformEvents: PlatformEventsService,
+    private readonly studentEnrollments: StudentEnrollmentsService
   ) {
     this.media.onConsumerLayerEvent((event) => {
       void this.handleConsumerLayerEvent(event);
@@ -327,6 +432,24 @@ export class RoomsService {
   onRoomFailed(listener: (event: RoomFailureEvent) => void): () => void {
     this.roomFailureEventListeners.add(listener);
     return () => this.roomFailureEventListeners.delete(listener);
+  }
+
+  onRoomClosed(listener: (roomId: string) => void): () => void {
+    this.roomClosedEventListeners.add(listener);
+    return () => this.roomClosedEventListeners.delete(listener);
+  }
+
+  onClassSessionLifecycleEvent(
+    listener: (event: ClassSessionLifecycleEventName, payload: ClassSessionLifecycleEvent) => void
+  ): () => void {
+    this.classSessionLifecycleEventListeners.add(listener);
+    return () => this.classSessionLifecycleEventListeners.delete(listener);
+  }
+
+  emitClassSessionLifecycleEvent(event: ClassSessionLifecycleEventName, payload: ClassSessionLifecycleEvent): void {
+    for (const listener of this.classSessionLifecycleEventListeners) {
+      listener(event, payload);
+    }
   }
 
   onRoomIncidentStateUpdated(listener: (state: RoomIncidentState) => void): () => void {
@@ -388,7 +511,10 @@ export class RoomsService {
     );
     roomDoc.hostId = participant.id;
     await roomDoc.save();
-    await this.redis.markPresence(roomDoc.id, participant.id, socketId);
+    await this.redis.markPresence(roomDoc.id, participant.id, socketId, {
+      userId: participant.userId,
+      nodeId: this.nodeRegistry.localNodeId()
+    });
     this.metrics.activeRooms.inc();
     this.metrics.roomProfileDistribution.labels(roomDoc.mediaProfile?.id ?? 'meeting').inc();
     await this.platformEvents.appendEvent({
@@ -403,9 +529,55 @@ export class RoomsService {
     return this.getRoom(roomDoc.id);
   }
 
+  async ensureClassSessionRoom(request: EnsureClassSessionRoomRequest): Promise<Room> {
+    const session = await this.classSessions.findById(request.sessionId);
+    if (session?.roomId) {
+      const existingRoom = await this.findRoomDocumentById(session.roomId);
+      if (existingRoom && !existingRoom.closedAt) {
+        await this.nodeRegistry.claimRoom(existingRoom.id);
+        return this.getRoom(existingRoom.id);
+      }
+    }
+
+    await this.nodeRegistry.assertLocalCanOwnNewRoom();
+    const roomDoc = await this.rooms.create({
+      name: request.title,
+      hostId: new Types.ObjectId().toHexString(),
+      settings: {
+        locked: false,
+        waitingRoomEnabled: false,
+        joinApprovalRequired: false,
+        visibility: 'private',
+        maxParticipants: 100,
+        recordingEnabled: false,
+        chatEnabled: true
+      },
+      mediaProfile: {
+        id: 'classroom',
+        updatedAt: new Date()
+      },
+      mediaState: { status: 'active' }
+    });
+    try {
+      await this.nodeRegistry.claimRoom(roomDoc.id);
+    } catch (error) {
+      roomDoc.closedAt = new Date();
+      await roomDoc.save();
+      throw error;
+    }
+    this.metrics.activeRooms.inc();
+    this.metrics.roomProfileDistribution.labels(roomDoc.mediaProfile?.id ?? 'classroom').inc();
+    return this.getRoom(roomDoc.id);
+  }
+
   async joinRoom(user: SocketUser, socketId: string, request: JoinRoomRequest): Promise<JoinRoomResponse> {
     const startedAt = performance.now();
-    const room = await this.rooms.findById(request.roomId);
+    const classSession = await this.classSessions.findOne({ roomId: request.roomId });
+    if (classSession) {
+      this.assertClassSessionRoomIsLive(classSession);
+      await this.assertSocketCanAccessClassSessionBatch(classSession.batchId, classSession.teacherId, user);
+    }
+    const room = await this.findRoomDocumentById(request.roomId);
     if (!room || room.closedAt) {
       throw new NotFoundException('Room not found');
     }
@@ -417,8 +589,15 @@ export class RoomsService {
     }
     await this.assertNotBanned(room.id, user.id);
     const existingParticipant = await this.participants.findOne({ roomId: room.id, userId: user.id, leftAt: { $exists: false } });
+    const classSessionEntitlements = classSession ? this.classSessionEntitlements(classSession, user) : undefined;
     if (existingParticipant) {
+      if (classSessionEntitlements) {
+        await this.applyClassSessionEntitlements(room, existingParticipant, classSessionEntitlements);
+      }
       await this.replaceParticipantSocket(room.id, existingParticipant.id, socketId);
+      if (classSession && this.isClassSessionTeacherUser(classSession, user)) {
+        this.cancelClassSessionTeacherReconnectGrace(classSession.id);
+      }
       this.metrics.roomJoinDuration.observe(performance.now() - startedAt);
       return {
         room: await this.getRoom(room.id),
@@ -457,10 +636,17 @@ export class RoomsService {
       this.metrics.roomAdmissionRejections.labels(`policy_${joinDecision.code}`).inc();
       throw new RoomPolicyViolationError(joinDecision.message, joinDecision);
     }
-    const role = request.asViewer ? Role.VIEWER : Role.PARTICIPANT;
-    const basePermissions = role === Role.VIEWER ? VIEWER_PERMISSIONS : DEFAULT_PARTICIPANT_PERMISSIONS;
+    const role = classSessionEntitlements?.role ?? (request.asViewer ? Role.VIEWER : Role.PARTICIPANT);
+    const basePermissions = classSessionEntitlements?.permissions ?? (role === Role.VIEWER ? VIEWER_PERMISSIONS : DEFAULT_PARTICIPANT_PERMISSIONS);
     const admitted = !(room.settings.waitingRoomEnabled || room.settings.joinApprovalRequired || joinDecision.action === 'soft-throttle');
     const participant = await this.createParticipant(room.id, user, socketId, role, basePermissions, admitted, request.displayName);
+    if (classSessionEntitlements?.role === Role.HOST && room.hostId !== participant.id) {
+      await this.rooms.updateOne({ _id: room.id }, { $set: { hostId: participant.id } });
+      room.hostId = participant.id;
+    }
+    if (classSession && this.isClassSessionTeacherUser(classSession, user)) {
+      this.cancelClassSessionTeacherReconnectGrace(classSession.id);
+    }
     if (!admitted || joinDecision.action === 'soft-throttle') {
       await this.recordRoomIncidentEvent({
         roomId: room.id,
@@ -476,7 +662,10 @@ export class RoomsService {
         relatedParticipantId: participant.id
       });
     }
-    await this.redis.markPresence(room.id, participant.id, socketId);
+    await this.redis.markPresence(room.id, participant.id, socketId, {
+      userId: participant.userId,
+      nodeId: this.nodeRegistry.localNodeId()
+    });
     this.metrics.roomJoinDuration.observe(performance.now() - startedAt);
     const updatedRoom = await this.getRoom(room.id);
     await this.platformEvents.appendEvent({
@@ -510,16 +699,39 @@ export class RoomsService {
     participant.nodeId = this.nodeRegistry.localNodeId();
     participant.lastSeenAt = new Date();
     await participant.save();
-    await this.redis.markPresence(roomId, participant.id, socketId);
+    await this.redis.markPresence(roomId, participant.id, socketId, {
+      userId: participant.userId,
+      nodeId: this.nodeRegistry.localNodeId()
+    });
   }
 
-  async leaveRoomForSocket(roomId: string, participantId: string, socketId: string): Promise<{ closed: boolean; left: boolean }> {
+  async leaveRoomForSocket(roomId: string, participantId: string, socketId: string): Promise<LeaveRoomForSocketResult> {
     const participant = await this.participants.findOne({ _id: participantId, roomId, leftAt: { $exists: false } });
     if (!participant) {
       return { closed: false, left: false };
     }
+    await this.redis.removePresence(roomId, participantId, socketId);
+    const remainingPresence = await this.redis.participantPresence(roomId, participantId);
+    if (remainingPresence.length) {
+      const [latest] = remainingPresence.sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
+      await this.participants.updateOne(
+        { _id: participantId, roomId },
+        {
+          $set: {
+            socketId: latest!.socketId,
+            nodeId: latest!.nodeId ?? participant.nodeId,
+            lastSeenAt: new Date()
+          }
+        }
+      );
+      return { closed: false, left: false };
+    }
     if (participant.socketId !== socketId) {
       return { closed: false, left: false };
+    }
+    const classSession = await this.classSessions.findOne({ roomId });
+    if (classSession?.status === 'live' && this.isClassSessionTeacherParticipant(classSession, participant)) {
+      return this.deferClassSessionTeacherDisconnect(classSession, participant);
     }
     const result = await this.leaveRoom(roomId, participantId);
     return { ...result, left: true };
@@ -616,7 +828,48 @@ export class RoomsService {
 
   async closeRoom(roomId: string, actorParticipantId: string): Promise<void> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
+    const classSession = await this.classSessions.findOne({ roomId });
+    if (classSession?.status === 'live') {
+      throw new BadRequestException('End the class session to close this classroom room.');
+    }
     const actor = await this.assertModerator(roomId, actorParticipantId, true);
+    await this.closeRoomWithActor(
+      roomId,
+      this.platformActorFromParticipantContext(actor, actorParticipantId, 'operator')
+    );
+  }
+
+  async closeClassSessionRoom(request: CloseClassSessionRoomRequest): Promise<boolean> {
+    const classSession = await this.classSessions.findOne({ roomId: request.roomId });
+    if (classSession) {
+      this.cancelClassSessionTeacherReconnectGrace(classSession.id);
+    }
+    const room = await this.findRoomDocumentById(request.roomId);
+    if (!room || room.closedAt) {
+      return false;
+    }
+    await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
+    await this.closeRoomWithActor(request.roomId, {
+      type: 'operator',
+      userId: request.actorUserId,
+      label: request.actorLabel ?? 'Class session end'
+    });
+    for (const listener of this.roomClosedEventListeners) {
+      listener(request.roomId);
+    }
+    return true;
+  }
+
+  cancelClassSessionTeacherReconnectGrace(sessionId: string): void {
+    const timer = this.classSessionTeacherReconnectTimers.get(sessionId);
+    if (!timer) {
+      return;
+    }
+    clearTimeout(timer);
+    this.classSessionTeacherReconnectTimers.delete(sessionId);
+  }
+
+  private async closeRoomWithActor(roomId: string, actor: PlatformEventActor): Promise<void> {
     const room = await this.rooms.findById(roomId);
     if (!room) {
       throw new NotFoundException('Room not found');
@@ -646,7 +899,7 @@ export class RoomsService {
     await this.platformEvents.appendEvent({
       type: 'room.closed',
       roomId,
-      actor: this.platformActorFromParticipantContext(actor, actorParticipantId, 'operator'),
+      actor,
       payload: {
         room: {
           roomId: room.id,
@@ -831,6 +1084,9 @@ export class RoomsService {
       this.metrics.roomAdmissionRejections.labels('publish_video_denied').inc();
       throw new ForbiddenException('Video publishing denied');
     }
+    if (request.kind === 'audio' || request.kind === 'video') {
+      await this.assertNoActiveStudentMediaModeration(request.roomId, participantId, request.kind);
+    }
     if (request.kind === 'screen' && !permission.canShareScreen) {
       this.metrics.roomAdmissionRejections.labels('publish_screen_denied').inc();
       throw new ForbiddenException('Screen sharing denied');
@@ -965,6 +1221,21 @@ export class RoomsService {
       await this.nodeRegistry.assertLocalRoomOwner(producer.roomId);
     }
     const actor = await this.assertCanControlProducer(producer, participantId);
+    if (status === 'live' && actor.id === producer.participantId) {
+      const permissions = await this.getPermissions(producer.roomId, producer.participantId);
+      if (producer.kind === 'audio' && !permissions.canPublishAudio) {
+        throw new ForbiddenException('Audio publishing denied');
+      }
+      if (producer.kind === 'video' && !permissions.canPublishVideo) {
+        throw new ForbiddenException('Video publishing denied');
+      }
+      if (producer.kind === 'audio' || producer.kind === 'video') {
+        await this.assertNoActiveStudentMediaModeration(producer.roomId, producer.participantId, producer.kind);
+      }
+      if (producer.kind === 'screen' && !permissions.canShareScreen) {
+        throw new ForbiddenException('Screen sharing denied');
+      }
+    }
     producer.status = status;
     await producer.save();
     await this.media.setProducerPaused(producerId, status === 'paused');
@@ -995,6 +1266,85 @@ export class RoomsService {
       }
     });
     return this.toProducer(producer);
+  }
+
+  async moderateStudentMedia(
+    roomId: string,
+    actorParticipantId: string,
+    targetParticipantId: string,
+    action: StudentMediaModerationAction
+  ): Promise<StudentMediaModerationResult> {
+    await this.nodeRegistry.assertLocalRoomOwner(roomId);
+    const classSession = await this.classSessions.findOne({ roomId });
+    if (!classSession) {
+      throw new NotFoundException('Class session room not found');
+    }
+    this.assertClassSessionRoomIsLive(classSession);
+    const actor = await this.assertModerator(roomId, actorParticipantId, false);
+    const target = await this.assertParticipant(roomId, targetParticipantId);
+    if (target.role === Role.HOST || target.role === Role.CO_HOST) {
+      throw new ForbiddenException('Only student participant media can be moderated.');
+    }
+
+    const kind = action === 'mute-mic' || action === 'unmute-mic' ? 'audio' : 'video';
+    const disabling = action === 'mute-mic' || action === 'stop-camera';
+    const producer = disabling
+      ? await this.producers
+          .findOne({
+            roomId,
+            participantId: targetParticipantId,
+            kind,
+            status: { $ne: 'closed' }
+          })
+          .sort({ createdAt: -1 })
+      : null;
+    const producerPayload =
+      disabling && producer && producer.status !== 'paused'
+        ? await this.setProducerStatus(producer.id, actorParticipantId, 'paused')
+        : disabling && producer
+          ? this.toProducer(producer)
+          : undefined;
+    const currentPermissions = await this.getPermissions(roomId, targetParticipantId);
+    const nextPermissions =
+      kind === 'audio'
+        ? { ...currentPermissions, canPublishAudio: !disabling }
+        : { ...currentPermissions, canPublishVideo: !disabling };
+
+    if (disabling) {
+      await this.participants.updateOne(
+        { _id: targetParticipantId, roomId },
+        kind === 'audio' ? { audioEnabled: false } : { videoEnabled: false }
+      );
+    }
+    await this.permissions.updateOne(
+      { roomId, participantId: targetParticipantId },
+      { $set: nextPermissions },
+      { upsert: true }
+    );
+    const moderationAction = kind === 'audio' ? 'force-mute' : 'disable-camera';
+    if (disabling) {
+      await this.addModeration(roomId, actorParticipantId, targetParticipantId, moderationAction);
+    } else {
+      await this.moderation.updateMany({ roomId, participantId: targetParticipantId, action: moderationAction, active: true }, { active: false });
+    }
+    const targets = await this.participantSocketTargets(roomId, [target]);
+
+    return {
+      event: {
+        roomId,
+        participantId: targetParticipantId,
+        ...(producerPayload ? { producerId: producerPayload.id } : {}),
+        kind,
+        action,
+        moderatedByParticipantId: actor.id,
+        permissions: nextPermissions,
+        message: this.studentMediaModerationMessage(action)
+      },
+      permissions: nextPermissions,
+      ...(producerPayload ? { producer: producerPayload } : {}),
+      ...(targets[0]?.socketId ? { targetSocketId: targets[0].socketId } : {}),
+      ...(targets.length ? { targetSocketIds: targets.map((socketTarget) => socketTarget.socketId), targets } : {})
+    };
   }
 
   async setProducerPriority(producerId: string, participantId: string, priority: number): Promise<Producer> {
@@ -2066,29 +2416,649 @@ export class RoomsService {
     }
   }
 
-  async sendChat(request: { roomId: string; message: string; recipientId?: string }, senderId: string): Promise<ChatMessage> {
+  async sendChat(request: { roomId: string; message: string; recipientId?: string; scope?: ChatMessageScope }, senderId: string): Promise<ChatDeliveryResult> {
     await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
+    const sender = await this.assertParticipant(request.roomId, senderId);
+    const messageBody = request.message.trim();
+    if (!messageBody) {
+      throw new BadRequestException('Chat message cannot be blank.');
+    }
+    if (messageBody.length > CHAT_MESSAGE_MAX_LENGTH) {
+      throw new BadRequestException(`Chat message cannot exceed ${CHAT_MESSAGE_MAX_LENGTH} characters.`);
+    }
+
+    const classSession = await this.classSessions.findOne({ roomId: request.roomId });
+    if (classSession) {
+      this.assertClassSessionRoomIsLive(classSession);
+      await this.assertSocketCanAccessClassSessionBatch(classSession.batchId, classSession.teacherId, {
+        id: sender.userId ?? sender.id,
+        email: sender.displayName,
+        roles: sender.role === Role.HOST ? ['TEACHER'] : sender.role === Role.CO_HOST ? ['ADMIN'] : ['STUDENT']
+      });
+    }
+
     const permissions = await this.getPermissions(request.roomId, senderId);
     if (!permissions.canChat) {
       throw new ForbiddenException('Chat permission denied');
     }
     const shadowMuted = await this.moderation.exists({ roomId: request.roomId, participantId: senderId, action: 'shadow-mute', active: true });
+    const delivery: {
+      scope: ChatMessageScope;
+      recipient?: ParticipantMongoDocument;
+      threadKey?: string;
+      targets?: SocketDeliveryTarget[];
+      broadcastRoomId?: string;
+    } = classSession
+      ? await this.resolveClassSessionChatDelivery(classSession, sender, request)
+      : {
+          scope: 'broadcast' as ChatMessageScope,
+          recipient: undefined,
+          threadKey: undefined,
+          broadcastRoomId: request.roomId
+        };
     const doc = await this.chat.create({
+      ...(classSession
+        ? {
+            sessionId: classSession.id,
+            batchId: classSession.batchId,
+            channelId: classSession.chatChannelId,
+            chatChannelId: classSession.chatChannelId
+          }
+        : {}),
       roomId: request.roomId,
-      senderId,
-      recipientId: request.recipientId,
-      message: request.message,
+      senderId: sender.id,
+      senderName: sender.displayName,
+      senderRole: this.chatSenderRole(sender.role),
+      recipientId: delivery.recipient?.id,
+      scope: delivery.scope,
+      ...(delivery.threadKey ? { threadKey: delivery.threadKey } : {}),
+      message: messageBody,
       shadowMuted: Boolean(shadowMuted)
     });
     return {
-      id: doc.id,
-      roomId: doc.roomId,
-      senderId: doc.senderId,
-      recipientId: doc.recipientId,
-      message: doc.message,
-      shadowMuted: doc.shadowMuted,
-      createdAt: doc.createdAt.toISOString()
+      message: this.toChatMessage(doc),
+      ...(delivery.broadcastRoomId ? { broadcastRoomId: delivery.broadcastRoomId } : {}),
+      ...(delivery.targets?.length ? { targets: delivery.targets, targetSocketIds: delivery.targets.map((target) => target.socketId) } : {})
     };
+  }
+
+  async getChatHistory(request: { sessionId?: string; roomId?: string; channelId?: string; threadKey?: string; scope?: ChatMessageScope; before?: string; limit?: number }): Promise<ChatHistoryResponse> {
+    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    if (request.sessionId) {
+      filter.sessionId = request.sessionId;
+    } else if (request.channelId) {
+      filter.$or = [{ channelId: request.channelId }, { chatChannelId: request.channelId }];
+    } else if (request.roomId) {
+      filter.roomId = request.roomId;
+    } else {
+      throw new BadRequestException('Session, room, or chat channel is required.');
+    }
+
+    if (request.threadKey) {
+      filter.threadKey = request.threadKey;
+    }
+    if (request.scope) {
+      filter.scope = request.scope;
+    }
+
+    if (request.before) {
+      const before = new Date(request.before);
+      if (Number.isNaN(before.getTime())) {
+        throw new BadRequestException('Invalid chat history cursor.');
+      }
+      filter.createdAt = { $lt: before };
+    }
+
+    const limit = Math.min(100, Math.max(1, Math.trunc(request.limit ?? 50)));
+    const docs = await this.chat.find(filter).sort({ createdAt: -1 }).limit(limit + 1).exec();
+    const visibleDocs = docs.slice(0, limit);
+    const messages = visibleDocs.reverse().map((doc) => this.toChatMessage(doc));
+    const nextBefore = docs.length > limit ? messages[0]?.createdAt : undefined;
+    return {
+      messages,
+      ...(nextBefore ? { nextBefore } : {})
+    };
+  }
+
+  async getClassSessionChatHistory(request: {
+    sessionId: string;
+    batchId: string;
+    roomId: string;
+    channelId: string;
+    teacherId: string;
+    requesterUserId: string;
+    requesterRole: 'teacher' | 'student' | 'admin';
+    participantId?: string;
+    scope?: ChatMessageScope;
+    before?: string;
+    limit?: number;
+  }): Promise<ChatHistoryResponse> {
+    const scope = request.requesterRole === 'student' ? undefined : request.scope ?? (request.participantId ? 'private' : 'broadcast');
+
+    if (request.requesterRole === 'student') {
+      const student = await this.findActiveParticipantByUserId(request.roomId, request.requesterUserId);
+      if (!student || student.role !== Role.PARTICIPANT) {
+        throw new ForbiddenException('Join the classroom before loading chat history.');
+      }
+      const threadKey = this.privateClassSessionThreadKey(request.sessionId, request.teacherId, student);
+      return this.getChatHistoryByFilter({
+        sessionId: request.sessionId,
+        before: request.before,
+        limit: request.limit,
+        filter: {
+          $or: [{ scope: 'broadcast' }, { scope: 'private', threadKey }]
+        }
+      });
+    }
+
+    if (scope === 'broadcast') {
+      if (request.participantId) {
+        throw new BadRequestException('Broadcast history does not accept a participant id.');
+      }
+      return this.getChatHistory({
+        sessionId: request.sessionId,
+        scope: 'broadcast',
+        before: request.before,
+        limit: request.limit
+      });
+    }
+
+    if (scope !== 'private') {
+      throw new BadRequestException('Unsupported chat history scope.');
+    }
+    if (!request.participantId) {
+      throw new BadRequestException('Student participant id is required for private chat history.');
+    }
+
+    const target = await this.resolveClassSessionStudentThreadTarget({
+      roomId: request.roomId,
+      batchId: request.batchId,
+      sessionId: request.sessionId,
+      teacherId: request.teacherId,
+      participantId: request.participantId
+    });
+    return this.getChatHistory({
+      sessionId: request.sessionId,
+      threadKey: target.threadKey,
+      scope: 'private',
+      before: request.before,
+      limit: request.limit
+    });
+  }
+
+  async markClassSessionChatRead(request: ClassSessionChatContext & { readAt?: string }): Promise<ChatReadState> {
+    const target = await this.resolveClassSessionReadTarget(request);
+    const lastReadAt = this.parseChatReadAt(request.readAt);
+    const readStateKey = this.chatReadStateKey(request.sessionId, request.requesterUserId, target.scope, target.threadKey);
+    const readStatePayload = {
+      readStateKey,
+      sessionId: request.sessionId,
+      batchId: request.batchId,
+      roomId: request.roomId,
+      channelId: request.channelId,
+      chatChannelId: request.channelId,
+      userId: request.requesterUserId,
+      participantId: target.participantId,
+      scope: target.scope,
+      lastReadAt,
+      ...(target.threadKey ? { threadKey: target.threadKey } : {})
+    };
+    const doc = await this.chatReadStates.findOneAndUpdate(
+      { readStateKey },
+      {
+        $set: readStatePayload,
+        ...(target.threadKey ? {} : { $unset: { threadKey: '' } })
+      },
+      { new: true, upsert: true }
+    );
+    if (!doc) {
+      throw new ServiceUnavailableException('Unable to update chat read state.');
+    }
+    return this.toChatReadState(doc);
+  }
+
+  async markChatRead(
+    request: { sessionId: string; roomId: string; participantId?: string; scope?: ChatMessageScope; readAt?: string },
+    user: SocketUser,
+    participantId: string | undefined
+  ): Promise<ChatReadState> {
+    await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
+    const classSession = await this.classSessions.findOne({ _id: request.sessionId, roomId: request.roomId });
+    if (!classSession) {
+      throw new NotFoundException('Class session chat not found.');
+    }
+    await this.assertSocketCanAccessClassSessionBatch(classSession.batchId, classSession.teacherId, user);
+    const participant = participantId
+      ? await this.assertParticipant(request.roomId, participantId)
+      : await this.findActiveParticipantByUserId(request.roomId, user.id);
+    if (!participant) {
+      throw new ForbiddenException('Join the classroom before updating chat read state.');
+    }
+
+    return this.markClassSessionChatRead({
+      sessionId: classSession.id,
+      batchId: classSession.batchId,
+      roomId: classSession.roomId,
+      channelId: classSession.chatChannelId,
+      teacherId: classSession.teacherId,
+      requesterUserId: user.id,
+      requesterRole: this.chatRequesterRole(participant, user),
+      participantId: request.participantId,
+      scope: request.scope,
+      readAt: request.readAt
+    });
+  }
+
+  async assertCanWatchClassSession(sessionId: string, user: SocketUser): Promise<void> {
+    const access = await this.resolveClassSessionAccessBySessionId(sessionId);
+    await this.assertSocketCanAccessClassSessionBatch(access.batchId, access.teacherId, user);
+  }
+
+  async getClassSessionChatSummary(request: ClassSessionChatContext): Promise<ChatThreadSummaryResponse> {
+    if (request.requesterRole === 'student') {
+      const student = await this.findActiveParticipantByUserId(request.roomId, request.requesterUserId);
+      if (!student || student.role !== Role.PARTICIPANT) {
+        throw new ForbiddenException('Join the classroom before loading chat summary.');
+      }
+      const privateThreadKey = this.privateClassSessionThreadKey(request.sessionId, request.teacherId, student);
+      const readStates = await this.chatReadStates.find({ sessionId: request.sessionId, userId: request.requesterUserId });
+      const privateReadState = this.readStateFor(readStates, 'private', privateThreadKey);
+      const broadcastReadState = this.readStateFor(readStates, 'broadcast');
+      const studentThread = await this.buildChatThreadSummary({
+        sessionId: request.sessionId,
+        scope: 'private',
+        threadKey: privateThreadKey,
+        participant: student,
+        readState: privateReadState,
+        unreadFilter: { senderRole: { $ne: 'student' } }
+      });
+      const broadcast = await this.buildChatThreadSummary({
+        sessionId: request.sessionId,
+        scope: 'broadcast',
+        readState: broadcastReadState,
+        unreadFilter: { senderRole: { $ne: 'student' } }
+      });
+      return {
+        sessionId: request.sessionId,
+        roomId: request.roomId,
+        threads: [studentThread, broadcast],
+        studentThread,
+        broadcast
+      };
+    }
+
+    const activeStudents = (await this.participants.find({
+      roomId: request.roomId,
+      admitted: true,
+      leftAt: { $exists: false },
+      role: Role.PARTICIPANT
+    })) as ParticipantMongoDocument[];
+    const activeByUserId = new Map(activeStudents.map((student) => [this.participantChatIdentity(student), student]));
+    const roster = await this.studentEnrollments.listBatchRoster(request.batchId);
+    const readStates = await this.chatReadStates.find({ sessionId: request.sessionId, userId: request.requesterUserId });
+    const privateThreads = await Promise.all(
+      roster.map((student) => {
+        const activeParticipant = activeByUserId.get(student.userId);
+        const threadKey = this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, student.userId);
+        return this.buildChatThreadSummary({
+          sessionId: request.sessionId,
+          scope: 'private',
+          threadKey,
+          participant: activeParticipant,
+          rosterItem: student,
+          readState: this.readStateFor(readStates, 'private', threadKey),
+          unreadFilter: { senderRole: 'student' }
+        });
+      })
+    );
+    const broadcast = await this.buildChatThreadSummary({
+      sessionId: request.sessionId,
+      scope: 'broadcast',
+      readState: this.readStateFor(readStates, 'broadcast'),
+      unreadFilter: { senderId: '__teacher_broadcast_unread_disabled__' }
+    });
+    return {
+      sessionId: request.sessionId,
+      roomId: request.roomId,
+      threads: [...privateThreads, broadcast],
+      broadcast
+    };
+  }
+
+  private async buildChatThreadSummary(request: {
+    sessionId: string;
+    scope: ChatMessageScope;
+    threadKey?: string;
+    participant?: ParticipantMongoDocument;
+    rosterItem?: StudentEnrollmentRosterItem;
+    readState?: ChatReadStateMongoDocument;
+    unreadFilter: Record<string, unknown>;
+  }): Promise<ChatThreadSummary> {
+    const messageFilter: Record<string, unknown> = {
+      deletedAt: { $exists: false },
+      sessionId: request.sessionId,
+      scope: request.scope
+    };
+    if (request.threadKey) {
+      messageFilter.threadKey = request.threadKey;
+    }
+    const latestDocs = await this.chat.find(messageFilter).sort({ createdAt: -1 }).limit(1).exec();
+    const latestMessage = latestDocs[0] ? this.toChatMessage(latestDocs[0]) : undefined;
+    const unreadFilter: Record<string, unknown> = {
+      ...messageFilter,
+      ...request.unreadFilter
+    };
+    if (request.readState?.lastReadAt) {
+      unreadFilter.createdAt = { $gt: request.readState.lastReadAt };
+    }
+    const unreadCount = await this.chat.countDocuments(unreadFilter);
+    const threadParticipantId = request.participant?.id ?? request.rosterItem?.userId;
+    const id = request.scope === 'broadcast' ? 'broadcast' : `private:${request.threadKey ?? threadParticipantId ?? 'unknown'}`;
+    return {
+      id,
+      scope: request.scope,
+      ...(request.participant || request.rosterItem
+        ? {
+            participantId: threadParticipantId,
+            participantName: request.participant?.displayName ?? request.rosterItem?.displayName,
+            participantRole: request.participant ? this.chatSenderRole(request.participant.role) : 'student',
+            online: request.participant ? !request.participant.leftAt : false
+          }
+        : {}),
+      ...(request.threadKey ? { threadKey: request.threadKey } : {}),
+      ...(request.readState?.lastReadAt ? { lastReadAt: this.dateToIso(request.readState.lastReadAt) } : {}),
+      ...(latestMessage
+        ? {
+            lastMessage: latestMessage,
+            lastMessagePreview: latestMessage.message,
+            lastMessageAt: latestMessage.createdAt
+          }
+        : {}),
+      unreadCount
+    };
+  }
+
+  private async resolveClassSessionReadTarget(request: ClassSessionChatContext): Promise<ClassSessionReadTarget> {
+    const scope = request.requesterRole === 'student' ? request.scope ?? 'private' : request.scope ?? (request.participantId ? 'private' : 'broadcast');
+    if (scope !== 'private' && scope !== 'broadcast') {
+      throw new BadRequestException('Unsupported chat read scope.');
+    }
+
+    if (request.requesterRole === 'student') {
+      const student = await this.findActiveParticipantByUserId(request.roomId, request.requesterUserId);
+      if (!student || student.role !== Role.PARTICIPANT) {
+        throw new ForbiddenException('Join the classroom before updating chat read state.');
+      }
+      if (scope === 'broadcast') {
+        return { scope: 'broadcast', participantId: student.id, student };
+      }
+      return {
+        scope: 'private',
+        participantId: student.id,
+        student,
+        threadKey: this.privateClassSessionThreadKey(request.sessionId, request.teacherId, student)
+      };
+    }
+
+    if (scope === 'broadcast') {
+      if (request.participantId) {
+        throw new BadRequestException('Broadcast read state does not accept a participant id.');
+      }
+      return { scope: 'broadcast' };
+    }
+
+    if (!request.participantId) {
+      throw new BadRequestException('Student participant id is required for private read state.');
+    }
+    const target = await this.resolveClassSessionStudentThreadTarget({
+      roomId: request.roomId,
+      batchId: request.batchId,
+      sessionId: request.sessionId,
+      teacherId: request.teacherId,
+      participantId: request.participantId
+    });
+    return {
+      scope: 'private',
+      participantId: target.participant?.id ?? target.studentId,
+      ...(target.participant ? { student: target.participant } : {}),
+      threadKey: target.threadKey
+    };
+  }
+
+  private readStateFor(readStates: readonly ChatReadStateMongoDocument[], scope: ChatMessageScope, threadKey?: string): ChatReadStateMongoDocument | undefined {
+    return readStates.find((state) => state.scope === scope && (threadKey ? state.threadKey === threadKey : !state.threadKey));
+  }
+
+  private parseChatReadAt(value: string | undefined): Date {
+    const now = new Date();
+    if (!value) {
+      return now;
+    }
+    const readAt = new Date(value);
+    if (Number.isNaN(readAt.getTime())) {
+      throw new BadRequestException('Invalid chat read timestamp.');
+    }
+    if (readAt.getTime() > now.getTime()) {
+      return now;
+    }
+    return readAt;
+  }
+
+  private async getChatHistoryByFilter(request: {
+    sessionId?: string;
+    filter: Record<string, unknown>;
+    before?: string;
+    limit?: number;
+  }): Promise<ChatHistoryResponse> {
+    const filter: Record<string, unknown> = {
+      deletedAt: { $exists: false },
+      ...(request.sessionId ? { sessionId: request.sessionId } : {}),
+      ...request.filter
+    };
+
+    if (request.before) {
+      const before = new Date(request.before);
+      if (Number.isNaN(before.getTime())) {
+        throw new BadRequestException('Invalid chat history cursor.');
+      }
+      filter.createdAt = { $lt: before };
+    }
+
+    const limit = Math.min(100, Math.max(1, Math.trunc(request.limit ?? 50)));
+    const docs = await this.chat.find(filter).sort({ createdAt: -1 }).limit(limit + 1).exec();
+    const visibleDocs = docs.slice(0, limit);
+    const messages = visibleDocs.reverse().map((doc) => this.toChatMessage(doc));
+    const nextBefore = docs.length > limit ? messages[0]?.createdAt : undefined;
+    return {
+      messages,
+      ...(nextBefore ? { nextBefore } : {})
+    };
+  }
+
+  private async resolveClassSessionChatDelivery(
+    classSession: ClassSessionMongoDocument,
+    sender: ParticipantMongoDocument,
+    request: { roomId: string; recipientId?: string; scope?: ChatMessageScope }
+  ): Promise<{
+    scope: ChatMessageScope;
+    recipient?: ParticipantMongoDocument;
+    threadKey?: string;
+    targets?: SocketDeliveryTarget[];
+    broadcastRoomId?: string;
+  }> {
+    if (request.scope && request.scope !== 'private' && request.scope !== 'broadcast') {
+      throw new BadRequestException('Unsupported chat message scope.');
+    }
+
+    if (!this.isTeacherChatParticipant(sender)) {
+      const teacher = await this.findClassSessionTeacherParticipant(classSession);
+      return {
+        scope: 'private',
+        recipient: teacher,
+        threadKey: this.privateClassSessionThreadKey(classSession.id, classSession.teacherId, sender),
+        targets: await this.participantSocketTargets(classSession.roomId, [sender, teacher])
+      };
+    }
+
+    const scope = request.scope ?? (request.recipientId ? 'private' : undefined);
+    if (!scope) {
+      throw new BadRequestException('Teacher chat messages must choose private or broadcast scope.');
+    }
+
+    if (scope === 'broadcast') {
+      if (request.recipientId) {
+        throw new BadRequestException('Broadcast chat messages cannot include a recipient.');
+      }
+      return {
+        scope: 'broadcast',
+        broadcastRoomId: request.roomId
+      };
+    }
+
+    if (!request.recipientId) {
+      throw new BadRequestException('A student recipient is required for private teacher chat.');
+    }
+    const recipient = await this.findActiveStudentParticipant(request.roomId, request.recipientId);
+    if (recipient.id === sender.id) {
+      throw new BadRequestException('Private chat recipient must be a student.');
+    }
+
+    return {
+      scope: 'private',
+      recipient,
+      threadKey: this.privateClassSessionThreadKey(classSession.id, classSession.teacherId, recipient),
+      targets: await this.participantSocketTargets(classSession.roomId, [sender, recipient])
+    };
+  }
+
+  private async findClassSessionTeacherParticipant(classSession: Pick<ClassSessionMongoDocument, 'roomId' | 'teacherId'>): Promise<ParticipantMongoDocument> {
+    const baseFilter = {
+      roomId: classSession.roomId,
+      admitted: true,
+      leftAt: { $exists: false },
+      role: { $in: [Role.HOST, Role.CO_HOST] }
+    };
+    const scheduledTeacher = classSession.teacherId
+      ? await this.participants.findOne({
+          ...baseFilter,
+          userId: classSession.teacherId
+        })
+      : null;
+    if (scheduledTeacher) {
+      return scheduledTeacher;
+    }
+
+    const activeTeacher = await this.participants.findOne(baseFilter);
+    if (!activeTeacher) {
+      throw new ConflictException('The teacher is not connected to chat yet.');
+    }
+    return activeTeacher;
+  }
+
+  private async findActiveStudentParticipant(roomId: string, participantId: string): Promise<ParticipantMongoDocument> {
+    const participant = await this.participants.findOne({
+      _id: participantId,
+      roomId,
+      admitted: true,
+      leftAt: { $exists: false }
+    });
+    if (!participant || participant.role !== Role.PARTICIPANT) {
+      throw new BadRequestException('Target student is not in this class session.');
+    }
+    return participant;
+  }
+
+  private async findActiveParticipantByUserId(roomId: string, userId: string): Promise<ParticipantMongoDocument | null> {
+    return this.participants.findOne({
+      roomId,
+      userId,
+      admitted: true,
+      leftAt: { $exists: false }
+    });
+  }
+
+  private async resolveClassSessionStudentThreadTarget(request: {
+    roomId: string;
+    batchId: string;
+    sessionId: string;
+    teacherId: string;
+    participantId: string;
+  }): Promise<{ studentId: string; threadKey: string; participant?: ParticipantMongoDocument; rosterItem?: StudentEnrollmentRosterItem }> {
+    const participant = await this.participants.findOne({
+      roomId: request.roomId,
+      admitted: true,
+      leftAt: { $exists: false },
+      role: Role.PARTICIPANT,
+      $or: [{ _id: request.participantId }, { userId: request.participantId }]
+    });
+    if (participant) {
+      const studentId = this.participantChatIdentity(participant);
+      return {
+        studentId,
+        participant,
+        threadKey: this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, studentId)
+      };
+    }
+
+    const roster = await this.studentEnrollments.listBatchRoster(request.batchId);
+    const rosterItem = roster.find((student) => student.userId === request.participantId || student.id === request.participantId || student.enrollmentId === request.participantId);
+    if (!rosterItem) {
+      throw new BadRequestException('Target student is not enrolled in this class session.');
+    }
+    return {
+      studentId: rosterItem.userId,
+      rosterItem,
+      threadKey: this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, rosterItem.userId)
+    };
+  }
+
+  private privateClassSessionThreadKey(sessionId: string, teacherId: string | undefined, student: ParticipantMongoDocument): string {
+    return this.privateClassSessionThreadKeyForStudentId(sessionId, teacherId, this.participantChatIdentity(student));
+  }
+
+  private privateClassSessionThreadKeyForStudentId(sessionId: string, teacherId: string | undefined, studentId: string): string {
+    const teacherKey = teacherId?.trim() || 'teacher';
+    const studentKey = studentId.trim();
+    return `${sessionId}:teacher:${teacherKey}:student:${studentKey}`;
+  }
+
+  private participantChatIdentity(participant: ParticipantMongoDocument): string {
+    return participant.userId?.trim() || participant.id;
+  }
+
+  private async participantSocketTargets(roomId: string, participants: readonly ParticipantMongoDocument[]): Promise<SocketDeliveryTarget[]> {
+    const participantIds = participants.map((participant) => participant.id);
+    const presence = await this.redis.participantsPresence(roomId, participantIds);
+    const targets = new Map<string, SocketDeliveryTarget>();
+    for (const entry of presence) {
+      targets.set(entry.socketId, this.presenceToSocketTarget(entry));
+    }
+    for (const participant of participants) {
+      if (participant.socketId && !targets.has(participant.socketId)) {
+        targets.set(participant.socketId, {
+          roomId,
+          participantId: participant.id,
+          socketId: participant.socketId,
+          ...(participant.userId ? { userId: participant.userId } : {}),
+          ...(participant.nodeId ? { nodeId: participant.nodeId } : {})
+        });
+      }
+    }
+    return [...targets.values()];
+  }
+
+  private presenceToSocketTarget(entry: RoomSocketPresence): SocketDeliveryTarget {
+    return {
+      roomId: entry.roomId,
+      participantId: entry.participantId,
+      socketId: entry.socketId,
+      ...(entry.userId ? { userId: entry.userId } : {}),
+      ...(entry.nodeId ? { nodeId: entry.nodeId } : {})
+    };
+  }
+
+  private isTeacherChatParticipant(participant: ParticipantMongoDocument): boolean {
+    return participant.role === Role.HOST || participant.role === Role.CO_HOST;
   }
 
   async raiseHand(roomId: string, participantId: string, raised: boolean): Promise<void> {
@@ -3246,6 +4216,17 @@ export class RoomsService {
     };
   }
 
+  private async findRoomDocumentById(roomId: string): Promise<RoomMongoDocument | null> {
+    try {
+      return await this.rooms.findById(roomId);
+    } catch (error) {
+      if (isMongooseCastError(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   private async createParticipant(
     roomId: string,
     user: SocketUser,
@@ -3278,6 +4259,220 @@ export class RoomsService {
     return participant;
   }
 
+  private async deferClassSessionTeacherDisconnect(
+    session: ClassSessionMongoDocument,
+    participant: ParticipantMongoDocument
+  ): Promise<LeaveRoomForSocketResult> {
+    const now = new Date();
+    const activeProducers = await this.producers.find({
+      roomId: session.roomId,
+      participantId: participant.id,
+      status: { $ne: 'closed' }
+    });
+    const activeProducerIds = activeProducers.map((producer) => producer.id);
+    await this.participants.updateOne(
+      { _id: participant.id, roomId: session.roomId },
+      {
+        $set: {
+          socketId: '',
+          lastSeenAt: now,
+          screenSharing: false
+        }
+      }
+    );
+    await this.producers.updateMany(
+      { roomId: session.roomId, participantId: participant.id, status: { $ne: 'closed' } },
+      { status: 'closed', closedAt: now }
+    );
+    await this.consumers.updateMany(
+      {
+        roomId: session.roomId,
+        status: { $ne: 'closed' },
+        $or: [
+          { participantId: participant.id },
+          ...(activeProducerIds.length ? [{ producerId: { $in: activeProducerIds } }] : [])
+        ]
+      },
+      { status: 'closed', closedAt: now }
+    );
+    await this.redis.removePresence(session.roomId, participant.id);
+    await this.media.closeParticipantTransports(participant.id);
+    this.scheduleClassSessionTeacherReconnectGrace(session);
+    return {
+      closed: false,
+      left: true,
+      reconnecting: true,
+      participantPatch: {
+        connected: false,
+        screenSharing: false
+      },
+      room: await this.getRoom(session.roomId)
+    };
+  }
+
+  private scheduleClassSessionTeacherReconnectGrace(session: ClassSessionMongoDocument): void {
+    this.cancelClassSessionTeacherReconnectGrace(session.id);
+    const timer = setTimeout(() => {
+      void this.completeClassSessionAfterTeacherReconnectGrace(session.id);
+    }, CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS);
+    this.classSessionTeacherReconnectTimers.set(session.id, timer);
+  }
+
+  private async completeClassSessionAfterTeacherReconnectGrace(sessionId: string): Promise<void> {
+    this.classSessionTeacherReconnectTimers.delete(sessionId);
+    const session = await this.classSessions.findById(sessionId);
+    if (!session || session.status !== 'live') {
+      return;
+    }
+    const teacher = await this.participants.findOne({
+      roomId: session.roomId,
+      userId: session.teacherId,
+      leftAt: { $exists: false }
+    });
+    if (teacher?.socketId) {
+      return;
+    }
+    try {
+      await this.closeClassSessionRoom({
+        roomId: session.roomId,
+        actorUserId: session.teacherId,
+        actorLabel: 'Teacher reconnect timeout'
+      });
+    } catch {
+      return;
+    }
+    const completedAt = new Date();
+    const updated = await this.classSessions.findOneAndUpdate(
+      { _id: sessionId, status: 'live' },
+      {
+        $set: {
+          status: 'completed',
+          completedAt
+        }
+      },
+      { new: true }
+    );
+    if (!updated) {
+      return;
+    }
+    this.emitClassSessionLifecycleEvent('session:ended', this.classSessionLifecyclePayload(updated));
+  }
+
+  private assertClassSessionRoomIsLive(session: ClassSessionMongoDocument): void {
+    if (session.status === 'live') {
+      return;
+    }
+    throw new ConflictException(this.classSessionJoinBlockedMessage(session.status));
+  }
+
+  private async resolveClassSessionAccessBySessionId(sessionId: string): Promise<{ batchId: string; teacherId: string }> {
+    const persisted = await this.classSessions.findById(sessionId);
+    if (persisted) {
+      return { batchId: persisted.batchId, teacherId: persisted.teacherId };
+    }
+
+    const batches = await this.batches.find({ deletedAt: { $exists: false } });
+    for (const batch of batches) {
+      if (!sessionId.startsWith(`${batch.id}-`)) {
+        continue;
+      }
+      const schedules = await this.batchSchedules.find({ batchId: batch.id }).sort({ dayOfWeek: 1 });
+      if (planClassSessions(batch, schedules).some((session) => session.id === sessionId)) {
+        return { batchId: batch.id, teacherId: batch.teacherId };
+      }
+    }
+
+    throw new NotFoundException('Class session not found.');
+  }
+
+  private async assertSocketCanAccessClassSessionBatch(batchId: string, teacherId: string, user: SocketUser): Promise<void> {
+    if (this.isAdminSocketUser(user)) {
+      return;
+    }
+    if (user.roles.includes('TEACHER') && teacherId === user.id) {
+      return;
+    }
+    if (user.roles.includes('STUDENT') && (await this.studentEnrollments.isStudentEnrolledInBatch(user.id, batchId))) {
+      return;
+    }
+    throw new ForbiddenException('You are not allowed to open this class session.');
+  }
+
+  private isClassSessionTeacherUser(session: ClassSessionMongoDocument, user: SocketUser): boolean {
+    return user.roles.includes('TEACHER') && session.teacherId === user.id;
+  }
+
+  private isClassSessionTeacherParticipant(session: ClassSessionMongoDocument, participant: ParticipantMongoDocument): boolean {
+    return participant.userId === session.teacherId || (participant.role === Role.HOST && participant.id === session.teacherId);
+  }
+
+  private classSessionLifecyclePayload(session: ClassSessionMongoDocument): ClassSessionLifecycleEvent {
+    return {
+      sessionId: session.id,
+      batchId: session.batchId,
+      roomId: session.roomId,
+      status: 'completed',
+      ...(session.startedAt ? { startedAt: session.startedAt.toISOString() } : {}),
+      ...(session.completedAt ? { completedAt: session.completedAt.toISOString() } : {})
+    };
+  }
+
+  private classSessionEntitlements(
+    session: ClassSessionMongoDocument,
+    user: SocketUser
+  ): { role: Role; permissions: Permissions } {
+    if (session.teacherId === user.id) {
+      return { role: Role.HOST, permissions: DEFAULT_PARTICIPANT_PERMISSIONS };
+    }
+    if (this.isAdminSocketUser(user)) {
+      return { role: Role.CO_HOST, permissions: DEFAULT_PARTICIPANT_PERMISSIONS };
+    }
+    return { role: Role.PARTICIPANT, permissions: CLASS_SESSION_STUDENT_PERMISSIONS };
+  }
+
+  private async applyClassSessionEntitlements(
+    room: RoomMongoDocument,
+    participant: ParticipantMongoDocument,
+    entitlements: { role: Role; permissions: Permissions }
+  ): Promise<void> {
+    const participantUpdate: Partial<ParticipantDocument> = {};
+    if (participant.role !== entitlements.role) {
+      participantUpdate.role = entitlements.role;
+    }
+    if (participant.audioEnabled !== entitlements.permissions.canPublishAudio) {
+      participantUpdate.audioEnabled = entitlements.permissions.canPublishAudio;
+    }
+    if (participant.videoEnabled !== entitlements.permissions.canPublishVideo) {
+      participantUpdate.videoEnabled = entitlements.permissions.canPublishVideo;
+    }
+    if (Object.keys(participantUpdate).length) {
+      await this.participants.updateOne({ _id: participant.id, roomId: room.id }, { $set: participantUpdate });
+    }
+    await this.permissions.updateOne(
+      { roomId: room.id, participantId: participant.id },
+      { $set: entitlements.permissions },
+      { upsert: true }
+    );
+    if (entitlements.role === Role.HOST && room.hostId !== participant.id) {
+      await this.rooms.updateOne({ _id: room.id }, { $set: { hostId: participant.id } });
+      room.hostId = participant.id;
+    }
+  }
+
+  private isAdminSocketUser(user: SocketUser): boolean {
+    return user.roles.includes('ADMIN') || user.roles.includes('SUPER_ADMIN');
+  }
+
+  private classSessionJoinBlockedMessage(status: ClassSessionMongoDocument['status']): string {
+    if (status === 'completed') {
+      return 'This class session has ended.';
+    }
+    if (status === 'cancelled') {
+      return 'This class session was cancelled.';
+    }
+    return 'The teacher has not started this class session yet.';
+  }
+
   private async requireRoomOwnerLookup(roomId: string): Promise<RoomOwnerLookupResponse> {
     const lookup = await this.nodeRegistry.lookupRoomOwner(roomId);
     if (!lookup.owner || !lookup.available) {
@@ -3289,6 +4484,69 @@ export class RoomsService {
   private async getPermissions(roomId: string, participantId: string): Promise<Permissions> {
     const doc = await this.permissions.findOne({ roomId, participantId });
     return doc ? this.toPermissions(doc) : DEFAULT_PARTICIPANT_PERMISSIONS;
+  }
+
+  private toChatMessage(doc: ChatMessageMongoDocument): ChatMessage {
+    return {
+      id: doc.id,
+      ...(doc.sessionId ? { sessionId: doc.sessionId } : {}),
+      ...(doc.batchId ? { batchId: doc.batchId } : {}),
+      roomId: doc.roomId,
+      ...(doc.channelId ? { channelId: doc.channelId } : {}),
+      ...(doc.chatChannelId ? { chatChannelId: doc.chatChannelId } : {}),
+      senderId: doc.senderId,
+      senderName: doc.senderName,
+      senderRole: doc.senderRole,
+      ...(doc.recipientId ? { recipientId: doc.recipientId } : {}),
+      scope: doc.scope ?? (doc.recipientId ? 'private' : 'broadcast'),
+      ...(doc.threadKey ? { threadKey: doc.threadKey } : {}),
+      message: doc.message,
+      shadowMuted: doc.shadowMuted,
+      createdAt: this.dateToIso(doc.createdAt),
+      ...(doc.deletedAt ? { deletedAt: this.dateToIso(doc.deletedAt) } : {})
+    };
+  }
+
+  private toChatReadState(doc: ChatReadStateMongoDocument): ChatReadState {
+    return {
+      id: doc.id,
+      sessionId: doc.sessionId,
+      ...(doc.batchId ? { batchId: doc.batchId } : {}),
+      roomId: doc.roomId,
+      ...(doc.channelId ? { channelId: doc.channelId } : {}),
+      ...(doc.chatChannelId ? { chatChannelId: doc.chatChannelId } : {}),
+      userId: doc.userId,
+      ...(doc.participantId ? { participantId: doc.participantId } : {}),
+      scope: doc.scope,
+      ...(doc.threadKey ? { threadKey: doc.threadKey } : {}),
+      lastReadAt: this.dateToIso(doc.lastReadAt),
+      updatedAt: this.dateToIso(doc.updatedAt ?? doc.lastReadAt)
+    };
+  }
+
+  private chatReadStateKey(sessionId: string, userId: string, scope: ChatMessageScope, threadKey?: string): string {
+    return `${sessionId}:${userId}:${scope}:${threadKey ?? 'broadcast'}`;
+  }
+
+  private chatSenderRole(role: Role): string {
+    if (role === Role.HOST || role === Role.CO_HOST) {
+      return 'teacher';
+    }
+    return 'student';
+  }
+
+  private chatRequesterRole(participant: ParticipantMongoDocument, user: SocketUser): 'teacher' | 'student' | 'admin' {
+    if (user.roles.includes('ADMIN') || user.roles.includes('SUPER_ADMIN')) {
+      return 'admin';
+    }
+    if (participant.role === Role.HOST || participant.role === Role.CO_HOST) {
+      return 'teacher';
+    }
+    return 'student';
+  }
+
+  private dateToIso(value: Date | string): string {
+    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
   }
 
   private async assertParticipant(roomId: string, participantId: string): Promise<ParticipantMongoDocument> {
@@ -3344,6 +4602,27 @@ export class RoomsService {
       active: true
     });
     return { actor, participant };
+  }
+
+  private async assertNoActiveStudentMediaModeration(roomId: string, participantId: string, kind: 'audio' | 'video'): Promise<void> {
+    const action = kind === 'audio' ? 'force-mute' : 'disable-camera';
+    const moderation = await this.moderation.exists({ roomId, participantId, action, active: true });
+    if (moderation) {
+      throw new ForbiddenException(kind === 'audio' ? 'Microphone disabled by moderator' : 'Camera disabled by moderator');
+    }
+  }
+
+  private studentMediaModerationMessage(action: StudentMediaModerationAction): string {
+    switch (action) {
+      case 'mute-mic':
+        return 'Teacher muted your microphone.';
+      case 'unmute-mic':
+        return 'Teacher allowed your microphone. You can turn it on when ready.';
+      case 'stop-camera':
+        return 'Teacher stopped your camera.';
+      case 'restore-camera':
+        return 'Teacher allowed your camera. You can turn it on when ready.';
+    }
   }
 
   private async handleConsumerLayerEvent(event: ConsumerLayerEvent): Promise<void> {
@@ -3906,6 +5185,7 @@ export class RoomsService {
       userId: doc.userId,
       displayName: doc.displayName,
       socketId: doc.socketId,
+      connected: Boolean(doc.socketId),
       role: doc.role,
       audioEnabled: doc.audioEnabled,
       videoEnabled: doc.videoEnabled,
@@ -4853,6 +6133,10 @@ function hasPendingLayerSwitch(state: Pick<ConsumerQualityState, 'currentLayers'
 
 function isPersistedMongoId(value: string): boolean {
   return Types.ObjectId.isValid(value);
+}
+
+function isMongooseCastError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'name' in error && error.name === 'CastError';
 }
 
 function averageNumber(values: number[]): number {

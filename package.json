@@ -28,6 +28,7 @@
     "test:load:socketio": "k6 run tests/load/socketio-room-flow.js",
     "test:load:node-drain": "k6 run tests/load/node-drain-soak.js",
     "test:live-soak": "node tests/load/live-soak-signoff.mjs",
+    "test:eventing:soak": "node tests/load/eventing-mixed-backlog-soak.mjs",
     "test:staging:preflight": "node tests/load/staging-rollout-preflight.mjs",
     "test:rc": "npm run lint && npm run build && npm run test && npm run test:e2e && npm run test:browser",
     "lint": "npm run lint --workspaces --if-present",

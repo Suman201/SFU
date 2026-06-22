@@ -1,12 +1,16 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import {
+  CreateRedisStreamEndpointRequest,
   CreateWebhookEndpointRequest,
   PlatformEventActor,
   PlatformEventListResponse,
   PlatformEventQuery,
+  RedisStreamEndpoint,
+  RedisStreamEndpointListResponse,
   ReplayWebhookDeliveryRequest,
   ReplayWebhookDeliveryResponse,
   ReplayWebhookEventRequest,
+  UpdateRedisStreamEndpointRequest,
   UpdateWebhookEndpointRequest,
   WebhookDelivery,
   WebhookDeliveryListResponse,
@@ -28,14 +32,29 @@ export class EventsController {
     return this.events.createWebhookEndpoint(request, operatorActor());
   }
 
+  @Post('redis-streams')
+  createRedisStreamEndpoint(@Body() request: CreateRedisStreamEndpointRequest): Promise<RedisStreamEndpoint> {
+    return this.events.createRedisStreamEndpoint(request, operatorActor());
+  }
+
   @Get('webhooks')
   listWebhookEndpoints(): Promise<WebhookEndpointListResponse> {
     return this.events.listWebhookEndpoints();
   }
 
+  @Get('redis-streams')
+  listRedisStreamEndpoints(): Promise<RedisStreamEndpointListResponse> {
+    return this.events.listRedisStreamEndpoints();
+  }
+
   @Get('webhooks/:endpointId')
   getWebhookEndpoint(@Param('endpointId') endpointId: string): Promise<WebhookEndpoint> {
     return this.events.getWebhookEndpoint(endpointId);
+  }
+
+  @Get('redis-streams/:endpointId')
+  getRedisStreamEndpoint(@Param('endpointId') endpointId: string): Promise<RedisStreamEndpoint> {
+    return this.events.getRedisStreamEndpoint(endpointId);
   }
 
   @Patch('webhooks/:endpointId')
@@ -44,6 +63,14 @@ export class EventsController {
     @Body() request: UpdateWebhookEndpointRequest
   ): Promise<WebhookEndpoint> {
     return this.events.updateWebhookEndpoint(endpointId, request, operatorActor());
+  }
+
+  @Patch('redis-streams/:endpointId')
+  updateRedisStreamEndpoint(
+    @Param('endpointId') endpointId: string,
+    @Body() request: UpdateRedisStreamEndpointRequest
+  ): Promise<RedisStreamEndpoint> {
+    return this.events.updateRedisStreamEndpoint(endpointId, request, operatorActor());
   }
 
   @Post('webhooks/:endpointId/rotate-secret')

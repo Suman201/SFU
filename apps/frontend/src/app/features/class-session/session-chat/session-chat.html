@@ -20,7 +20,7 @@
   >
     <span class="drag-grip" aria-hidden="true"></span>
     <span class="chat-icon" aria-hidden="true"></span>
-    <span>Class chat</span>
+    <span>{{ headerTitle() }}</span>
     @if (unreadCount()) {
       <strong>{{ unreadCount() }}</strong>
     }
@@ -31,8 +31,8 @@
       <header class="chat-header drag-handle" (pointerdown)="startDrag($event, chatElement)">
         <span class="drag-grip" aria-hidden="true"></span>
         <div>
-          <p>Live discussion</p>
-          <h2>Class chat</h2>
+          <p>{{ headerEyebrow() }}</p>
+          <h2>{{ headerTitle() }}</h2>
         </div>
         <button
           type="button"
@@ -46,34 +46,113 @@
         </button>
       </header>
 
+      @if (isTeacherChat()) {
+        <div class="chat-mode-strip" aria-label="Chat mode">
+          <button
+            type="button"
+            class="mode-button"
+            [class.active]="chatMode() === 'private'"
+            (click)="chatMode.set('private')"
+          >
+            Private
+          </button>
+          <button
+            type="button"
+            class="mode-button broadcast"
+            [class.active]="chatMode() === 'broadcast'"
+            (click)="selectBroadcast()"
+          >
+            Broadcast
+            @if (broadcastUnread()) {
+              <strong>{{ broadcastUnread() }}</strong>
+            }
+          </button>
+        </div>
+
+        @if (chatMode() === 'private') {
+          <div class="thread-list" aria-label="Student private threads">
+            @if (!threadParticipants().length) {
+              <span class="thread-empty">No students joined</span>
+            } @else {
+              @for (participant of threadParticipants(); track participant.id) {
+                <button
+                  type="button"
+                  class="thread-button"
+                  [class.active]="selectedThreadParticipantId() === participant.id"
+                  (click)="selectPrivateThread(participant.id)"
+                >
+                  <span>{{ participant.initials || participant.name.slice(0, 2) }}</span>
+                  <span class="thread-copy">
+                    <strong>{{ participant.name }}</strong>
+                    <small>{{ threadPreview(participant) }}</small>
+                  </span>
+                  <i [class.online]="threadOnline(participant)" aria-hidden="true"></i>
+                  @if (threadUnread(participant)) {
+                    <em>{{ threadUnread(participant) }}</em>
+                  }
+                </button>
+              }
+            }
+          </div>
+        }
+      }
+
       <div class="message-list" aria-live="polite">
-        @for (message of messages(); track message.id) {
-          <article class="message" [class.mine]="message.mine">
-            <div class="message-meta">
-              <strong>{{ message.author }}</strong>
-              <span>{{ message.role }} · {{ message.sentAt }}</span>
-            </div>
-            <p>{{ message.body }}</p>
-          </article>
+        @if (loadingHistory() && !visibleMessages().length) {
+          <div class="chat-state">Loading messages</div>
+        } @else if (!visibleMessages().length) {
+          <div class="chat-state">No messages yet</div>
+        } @else {
+          @for (message of visibleMessages(); track message.id) {
+            <article
+              class="message"
+              [class.mine]="isMine(message)"
+              [class.announcement]="isAnnouncement(message)"
+              [class.shadow-muted]="message.shadowMuted"
+            >
+              <div class="message-meta">
+                <strong>{{ senderName(message) }}</strong>
+                <span>{{ senderRole(message) }} · {{ messageTime(message) }}</span>
+              </div>
+              <p>{{ message.message }}</p>
+              @if (isMine(message)) {
+                <div class="message-status" [class.failed]="message.deliveryState === 'failed'">
+                  <span>{{ deliveryLabel(message) }}</span>
+                  @if (message.deliveryState === 'failed') {
+                    <button type="button" [disabled]="!canSend()" (click)="retryMessage(message)">Retry</button>
+                  }
+                </div>
+              }
+            </article>
+          }
         }
       </div>
 
+      @if (chatError()) {
+        <p class="chat-error" role="alert">{{ chatError() }}</p>
+      } @else if (composerDisabledReason()) {
+        <p class="chat-hint">{{ composerDisabledReason() }}</p>
+      }
+
       <form class="chat-composer" [formRoot]="chatForm" (submit)="sendMessage($event)">
-        <input
-          type="text"
-          autocomplete="off"
-          placeholder="Message class"
-          [formField]="chatForm.message"
-        />
-        <button
-          type="submit"
-          class="send-button"
-          [disabled]="!chatModel().message.trim() || chatForm().invalid()"
-          title="Send message"
-          aria-label="Send message"
-        >
-          <span aria-hidden="true"></span>
-        </button>
+        <fieldset class="composer-fields" [disabled]="!canSend()">
+          <input
+            type="text"
+            autocomplete="off"
+            [placeholder]="composerPlaceholder()"
+            [formField]="chatForm.message"
+          />
+          <button
+            type="submit"
+            class="send-button"
+            [class.sending]="sending()"
+            [disabled]="!chatModel().message.trim() || chatForm().invalid() || !canSend()"
+            [title]="sending() ? 'Sending message' : 'Send message'"
+            [attr.aria-label]="sending() ? 'Sending message' : 'Send message'"
+          >
+            <span aria-hidden="true"></span>
+          </button>
+        </fieldset>
       </form>
     </div>
   }

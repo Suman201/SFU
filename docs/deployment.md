@@ -51,7 +51,10 @@ Treat these values as the minimum deployment-facing config surface that must be 
 | `ICE_STUN_SERVERS` | Optional comma-separated STUN servers used by the SFU itself to gather server-reflexive candidates. Keep them on UDP and point them at real reachable infrastructure. | `GET /api/v1/media/diagnostics/node` -> `ice.stun*` |
 | `ICE_TURN_SERVERS` | Optional comma-separated TURN URIs used by the SFU itself to gather relay candidates. Current RC support is UDP `turn:` only and the backend derives shared-secret credentials from `TURN_SECRET`. | `GET /api/v1/media/diagnostics/node` -> `ice.turn*` |
 | `ICE_ANNOUNCED_ADDRESS` | Optional host-candidate public address rewrite for the SFU media plane. Use it when the node binds privately but must advertise a different public host candidate. | `GET /api/v1/media/diagnostics/node` -> `ice.announcedAddress`, `ice.hostCandidateMode` |
-| `OPERATIONS_TOKEN` | Operator credential for `/metrics` and `/api/v1/media/*` control routes. Production requires a non-empty value. | `npm run test:staging:preflight` checks token enforcement |
+| `OPERATIONS_TOKEN` | Operator credential for `/metrics`, `/api/v1/media/*`, and `/api/v1/events/*` control routes. Production requires a non-empty value. | `npm run test:staging:preflight` checks token enforcement |
+| `WEBHOOK_SECRET_ENCRYPTION_KEY` | Dedicated encryption key for webhook signing secrets at rest. Production should not rely on the JWT fallback for this. | Boot-time config validation plus create/list/replay smoke through `/api/v1/events/*` |
+| `WEBHOOK_DELIVERY_CONCURRENCY` / `WEBHOOK_DELIVERY_MAX_BATCH_PER_PUMP` / `WEBHOOK_DELIVERY_MAX_CONCURRENT_PER_ENDPOINT` | Backlog throughput and fairness knobs for the shared event delivery pump that now serves both webhook and Redis stream adapters. Keep max batch >= concurrency and per-endpoint concurrency <= total concurrency. | `GET /api/v1/events/diagnostics/summary` -> `dispatch.*`, `deliveryCountsByAdapter`, and backlog behavior under load |
+| `EVENT_LOG_RETENTION_DAYS` / `WEBHOOK_DELIVERY_RETENTION_DAYS` / `WEBHOOK_EXHAUSTED_DELIVERY_RETENTION_DAYS` | Policy-driven retention windows for audit events, normal delivery history, and dead-letter history. | `GET /api/v1/events/diagnostics/summary` -> `retention.*` |
 | `PIPE_ADVERTISE_IP` | Stable inter-node address other SFU nodes actually dial when `ENABLE_PIPE_TRANSPORT=true`. It must not be localhost or a pod-only address. | `GET /api/v1/media/diagnostics/node` -> `addressing.pipeAdvertiseIp` and pipe health |
 | `METRICS_PATH` | Optional extra scrape alias when an environment needs a non-default metrics path. | Probe the configured alias if you use one; `/metrics` remains the canonical endpoint |
 
@@ -123,6 +126,7 @@ Do not use a blind sleep as the primary shutdown mechanism. If you add a `preSto
 - When `OPERATIONS_TOKEN` is configured, send it as `X-Operations-Token` for `/metrics` and `/api/v1/media/*` operator endpoints.
 - Treat `/api/v1/media/*` diagnostics and drain routes as operator-only even though some health routes stay public for orchestrators.
 - `GET /api/v1/media/diagnostics/node` is the main runtime truth source for staged rollout checks. Use it to confirm `trafficReady`, derived rollout alerts, TURN URI hygiene, public URL shape, and pipe advertise IP shape before blaming browsers or ingress.
+- `GET /api/v1/events/diagnostics/summary` is the runtime truth source for eventing backlog fairness, per-adapter skew, dispatch concurrency, lease expiry, backlog aging, hottest-lane concentration, and frozen snapshot mix.
 - Keep Swagger disabled in production unless you have an explicit operational reason to expose it.
 
 ## Observability

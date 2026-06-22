@@ -68,6 +68,8 @@ export class BatchDetails {
   protected readonly openSessionMenuPosition = signal<'above' | 'below'>('below');
   protected readonly messageTargetId = signal<string | null>(null);
   protected readonly actionNotice = signal('');
+  protected readonly actionError = signal('');
+  protected readonly sessionActionLoadingId = this.dashboard.sessionActionLoadingId;
   protected readonly messageModel = signal<MessageFormModel>({ message: '' });
   protected readonly messageForm = signalForm(this.messageModel, (path) => {
     required(path.message);
@@ -83,14 +85,18 @@ export class BatchDetails {
   }
 
   protected async startSession(session: TeacherSession): Promise<void> {
-    const startedSession = this.dashboard.startSession(session.id);
-    if (!startedSession) {
-      return;
-    }
-    await this.router.navigate(['/class-session/teacher'], {
-      queryParams: {
-        batchId: session.batchId,
-        sessionId: session.id
+    this.actionError.set('');
+    this.dashboard.startSession(session).subscribe({
+      next: async (payload) => {
+        await this.router.navigate(['/class-session/teacher'], {
+          queryParams: {
+            batchId: payload.batchId,
+            sessionId: payload.sessionId
+          }
+        });
+      },
+      error: () => {
+        this.actionError.set(this.dashboard.error());
       }
     });
   }
@@ -112,7 +118,15 @@ export class BatchDetails {
   }
 
   protected completeSession(session: TeacherSession): void {
-    this.dashboard.completeSession(session.id);
+    this.actionError.set('');
+    this.dashboard.completeSession(session).subscribe({
+      next: () => {
+        this.actionNotice.set(`Session ${session.sessionNumber} has ended.`);
+      },
+      error: () => {
+        this.actionError.set(this.dashboard.error());
+      }
+    });
   }
 
   protected batchProgress(batch: TeacherBatch): number {

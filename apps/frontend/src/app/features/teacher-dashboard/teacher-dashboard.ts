@@ -54,6 +54,7 @@ export class TeacherDashboard {
   protected readonly batches = this.dashboard.batches;
   protected readonly loading = this.dashboard.loading;
   protected readonly saving = this.dashboard.saving;
+  protected readonly sessionActionLoadingId = this.dashboard.sessionActionLoadingId;
   protected readonly batchModel = signal<BatchFormModel>(this.initialBatchModel());
   protected readonly selectedSchedule = computed(() => this.scheduleFromModel(this.batchModel()));
   protected readonly dateRangeLabel = computed(() => {
@@ -144,15 +145,21 @@ export class TeacherDashboard {
       return;
     }
 
-    await this.startSession(session);
+    this.startSession(session);
   }
 
-  private async startSession(session: TeacherSession): Promise<void> {
-    const startedSession = this.dashboard.startSession(session.id);
-    if (!startedSession) {
-      return;
-    }
-    await this.openSession(startedSession);
+  private startSession(session: TeacherSession): void {
+    this.dashboard.startSession(session).subscribe({
+      next: async (payload) => {
+        await this.router.navigate(['/class-session/teacher'], {
+          queryParams: {
+            batchId: payload.batchId,
+            sessionId: payload.sessionId
+          }
+        });
+      },
+      error: () => undefined
+    });
   }
 
   private async openSession(session: TeacherSession): Promise<void> {

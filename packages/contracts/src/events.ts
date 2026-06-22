@@ -218,8 +218,10 @@ export interface OperatorActionExecutedEventPayload {
     | 'event_replayed_to_endpoint'
     | 'webhook_endpoint_created'
     | 'webhook_endpoint_updated'
-    | 'webhook_endpoint_secret_rotated';
-  scope: 'room' | 'worker' | 'node' | 'webhook' | 'delivery';
+    | 'webhook_endpoint_secret_rotated'
+    | 'redis_stream_endpoint_created'
+    | 'redis_stream_endpoint_updated';
+  scope: 'room' | 'worker' | 'node' | 'webhook' | 'redis_stream' | 'delivery';
   roomId?: string;
   workerId?: string;
   endpointId?: string;
@@ -310,11 +312,36 @@ export interface PlatformEventQuery {
   limit?: number;
 }
 
-export const WEBHOOK_DELIVERY_STATUSES = ['queued', 'retrying', 'delivered', 'exhausted', 'cancelled'] as const;
+export const EVENT_DELIVERY_ADAPTER_KINDS = ['webhook', 'redis-stream'] as const;
+export type EventDeliveryAdapterKind = (typeof EVENT_DELIVERY_ADAPTER_KINDS)[number];
+
+export const WEBHOOK_DELIVERY_STATUSES = ['queued', 'retrying', 'dispatching', 'delivered', 'exhausted', 'cancelled'] as const;
 export type WebhookDeliveryStatus = (typeof WEBHOOK_DELIVERY_STATUSES)[number];
 
 export const WEBHOOK_ENDPOINT_HEALTH_STATES = ['healthy', 'degraded', 'failing', 'disabled'] as const;
 export type WebhookEndpointHealthState = (typeof WEBHOOK_ENDPOINT_HEALTH_STATES)[number];
+
+export const EVENT_DELIVERY_FAILURE_CATEGORIES = [
+  'http',
+  'timeout',
+  'network',
+  'auth',
+  'configuration',
+  'storage',
+  'throttled',
+  'endpoint_disabled',
+  'endpoint_missing',
+  'event_missing'
+] as const;
+export type EventDeliveryFailureCategory = (typeof EVENT_DELIVERY_FAILURE_CATEGORIES)[number];
+export type WebhookDeliveryFailureCategory = EventDeliveryFailureCategory;
+
+export const DELIVERY_SNAPSHOT_SOURCES = [
+  'queued_endpoint_state',
+  'original_delivery_snapshot',
+  'current_endpoint_state'
+] as const;
+export type DeliverySnapshotSource = (typeof DELIVERY_SNAPSHOT_SOURCES)[number];
 
 export interface WebhookEndpointHealthSummary {
   status: WebhookEndpointHealthState;
@@ -322,6 +349,8 @@ export interface WebhookEndpointHealthSummary {
   lastDeliveryAt?: string;
   lastResponseStatusCode?: number;
   lastError?: string;
+  lastFailureCategory?: EventDeliveryFailureCategory;
+  lastDeliveryReference?: string;
   consecutiveFailures: number;
 }
 
@@ -380,6 +409,61 @@ export interface WebhookEndpointListResponse {
   endpoints: WebhookEndpoint[];
 }
 
+export interface RedisStreamEndpointHealthSummary {
+  status: WebhookEndpointHealthState;
+  lastDeliveryStatus?: WebhookDeliveryStatus;
+  lastDeliveryAt?: string;
+  lastError?: string;
+  lastFailureCategory?: EventDeliveryFailureCategory;
+  lastDeliveryReference?: string;
+  consecutiveFailures: number;
+}
+
+export interface RedisStreamEndpoint {
+  id: string;
+  adapterKind: 'redis-stream';
+  name: string;
+  enabled: boolean;
+  streamKey: string;
+  maxLen?: number;
+  subscribedEventTypes: PlatformEventType[];
+  roomFilterIds?: string[];
+  timeoutMs: number;
+  maxAttempts: number;
+  initialBackoffMs: number;
+  health: RedisStreamEndpointHealthSummary;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateRedisStreamEndpointRequest {
+  name: string;
+  enabled?: boolean;
+  streamKey: string;
+  maxLen?: number;
+  subscribedEventTypes: PlatformEventType[];
+  roomFilterIds?: string[];
+  timeoutMs?: number;
+  maxAttempts?: number;
+  initialBackoffMs?: number;
+}
+
+export interface UpdateRedisStreamEndpointRequest {
+  name?: string;
+  enabled?: boolean;
+  streamKey?: string;
+  maxLen?: number;
+  subscribedEventTypes?: PlatformEventType[];
+  roomFilterIds?: string[];
+  timeoutMs?: number;
+  maxAttempts?: number;
+  initialBackoffMs?: number;
+}
+
+export interface RedisStreamEndpointListResponse {
+  endpoints: RedisStreamEndpoint[];
+}
+
 export interface WebhookDeliveryAttempt {
   attemptNumber: number;
   attemptedAt: string;
@@ -388,19 +472,54 @@ export interface WebhookDeliveryAttempt {
   responseStatusCode?: number;
   durationMs: number;
   error?: string;
+  failureCategory?: EventDeliveryFailureCategory;
+  deliveryReference?: string;
   nextAttemptAt?: string;
 }
 
-export interface WebhookDelivery {
+export interface WebhookEndpointSnapshot {
+  adapterKind: 'webhook';
+  url: string;
+  signingAlgorithm: 'hmac-sha256';
+  secretFingerprint?: string;
+  timeoutMs: number;
+  maxAttempts: number;
+  initialBackoffMs: number;
+  subscribedEventTypes: PlatformEventType[];
+  roomFilterIds?: string[];
+  endpointUpdatedAt?: string;
+  secretLastRotatedAt?: string;
+}
+
+export interface RedisStreamEndpointSnapshot {
+  adapterKind: 'redis-stream';
+  streamKey: string;
+  maxLen?: number;
+  timeoutMs: number;
+  maxAttempts: number;
+  initialBackoffMs: number;
+  subscribedEventTypes: PlatformEventType[];
+  roomFilterIds?: string[];
+  endpointUpdatedAt?: string;
+}
+
+export type EventDeliverySnapshot = WebhookEndpointSnapshot | RedisStreamEndpointSnapshot;
+
+export interface EventDelivery {
   id: string;
+  adapterKind: EventDeliveryAdapterKind;
   endpointId: string;
   eventId: string;
   eventType: PlatformEventType;
   roomId?: string;
   status: WebhookDeliveryStatus;
+  snapshotSource: DeliverySnapshotSource;
+  endpointSnapshot: EventDeliverySnapshot;
   attemptCount: number;
   lastResponseStatusCode?: number;
   lastError?: string;
+  lastFailureCategory?: EventDeliveryFailureCategory;
+  lastDeliveryReference?: string;
   nextAttemptAt?: string;
   deliveredAt?: string;
   exhaustedAt?: string;
@@ -411,6 +530,8 @@ export interface WebhookDelivery {
   createdAt: string;
   updatedAt: string;
 }
+
+export type WebhookDelivery = EventDelivery;
 
 export interface WebhookDeliveryQuery {
   endpointId?: string;
@@ -439,6 +560,38 @@ export interface ReplayWebhookDeliveryResponse {
   delivery: WebhookDelivery;
 }
 
+export interface DeliveryDispatchDiagnosticsSummary {
+  concurrency: number;
+  maxBatchPerPump: number;
+  maxConcurrentPerEndpoint: number;
+  activeDispatches: number;
+  nextClaimPrefers: 'queued' | 'retrying';
+}
+
+export interface DeliveryBacklogEndpointSummary {
+  adapterKind: EventDeliveryAdapterKind;
+  endpointId: string;
+  total: number;
+  queued: number;
+  retrying: number;
+  dispatching: number;
+}
+
+export interface DeliveryBacklogAgingSummary {
+  queued: number;
+  retrying: number;
+  dispatching: number;
+}
+
+export interface DeliveryFairnessDiagnosticsSummary {
+  activeLaneCount: number;
+  queuedLaneCount: number;
+  retryingLaneCount: number;
+  dispatchingLaneCount: number;
+  largestBacklogEndpointShare: number;
+  largestBacklogEndpointShareByAdapter: Record<EventDeliveryAdapterKind, number>;
+}
+
 export interface EventingDiagnosticsSummary {
   observedAt: string;
   endpointCounts: {
@@ -447,12 +600,49 @@ export interface EventingDiagnosticsSummary {
     disabled: number;
     unhealthy: number;
   };
+  endpointCountsByAdapter: Record<EventDeliveryAdapterKind, number>;
   deliveryCounts: {
     queued: number;
     retrying: number;
+    dispatching: number;
     delivered: number;
     exhausted: number;
     cancelled: number;
+  };
+  deliveryCountsByAdapter: Record<
+    EventDeliveryAdapterKind,
+    {
+      queued: number;
+      retrying: number;
+      dispatching: number;
+      delivered: number;
+      exhausted: number;
+      cancelled: number;
+    }
+  >;
+  failureCategoryCounts: Record<EventDeliveryFailureCategory, number>;
+  snapshotSourceCounts: Record<DeliverySnapshotSource, number>;
+  adapterCounts: Record<EventDeliveryAdapterKind, number>;
+  dispatch: DeliveryDispatchDiagnosticsSummary;
+  activeDispatchesByAdapter: Record<EventDeliveryAdapterKind, number>;
+  leaseCounts: {
+    active: number;
+    expired: number;
+  };
+  backlogAging: DeliveryBacklogAgingSummary;
+  backlogAgingByAdapter: Record<EventDeliveryAdapterKind, DeliveryBacklogAgingSummary>;
+  fairness: DeliveryFairnessDiagnosticsSummary;
+  topBacklogEndpoints: DeliveryBacklogEndpointSummary[];
+  retention: {
+    eventRetentionDays: number;
+    deliveryRetentionDays: number;
+    exhaustedDeliveryRetentionDays: number;
+    cleanupIntervalMs: number;
+    lastSweepAt?: string;
+    lastSweepDeletedCounts?: {
+      events: number;
+      deliveries: number;
+    };
   };
   recentEventCount: number;
   lastEventAt?: string;

@@ -1,6 +1,29 @@
 <!-- <sfu-header /> -->
+@if (loading()) {
+  <main class="class-session-state">
+    <h1>Loading classroom</h1>
+    <p>Preparing the live session workspace.</p>
+  </main>
+} @else if (error()) {
+  <main class="class-session-state">
+    <h1>Classroom unavailable</h1>
+    <p>{{ error() }}</p>
+    <a class="button primary" routerLink="/teacher/dashboard">Back to dashboard</a>
+  </main>
+} @else if (!sessionLive()) {
+  <main class="class-session-state">
+    <h1>Session is not live</h1>
+    <p>Start this session manually from the batch dashboard before opening the classroom.</p>
+    <a class="button primary" [routerLink]="['/teacher/dashboard/batches', session()?.batchId]">Back to batch</a>
+  </main>
+} @else {
 <main class="class-session-shell">
-  <sfu-whiteboard [cursors]="studentCursors()" />
+  <sfu-whiteboard
+    [cursors]="studentCursors()"
+    [readOnly]="!sessionLive() || ending()"
+    [showEndSession]="sessionLive() && !ending()"
+    (endSession)="endSession()"
+  />
 
   <aside
     #rightSidebar
@@ -17,53 +40,223 @@
       <div class="participants-header">
         <div>
           <p class="eyebrow">Live class</p>
-          <h2>Participants</h2>
+          <h2>{{ session()?.title ?? 'Participants' }}</h2>
         </div>
         <span class="count">{{ participants().length }}</span>
       </div>
 
+      <div
+        class="media-console"
+        [class.ready]="cameraPublished()"
+        [class.problem]="mediaError()"
+        [class.busy]="mediaBusy()"
+        aria-live="polite"
+      >
+        <div class="media-status-row">
+          <span class="media-dot" aria-hidden="true"></span>
+          <strong>{{ mediaStatusLabel() }}</strong>
+          <span class="network-chip">Network {{ webrtc.networkScore() }}/5</span>
+        </div>
+
+        <div class="device-switcher" aria-label="Teacher camera and microphone devices">
+          <label class="device-field" [class.switching]="switchingAudioDevice()">
+            <span>Microphone</span>
+            <select
+              [value]="selectedAudioDeviceId()"
+              [disabled]="!roomJoined() || !cameraPublished() || mediaBusy()"
+              [title]="cameraPublished() ? 'Choose microphone' : 'Microphone is not live yet'"
+              (change)="switchMicrophone($any($event.target).value)"
+            >
+              <option value="">System default</option>
+              @if (audioInputDevices().length) {
+                @for (device of audioInputDevices(); track device.id) {
+                  <option [value]="device.id">{{ device.label }}</option>
+                }
+              } @else {
+                <option value="" disabled>No microphones found</option>
+              }
+            </select>
+          </label>
+
+          <label class="device-field" [class.switching]="switchingVideoDevice()">
+            <span>Camera</span>
+            <select
+              [value]="selectedVideoDeviceId()"
+              [disabled]="!roomJoined() || !cameraPublished() || mediaBusy()"
+              [title]="cameraPublished() ? 'Choose camera' : 'Camera is not live yet'"
+              (change)="switchCamera($any($event.target).value)"
+            >
+              <option value="">System default</option>
+              @if (videoInputDevices().length) {
+                @for (device of videoInputDevices(); track device.id) {
+                  <option [value]="device.id">{{ device.label }}</option>
+                }
+              } @else {
+                <option value="" disabled>No cameras found</option>
+              }
+            </select>
+          </label>
+
+          <button
+            class="refresh-devices-button"
+            type="button"
+            [disabled]="!roomJoined() || refreshingDevices()"
+            [title]="refreshingDevices() ? 'Refreshing devices' : 'Refresh devices'"
+            aria-label="Refresh camera and microphone devices"
+            (click)="refreshDevices()"
+          >
+            <span class="refresh-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <div class="media-actions">
+          <button
+            class="share-button"
+            type="button"
+            [class.active]="screenSharing()"
+            [disabled]="!roomJoined() || mediaBusy()"
+            [title]="screenSharing() ? 'Stop screen share' : 'Share screen'"
+            [attr.aria-pressed]="screenSharing()"
+            (click)="toggleScreenShare()"
+          >
+            <span class="screen-icon" aria-hidden="true"></span>
+            @if (publishingScreen()) {
+              Starting
+            } @else if (stoppingScreen()) {
+              Stopping
+            } @else if (screenSharing()) {
+              Stop Share
+            } @else {
+              Share Screen
+            }
+          </button>
+        </div>
+
+        @if (mediaError()) {
+          <p class="media-message error">{{ mediaError() }}</p>
+        } @else if (mediaNotice()) {
+          <p class="media-message">{{ mediaNotice() }}</p>
+        }
+      </div>
+
       <div class="participant-list">
         @for (participant of participants(); track participant.id) {
-          <article class="participant-card" [class.camera-disabled]="participant.cameraOff">
-            <div class="camera-feed">
-              @if (participant.cameraOff) {
-                <span class="avatar">{{ participant.initials }}</span>
+          @let mediaState = participantMediaState(participant.id);
+          @let videoStream = studentVideoStream(participant.id);
+          @let micMuted = isParticipantMicMuted(participant.id);
+          @let cameraStopped = isParticipantCameraStopped(participant.id);
+          @let micTeacherDisabled = isParticipantMicTeacherDisabled(participant.id);
+          @let cameraTeacherDisabled = isParticipantCameraTeacherDisabled(participant.id);
+          @let localHidden = isParticipantMediaHidden(participant.id);
+          @let mutePending = isParticipantActionPending(participant.id, 'mute');
+          @let cameraPending = isParticipantActionPending(participant.id, 'camera');
+          @let visibilityPending = isParticipantActionPending(participant.id, 'visibility');
+          <article
+            class="participant-card"
+            [class.camera-disabled]="!videoStream"
+            [class.screen-sharing]="participant.screenSharing"
+            [class.local-hidden]="localHidden"
+            [class.pending-action]="hasPendingParticipantAction(participant.id)"
+          >
+            <div class="camera-feed" [class.has-video]="videoStream">
+              @if (videoStream) {
+                <video
+                  class="student-video"
+                  [sfuMediaStream]="videoStream"
+                  autoplay
+                  muted
+                  playsinline
+                ></video>
               } @else {
                 <span class="feed-shine" aria-hidden="true"></span>
-                <span class="avatar live">{{ participant.initials }}</span>
+                <span class="avatar">{{ participant.initials }}</span>
               }
             </div>
 
             <div class="participant-meta">
               <strong>{{ participant.name }}</strong>
-              <span>{{ participant.muted ? 'Muted' : 'Speaking allowed' }}</span>
+              <span>{{ participant.role }} · {{ micMuted ? 'Muted' : 'Speaking allowed' }}</span>
+              <div class="participant-state-row">
+                @switch (mediaState) {
+                  @case ('video') {
+                    <span class="participant-media-state video">Live camera</span>
+                  }
+                  @case ('audio-only') {
+                    <span class="participant-media-state audio-only">Audio only</span>
+                  }
+                  @case ('muted') {
+                    <span class="participant-media-state muted">Muted</span>
+                  }
+                  @case ('camera-off') {
+                    <span class="participant-media-state camera-off">Camera off</span>
+                  }
+                  @case ('local-hidden') {
+                    <span class="participant-media-state local-hidden">Hidden locally</span>
+                  }
+                  @case ('unavailable') {
+                    <span class="participant-media-state unavailable">Reconnecting</span>
+                  }
+                  @default {
+                    <span class="participant-media-state unavailable">Unavailable</span>
+                  }
+                }
+                @if (participant.screenSharing) {
+                  <span class="participant-live-state">Sharing screen</span>
+                }
+                @if (mutePending || cameraPending || visibilityPending) {
+                  <span class="participant-live-state pending">Updating</span>
+                }
+              </div>
             </div>
 
             <div class="participant-controls">
               <button
-                class="control-button"
-                [class.disabled-state]="participant.muted"
+                class="control-button mic-control"
+                [class.disabled-state]="micTeacherDisabled || micMuted"
+                [class.pending]="mutePending"
                 type="button"
-                [title]="participant.muted ? 'Unmute participant' : 'Mute participant'"
-                [attr.aria-label]="participant.muted ? 'Unmute ' + participant.name : 'Mute ' + participant.name"
-                [attr.aria-pressed]="participant.muted"
-                (click)="toggleMute(participant.id)"
+                [disabled]="mutePending || !roomJoined() || (!micTeacherDisabled && micMuted)"
+                [title]="mutePending ? 'Updating microphone' : micTeacherDisabled ? 'Allow student microphone' : micMuted ? 'Microphone is off' : 'Mute student microphone'"
+                [attr.aria-label]="mutePending ? 'Updating microphone for ' + participant.name : micTeacherDisabled ? 'Allow microphone for ' + participant.name : micMuted ? participant.name + ' microphone is off' : 'Mute microphone for ' + participant.name"
+                [attr.aria-pressed]="micTeacherDisabled || micMuted"
+                (click)="micTeacherDisabled ? unmuteStudentMicrophone(participant.id) : muteStudentMicrophone(participant.id)"
               >
                 <span class="control-icon mic-icon" aria-hidden="true"></span>
               </button>
               <button
-                class="control-button"
-                [class.disabled-state]="participant.cameraOff"
+                class="control-button camera-control"
+                [class.disabled-state]="cameraTeacherDisabled || cameraStopped"
+                [class.pending]="cameraPending"
                 type="button"
-                [title]="participant.cameraOff ? 'Turn camera on' : 'Turn camera off'"
-                [attr.aria-label]="participant.cameraOff ? 'Turn camera on for ' + participant.name : 'Turn camera off for ' + participant.name"
-                [attr.aria-pressed]="participant.cameraOff"
-                (click)="toggleCamera(participant.id)"
+                [disabled]="cameraPending || !roomJoined() || (!cameraTeacherDisabled && (cameraStopped || !hasLiveStudentCamera(participant.id)))"
+                [title]="cameraPending ? 'Updating camera' : cameraTeacherDisabled ? 'Allow student camera' : cameraStopped ? 'Camera is off' : hasLiveStudentCamera(participant.id) ? 'Stop student camera' : 'No live camera to stop'"
+                [attr.aria-label]="cameraPending ? 'Updating camera for ' + participant.name : cameraTeacherDisabled ? 'Allow camera for ' + participant.name : cameraStopped ? participant.name + ' camera is off' : 'Stop camera for ' + participant.name"
+                [attr.aria-pressed]="cameraTeacherDisabled || cameraStopped"
+                (click)="cameraTeacherDisabled ? restoreStudentCamera(participant.id) : stopStudentCamera(participant.id)"
               >
                 <span class="control-icon camera-icon" aria-hidden="true"></span>
               </button>
+              <button
+                class="control-button visibility-control"
+                [class.local-hidden-state]="localHidden"
+                [class.pending]="visibilityPending"
+                type="button"
+                [disabled]="visibilityPending || (!localHidden && !hasLiveStudentMedia(participant.id))"
+                [title]="visibilityPending ? 'Updating local media' : localHidden ? 'Show student media locally' : 'Hide student media locally'"
+                [attr.aria-label]="visibilityPending ? 'Updating local media for ' + participant.name : localHidden ? 'Show media from ' + participant.name + ' locally' : 'Hide media from ' + participant.name + ' locally'"
+                [attr.aria-pressed]="localHidden"
+                (click)="toggleStudentMediaVisibility(participant.id)"
+              >
+                <span class="control-icon eye-icon" aria-hidden="true"></span>
+              </button>
             </div>
           </article>
+        }
+      </div>
+
+      <div class="student-audio-streams" aria-hidden="true">
+        @for (studentAudio of studentAudioStreams(); track studentAudio.producerId) {
+          <audio [sfuMediaStream]="studentAudio.stream" autoplay></audio>
         }
       </div>
     </section>
@@ -85,7 +278,13 @@
     <section class="chat-pane" [class.collapsed]="chatCollapsed()" aria-label="Class chat">
       <sfu-session-chat
         [docked]="true"
-        currentUser="Teacher"
+        [sessionId]="session()?.sessionId ?? ''"
+        [batchId]="session()?.batchId ?? ''"
+        [roomId]="session()?.roomId ?? ''"
+        [live]="sessionLive()"
+        [joined]="roomJoined()"
+        [threadParticipants]="chatThreadParticipants()"
+        [currentUser]="chatDisplayName()"
         currentRole="Teacher"
         [collapsed]="chatCollapsed()"
         (collapsedChange)="chatCollapsed.set($event)"
@@ -93,4 +292,5 @@
     </section>
   </aside>
 </main>
+}
 <!-- <sfu-footer /> -->

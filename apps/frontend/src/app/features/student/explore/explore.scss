@@ -42,6 +42,16 @@
   gap: 16px;
 }
 
+.form-alert {
+  grid-column: 1 / -1;
+  border: 1px solid rgba(242, 96, 118, .28);
+  border-radius: var(--radius);
+  background: rgba(242, 96, 118, .1);
+  color: #F26076;
+  padding: 12px 14px;
+  font-weight: 800;
+}
+
 .batch-card {
   display: grid;
   align-content: start;
@@ -189,6 +199,11 @@
   padding: 10px 12px;
   text-decoration: none;
   font-weight: 850;
+}
+
+.batch-card footer button:disabled {
+  cursor: wait;
+  opacity: .64;
 }
 
 @media (max-width: 700px) {

@@ -235,20 +235,25 @@ The following routes are operator-facing:
 | `GET /api/v1/events/webhooks/:endpointId` | `X-Operations-Token` | Inspect one webhook endpoint. |
 | `PATCH /api/v1/events/webhooks/:endpointId` | `X-Operations-Token` | Update endpoint URL, subscriptions, filters, timeouts, retry policy, or enabled state. |
 | `POST /api/v1/events/webhooks/:endpointId/rotate-secret` | `X-Operations-Token` | Rotate the webhook signing secret and return the new secret once. |
+| `POST /api/v1/events/redis-streams` | `X-Operations-Token` | Create a Redis stream delivery endpoint. |
+| `GET /api/v1/events/redis-streams` | `X-Operations-Token` | List Redis stream endpoints with health state and last-delivery summary. |
+| `GET /api/v1/events/redis-streams/:endpointId` | `X-Operations-Token` | Inspect one Redis stream endpoint. |
+| `PATCH /api/v1/events/redis-streams/:endpointId` | `X-Operations-Token` | Update Redis stream endpoint name, stream key, subscriptions, filters, timeouts, retry policy, or enabled state. |
 | `GET /api/v1/events/log` | `X-Operations-Token` | Global platform event log query surface. |
 | `GET /api/v1/events/rooms/:roomId/log` | `X-Operations-Token` | Room-scoped platform event log query surface. |
 | `GET /api/v1/events/deliveries` | `X-Operations-Token` | Delivery history with endpoint, event, status, and time filters. |
 | `GET /api/v1/events/deliveries/exhausted` | `X-Operations-Token` | Exhausted / dead-letter delivery queue view. |
 | `GET /api/v1/events/deliveries/:deliveryId` | `X-Operations-Token` | One delivery record with attempt history. |
-| `POST /api/v1/events/deliveries/:deliveryId/replay` | `X-Operations-Token` | Replay a failed delivery through the real queue and signer path. |
-| `POST /api/v1/events/log/:eventId/endpoints/:endpointId/replay` | `X-Operations-Token` | Replay a specific event to a specific endpoint through the real queue and signer path. |
-| `GET /api/v1/events/diagnostics/summary` | `X-Operations-Token` | Eventing / webhook backlog and unhealthy-endpoint summary. |
+| `POST /api/v1/events/deliveries/:deliveryId/replay` | `X-Operations-Token` | Replay a cancelled or exhausted delivery through the real adapter-specific queue path. |
+| `POST /api/v1/events/log/:eventId/endpoints/:endpointId/replay` | `X-Operations-Token` | Replay a specific event to a specific endpoint through the real adapter-specific queue path. |
+| `GET /api/v1/events/diagnostics/summary` | `X-Operations-Token` | Eventing backlog, per-adapter fairness, failure-category, and retention summary. |
 
 Operational notes:
 
 - `/health/*` stays outside `/api/v1` so orchestrators can probe liveness and readiness without the room-auth stack.
 - `/api/v1/media/*` diagnostics and drain routes are operator-only and should not be exposed through end-user clients.
-- `/api/v1/events/*` is the operator eventing surface for audit queries, webhook management, delivery replay, and delivery diagnostics.
+- `/api/v1/events/*` is the operator eventing surface for audit queries, webhook management, Redis stream endpoint management, delivery replay, and delivery diagnostics.
+- When `OPERATIONS_TOKEN` is intentionally left empty in local development, the operator media/event routes remain reachable without the header. Production validation requires a non-empty token.
 - Incident snapshot exports are JSON payloads intended for download, ticket attachment, or copy/paste into operational tooling. They are not public room APIs.
 - `POST /api/v1/media/diagnostics/rooms/:roomId/fail` is disabled in production and exists only to drive truthful local or pre-production browser validation through the real room-failure path.
 
@@ -262,9 +267,42 @@ Webhook delivery notes:
   - `X-Native-Sfu-Event-Type`
   - `X-Native-Sfu-Timestamp`
   - `X-Native-Sfu-Signature`
+- Endpoint URLs must use `https` in production and must not target localhost / wildcard hosts.
 - Non-2xx responses, timeouts, and transport errors are treated as failures.
 - Failed deliveries retry with bounded exponential backoff until they reach `exhausted`.
+- Delivery records may transiently surface as `dispatching` while a claimed row is actively being sent.
+- Each queued delivery freezes the effective endpoint execution state at queue time:
+  - destination URL
+  - signing secret fingerprint / version reference
+  - subscribed event types
+  - room filters
+  - timeout and retry policy inputs
 - Replay routes enqueue a fresh delivery record and reuse the real delivery pipeline rather than shortcutting the HTTP send.
+- `POST /api/v1/events/deliveries/:deliveryId/replay` rejects `queued`, `retrying`, `dispatching`, and already `delivered` rows.
+- `POST /api/v1/events/deliveries/:deliveryId/replay` reuses the original delivery snapshot, so later endpoint edits do not silently change that replay's destination or retry policy.
+- `POST /api/v1/events/log/:eventId/endpoints/:endpointId/replay` uses the endpoint's current state and acts as an explicit operator override.
+- Endpoint `enabled=false` cancels queued or retrying deliveries immediately; re-enabling affects only future dispatch eligibility.
+- Subscription and room-filter edits are forward-looking. They affect new deliveries, while already queued records keep their frozen snapshot unless the endpoint is disabled.
+- Diagnostics summary exposes failure-category counts, snapshot-source counts, adapter backlog, dispatch concurrency settings, top backlog endpoints, and the configured event/delivery retention windows.
+- Default retention policy:
+  - platform events: `EVENT_LOG_RETENTION_DAYS` (default `30`)
+  - delivered/cancelled deliveries: `WEBHOOK_DELIVERY_RETENTION_DAYS` (default `14`)
+  - exhausted deliveries: `WEBHOOK_EXHAUSTED_DELIVERY_RETENTION_DAYS` (default `30`)
+
+Redis stream delivery notes:
+
+- Redis stream endpoints use the same persisted event log and replay surface as webhooks, but the adapter writes structured payloads into a Redis stream via `XADD`.
+- Successful Redis deliveries record the returned stream entry id as `lastDeliveryReference`.
+- Redis delivery payloads are canonicalized before publish so replayed rows keep stable field ordering.
+- Redis adapter failures are classified into `configuration`, `auth`, `network`, `storage`, or `timeout`.
+- Non-retryable Redis failures, such as invalid stream configuration or auth errors, move directly to `exhausted` instead of burning through the full retry budget.
+- `maxLen` is optional. When provided, the adapter publishes with Redis stream trimming semantics.
+
+Event delivery fairness notes:
+
+- Dispatch fairness is lane-based across `adapterKind + endpointId`, not just first-queued globally.
+- Per-endpoint concurrency caps still apply, and per-adapter concurrency is bounded so a hot webhook or hot Redis stream cannot monopolize the pump.
+- Diagnostics summary now exposes `endpointCountsByAdapter`, `deliveryCountsByAdapter`, `activeDispatchesByAdapter`, `leaseCounts`, `backlogAging`, `backlogAgingByAdapter`, and `fairness` to make backlog skew and queue age visible.
 
 ## Recordings
 

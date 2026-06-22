@@ -14,6 +14,14 @@ export interface RoomSignalEnvelope {
   roomId: string;
   event: keyof ServerToClientEvents;
   payload: unknown[];
+  target?: RoomSignalTarget;
+}
+
+export interface RoomSignalTarget {
+  socketIds?: string[];
+  participantIds?: string[];
+  userIds?: string[];
+  nodeIds?: string[];
 }
 
 @Injectable()
@@ -67,13 +75,22 @@ export class RoomSignalService implements OnModuleInit {
   }
 
   async publish(roomId: string, event: keyof ServerToClientEvents, ...payload: unknown[]): Promise<void> {
+    return this.publishEnvelope(roomId, event, undefined, ...payload);
+  }
+
+  async publishTargeted(roomId: string, target: RoomSignalTarget, event: keyof ServerToClientEvents, ...payload: unknown[]): Promise<void> {
+    return this.publishEnvelope(roomId, event, target, ...payload);
+  }
+
+  private async publishEnvelope(roomId: string, event: keyof ServerToClientEvents, target: RoomSignalTarget | undefined, ...payload: unknown[]): Promise<void> {
     try {
       await this.redis.publishDurable(ROOM_SIGNAL_STREAM, {
         eventId: randomUUID(),
         sourceNodeId: this.registry.localNodeId(),
         roomId,
         event,
-        payload
+        payload,
+        ...(target ? { target } : {})
       } satisfies RoomSignalEnvelope);
       this.metrics.controlPlaneMessagesPublished.labels('room_signals').inc();
     } catch (error) {

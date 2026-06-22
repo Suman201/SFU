@@ -100,6 +100,15 @@
   padding: 18px;
 }
 
+.form-alert {
+  border: 1px solid rgba(242, 96, 118, .28);
+  border-radius: var(--radius);
+  background: rgba(242, 96, 118, .1);
+  color: #F26076;
+  padding: 12px 14px;
+  font-weight: 800;
+}
+
 .enrolled-panel h2 {
   color: var(--text);
   font-size: 25px;
@@ -188,6 +197,11 @@
 
 .batch-actions {
   flex: 0 0 auto;
+}
+
+.batch-actions button:disabled {
+  cursor: wait;
+  opacity: .64;
 }
 
 .empty-state {

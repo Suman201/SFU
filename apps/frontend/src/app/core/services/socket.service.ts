@@ -4,6 +4,8 @@ import { io, Socket } from 'socket.io-client';
 import { AuthService } from './auth.service';
 import { SOCKET_URL } from './app-environment';
 
+const SOCKET_ACK_TIMEOUT_MS = 15_000;
+
 export class SocketAckError extends Error {
   constructor(
     readonly code: string,
@@ -22,7 +24,7 @@ export class SocketService {
   constructor(private readonly auth: AuthService) {}
 
   connect(): Socket<ServerToClientEvents, ClientToServerEvents> {
-    if (this.socket?.connected) {
+    if (this.socket && (this.socket.connected || this.socket.active)) {
       return this.socket;
     }
     this.socket = io(SOCKET_URL, {
@@ -45,11 +47,20 @@ export class SocketService {
   ): Promise<ExtractAckData<Parameters<ClientToServerEvents[K]>[1]>> {
     const socket = this.connect();
     return new Promise((resolve, reject) => {
-      (socket.emit as unknown as (name: K, body: unknown, ack: (response: AckResponse<unknown>) => void) => void)(event, payload, (response) => {
-        if (response.ok) {
+      const emitWithAck = socket.timeout(SOCKET_ACK_TIMEOUT_MS).emit as unknown as (
+        name: K,
+        body: unknown,
+        ack: (error: Error | null, response?: AckResponse<unknown>) => void
+      ) => void;
+      emitWithAck(event, payload, (error, response) => {
+        if (error) {
+          reject(new SocketAckError('ACK_TIMEOUT', 'The server did not acknowledge this action. Please try again.'));
+          return;
+        }
+        if (response?.ok) {
           resolve(response.data as ExtractAckData<Parameters<ClientToServerEvents[K]>[1]>);
         } else {
-          reject(new SocketAckError(response.error.code, response.error.message, response.error.details));
+          reject(new SocketAckError(response?.error.code ?? 'ACK_ERROR', response?.error.message ?? 'The server rejected this action.', response?.error.details));
         }
       });
     });

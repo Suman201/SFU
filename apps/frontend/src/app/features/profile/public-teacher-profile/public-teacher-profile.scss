@@ -388,6 +388,15 @@ h3 {
   gap: 12px;
 }
 
+.form-alert {
+  border: 1px solid rgba(242, 96, 118, .28);
+  border-radius: var(--radius);
+  background: rgba(242, 96, 118, .1);
+  color: #F26076;
+  padding: 12px 14px;
+  font-weight: 800;
+}
+
 .award-list article {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);
@@ -454,6 +463,11 @@ h3 {
   padding: 10px 12px;
   text-decoration: none;
   font-weight: 850;
+}
+
+.batch-row footer button:disabled {
+  cursor: wait;
+  opacity: .64;
 }
 
 .empty-state {

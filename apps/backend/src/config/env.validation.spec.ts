@@ -102,9 +102,53 @@ describe('validateConfig', () => {
         PUBLIC_URL: 'https://sfu.example.com',
         NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
         TURN_URIS: 'turn:sfu.example.com:3478?transport=udp',
-        OPERATIONS_TOKEN: 'operations-token-valid-length-32'
+        OPERATIONS_TOKEN: 'operations-token-valid-length-32',
+        WEBHOOK_SECRET_ENCRYPTION_KEY: 'webhook-secret-encryption-key-32+'
       })
     ).not.toThrow();
+  });
+
+  it('requires a dedicated webhook secret encryption key in production when delivery is enabled', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        NODE_ENV: 'production',
+        PUBLIC_URL: 'https://sfu.example.com',
+        NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
+        TURN_URIS: 'turn:sfu.example.com:3478?transport=udp',
+        OPERATIONS_TOKEN: 'operations-token-valid-length-32'
+      })
+    ).toThrow(/WEBHOOK_SECRET_ENCRYPTION_KEY/);
+  });
+
+  it('rejects event retention shorter than delivery retention', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        EVENT_LOG_RETENTION_DAYS: '7',
+        WEBHOOK_DELIVERY_RETENTION_DAYS: '14'
+      })
+    ).toThrow(/EVENT_LOG_RETENTION_DAYS/);
+  });
+
+  it('rejects webhook batch sizes smaller than the configured delivery concurrency', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WEBHOOK_DELIVERY_CONCURRENCY: '8',
+        WEBHOOK_DELIVERY_MAX_BATCH_PER_PUMP: '4'
+      })
+    ).toThrow(/WEBHOOK_DELIVERY_MAX_BATCH_PER_PUMP/);
+  });
+
+  it('rejects per-endpoint dispatch caps that exceed total delivery concurrency', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WEBHOOK_DELIVERY_CONCURRENCY: '4',
+        WEBHOOK_DELIVERY_MAX_CONCURRENT_PER_ENDPOINT: '5'
+      })
+    ).toThrow(/WEBHOOK_DELIVERY_MAX_CONCURRENT_PER_ENDPOINT/);
   });
 
   it('rejects localhost TURN URIs in production', () => {

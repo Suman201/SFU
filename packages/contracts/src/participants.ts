@@ -7,6 +7,7 @@ export interface Participant {
   userId?: string;
   displayName: string;
   socketId: string;
+  connected?: boolean;
   role: Role;
   audioEnabled: boolean;
   videoEnabled: boolean;
@@ -26,4 +27,5 @@ export interface ParticipantPatch {
   handRaised?: boolean;
   permissions?: Partial<Permissions>;
   role?: Role;
+  connected?: boolean;
 }

@@ -477,6 +477,11 @@ export class MetricsService implements OnModuleInit {
     help: 'Failed webhook deliveries scheduled for retry by platform event type',
     labelNames: ['type']
   });
+  readonly webhookDeliveryFailuresByCategory = new Counter({
+    name: 'sfu_webhook_delivery_failures_by_category_total',
+    help: 'Webhook delivery failures by platform event type and failure category',
+    labelNames: ['type', 'category']
+  });
   readonly webhookDeliveriesExhausted = new Counter({
     name: 'sfu_webhook_deliveries_exhausted_total',
     help: 'Webhook deliveries that exhausted retries by platform event type',
@@ -497,20 +502,110 @@ export class MetricsService implements OnModuleInit {
     help: 'Manual webhook replay requests by scope',
     labelNames: ['scope']
   });
+  readonly eventDeliveryAttempts = new Counter({
+    name: 'sfu_event_delivery_attempts_total',
+    help: 'Event delivery attempts by adapter kind and platform event type',
+    labelNames: ['adapter', 'type']
+  });
+  readonly eventDeliveriesSucceeded = new Counter({
+    name: 'sfu_event_deliveries_succeeded_total',
+    help: 'Successful event deliveries by adapter kind and platform event type',
+    labelNames: ['adapter', 'type']
+  });
+  readonly eventDeliveriesFailed = new Counter({
+    name: 'sfu_event_deliveries_failed_total',
+    help: 'Failed event deliveries scheduled for retry by adapter kind and platform event type',
+    labelNames: ['adapter', 'type']
+  });
+  readonly eventDeliveryFailuresByCategory = new Counter({
+    name: 'sfu_event_delivery_failures_by_category_total',
+    help: 'Event delivery failures by adapter kind, platform event type, and failure category',
+    labelNames: ['adapter', 'type', 'category']
+  });
+  readonly eventDeliveriesExhausted = new Counter({
+    name: 'sfu_event_deliveries_exhausted_total',
+    help: 'Event deliveries that exhausted retries by adapter kind and platform event type',
+    labelNames: ['adapter', 'type']
+  });
+  readonly eventDeliveriesCancelled = new Counter({
+    name: 'sfu_event_deliveries_cancelled_total',
+    help: 'Event deliveries cancelled before dispatch by adapter kind and reason',
+    labelNames: ['adapter', 'reason']
+  });
+  readonly eventRetriesScheduled = new Counter({
+    name: 'sfu_event_retries_scheduled_total',
+    help: 'Event retries scheduled by adapter kind and platform event type',
+    labelNames: ['adapter', 'type']
+  });
+  readonly eventDeliveryReplays = new Counter({
+    name: 'sfu_event_delivery_replays_total',
+    help: 'Manual event delivery replay requests by adapter kind and scope',
+    labelNames: ['adapter', 'scope']
+  });
+  readonly eventDeliveryAdapterExecutions = new Counter({
+    name: 'sfu_event_delivery_adapter_executions_total',
+    help: 'Event delivery adapter executions by adapter kind and result',
+    labelNames: ['adapter', 'result']
+  });
+  readonly eventDeliverySnapshotSourceUsage = new Counter({
+    name: 'sfu_event_delivery_snapshot_source_usage_total',
+    help: 'Event delivery snapshot usage by adapter kind and snapshot source',
+    labelNames: ['adapter', 'snapshotSource']
+  });
+  readonly webhookActiveDispatches = new Gauge({
+    name: 'sfu_webhook_active_dispatches',
+    help: 'Currently active webhook dispatch attempts'
+  });
+  readonly eventDeliveryActiveDispatchesByAdapter = new Gauge({
+    name: 'sfu_event_delivery_active_dispatches',
+    help: 'Currently active event delivery dispatch attempts by adapter kind',
+    labelNames: ['adapter']
+  });
   readonly webhookEndpointCounts = new Gauge({
     name: 'sfu_webhook_endpoint_count',
     help: 'Webhook endpoint counts by state',
     labelNames: ['state']
+  });
+  readonly eventDeliveryEndpointCountsByAdapter = new Gauge({
+    name: 'sfu_event_delivery_endpoint_count',
+    help: 'Event delivery endpoint counts by adapter kind and state',
+    labelNames: ['adapter', 'state']
   });
   readonly webhookDeliveryQueue = new Gauge({
     name: 'sfu_webhook_delivery_queue',
     help: 'Webhook delivery counts by queue state',
     labelNames: ['state']
   });
+  readonly eventDeliveryQueueByAdapter = new Gauge({
+    name: 'sfu_event_delivery_queue',
+    help: 'Event delivery counts by adapter kind and queue state',
+    labelNames: ['adapter', 'state']
+  });
+  readonly eventDeliveryOldestAgeByAdapter = new Gauge({
+    name: 'sfu_event_delivery_oldest_age_ms',
+    help: 'Age in milliseconds of the oldest outstanding event delivery by adapter kind and queue state',
+    labelNames: ['adapter', 'state']
+  });
+  readonly eventDeliveryBacklogConcentration = new Gauge({
+    name: 'sfu_event_delivery_backlog_concentration_ratio',
+    help: 'Share of outstanding backlog held by the hottest endpoint lane overall and per adapter',
+    labelNames: ['scope']
+  });
+  readonly eventDeliveryLaneCounts = new Gauge({
+    name: 'sfu_event_delivery_lane_count',
+    help: 'Count of active delivery lanes by adapter kind and queue state',
+    labelNames: ['adapter', 'state']
+  });
   readonly webhookDeliveryLatency = new Histogram({
     name: 'sfu_webhook_delivery_duration_ms',
     help: 'Webhook delivery latency in milliseconds',
     labelNames: ['result'],
+    buckets: [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000]
+  });
+  readonly eventDeliveryLatency = new Histogram({
+    name: 'sfu_event_delivery_duration_ms',
+    help: 'Event delivery latency in milliseconds by adapter kind and result',
+    labelNames: ['adapter', 'result'],
     buckets: [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000]
   });
   readonly producerNodeIdFallbacks = new Counter({
@@ -874,13 +969,32 @@ export class MetricsService implements OnModuleInit {
       this.webhookDeliveryAttempts,
       this.webhookDeliveriesSucceeded,
       this.webhookDeliveriesFailed,
+      this.webhookDeliveryFailuresByCategory,
       this.webhookDeliveriesExhausted,
       this.webhookDeliveriesCancelled,
       this.webhookRetriesScheduled,
       this.webhookReplays,
+      this.eventDeliveryAttempts,
+      this.eventDeliveriesSucceeded,
+      this.eventDeliveriesFailed,
+      this.eventDeliveryFailuresByCategory,
+      this.eventDeliveriesExhausted,
+      this.eventDeliveriesCancelled,
+      this.eventRetriesScheduled,
+      this.eventDeliveryReplays,
+      this.eventDeliveryAdapterExecutions,
+      this.eventDeliverySnapshotSourceUsage,
+      this.webhookActiveDispatches,
+      this.eventDeliveryActiveDispatchesByAdapter,
       this.webhookEndpointCounts,
+      this.eventDeliveryEndpointCountsByAdapter,
       this.webhookDeliveryQueue,
+      this.eventDeliveryQueueByAdapter,
+      this.eventDeliveryOldestAgeByAdapter,
+      this.eventDeliveryBacklogConcentration,
+      this.eventDeliveryLaneCounts,
       this.webhookDeliveryLatency,
+      this.eventDeliveryLatency,
       this.producerNodeIdFallbacks,
       this.producerNodeIdBackfills,
       this.clusterNodeInfo,

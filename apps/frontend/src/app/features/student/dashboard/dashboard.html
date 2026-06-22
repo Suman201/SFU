@@ -35,6 +35,13 @@
       </div>
     </header>
 
+    @if (classOpenError()) {
+      <div class="form-alert">{{ classOpenError() }}</div>
+    }
+    @if (enrollment.enrollmentError()) {
+      <div class="form-alert">{{ enrollment.enrollmentError() }}</div>
+    }
+
     @if (enrolledBatches().length) {
       <div class="enrolled-list">
         @for (batch of enrolledBatches(); track batch.id) {
@@ -57,8 +64,12 @@
             </div>
 
             <div class="batch-actions">
-              <button class="primary" type="button" (click)="openClass(batch)">Open class</button>
-              <button type="button" (click)="leave(batch)">Leave</button>
+              <button class="primary" type="button" [disabled]="classOpenLoadingId() === batch.id" (click)="openClass(batch)">
+                {{ classOpenLoadingId() === batch.id ? 'Checking...' : 'Open class' }}
+              </button>
+              <button type="button" [disabled]="enrollment.enrollmentActionBatchId() === batch.id" (click)="leave(batch)">
+                {{ enrollment.enrollmentActionBatchId() === batch.id ? 'Leaving...' : 'Leave' }}
+              </button>
             </div>
           </article>
         }

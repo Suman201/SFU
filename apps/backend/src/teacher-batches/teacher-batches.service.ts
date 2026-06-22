@@ -7,8 +7,13 @@ import {
   BatchScheduleDocument,
   BatchScheduleMongoDocument,
   BatchStatus,
-  BatchWeekday
+  BatchWeekday,
+  ClassSessionDocument,
+  ClassSessionMongoDocument,
+  ClassSessionStatus
 } from '../database/schemas';
+import { classSessionChannelIds, PlannedClassSession, planClassSessions } from '../class-sessions/class-session-planner';
+import { StudentEnrollmentsService } from '../student-enrollments/student-enrollments.service';
 import { BatchScheduleDto, CreateTeacherBatchDto, UpdateTeacherBatchDto } from './dto/teacher-batch.dto';
 
 interface BatchWithSchedules {
@@ -21,7 +26,9 @@ export class TeacherBatchesService {
   constructor(
     @InjectModel(BatchDocument.name) private readonly batches: Model<BatchMongoDocument>,
     @InjectModel(BatchScheduleDocument.name) private readonly schedules: Model<BatchScheduleMongoDocument>,
-    @InjectConnection() private readonly connection: Connection
+    @InjectModel(ClassSessionDocument.name) private readonly classSessions: Model<ClassSessionMongoDocument>,
+    @InjectConnection() private readonly connection: Connection,
+    private readonly studentEnrollments: StudentEnrollmentsService
   ) {}
 
   async create(teacherId: string, dto: CreateTeacherBatchDto): Promise<Record<string, unknown>> {
@@ -60,12 +67,14 @@ export class TeacherBatchesService {
   async findAll(teacherId: string): Promise<Record<string, unknown>[]> {
     const batches = await this.batches.find({ teacherId, deletedAt: { $exists: false } }).sort({ createdAt: -1 });
     const scheduleMap = await this.scheduleMap(batches.map((batch) => batch.id));
-    return batches.map((batch) => this.serialize(batch, scheduleMap.get(batch.id) ?? []));
+    const sessionMap = await this.classSessionMap(batches.map((batch) => batch.id));
+    return Promise.all(batches.map((batch) => this.serialize(batch, scheduleMap.get(batch.id) ?? [], sessionMap.get(batch.id) ?? [])));
   }
 
   async findOne(teacherId: string, id: string, session?: ClientSession): Promise<Record<string, unknown>> {
     const data = await this.findOwnedWithSchedules(teacherId, id, session);
-    return this.serialize(data.batch, data.schedules);
+    const classSessions = await this.classSessions.find({ batchId: id }).sort({ scheduledAt: 1 }).session(session ?? null);
+    return this.serialize(data.batch, data.schedules, classSessions);
   }
 
   async update(teacherId: string, id: string, dto: UpdateTeacherBatchDto): Promise<Record<string, unknown>> {
@@ -119,7 +128,8 @@ export class TeacherBatchesService {
     );
     if (!batch) throw new NotFoundException('Batch not found');
     const schedules = await this.schedules.find({ batchId: id }).sort({ dayOfWeek: 1 });
-    return this.serialize(batch, schedules);
+    const classSessions = await this.classSessions.find({ batchId: id }).sort({ scheduledAt: 1 });
+    return this.serialize(batch, schedules, classSessions);
   }
 
   async remove(teacherId: string, id: string): Promise<void> {
@@ -181,7 +191,19 @@ export class TeacherBatchesService {
     }, new Map<string, BatchScheduleMongoDocument[]>());
   }
 
-  private serialize(batch: BatchMongoDocument, schedules: BatchScheduleMongoDocument[]): Record<string, unknown> {
+  private async classSessionMap(batchIds: string[]): Promise<Map<string, ClassSessionMongoDocument[]>> {
+    if (!batchIds.length) return new Map();
+    const classSessions = await this.classSessions.find({ batchId: { $in: batchIds } }).sort({ scheduledAt: 1 });
+    return classSessions.reduce((map, session) => {
+      const list = map.get(session.batchId) ?? [];
+      list.push(session);
+      map.set(session.batchId, list);
+      return map;
+    }, new Map<string, ClassSessionMongoDocument[]>());
+  }
+
+  private async serialize(batch: BatchMongoDocument, schedules: BatchScheduleMongoDocument[], classSessions: ClassSessionMongoDocument[] = []): Promise<Record<string, unknown>> {
+    const roster = await this.studentEnrollments.listBatchRoster(batch.id);
     return {
       id: batch.id,
       name: batch.name,
@@ -192,15 +214,73 @@ export class TeacherBatchesService {
       startDate: this.dateOnly(batch.startDate),
       endDate: this.dateOnly(batch.endDate),
       maxCapacity: batch.maxCapacity,
-      enrolledCount: 0,
+      enrolledCount: roster.length,
       status: batch.status,
       schedule: schedules.map((schedule) => ({
         id: schedule.id,
         dayOfWeek: schedule.dayOfWeek,
         startTime: schedule.startTime
       })),
+      students: roster.map((student) => ({
+        id: student.userId,
+        displayName: student.displayName,
+        email: student.email,
+        attendanceRate: 0,
+        joinedAt: student.joinedAt,
+        status: student.status === 'active' ? 'active' : student.status === 'pending' ? 'invited' : student.status
+      })),
+      sessions: this.serializeClassSessions(batch, schedules, classSessions),
       createdAt: batch.createdAt,
       updatedAt: batch.updatedAt
+    };
+  }
+
+  private serializeClassSessions(
+    batch: BatchMongoDocument,
+    schedules: BatchScheduleMongoDocument[],
+    classSessions: ClassSessionMongoDocument[]
+  ): Record<string, unknown>[] {
+    const persistedById = new Map(classSessions.map((session) => [session.id, session]));
+    const planned = planClassSessions(batch, schedules).map((session) => this.serializeClassSession(session, persistedById.get(session.id)));
+    const plannedIds = new Set(planned.map((session) => String(session.id)));
+    const orphaned = classSessions
+      .filter((session) => !plannedIds.has(session.id))
+      .map((session) =>
+        this.serializeClassSession(
+          {
+            id: session.id,
+            batchId: session.batchId,
+            title: session.title,
+            sessionNumber: session.sessionNumber,
+            scheduledAt: session.scheduledAt,
+            durationMinutes: session.durationMinutes
+          },
+          session
+        )
+      );
+    return [...planned, ...orphaned].sort((left, right) => {
+      const leftDate = typeof left.scheduledAt === 'string' ? left.scheduledAt : '';
+      const rightDate = typeof right.scheduledAt === 'string' ? right.scheduledAt : '';
+      return new Date(leftDate).getTime() - new Date(rightDate).getTime();
+    });
+  }
+
+  private serializeClassSession(planned: PlannedClassSession, persisted?: ClassSessionMongoDocument): Record<string, unknown> {
+    const channelIds = classSessionChannelIds(planned.id);
+    const status: ClassSessionStatus = persisted?.status ?? 'scheduled';
+    return {
+      id: planned.id,
+      batchId: planned.batchId,
+      title: planned.title,
+      sessionNumber: planned.sessionNumber,
+      scheduledAt: planned.scheduledAt.toISOString(),
+      durationMinutes: planned.durationMinutes,
+      status,
+      roomId: persisted?.roomId ?? channelIds.roomId,
+      chatChannelId: persisted?.chatChannelId ?? channelIds.chatChannelId,
+      whiteboardChannelId: persisted?.whiteboardChannelId ?? channelIds.whiteboardChannelId,
+      startedAt: persisted?.startedAt?.toISOString(),
+      completedAt: persisted?.completedAt?.toISOString()
     };
   }
 
@@ -239,7 +319,7 @@ export class TeacherBatchesService {
     return trimmed ? trimmed : undefined;
   }
 
-  private async currentEnrolledCount(_batchId: string): Promise<number> {
-    return 0;
+  private async currentEnrolledCount(batchId: string): Promise<number> {
+    return this.studentEnrollments.countActiveByBatch(batchId);
   }
 }

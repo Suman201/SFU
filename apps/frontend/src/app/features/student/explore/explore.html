@@ -9,6 +9,10 @@
   </section>
 
   <section class="batch-grid" aria-label="Available batches">
+    @if (enrollment.enrollmentError()) {
+      <div class="form-alert">{{ enrollment.enrollmentError() }}</div>
+    }
+
     @for (batch of batches(); track batch.id) {
       <article class="batch-card" [class.enrolled]="isEnrolled(batch)">
         <header>
@@ -45,7 +49,9 @@
           @if (isEnrolled(batch)) {
             <a routerLink="/student/dashboard">Enrolled</a>
           } @else {
-            <button type="button" class="primary" (click)="enroll(batch)">Enroll</button>
+            <button type="button" class="primary" [disabled]="isEnrollmentPending(batch)" (click)="enroll(batch)">
+              {{ isEnrollmentPending(batch) ? 'Enrolling...' : 'Enroll' }}
+            </button>
           }
         </footer>
       </article>

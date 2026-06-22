@@ -1,4 +1,4 @@
-import type { ChatMessage, SendChatMessageRequest } from './chat.js';
+import type { ChatMessage, ChatReadState, MarkChatReadRequest, SendChatMessageRequest } from './chat.js';
 import type {
   Consumer,
   ConsumerLayerEvent,
@@ -41,7 +41,39 @@ import type { RoomOwnerInfo, RoomOwnerLookupResponse } from './cluster.js';
 import type { DtlsParameters, IceCandidate, IceParameters, TransportOptions } from './transport.js';
 import type { RoomQualitySummaryState } from './metrics.js';
 
+export type ClassSessionLifecycleStatus = 'live' | 'completed';
+
+export interface ClassSessionLifecycleEvent {
+  sessionId: string;
+  batchId: string;
+  roomId: string;
+  status: ClassSessionLifecycleStatus;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export type StudentMediaModerationAction = 'mute-mic' | 'unmute-mic' | 'stop-camera' | 'restore-camera';
+
+export interface StudentMediaModerationRequest {
+  roomId: string;
+  participantId: string;
+}
+
+export interface StudentMediaModerationEvent {
+  roomId: string;
+  participantId: string;
+  producerId?: string;
+  kind: 'audio' | 'video';
+  action: StudentMediaModerationAction;
+  moderatedByParticipantId: string;
+  permissions?: Permissions;
+  reason?: string;
+  message?: string;
+}
+
 export interface ClientToServerEvents {
+  'session:watch': (request: { sessionId: string }, ack: Ack<void>) => void;
+  'session:unwatch': (request: { sessionId: string }, ack: Ack<void>) => void;
   'room:create': (request: CreateRoomRequest, ack: Ack<Room>) => void;
   'room:get-owner': (request: { roomId: string }, ack: Ack<RoomOwnerLookupResponse>) => void;
   'room:join': (request: JoinRoomRequest, ack: Ack<JoinRoomResponse>) => void;
@@ -86,13 +118,20 @@ export interface ClientToServerEvents {
   'participant:ban': (request: { roomId: string; participantId: string; reason?: string }, ack: Ack<void>) => void;
   'participant:unban': (request: { roomId: string; participantId: string }, ack: Ack<void>) => void;
   'participant:mute': (request: { roomId: string; participantId: string; force?: boolean }, ack: Ack<void>) => void;
+  'student:mute-mic': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
+  'student:unmute-mic': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
+  'student:stop-camera': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
+  'student:restore-camera': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
   'screen:start': (request: CreateProducerRequest, ack: Ack<Producer>) => void;
   'screen:stop': (request: { producerId: string }, ack: Ack<void>) => void;
   'chat:send': (request: SendChatMessageRequest, ack: Ack<ChatMessage>) => void;
+  'chat:mark-read': (request: MarkChatReadRequest, ack: Ack<ChatReadState>) => void;
   'hand:raise': (request: { roomId: string; raised: boolean }, ack: Ack<void>) => void;
 }
 
 export interface ServerToClientEvents {
+  'session:started': (event: ClassSessionLifecycleEvent) => void;
+  'session:ended': (event: ClassSessionLifecycleEvent) => void;
   'room:updated': (room: Room) => void;
   'room:closed': (roomId: string) => void;
   'room:failed': (event: RoomFailureEvent) => void;
@@ -106,6 +145,7 @@ export interface ServerToClientEvents {
   'participant:kicked': (reason?: string) => void;
   'participant:banned': (reason?: string) => void;
   'permissions:updated': (participantId: string, permissions: Permissions) => void;
+  'student:media-moderated': (event: StudentMediaModerationEvent) => void;
   'producer:created': (producer: Producer) => void;
   'producer:updated': (producer: Producer) => void;
   'producer:closed': (producerId: string) => void;
@@ -129,6 +169,7 @@ export interface ServerToClientEvents {
   'consumer:svc-layers-unavailable': (event: ConsumerLayerEvent) => void;
   'consumer:svc-layers-switch-failed': (event: ConsumerLayerEvent) => void;
   'chat:message': (message: ChatMessage) => void;
+  'chat:read': (state: ChatReadState) => void;
   'network:quality': (quality: { participantId: string; score: number; packetLoss: number; rtt: number; jitter: number }) => void;
   'waiting-room:pending': (participant: Participant) => void;
 }

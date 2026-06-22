@@ -123,7 +123,16 @@ export const appConfig = () => ({
       defaultMaxAttempts: Number(process.env.WEBHOOK_DEFAULT_MAX_ATTEMPTS ?? 5),
       defaultInitialBackoffMs: Number(process.env.WEBHOOK_DEFAULT_INITIAL_BACKOFF_MS ?? 2000),
       pollIntervalMs: Number(process.env.WEBHOOK_DELIVERY_POLL_INTERVAL_MS ?? 1000),
-      leaseMs: Number(process.env.WEBHOOK_DELIVERY_LEASE_MS ?? 30000)
+      leaseMs: Number(process.env.WEBHOOK_DELIVERY_LEASE_MS ?? 30000),
+      concurrency: Number(process.env.WEBHOOK_DELIVERY_CONCURRENCY ?? 4),
+      maxBatchPerPump: Number(process.env.WEBHOOK_DELIVERY_MAX_BATCH_PER_PUMP ?? 16),
+      maxConcurrentPerEndpoint: Number(process.env.WEBHOOK_DELIVERY_MAX_CONCURRENT_PER_ENDPOINT ?? 2)
+    },
+    retention: {
+      eventRetentionDays: Number(process.env.EVENT_LOG_RETENTION_DAYS ?? 30),
+      deliveryRetentionDays: Number(process.env.WEBHOOK_DELIVERY_RETENTION_DAYS ?? 14),
+      exhaustedDeliveryRetentionDays: Number(process.env.WEBHOOK_EXHAUSTED_DELIVERY_RETENTION_DAYS ?? 30),
+      cleanupIntervalMs: Number(process.env.EVENT_RETENTION_CLEANUP_INTERVAL_MS ?? 3_600_000)
     }
   },
   // Backward-compatible aliases for existing code that still reads raw keys.

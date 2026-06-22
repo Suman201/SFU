@@ -1,4 +1,6 @@
-import { Injectable, computed, effect, signal } from '@angular/core';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { API_BASE_URL } from '../../core/services/app-environment';
 
 export interface StudentBatch {
   id: string;
@@ -79,6 +81,11 @@ export interface PublicTeacherProfile {
 
 interface StudentEnrollmentState {
   enrolledBatchIds: string[];
+}
+
+interface ApiEnvelope<T> {
+  success?: boolean;
+  data?: T;
 }
 
 const STORAGE_KEY = 'native-sfu-student-enrollments';
@@ -403,12 +410,21 @@ const TEACHER_PROFILES: PublicTeacherProfile[] = [
 
 @Injectable({ providedIn: 'root' })
 export class StudentEnrollmentStore {
+  private readonly http = inject(HttpClient);
   private readonly state = signal<StudentEnrollmentState>(this.loadState());
+  private readonly remoteAvailableBatches = signal<StudentBatch[] | null>(null);
+  private readonly remoteEnrolledBatches = signal<StudentBatch[] | null>(null);
+  private readonly loadingEnrolledBatchesSignal = signal(false);
+  private readonly enrollmentActionBatchIdSignal = signal<string | null>(null);
+  private readonly enrollmentErrorSignal = signal('');
 
-  readonly batches = computed(() => [...BATCH_CATALOG].sort((left, right) => this.startTime(left) - this.startTime(right)));
+  readonly loadingEnrolledBatches = this.loadingEnrolledBatchesSignal.asReadonly();
+  readonly enrollmentActionBatchId = this.enrollmentActionBatchIdSignal.asReadonly();
+  readonly enrollmentError = this.enrollmentErrorSignal.asReadonly();
+  readonly batches = computed(() => [...(this.remoteAvailableBatches() ?? BATCH_CATALOG)].sort((left, right) => this.startTime(left) - this.startTime(right)));
   readonly teachers = computed(() => [...TEACHER_PROFILES].sort((left, right) => left.name.localeCompare(right.name)));
-  readonly enrolledBatchIds = computed(() => new Set(this.state().enrolledBatchIds));
-  readonly enrolledBatches = computed(() => this.batches().filter((batch) => this.enrolledBatchIds().has(batch.id)));
+  readonly enrolledBatchIds = computed(() => new Set(this.remoteEnrolledBatches()?.map((batch) => batch.id) ?? this.state().enrolledBatchIds));
+  readonly enrolledBatches = computed(() => this.remoteEnrolledBatches() ?? this.batches().filter((batch) => this.enrolledBatchIds().has(batch.id)));
   readonly availableBatches = computed(() => this.batches().filter((batch) => !this.enrolledBatchIds().has(batch.id)));
 
   constructor() {
@@ -416,25 +432,79 @@ export class StudentEnrollmentStore {
   }
 
   enroll(batchId: string): void {
-    if (!BATCH_CATALOG.some((batch) => batch.id === batchId)) {
+    if (this.enrollmentActionBatchIdSignal()) {
       return;
     }
 
-    this.state.update((state) => {
-      if (state.enrolledBatchIds.includes(batchId)) {
-        return state;
-      }
+    if (!this.batches().some((batch) => batch.id === batchId) || this.isEnrolled(batchId)) {
+      return;
+    }
 
-      return {
-        enrolledBatchIds: [...state.enrolledBatchIds, batchId]
-      };
+    this.enrollmentActionBatchIdSignal.set(batchId);
+    this.enrollmentErrorSignal.set('');
+    this.http.post<StudentBatch | ApiEnvelope<StudentBatch>>(`${API_BASE_URL}/student-enrollments/me/batches/${encodeURIComponent(batchId)}`, {}).subscribe({
+      next: (response) => {
+        const batch = this.normalizeRemoteBatch(this.unwrapResponse(response));
+        this.remoteEnrolledBatches.update((batches) => this.upsertBatch(batches ?? [], batch));
+        this.state.update(() => ({ enrolledBatchIds: this.enrolledBatchIdsFromRemote() }));
+        this.loadAvailableBatches();
+        this.loadEnrolledBatches();
+      },
+      error: (error) => {
+        this.enrollmentErrorSignal.set(this.errorMessage(error));
+        this.enrollmentActionBatchIdSignal.set(null);
+      },
+      complete: () => this.enrollmentActionBatchIdSignal.set(null)
+    });
+  }
+
+  loadAvailableBatches(): void {
+    this.http.get<StudentBatch[] | ApiEnvelope<StudentBatch[]>>(`${API_BASE_URL}/student-enrollments/batches`).subscribe({
+      next: (response) => {
+        this.remoteAvailableBatches.set(this.unwrapResponse(response).map((batch) => this.normalizeRemoteBatch(batch)));
+      },
+      error: () => {
+        this.remoteAvailableBatches.set(null);
+      }
+    });
+  }
+
+  loadEnrolledBatches(): void {
+    this.loadingEnrolledBatchesSignal.set(true);
+    this.http.get<StudentBatch[] | ApiEnvelope<StudentBatch[]>>(`${API_BASE_URL}/student-enrollments/me/batches`).subscribe({
+      next: (response) => {
+        const batches = this.unwrapResponse(response).map((batch) => this.normalizeRemoteBatch(batch));
+        this.remoteEnrolledBatches.set(batches);
+        this.state.update(() => ({ enrolledBatchIds: batches.map((batch) => batch.id) }));
+      },
+      error: () => {
+        this.remoteEnrolledBatches.set(null);
+        this.loadingEnrolledBatchesSignal.set(false);
+      },
+      complete: () => this.loadingEnrolledBatchesSignal.set(false)
     });
   }
 
   leave(batchId: string): void {
-    this.state.update((state) => ({
-      enrolledBatchIds: state.enrolledBatchIds.filter((enrolledBatchId) => enrolledBatchId !== batchId)
-    }));
+    if (this.enrollmentActionBatchIdSignal()) {
+      return;
+    }
+
+    this.enrollmentActionBatchIdSignal.set(batchId);
+    this.enrollmentErrorSignal.set('');
+    this.http.delete<Record<string, unknown> | ApiEnvelope<Record<string, unknown>>>(`${API_BASE_URL}/student-enrollments/me/batches/${encodeURIComponent(batchId)}`).subscribe({
+      next: () => {
+        this.remoteEnrolledBatches.update((batches) => (batches ?? this.enrolledBatches()).filter((batch) => batch.id !== batchId));
+        this.state.update(() => ({ enrolledBatchIds: this.enrolledBatchIdsFromRemote() }));
+        this.loadAvailableBatches();
+        this.loadEnrolledBatches();
+      },
+      error: (error) => {
+        this.enrollmentErrorSignal.set(this.errorMessage(error));
+        this.enrollmentActionBatchIdSignal.set(null);
+      },
+      complete: () => this.enrollmentActionBatchIdSignal.set(null)
+    });
   }
 
   isEnrolled(batchId: string): boolean {
@@ -442,7 +512,8 @@ export class StudentEnrollmentStore {
   }
 
   enrollmentCount(batch: StudentBatch): number {
-    return Math.min(batch.capacity, batch.enrolledCount + (this.isEnrolled(batch.id) ? 1 : 0));
+    const remoteIsAuthoritative = this.remoteAvailableBatches() !== null || this.remoteEnrolledBatches() !== null;
+    return Math.min(batch.capacity, batch.enrolledCount + (!remoteIsAuthoritative && this.isEnrolled(batch.id) ? 1 : 0));
   }
 
   seatsLeft(batch: StudentBatch): number {
@@ -459,6 +530,55 @@ export class StudentEnrollmentStore {
 
   private startTime(batch: StudentBatch): number {
     return new Date(batch.startsAt).getTime();
+  }
+
+  private unwrapResponse<T>(response: T | ApiEnvelope<T>): T {
+    if (response && typeof response === 'object' && 'data' in response) {
+      const data = (response as ApiEnvelope<T>).data;
+      if (data !== undefined && data !== null) {
+        return data;
+      }
+    }
+    return response as T;
+  }
+
+  private normalizeRemoteBatch(batch: StudentBatch): StudentBatch {
+    return {
+      ...batch,
+      level: batch.level ?? 'Intermediate',
+      teacherTitle: batch.teacherTitle ?? 'Class instructor',
+      schedule: batch.schedule ?? 'Schedule to be announced'
+    };
+  }
+
+  private upsertBatch(batches: StudentBatch[], batch: StudentBatch): StudentBatch[] {
+    return [batch, ...batches.filter((item) => item.id !== batch.id)];
+  }
+
+  private enrolledBatchIdsFromRemote(): string[] {
+    return this.remoteEnrolledBatches()?.map((batch) => batch.id) ?? this.state().enrolledBatchIds;
+  }
+
+  private errorMessage(error: unknown): string {
+    if (error instanceof HttpErrorResponse) {
+      const backendMessage = this.backendMessage(error.error);
+      if (backendMessage) return backendMessage;
+      if (error.status === 0) return 'Unable to reach the server. Please check your connection and try again.';
+      if (error.status === 401) return 'Please sign in with a student account to enroll.';
+      if (error.status === 403) return 'Only student accounts can manage batch enrollments.';
+      if (error.status === 404) return 'This batch is no longer available.';
+      if (error.status === 409) return 'This batch is full or you are already enrolled.';
+    }
+    return 'Unable to update enrollment right now. Please try again.';
+  }
+
+  private backendMessage(error: unknown): string {
+    if (!error || typeof error !== 'object') return '';
+    const body = error as { message?: unknown; error?: unknown };
+    if (typeof body.message === 'string') return body.message;
+    if (Array.isArray(body.message)) return body.message.map((item) => this.backendMessage(item) || String(item)).filter(Boolean).join(' ');
+    if (Array.isArray(body.error)) return body.error.map((item) => this.backendMessage(item) || String(item)).filter(Boolean).join(' ');
+    return '';
   }
 
   private loadState(): StudentEnrollmentState {

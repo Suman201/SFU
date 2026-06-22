@@ -48,15 +48,36 @@ export interface PublishOptions {
   codec?: 'VP8' | 'VP9' | 'H264';
 }
 
+export interface RemoteMediaStream {
+  producerId: string;
+  participantId: string;
+  kind: ProducerKind;
+  consumerId?: string;
+  stream: MediaStream;
+}
+
+type LocalDeviceKind = 'audio' | 'video';
+
 @Injectable({ providedIn: 'root' })
 export class WebRtcService {
   readonly localStream = signal<MediaStream | null>(null);
   readonly screenStream = signal<MediaStream | null>(null);
+  readonly remoteStreams = signal<RemoteMediaStream[]>([]);
   readonly devices = signal<{ audioInputs: DeviceOption[]; videoInputs: DeviceOption[] }>({ audioInputs: [], videoInputs: [] });
+  readonly selectedAudioDeviceId = signal<string | null>(null);
+  readonly selectedVideoDeviceId = signal<string | null>(null);
+  readonly activeAudioDeviceId = signal<string | null>(null);
+  readonly activeVideoDeviceId = signal<string | null>(null);
+  readonly mediaDeviceLoading = signal(false);
+  readonly deviceSwitching = signal<{ audio: boolean; video: boolean }>({ audio: false, video: false });
+  readonly mediaDeviceError = signal<string | null>(null);
   readonly networkScore = signal(5);
   readonly turnStatus = signal<TurnStatus>({ state: 'idle', supportedUriCount: 0 });
-  private peer?: RTCPeerConnection;
+  private readonly peers = new Map<string, RTCPeerConnection>();
+  private readonly transportPublishCounts = new Map<string, number>();
   private readonly publishedProducers = new Map<string, { kind: ProducerKind; svc: boolean; senders: PublishedSender[] }>();
+  private readonly remoteConsumers = new Map<string, { consumer: Consumer; peer: RTCPeerConnection; transport: TransportOptions }>();
+  private mediaDeviceLoadingCount = 0;
   private cachedIceServers?: { expiresAt: number; servers: RTCIceServer[] };
 
   constructor(
@@ -65,26 +86,66 @@ export class WebRtcService {
   ) {}
 
   async refreshDevices(): Promise<void> {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    this.devices.set({
-      audioInputs: devices.filter((device) => device.kind === 'audioinput').map((device) => ({ id: device.deviceId, label: device.label || 'Microphone' })),
-      videoInputs: devices.filter((device) => device.kind === 'videoinput').map((device) => ({ id: device.deviceId, label: device.label || 'Camera' }))
-    });
+    this.setMediaDeviceLoading(true);
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter((device) => device.kind === 'audioinput').map((device) => ({ id: device.deviceId, label: device.label || 'Microphone' }));
+      const videoInputs = devices.filter((device) => device.kind === 'videoinput').map((device) => ({ id: device.deviceId, label: device.label || 'Camera' }));
+      this.devices.set({ audioInputs, videoInputs });
+      this.reconcileSelectedDevice('audio', audioInputs);
+      this.reconcileSelectedDevice('video', videoInputs);
+      this.mediaDeviceError.set(null);
+    } catch (error) {
+      this.mediaDeviceError.set(errorMessage(error, 'Unable to refresh media devices.'));
+      throw error;
+    } finally {
+      this.setMediaDeviceLoading(false);
+    }
   }
 
-  async startCamera(audioDeviceId?: string, videoDeviceId?: string): Promise<MediaStream> {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true,
-      video: videoDeviceId ? { deviceId: { exact: videoDeviceId } } : { width: { ideal: 1280 }, height: { ideal: 720 } }
-    });
-    this.localStream.set(stream);
-    await this.refreshDevices();
-    return stream;
+  selectAudioDevice(deviceId: string | null | undefined): void {
+    this.selectedAudioDeviceId.set(normalizeDeviceId(deviceId));
+  }
+
+  selectVideoDevice(deviceId: string | null | undefined): void {
+    this.selectedVideoDeviceId.set(normalizeDeviceId(deviceId));
+  }
+
+  async startCamera(...deviceIds: [audioDeviceId?: string | null, videoDeviceId?: string | null]): Promise<MediaStream> {
+    const requestedAudioDeviceId = normalizeDeviceId(deviceIds.length > 0 ? deviceIds[0] : this.selectedAudioDeviceId());
+    const requestedVideoDeviceId = normalizeDeviceId(deviceIds.length > 1 ? deviceIds[1] : this.selectedVideoDeviceId());
+    this.setMediaDeviceLoading(true);
+    this.mediaDeviceError.set(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints(requestedAudioDeviceId),
+        video: videoConstraints(requestedVideoDeviceId)
+      });
+      this.localStream.set(stream);
+      this.syncDeviceStateFromStream(stream, requestedAudioDeviceId, requestedVideoDeviceId);
+      await this.refreshDevices();
+      return stream;
+    } catch (error) {
+      this.mediaDeviceError.set(errorMessage(error, 'Unable to start camera and microphone.'));
+      throw error;
+    } finally {
+      this.setMediaDeviceLoading(false);
+    }
   }
 
   stopCamera(): void {
     this.localStream()?.getTracks().forEach((track) => track.stop());
     this.localStream.set(null);
+    this.activeAudioDeviceId.set(null);
+    this.activeVideoDeviceId.set(null);
+  }
+
+  async switchCamera(videoDeviceId: string | null | undefined): Promise<MediaStream> {
+    return this.switchLocalDeviceTrack('video', videoDeviceId);
+  }
+
+  async switchMicrophone(audioDeviceId: string | null | undefined): Promise<MediaStream> {
+    return this.switchLocalDeviceTrack('audio', audioDeviceId);
   }
 
   async startScreen(): Promise<MediaStream> {
@@ -100,54 +161,147 @@ export class WebRtcService {
 
   async preparePeer(roomId: string): Promise<TransportOptions> {
     const transport = await this.socket.emitAck('transport:create', { roomId });
-    const iceServers = await this.loadIceServers();
-    this.peer = new RTCPeerConnection({
-      iceServers,
-      bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require'
-    });
-    this.peer.onicecandidate = (event) => {
-      if (event.candidate?.candidate) {
-        void this.socket.emitAck('transport:ice-candidate', {
-          transportId: transport.id,
-          candidate: parseCandidate(event.candidate)
-        });
-      }
-    };
+    this.peers.set(transport.id, await this.createPeer(transport));
     return transport;
   }
 
   async publish(roomId: string, transport: TransportOptions, kind: ProducerKind, stream: MediaStream, options: PublishOptions = {}): Promise<Producer> {
-    if (!this.peer) {
-      await this.preparePeer(roomId);
+    let activeTransport = transport;
+    if (this.transportPublishCounts.get(transport.id)) {
+      activeTransport = await this.preparePeer(roomId);
+    }
+    let peer = this.peers.get(activeTransport.id);
+    if (!peer) {
+      activeTransport = await this.preparePeer(roomId);
+      peer = this.peers.get(activeTransport.id);
+    }
+    if (!peer) {
+      throw new Error('Unable to prepare media transport');
     }
     const senders: PublishedSender[] = [];
     for (const track of stream.getTracks()) {
       if ((kind === 'audio' && track.kind !== 'audio') || (kind !== 'audio' && track.kind !== 'video')) {
         continue;
       }
-      const sender = this.peer ? addSenderForTrack(this.peer, track, stream, kind, options) : undefined;
+      const sender = addSenderForTrack(peer, track, stream, kind, options);
       if (sender?.sender) {
         senders.push(sender);
       }
     }
-    if (this.peer && this.peer.signalingState === 'stable') {
-      const offer = await this.peer.createOffer();
-      await this.peer.setLocalDescription(offer);
-      const iceParameters = parseIceParameters(this.peer.localDescription?.sdp ?? '');
-      if (iceParameters) {
-        await this.socket.emitAck('transport:ice-parameters', { transportId: transport.id, iceParameters });
-      }
-      const dtlsParameters = parseDtlsParameters(this.peer.localDescription?.sdp ?? '');
-      if (dtlsParameters) {
-        await this.socket.emitAck('transport:dtls-parameters', { transportId: transport.id, dtlsParameters });
-      }
+    if (!senders.length) {
+      throw new Error(`No ${kind === 'audio' ? 'audio' : 'video'} track is available to publish`);
     }
-    const rtpParameters = createRtpParameters(kind, options);
-    const event = kind === 'screen' ? 'screen:start' : 'producer:create';
-    const producer = await this.socket.emitAck(event, { roomId, kind, transportId: transport.id, rtpParameters });
-    this.publishedProducers.set(producer.id, { kind, svc: Boolean(options.svc && kind !== 'audio'), senders });
-    return producer;
+
+    if (peer.signalingState === 'stable') {
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      const localSdp = peer.localDescription?.sdp ?? '';
+      const iceParameters = parseIceParameters(localSdp);
+      if (iceParameters) {
+        await this.socket.emitAck('transport:ice-parameters', { transportId: activeTransport.id, iceParameters });
+      }
+      const dtlsParameters = parseDtlsParameters(localSdp);
+      if (dtlsParameters) {
+        await this.socket.emitAck('transport:dtls-parameters', { transportId: activeTransport.id, dtlsParameters });
+      }
+      const rtpParameters = parseRtpParameters(kind, localSdp) ?? createRtpParameters(kind, options);
+      const event = kind === 'screen' ? 'screen:start' : 'producer:create';
+      const producer = await this.socket.emitAck(event, { roomId, kind, transportId: activeTransport.id, rtpParameters });
+      const answer = buildUnifiedPlanAnswer({
+        transport: activeTransport,
+        offer: localSdp,
+        direction: 'recvonly',
+        mediaKind: kind === 'audio' ? 'audio' : 'video',
+        rtpParameters
+      });
+      await peer.setRemoteDescription({ type: 'answer', sdp: answer });
+      this.transportPublishCounts.set(activeTransport.id, (this.transportPublishCounts.get(activeTransport.id) ?? 0) + 1);
+      this.publishedProducers.set(producer.id, { kind, svc: Boolean(options.svc && kind !== 'audio'), senders });
+      return producer;
+    }
+
+    throw new Error('Media negotiation is already in progress');
+  }
+
+  async consumeProducer(roomId: string, producer: Producer): Promise<Consumer | undefined> {
+    if (producer.status !== 'live' || this.remoteConsumers.has(producer.id) || this.publishedProducers.has(producer.id)) {
+      return undefined;
+    }
+    const mediaKind = producer.kind === 'audio' ? 'audio' : 'video';
+    const transport = await this.preparePeer(roomId);
+    const peer = this.peers.get(transport.id);
+    if (!peer) {
+      throw new Error('Unable to prepare receive transport');
+    }
+    peer.addTransceiver(mediaKind, { direction: 'recvonly' });
+    peer.ontrack = (event) => {
+      const stream = event.streams[0] ?? new MediaStream([event.track]);
+      this.upsertRemoteStream({
+        producerId: producer.id,
+        participantId: producer.participantId,
+        kind: producer.kind,
+        consumerId: this.remoteConsumers.get(producer.id)?.consumer.id,
+        stream
+      });
+    };
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    const localSdp = peer.localDescription?.sdp ?? '';
+    const iceParameters = parseIceParameters(localSdp);
+    if (iceParameters) {
+      await this.socket.emitAck('transport:ice-parameters', { transportId: transport.id, iceParameters });
+    }
+    const dtlsParameters = parseDtlsParameters(localSdp);
+    if (dtlsParameters) {
+      await this.socket.emitAck('transport:dtls-parameters', { transportId: transport.id, dtlsParameters });
+    }
+    const consumer = await this.socket.emitAck('consumer:create', { roomId, producerId: producer.id, transportId: transport.id });
+    const answer = buildUnifiedPlanAnswer({
+      transport,
+      offer: localSdp,
+      direction: 'sendonly',
+      mediaKind,
+      rtpParameters: consumer.rtpParameters
+    });
+    await peer.setRemoteDescription({ type: 'answer', sdp: answer });
+    this.remoteConsumers.set(producer.id, { consumer, peer, transport });
+    return consumer;
+  }
+
+  async closeProducer(producerId: string): Promise<void> {
+    const publication = this.publishedProducers.get(producerId);
+    if (!publication) {
+      return;
+    }
+    await this.socket.emitAck(publication.kind === 'screen' ? 'screen:stop' : 'producer:close', { producerId });
+    for (const entry of publication.senders) {
+      entry.sender.track?.stop();
+    }
+    this.publishedProducers.delete(producerId);
+  }
+
+  removeRemoteProducer(producerId: string): void {
+    const remote = this.remoteConsumers.get(producerId);
+    if (remote) {
+      void this.socket.emitAck('consumer:close', { consumerId: remote.consumer.id }).catch(() => undefined);
+      remote.peer.close();
+      this.peers.delete(remote.transport.id);
+      this.remoteConsumers.delete(producerId);
+    }
+    this.remoteStreams.update((streams) => streams.filter((stream) => stream.producerId !== producerId));
+  }
+
+  resetRoomMedia(): void {
+    this.stopCamera();
+    this.stopScreen();
+    for (const peer of this.peers.values()) {
+      peer.close();
+    }
+    this.peers.clear();
+    this.transportPublishCounts.clear();
+    this.publishedProducers.clear();
+    this.remoteConsumers.clear();
+    this.remoteStreams.set([]);
   }
 
   async setPreferredSvcLayers(consumerId: string, preferredSvcLayers: SvcLayerSelection): Promise<void> {
@@ -208,6 +362,142 @@ export class WebRtcService {
     );
   }
 
+  private async switchLocalDeviceTrack(kind: LocalDeviceKind, deviceId: string | null | undefined): Promise<MediaStream> {
+    const normalizedDeviceId = normalizeDeviceId(deviceId);
+    const deviceName = kind === 'audio' ? 'microphone' : 'camera';
+
+    this.setDeviceSwitching(kind, true);
+    this.setMediaDeviceLoading(true);
+    this.mediaDeviceError.set(null);
+
+    let replacementTrack: MediaStreamTrack | undefined;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(
+        kind === 'audio'
+          ? { audio: audioConstraints(normalizedDeviceId), video: false }
+          : { audio: false, video: videoConstraints(normalizedDeviceId) }
+      );
+      replacementTrack = firstTrackOfKind(stream, kind);
+      if (!replacementTrack) {
+        throw new Error(`No ${deviceName} track is available from the selected device.`);
+      }
+
+      const previousTracks = this.localStream()?.getTracks().filter((track) => track.kind === kind) ?? [];
+      const previousPublishedTracks = this.publishedTracksForKind(kind);
+      replacementTrack.enabled = previousTracks[0]?.enabled ?? true;
+
+      await this.replacePublishedTracks(kind, replacementTrack);
+      const nextStream = this.replaceLocalTrack(kind, replacementTrack);
+      this.setSelectedDeviceId(kind, normalizedDeviceId);
+      this.setActiveDeviceId(kind, deviceIdFromTrack(replacementTrack) ?? normalizedDeviceId);
+      await this.refreshDevices().catch(() => undefined);
+      new Set([...previousTracks, ...previousPublishedTracks]).forEach((track) => track.stop());
+      return nextStream;
+    } catch (error) {
+      replacementTrack?.stop();
+      this.mediaDeviceError.set(errorMessage(error, `Unable to switch ${deviceName}.`));
+      throw error;
+    } finally {
+      this.setMediaDeviceLoading(false);
+      this.setDeviceSwitching(kind, false);
+    }
+  }
+
+  private async replacePublishedTracks(kind: LocalDeviceKind, track: MediaStreamTrack): Promise<number> {
+    const producerKind: ProducerKind = kind === 'audio' ? 'audio' : 'video';
+    const senders = [...this.publishedProducers.values()]
+      .filter((publication) => publication.kind === producerKind)
+      .flatMap((publication) => publication.senders)
+      .filter((entry) => !entry.sender.track || entry.sender.track.kind === kind);
+
+    if (!senders.length) {
+      return 0;
+    }
+
+    await Promise.all(senders.map((entry) => entry.sender.replaceTrack(track)));
+    return senders.length;
+  }
+
+  private publishedTracksForKind(kind: LocalDeviceKind): MediaStreamTrack[] {
+    const producerKind: ProducerKind = kind === 'audio' ? 'audio' : 'video';
+    return [...this.publishedProducers.values()]
+      .filter((publication) => publication.kind === producerKind)
+      .flatMap((publication) => publication.senders)
+      .map((entry) => entry.sender.track)
+      .filter((track): track is MediaStreamTrack => track !== null && track.kind === kind);
+  }
+
+  private replaceLocalTrack(kind: LocalDeviceKind, track: MediaStreamTrack): MediaStream {
+    const currentStream = this.localStream();
+    if (!currentStream) {
+      const stream = new MediaStream([track]);
+      this.localStream.set(stream);
+      return stream;
+    }
+
+    let inserted = false;
+    const tracks = currentStream.getTracks().flatMap((currentTrack) => {
+      if (currentTrack.kind !== kind) {
+        return [currentTrack];
+      }
+      if (inserted) {
+        return [];
+      }
+      inserted = true;
+      return [track];
+    });
+
+    if (!inserted) {
+      tracks.push(track);
+    }
+
+    const stream = new MediaStream(tracks);
+    this.localStream.set(stream);
+    return stream;
+  }
+
+  private syncDeviceStateFromStream(stream: MediaStream, requestedAudioDeviceId: string | null, requestedVideoDeviceId: string | null): void {
+    const audioDeviceId = deviceIdFromTrack(stream.getAudioTracks()[0]) ?? requestedAudioDeviceId;
+    const videoDeviceId = deviceIdFromTrack(stream.getVideoTracks()[0]) ?? requestedVideoDeviceId;
+    this.activeAudioDeviceId.set(audioDeviceId);
+    this.activeVideoDeviceId.set(videoDeviceId);
+    this.selectedAudioDeviceId.set(requestedAudioDeviceId ?? audioDeviceId);
+    this.selectedVideoDeviceId.set(requestedVideoDeviceId ?? videoDeviceId);
+  }
+
+  private reconcileSelectedDevice(kind: LocalDeviceKind, devices: DeviceOption[]): void {
+    const selectedDeviceId = kind === 'audio' ? this.selectedAudioDeviceId() : this.selectedVideoDeviceId();
+    if (!selectedDeviceId || devices.length === 0 || devices.some((device) => device.id === selectedDeviceId) || devices.every((device) => !device.id)) {
+      return;
+    }
+    this.setSelectedDeviceId(kind, null);
+  }
+
+  private setSelectedDeviceId(kind: LocalDeviceKind, deviceId: string | null): void {
+    if (kind === 'audio') {
+      this.selectedAudioDeviceId.set(deviceId);
+      return;
+    }
+    this.selectedVideoDeviceId.set(deviceId);
+  }
+
+  private setActiveDeviceId(kind: LocalDeviceKind, deviceId: string | null): void {
+    if (kind === 'audio') {
+      this.activeAudioDeviceId.set(deviceId);
+      return;
+    }
+    this.activeVideoDeviceId.set(deviceId);
+  }
+
+  private setDeviceSwitching(kind: LocalDeviceKind, switching: boolean): void {
+    this.deviceSwitching.update((state) => ({ ...state, [kind]: switching }));
+  }
+
+  private setMediaDeviceLoading(loading: boolean): void {
+    this.mediaDeviceLoadingCount = Math.max(0, this.mediaDeviceLoadingCount + (loading ? 1 : -1));
+    this.mediaDeviceLoading.set(this.mediaDeviceLoadingCount > 0);
+  }
+
   private async loadIceServers(): Promise<RTCIceServer[]> {
     const now = Date.now();
     if (this.cachedIceServers && this.cachedIceServers.expiresAt > now) {
@@ -243,6 +533,57 @@ export class WebRtcService {
       return [];
     }
   }
+
+  private async createPeer(transport: TransportOptions): Promise<RTCPeerConnection> {
+    const iceServers = await this.loadIceServers();
+    const peer = new RTCPeerConnection({
+      iceServers,
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require'
+    });
+    peer.onicecandidate = (event) => {
+      if (event.candidate?.candidate) {
+        void this.socket.emitAck('transport:ice-candidate', {
+          transportId: transport.id,
+          candidate: parseCandidate(event.candidate)
+        });
+      }
+    };
+    return peer;
+  }
+
+  private upsertRemoteStream(remote: RemoteMediaStream): void {
+    this.remoteStreams.update((streams) => [...streams.filter((stream) => stream.producerId !== remote.producerId), remote]);
+  }
+}
+
+function normalizeDeviceId(deviceId: string | null | undefined): string | null {
+  const normalized = deviceId?.trim();
+  return normalized ? normalized : null;
+}
+
+function audioConstraints(deviceId: string | null): boolean | MediaTrackConstraints {
+  return deviceId ? { deviceId: { exact: deviceId } } : true;
+}
+
+function videoConstraints(deviceId: string | null): MediaTrackConstraints {
+  const constraints: MediaTrackConstraints = { width: { ideal: 1280 }, height: { ideal: 720 } };
+  if (deviceId) {
+    constraints.deviceId = { exact: deviceId };
+  }
+  return constraints;
+}
+
+function firstTrackOfKind(stream: MediaStream, kind: LocalDeviceKind): MediaStreamTrack | undefined {
+  return kind === 'audio' ? stream.getAudioTracks()[0] : stream.getVideoTracks()[0];
+}
+
+function deviceIdFromTrack(track: MediaStreamTrack | undefined): string | null {
+  return normalizeDeviceId(track?.getSettings().deviceId);
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function isSupportedTurnUri(uri: string): boolean {
@@ -375,6 +716,351 @@ function parseDtlsParameters(sdp: string): DtlsParameters | undefined {
     role: 'client',
     fingerprints
   };
+}
+
+function parseRtpParameters(kind: ProducerKind, sdp: string): RtpParameters | undefined {
+  try {
+    const mediaKind = kind === 'audio' ? 'audio' : 'video';
+    const section = mediaSection(sdp, mediaKind);
+    const mLine = section.find((line) => line.startsWith('m=')) ?? '';
+    const payloadTypes = mLine.split(/\s+/).slice(3).map(Number).filter(Number.isFinite);
+    const primaryPayloadType = selectPrimaryPayloadType(section, payloadTypes, mediaKind);
+    const rtpmap = section.find((line) => line.startsWith(`a=rtpmap:${primaryPayloadType} `));
+    const codecParts = rtpmap?.split(/\s+/)[1]?.split('/') ?? [];
+    const rtxPayloadTypes = rtxPayloadTypesForApt(section, primaryPayloadType);
+    const fidGroups = fidGroupsFromSection(section);
+    const primarySsrcs = primarySsrcsFromSection(section, fidGroups);
+    const ridInfos = mediaKind === 'video' ? ridInfosFromSection(section) : [];
+    const cnameSsrc = primarySsrcs[0];
+    const cname = cnameSsrc ? section.find((line) => line.startsWith(`a=ssrc:${cnameSsrc} cname:`))?.split('cname:')[1] ?? crypto.randomUUID() : crypto.randomUUID();
+    const encodingCount = Math.max(primarySsrcs.length, ridInfos.length, 1);
+
+    return {
+      codecs: [
+        {
+          mimeType: `${mediaKind}/${codecParts[0] ?? (mediaKind === 'audio' ? 'opus' : 'VP8')}`,
+          payloadType: primaryPayloadType,
+          clockRate: Number(codecParts[1] ?? (mediaKind === 'audio' ? 48000 : 90000)),
+          channels: codecParts[2] ? Number(codecParts[2]) : undefined,
+          parameters: fmtpParameters(section, primaryPayloadType),
+          rtcpFeedback: section
+            .filter((line) => line.startsWith(`a=rtcp-fb:${primaryPayloadType}`))
+            .map((line) => line.split(/\s+/).slice(1).join(' '))
+        },
+        ...rtxPayloadTypes.map((payloadType) => ({
+          mimeType: `${mediaKind}/rtx`,
+          payloadType,
+          clockRate: Number(section.find((line) => line.startsWith(`a=rtpmap:${payloadType} `))?.split(/\s+/)[1]?.split('/')[1] ?? 90000),
+          parameters: fmtpParameters(section, payloadType),
+          rtcpFeedback: []
+        }))
+      ],
+      headerExtensions: headerExtensionsFromSection(section),
+      encodings: Array.from({ length: encodingCount }).map((_, index) => {
+        const ssrc = primarySsrcs[index];
+        const ridInfo = ridInfos[index];
+        const rtxSsrc = ssrc === undefined ? undefined : fidGroups.get(ssrc);
+        return {
+          ssrc,
+          rid: mediaKind === 'audio' ? undefined : ridInfo?.rid ?? ridAt(section, index),
+          spatialLayer: mediaKind === 'audio' ? undefined : spatialLayerFromRid(ridInfo?.rid, index),
+          maxBitrate: ridInfo?.maxBitrate,
+          scaleResolutionDownBy: ridInfo?.scaleResolutionDownBy,
+          rtx: rtxSsrc !== undefined ? { ssrc: rtxSsrc, payloadType: rtxPayloadTypes[0] } : undefined
+        };
+      }),
+      simulcast:
+        mediaKind === 'video' && ridInfos.length > 1
+          ? {
+              direction: 'send',
+              rids: ridInfos.map((rid) => rid.rid),
+              pausedRids: ridInfos.filter((rid) => rid.paused).map((rid) => rid.rid)
+            }
+          : undefined,
+      rtcp: { cname, reducedSize: section.includes('a=rtcp-rsize') || section.includes('a=rtcp-mux') }
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function buildUnifiedPlanAnswer(options: {
+  transport: TransportOptions;
+  offer: string;
+  direction: 'sendonly' | 'recvonly' | 'inactive';
+  mediaKind: 'audio' | 'video';
+  rtpParameters?: RtpParameters;
+}): string {
+  const sections = mediaSections(options.offer);
+  const targetIndex = sections.findIndex((section) => mediaTypeFromSection(section) === options.mediaKind);
+  if (targetIndex < 0) {
+    throw new Error('SDP offer does not include a compatible media section');
+  }
+  const candidate = options.transport.iceCandidates.find((item) => item.ip === '127.0.0.1') ?? options.transport.iceCandidates[0];
+  if (!candidate) {
+    throw new Error('Transport does not include ICE candidates');
+  }
+  const mediaAnswers: string[][] = [];
+  const activeMids: string[] = [];
+
+  sections.forEach((section, index) => {
+    const mid = findLineValue(section, 'a=mid:') ?? String(index);
+    const mLine = section.find((line) => line.startsWith('m=')) ?? '';
+    const mParts = mLine.split(/\s+/);
+    const mediaType = mParts[0]?.slice(2) ?? options.mediaKind;
+    const protocol = mParts[2] ?? 'UDP/TLS/RTP/SAVPF';
+    const payloadTypes = mParts.slice(3).join(' ');
+    if (index !== targetIndex) {
+      mediaAnswers.push([
+        `m=${mediaType} 0 ${protocol} ${payloadTypes}`.trimEnd(),
+        'c=IN IP4 0.0.0.0',
+        `a=mid:${mid}`,
+        'a=inactive',
+        ...(section.includes('a=rtcp-mux') ? ['a=rtcp-mux'] : [])
+      ]);
+      return;
+    }
+
+    activeMids.push(mid);
+    const selectedPayloadTypes = answerPayloadTypes(section, options.rtpParameters);
+    const activePayloadTypes = selectedPayloadTypes.length ? selectedPayloadTypes.join(' ') : payloadTypes;
+    const codecLines = section.filter((line) => {
+      if (/^(a=extmap:|a=extmap-allow-mixed)/.test(line)) {
+        return true;
+      }
+      const payloadType = payloadTypeFromCodecLine(line);
+      return payloadType !== undefined && (!selectedPayloadTypes.length || selectedPayloadTypes.includes(payloadType));
+    });
+    const activeLines = [
+      `m=${mediaType} 9 UDP/TLS/RTP/SAVPF ${activePayloadTypes}`.trimEnd(),
+      'c=IN IP4 0.0.0.0',
+      `a=mid:${mid}`,
+      `a=ice-ufrag:${options.transport.iceParameters.usernameFragment}`,
+      `a=ice-pwd:${options.transport.iceParameters.password}`,
+      'a=ice-options:trickle',
+      ...options.transport.dtlsParameters.fingerprints.map((fingerprint) => `a=fingerprint:${fingerprint.algorithm} ${fingerprint.value}`),
+      'a=setup:passive',
+      `a=${options.direction}`,
+      'a=rtcp-mux',
+      'a=rtcp-rsize',
+      ...codecLines,
+      ...simulcastAnswerLines(section, options.direction),
+      candidateLine(candidate),
+      'a=end-of-candidates'
+    ];
+
+    if (options.direction === 'sendonly' && options.rtpParameters) {
+      for (const encoding of options.rtpParameters.encodings) {
+        if (encoding.ssrc === undefined) {
+          continue;
+        }
+        if (encoding.rtx?.ssrc !== undefined) {
+          activeLines.push(`a=ssrc-group:FID ${encoding.ssrc} ${encoding.rtx.ssrc}`);
+        }
+        activeLines.push(`a=ssrc:${encoding.ssrc} cname:${options.rtpParameters.rtcp.cname}`);
+        activeLines.push(`a=ssrc:${encoding.ssrc} msid:sfu-stream ${options.mediaKind}-track`);
+        if (encoding.rtx?.ssrc !== undefined) {
+          activeLines.push(`a=ssrc:${encoding.rtx.ssrc} cname:${options.rtpParameters.rtcp.cname}`);
+          activeLines.push(`a=ssrc:${encoding.rtx.ssrc} msid:sfu-stream ${options.mediaKind}-rtx`);
+        }
+      }
+    }
+    mediaAnswers.push(activeLines);
+  });
+
+  return [
+    'v=0',
+    `o=- ${Date.now()} 2 IN IP4 127.0.0.1`,
+    's=-',
+    't=0 0',
+    `a=group:BUNDLE ${activeMids.join(' ')}`,
+    'a=msid-semantic: WMS *',
+    ...mediaAnswers.flat()
+  ].join('\r\n') + '\r\n';
+}
+
+function mediaSections(sdp: string): string[][] {
+  return sdp
+    .split(/\r?\n(?=m=)/)
+    .slice(1)
+    .map((section) => section.split(/\r?\n/).filter(Boolean))
+    .filter((section) => /^m=(audio|video)\s/.test(section[0] ?? ''));
+}
+
+function mediaSection(sdp: string, mediaKind: 'audio' | 'video'): string[] {
+  const section = mediaSections(sdp).find((item) => item[0]?.startsWith(`m=${mediaKind} `));
+  if (!section) {
+    throw new Error('SDP does not include a compatible media section');
+  }
+  return section;
+}
+
+function mediaTypeFromSection(section: string[]): 'audio' | 'video' | undefined {
+  const type = section[0]?.split(/\s+/)[0]?.slice(2);
+  return type === 'audio' || type === 'video' ? type : undefined;
+}
+
+function findLineValue(lines: string[], prefix: string): string | undefined {
+  return lines.find((line) => line.startsWith(prefix))?.slice(prefix.length).trim();
+}
+
+function answerPayloadTypes(section: string[], rtpParameters: RtpParameters | undefined): number[] {
+  if (!rtpParameters?.codecs?.length) {
+    return [];
+  }
+  const offeredPayloadTypes = ((section.find((line) => line.startsWith('m=')) ?? '').split(/\s+/).slice(3))
+    .map((value) => Number(value))
+    .filter(Number.isFinite);
+  const selectedPayloadTypes = new Set(rtpParameters.codecs.map((codec) => codec.payloadType));
+  return offeredPayloadTypes.filter((payloadType) => selectedPayloadTypes.has(payloadType));
+}
+
+function payloadTypeFromCodecLine(line: string): number | undefined {
+  const match = line.match(/^a=(?:rtpmap|rtcp-fb|fmtp):(\d+)/);
+  if (!match) {
+    return undefined;
+  }
+  const payloadType = Number(match[1]);
+  return Number.isFinite(payloadType) ? payloadType : undefined;
+}
+
+function selectPrimaryPayloadType(section: string[], payloadTypes: number[], mediaKind: 'audio' | 'video'): number {
+  const rtxPayloads = new Set(
+    section
+      .filter((line) => /a=rtpmap:\d+\s+rtx\//i.test(line))
+      .map((line) => Number(line.match(/^a=rtpmap:(\d+)/)?.[1]))
+      .filter(Number.isFinite)
+  );
+  const preferred = mediaKind === 'audio' ? /opus/i : /^(VP8|VP9|H264|AV1)\//i;
+  return (
+    payloadTypes.find((payloadType) => !rtxPayloads.has(payloadType) && preferred.test(section.find((line) => line.startsWith(`a=rtpmap:${payloadType} `))?.split(/\s+/)[1] ?? '')) ??
+    payloadTypes.find((payloadType) => !rtxPayloads.has(payloadType)) ??
+    payloadTypes[0] ??
+    (mediaKind === 'audio' ? 111 : 96)
+  );
+}
+
+function fmtpParameters(section: string[], payloadType: number): Record<string, string | number | boolean> | undefined {
+  const fmtp = section.find((line) => line.startsWith(`a=fmtp:${payloadType} `))?.split(/\s+/).slice(1).join(' ');
+  if (!fmtp) {
+    return undefined;
+  }
+  return Object.fromEntries(
+    fmtp
+      .split(';')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const [key, value = true] = part.split('=');
+        const numeric = typeof value === 'string' ? Number(value) : Number.NaN;
+        return [key, Number.isFinite(numeric) ? numeric : value];
+      })
+  );
+}
+
+function rtxPayloadTypesForApt(section: string[], apt: number): number[] {
+  return section
+    .filter((line) => line.startsWith('a=fmtp:') && line.includes(`apt=${apt}`))
+    .map((line) => Number(line.match(/^a=fmtp:(\d+)/)?.[1]))
+    .filter(Number.isFinite);
+}
+
+function headerExtensionsFromSection(section: string[]): RtpParameters['headerExtensions'] {
+  return section
+    .filter((line) => line.startsWith('a=extmap:'))
+    .map((line) => {
+      const [idPart, uri, directionPart] = line.slice('a=extmap:'.length).trim().split(/\s+/);
+      const [id, direction] = (idPart ?? '').split('/');
+      return {
+        id: Number(id),
+        uri: uri ?? '',
+        direction: (direction ?? directionPart) as RtpParameters['headerExtensions'] extends Array<infer T> ? T extends { direction?: infer D } ? D : never : never
+      };
+    })
+    .filter((extension) => Number.isFinite(extension.id) && extension.uri);
+}
+
+function fidGroupsFromSection(section: string[]): Map<number, number> {
+  const groups = new Map<number, number>();
+  for (const line of section.filter((entry) => entry.startsWith('a=ssrc-group:FID '))) {
+    const values = line.slice('a=ssrc-group:FID '.length).trim().split(/\s+/).map(Number);
+    const primary = values[0];
+    const rtx = values[1];
+    if (primary !== undefined && rtx !== undefined && Number.isFinite(primary) && Number.isFinite(rtx)) {
+      groups.set(primary, rtx);
+    }
+  }
+  return groups;
+}
+
+function primarySsrcsFromSection(section: string[], fidGroups: Map<number, number>): number[] {
+  const rtxSsrcs = new Set(fidGroups.values());
+  return [
+    ...new Set(
+      section
+        .filter((line) => line.startsWith('a=ssrc:'))
+        .map((line) => Number(line.match(/^a=ssrc:(\d+)/)?.[1]))
+        .filter((ssrc) => Number.isFinite(ssrc) && !rtxSsrcs.has(ssrc))
+    )
+  ];
+}
+
+function ridInfosFromSection(section: string[]): Array<{ rid: string; paused: boolean; maxBitrate?: number; scaleResolutionDownBy?: number }> {
+  return section
+    .filter((line) => line.startsWith('a=rid:') && /\ssend(?:\s|$)/.test(line))
+    .map((line, index) => {
+      const parts = line.slice('a=rid:'.length).trim().split(/\s+/);
+      const rid = parts[0] ?? ridAt(section, index) ?? String(index);
+      const params = parts.slice(2).join(' ');
+      const maxBitrate = Number(params.match(/max-br=(\d+)/)?.[1]);
+      return {
+        rid,
+        paused: line.includes('paused'),
+        maxBitrate: Number.isFinite(maxBitrate) ? maxBitrate : undefined,
+        scaleResolutionDownBy: rid === 'low' ? 4 : rid === 'medium' || rid === 'mid' ? 2 : 1
+      };
+    });
+}
+
+function ridAt(_section: string[], index: number): string | undefined {
+  return ['low', 'medium', 'high'][index];
+}
+
+function simulcastAnswerLines(section: string[], direction: 'sendonly' | 'recvonly' | 'inactive'): string[] {
+  if (direction !== 'recvonly') {
+    return [];
+  }
+  const rids = ridInfosFromSection(section).map((rid) => rid.rid);
+  if (rids.length <= 1) {
+    return [];
+  }
+  return [
+    ...rids.map((rid) => `a=rid:${rid} recv`),
+    `a=simulcast:recv ${rids.join(';')}`
+  ];
+}
+
+function candidateLine(candidate: TransportOptions['iceCandidates'][number]): string {
+  const base = [
+    `a=candidate:${candidate.foundation}`,
+    candidate.component,
+    candidate.protocol.toUpperCase(),
+    candidate.priority,
+    candidate.ip,
+    candidate.port,
+    'typ',
+    candidate.type
+  ];
+  if (candidate.relatedAddress) {
+    base.push('raddr', candidate.relatedAddress);
+  }
+  if (candidate.relatedPort) {
+    base.push('rport', candidate.relatedPort);
+  }
+  if (candidate.tcpType) {
+    base.push('tcptype', candidate.tcpType);
+  }
+  return base.join(' ');
 }
 
 async function applySenderDynacast(

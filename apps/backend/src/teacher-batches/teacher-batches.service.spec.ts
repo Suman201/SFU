@@ -39,7 +39,7 @@ describe('TeacherBatchesService', () => {
     expect(thrown).toBeInstanceOf(ConflictException);
   });
 
-  it('lists teacher batches with schedules and zero enrolled count', async () => {
+  it('lists teacher batches with schedules and enrollment-backed roster', async () => {
     const service = serviceWith({
       batches: [
         {
@@ -59,6 +59,17 @@ describe('TeacherBatchesService', () => {
       schedules: [
         { id: 'schedule-1', batchId: 'batch-1', dayOfWeek: 'MONDAY', startTime: '10:00' },
         { id: 'schedule-2', batchId: 'batch-1', dayOfWeek: 'WEDNESDAY', startTime: '14:00' }
+      ],
+      roster: [
+        {
+          id: 'student-1',
+          userId: 'student-1',
+          enrollmentId: 'enrollment-1',
+          displayName: 'Student One',
+          email: 'student.one@example.test',
+          status: 'active',
+          joinedAt: '2026-01-02T00:00:00.000Z'
+        }
       ]
     });
 
@@ -66,8 +77,18 @@ describe('TeacherBatchesService', () => {
     expect(results.length).toBe(1);
     expect(results[0]?.id).toBe('batch-1');
     expect(results[0]?.name).toBe('Laravel Morning Batch 2026');
-    expect(results[0]?.enrolledCount).toBe(0);
+    expect(results[0]?.enrolledCount).toBe(1);
     expect(results[0]?.maxCapacity).toBe(30);
+    expect(results[0]?.students).toEqual([
+      {
+        id: 'student-1',
+        displayName: 'Student One',
+        email: 'student.one@example.test',
+        attendanceRate: 0,
+        joinedAt: '2026-01-02T00:00:00.000Z',
+        status: 'active'
+      }
+    ]);
     expect(results[0]?.schedule).toEqual([
       { id: 'schedule-1', dayOfWeek: 'MONDAY', startTime: '10:00' },
       { id: 'schedule-2', dayOfWeek: 'WEDNESDAY', startTime: '14:00' }
@@ -75,7 +96,7 @@ describe('TeacherBatchesService', () => {
   });
 });
 
-function serviceWith(options: { batchExists?: boolean; batches?: unknown[]; schedules?: unknown[] }): TeacherBatchesService {
+function serviceWith(options: { batchExists?: boolean; batches?: unknown[]; schedules?: unknown[]; roster?: unknown[] }): TeacherBatchesService {
   const batches = {
     exists: jest.fn().mockResolvedValue(options.batchExists ? { _id: 'existing' } : null),
     find: jest.fn().mockReturnValue({ sort: jest.fn().mockResolvedValue(options.batches ?? []) })
@@ -83,8 +104,15 @@ function serviceWith(options: { batchExists?: boolean; batches?: unknown[]; sche
   const schedules = {
     find: jest.fn().mockReturnValue({ sort: jest.fn().mockResolvedValue(options.schedules ?? []) })
   };
+  const classSessions = {
+    find: jest.fn().mockReturnValue({ sort: jest.fn().mockResolvedValue([]) })
+  };
   const connection = {
     startSession: jest.fn()
   };
-  return new TeacherBatchesService(batches as never, schedules as never, connection as never);
+  const studentEnrollments = {
+    listBatchRoster: jest.fn(async () => options.roster ?? []),
+    countActiveByBatch: jest.fn(async () => options.roster?.length ?? 0)
+  };
+  return new TeacherBatchesService(batches as never, schedules as never, classSessions as never, connection as never, studentEnrollments as never);
 }
