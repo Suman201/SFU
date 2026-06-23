@@ -1,6 +1,6 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import type { ChatHistoryResponse, ChatMessage, ChatMessageScope, ChatReadState, ChatThreadSummaryResponse } from '@native-sfu/contracts';
+import type { ChatAttachment, ChatHistoryResponse, ChatMessage, ChatMessageScope, ChatReadState, ChatThreadSummaryResponse, Recording } from '@native-sfu/contracts';
 import { Observable, map } from 'rxjs';
 import { API_BASE_URL } from '../../core/services/app-environment';
 
@@ -33,6 +33,8 @@ export interface ClassroomPayload {
   role: ClassroomRole;
   canJoin: boolean;
   participants: ClassroomParticipant[];
+  activeRecording?: Recording;
+  latestRecording?: Recording;
   startedAt?: string;
   completedAt?: string;
 }
@@ -75,6 +77,44 @@ export class ClassSessionService {
       .pipe(map((response) => this.unwrapResponse(response)));
   }
 
+  downloadAttendance(sessionId: string, batchId?: string): Observable<Blob> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/attendance.csv`);
+    if (batchId) {
+      url.searchParams.set('batchId', batchId);
+    }
+    return this.http.get(url.toString(), { responseType: 'blob' });
+  }
+
+  startRecording(sessionId: string): Observable<Recording> {
+    return this.http
+      .post<Recording | ApiEnvelope<Recording>>(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/recording/start`, {})
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  stopRecording(sessionId: string): Observable<Recording> {
+    return this.http
+      .post<Recording | ApiEnvelope<Recording>>(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/recording/stop`, {})
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  listRecordings(sessionId: string, batchId?: string): Observable<Recording[]> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/recordings`);
+    if (batchId) {
+      url.searchParams.set('batchId', batchId);
+    }
+    return this.http.get<Recording[] | ApiEnvelope<Recording[]>>(url.toString()).pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  downloadRecording(sessionId: string, recordingId: string, batchId?: string): Observable<Blob> {
+    const url = new URL(
+      `${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/recordings/${encodeURIComponent(recordingId)}/download`
+    );
+    if (batchId) {
+      url.searchParams.set('batchId', batchId);
+    }
+    return this.http.get(url.toString(), { responseType: 'blob' });
+  }
+
   joinSession(sessionId: string, batchId: string): Observable<ClassroomPayload> {
     return this.http
       .post<ClassroomPayload | ApiEnvelope<ClassroomPayload>>(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/join`, { batchId })
@@ -102,6 +142,26 @@ export class ClassSessionService {
       url.searchParams.set('limit', String(options.limit));
     }
     return this.http.get<ChatHistoryResponse | ApiEnvelope<ChatHistoryResponse>>(url.toString()).pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  uploadChatAttachments(sessionId: string, files: File[], options: { batchId?: string } = {}): Observable<ChatAttachment[]> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/chat/attachments`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file, file.name);
+    }
+    return this.http.post<ChatAttachment[] | ApiEnvelope<ChatAttachment[]>>(url.toString(), formData).pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  downloadChatAttachment(sessionId: string, attachmentId: string, options: { batchId?: string } = {}): Observable<Blob> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/chat/attachments/${encodeURIComponent(attachmentId)}`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    return this.http.get(url.toString(), { responseType: 'blob' });
   }
 
   getChatSummary(sessionId: string, options: { batchId?: string } = {}): Observable<ChatThreadSummaryResponse> {

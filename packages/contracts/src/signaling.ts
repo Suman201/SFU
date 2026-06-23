@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatReadState, MarkChatReadRequest, SendChatMessageRequest } from './chat.js';
+import type { ChatMessage, ChatReadReceiptEvent, ChatReadState, MarkChatReadRequest, SendChatMessageRequest, SendChatMessageResponse } from './chat.js';
 import type {
   Consumer,
   ConsumerLayerEvent,
@@ -23,6 +23,7 @@ import type {
 } from './metrics.js';
 import type { Participant, ParticipantPatch } from './participants.js';
 import type { Permissions } from './permissions.js';
+import type { ClassSessionRecordingEvent } from './recordings.js';
 import type { CreateProducerRequest, Producer, ProducerDynacastControlFailureReport, ProducerDynacastEvent, ProducerLayerState } from './producers.js';
 import type {
   CreateRoomRequest,
@@ -52,6 +53,11 @@ export interface ClassSessionLifecycleEvent {
   completedAt?: string;
 }
 
+export interface ClassSessionWatchRequest {
+  sessionId: string;
+  batchId?: string;
+}
+
 export type StudentMediaModerationAction = 'mute-mic' | 'unmute-mic' | 'stop-camera' | 'restore-camera';
 
 export interface StudentMediaModerationRequest {
@@ -71,8 +77,35 @@ export interface StudentMediaModerationEvent {
   message?: string;
 }
 
+export interface ClassStudentMediaModerationRequest {
+  roomId: string;
+}
+
+export interface ClassStudentMediaModerationResponse {
+  roomId: string;
+  action: Extract<StudentMediaModerationAction, 'mute-mic' | 'stop-camera'>;
+  moderatedCount: number;
+  events: StudentMediaModerationEvent[];
+}
+
+export interface ClassStudentSpeakRequest {
+  roomId: string;
+  participantId: string;
+}
+
+export interface ClassStudentSpeakEvent {
+  roomId: string;
+  participantId: string;
+  allowedToSpeak: boolean;
+  allowedToSpeakAt?: string;
+  allowedToSpeakBy?: string;
+  moderatedByParticipantId: string;
+  permissions: Permissions;
+  message: string;
+}
+
 export interface ClientToServerEvents {
-  'session:watch': (request: { sessionId: string }, ack: Ack<void>) => void;
+  'session:watch': (request: ClassSessionWatchRequest, ack: Ack<void>) => void;
   'session:unwatch': (request: { sessionId: string }, ack: Ack<void>) => void;
   'room:create': (request: CreateRoomRequest, ack: Ack<Room>) => void;
   'room:get-owner': (request: { roomId: string }, ack: Ack<RoomOwnerLookupResponse>) => void;
@@ -118,20 +151,29 @@ export interface ClientToServerEvents {
   'participant:ban': (request: { roomId: string; participantId: string; reason?: string }, ack: Ack<void>) => void;
   'participant:unban': (request: { roomId: string; participantId: string }, ack: Ack<void>) => void;
   'participant:mute': (request: { roomId: string; participantId: string; force?: boolean }, ack: Ack<void>) => void;
+  'class:mute-all-students': (request: ClassStudentMediaModerationRequest, ack: Ack<ClassStudentMediaModerationResponse>) => void;
+  'class:stop-all-cameras': (request: ClassStudentMediaModerationRequest, ack: Ack<ClassStudentMediaModerationResponse>) => void;
+  'class:allow-speak': (request: ClassStudentSpeakRequest, ack: Ack<ClassStudentSpeakEvent>) => void;
+  'class:revoke-speak': (request: ClassStudentSpeakRequest, ack: Ack<ClassStudentSpeakEvent>) => void;
+  'class:lower-hand': (request: ClassStudentSpeakRequest, ack: Ack<ParticipantPatch>) => void;
   'student:mute-mic': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
   'student:unmute-mic': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
   'student:stop-camera': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
   'student:restore-camera': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
   'screen:start': (request: CreateProducerRequest, ack: Ack<Producer>) => void;
   'screen:stop': (request: { producerId: string }, ack: Ack<void>) => void;
-  'chat:send': (request: SendChatMessageRequest, ack: Ack<ChatMessage>) => void;
+  'chat:send': (request: SendChatMessageRequest, ack: Ack<SendChatMessageResponse>) => void;
   'chat:mark-read': (request: MarkChatReadRequest, ack: Ack<ChatReadState>) => void;
-  'hand:raise': (request: { roomId: string; raised: boolean }, ack: Ack<void>) => void;
+  'hand:raise': (request: { roomId: string; raised: boolean }, ack: Ack<ParticipantPatch>) => void;
 }
 
 export interface ServerToClientEvents {
   'session:started': (event: ClassSessionLifecycleEvent) => void;
   'session:ended': (event: ClassSessionLifecycleEvent) => void;
+  'recording:started': (event: ClassSessionRecordingEvent) => void;
+  'recording:updated': (event: ClassSessionRecordingEvent) => void;
+  'recording:stopped': (event: ClassSessionRecordingEvent) => void;
+  'recording:failed': (event: ClassSessionRecordingEvent) => void;
   'room:updated': (room: Room) => void;
   'room:closed': (roomId: string) => void;
   'room:failed': (event: RoomFailureEvent) => void;
@@ -169,7 +211,7 @@ export interface ServerToClientEvents {
   'consumer:svc-layers-unavailable': (event: ConsumerLayerEvent) => void;
   'consumer:svc-layers-switch-failed': (event: ConsumerLayerEvent) => void;
   'chat:message': (message: ChatMessage) => void;
-  'chat:read': (state: ChatReadState) => void;
+  'chat:read': (state: ChatReadReceiptEvent) => void;
   'network:quality': (quality: { participantId: string; score: number; packetLoss: number; rtt: number; jitter: number }) => void;
   'waiting-room:pending': (participant: Participant) => void;
 }

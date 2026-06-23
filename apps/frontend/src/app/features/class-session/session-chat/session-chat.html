@@ -114,7 +114,36 @@
                 <strong>{{ senderName(message) }}</strong>
                 <span>{{ senderRole(message) }} · {{ messageTime(message) }}</span>
               </div>
-              <p>{{ message.message }}</p>
+              @if (message.message) {
+                <p>{{ message.message }}</p>
+              }
+              @if (message.attachments?.length) {
+                <div class="message-attachments">
+                  @for (attachment of message.attachments; track attachment.id) {
+                    <a
+                      class="message-attachment"
+                      [class.image]="attachment.type === 'image'"
+                      [class.pdf]="attachment.type === 'pdf'"
+                      [class.link]="attachment.type === 'link'"
+                      [href]="attachmentHref(attachment)"
+                      [attr.target]="attachment.type === 'link' ? '_blank' : null"
+                      [attr.rel]="attachment.type === 'link' ? 'noopener noreferrer' : null"
+                      [attr.download]="attachmentDownloadName(attachment)"
+                      (click)="openAttachment($event, attachment)"
+                    >
+                      @if (isImageAttachment(attachment)) {
+                        <img [src]="attachmentHref(attachment)" [alt]="attachmentTitle(attachment)" loading="lazy" />
+                      } @else {
+                        <span class="attachment-icon" aria-hidden="true"></span>
+                      }
+                      <span class="attachment-copy">
+                        <strong>{{ attachmentTitle(attachment) }}</strong>
+                        <small>{{ attachmentDetail(attachment) }}</small>
+                      </span>
+                    </a>
+                  }
+                </div>
+              }
               @if (isMine(message)) {
                 <div class="message-status" [class.failed]="message.deliveryState === 'failed'">
                   <span>{{ deliveryLabel(message) }}</span>
@@ -135,7 +164,54 @@
       }
 
       <form class="chat-composer" [formRoot]="chatForm" (submit)="sendMessage($event)">
+        @if (pendingAttachments().length) {
+          <div class="pending-attachments" aria-label="Selected attachments">
+            @for (attachment of pendingAttachments(); track attachment.id) {
+              <span class="pending-attachment">
+                <strong>{{ attachmentTitle(attachment) }}</strong>
+                <small>{{ attachmentDetail(attachment) }}</small>
+                <button type="button" aria-label="Remove attachment" (click)="removePendingAttachment(attachment.id)">×</button>
+              </span>
+            }
+          </div>
+        }
+        @if (uploadingAttachments()) {
+          <div class="pending-attachments" aria-live="polite">
+            <span class="pending-attachment uploading">
+              <strong>Uploading attachment</strong>
+              <small>{{ uploadingAttachments() }} pending</small>
+            </span>
+          </div>
+        }
         <fieldset class="composer-fields" [disabled]="!canSend()">
+          <input
+            #attachmentInput
+            class="attachment-input"
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+            multiple
+            (change)="attachFiles($event)"
+          />
+          <button
+            type="button"
+            class="attach-button"
+            title="Attach PDF or image"
+            aria-label="Attach PDF or image"
+            [disabled]="!canSend()"
+            (click)="attachmentInput.click()"
+          >
+            <span class="attach-icon" aria-hidden="true"></span>
+          </button>
+          <button
+            type="button"
+            class="link-button"
+            title="Attach link"
+            aria-label="Attach link"
+            [disabled]="!canSend()"
+            (click)="addLinkAttachment()"
+          >
+            <span class="link-icon" aria-hidden="true"></span>
+          </button>
           <input
             type="text"
             autocomplete="off"
@@ -146,7 +222,7 @@
             type="submit"
             class="send-button"
             [class.sending]="sending()"
-            [disabled]="!chatModel().message.trim() || chatForm().invalid() || !canSend()"
+            [disabled]="!composerHasContent() || chatForm().invalid() || !canSend()"
             [title]="sending() ? 'Sending message' : 'Send message'"
             [attr.aria-label]="sending() ? 'Sending message' : 'Send message'"
           >

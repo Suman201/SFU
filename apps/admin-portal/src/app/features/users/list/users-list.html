@@ -1,0 +1,152 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Access control</p>
+    <h1>Users</h1>
+    <p>Manage teacher, student, admin, and super admin accounts from one workspace.</p>
+  </div>
+</section>
+
+<section class="summary-grid" aria-label="User summary">
+  <article>
+    <span>Total users</span>
+    <strong>{{ summary()?.totalUsers ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Teachers</span>
+    <strong>{{ summary()?.teachers ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Students</span>
+    <strong>{{ summary()?.students ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Admins</span>
+    <strong>{{ summary()?.admins ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Disabled</span>
+    <strong>{{ summary()?.disabledUsers ?? 0 }}</strong>
+  </article>
+</section>
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>User directory</h2>
+      <p>{{ total() }} records found</p>
+    </div>
+    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+      <select formControlName="role" aria-label="Role">
+        <option value="all">All roles</option>
+        <option value="teacher">Teachers</option>
+        <option value="student">Students</option>
+        <option value="admin">Admins</option>
+        <option value="super_admin">Super admins</option>
+      </select>
+      <select formControlName="status" aria-label="Status">
+        <option value="all">All statuses</option>
+        <option value="active">Active</option>
+        <option value="inactive">Inactive</option>
+        <option value="suspended">Suspended</option>
+        <option value="invited">Invited</option>
+      </select>
+      <select formControlName="sort" aria-label="Sort">
+        <option value="created_desc">Newest first</option>
+        <option value="created_asc">Oldest first</option>
+        <option value="name_asc">Name A-Z</option>
+        <option value="email_asc">Email A-Z</option>
+        <option value="last_login_desc">Recent login</option>
+      </select>
+      <select formControlName="limit" aria-label="Page size">
+        <option [ngValue]="10">10</option>
+        <option [ngValue]="25">25</option>
+        <option [ngValue]="50">50</option>
+        <option [ngValue]="100">100</option>
+      </select>
+      <input type="search" formControlName="search" placeholder="Search name, email, phone, id" aria-label="Search users" />
+      <button type="submit" class="table-action primary">Apply</button>
+      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+    </form>
+  </div>
+
+  @if (error()) {
+    <p class="table-error" role="alert">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="table-success" role="status">{{ success() }}</p>
+  }
+
+  <div class="data-table-wrap" style="--data-table-min-width: 1060px">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Phone</th>
+          <th>Created</th>
+          <th>Last login</th>
+          <th class="row-menu-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr>
+            <td colspan="7" class="empty-state">Loading users...</td>
+          </tr>
+        } @else if (!rows().length) {
+          <tr>
+            <td colspan="7" class="empty-state">No users match these filters.</td>
+          </tr>
+        } @else {
+          @for (row of rows(); track trackByUser($index, row)) {
+            <tr>
+              <td>
+                <div class="primary-cell">
+                  <span class="table-avatar">{{ initials(row) || 'US' }}</span>
+                  <div>
+                    <strong>{{ row.name }}</strong>
+                    <small>{{ row.email }}</small>
+                    <code>{{ row.id }}</code>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <span class="data-pill {{ roleClass(row.primaryRole) }}">{{ roleLabel(row.primaryRole) }}</span>
+                <small>{{ row.roles.join(', ') }}</small>
+              </td>
+              <td>
+                <span class="data-pill {{ statusClass(row.status) }}">{{ row.disabled ? 'disabled' : row.status }}</span>
+              </td>
+              <td>{{ row.phone || 'Not added' }}</td>
+              <td>{{ row.createdAt ? (row.createdAt | date: 'mediumDate') : 'Unknown' }}</td>
+              <td>{{ row.lastLoginAt ? (row.lastLoginAt | date: 'medium') : 'Never' }}</td>
+              <td class="row-menu-cell">
+                <div class="table-row-menu">
+                  <a class="table-action" [routerLink]="['/users', row.id]">View</a>
+                  @if (row.disabled || row.status !== 'active') {
+                    <button type="button" class="table-action primary" [disabled]="pendingUserId() === row.id" (click)="activate(row)">
+                      Activate
+                    </button>
+                  } @else {
+                    <button type="button" class="table-action danger" [disabled]="pendingUserId() === row.id" (click)="deactivate(row)">
+                      Deactivate
+                    </button>
+                  }
+                </div>
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-footer">
+    <span>Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() <= 1" (click)="previousPage()">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+    </div>
+  </div>
+</section>

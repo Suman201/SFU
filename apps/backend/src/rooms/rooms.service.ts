@@ -1,11 +1,27 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+  ServiceUnavailableException
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { randomBytes } from 'node:crypto';
+import { createReadStream, type ReadStream } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { Model, Types } from 'mongoose';
 import {
   ChatMessage,
+  ChatAttachment,
+  type ChatDeliveryState,
   type ChatMessageScope,
+  type ChatReadReceiptEvent,
   ChatReadState,
   ChatThreadSummary,
   ChatThreadSummaryResponse,
@@ -68,8 +84,10 @@ import {
   SvcLayerSelection,
   StudentMediaModerationEvent,
   StudentMediaModerationAction,
+  ClassStudentSpeakEvent,
   TransportQualityState,
   Room,
+  SendChatAttachment,
   TransportOptions,
   UpdateRoomMediaProfileRequest,
   VIEWER_PERMISSIONS
@@ -81,6 +99,8 @@ import {
   BatchScheduleDocument,
   BatchScheduleMongoDocument,
   ChatMessageDocument,
+  ChatAttachmentFileDocument,
+  ChatAttachmentFileMongoDocument,
   ChatMessageMongoDocument,
   ChatReadStateDocument,
   ChatReadStateMongoDocument,
@@ -108,12 +128,17 @@ import {
 import { StudentEnrollmentsService, type StudentEnrollmentRosterItem } from '../student-enrollments/student-enrollments.service';
 
 const CHAT_MESSAGE_MAX_LENGTH = 2000;
+const CHAT_ATTACHMENT_MAX_COUNT = 3;
+const CHAT_ATTACHMENT_MAX_SIZE_BYTES = 2 * 1024 * 1024;
+const CHAT_ATTACHMENT_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const CHAT_ATTACHMENT_FILE_MIME_TYPES = new Set([...CHAT_ATTACHMENT_IMAGE_MIME_TYPES, 'application/pdf']);
 import { NodeRegistryService } from '../cluster/node-registry.service';
 import { PipeCoordinatorService } from '../cluster/pipe-coordinator.service';
 import { MediaService, type MediaWorkerRoomFailureEvent } from '@native-sfu/nest-sfu';
 import { MetricsService } from '../metrics/metrics.service';
 import { RedisService, type RoomSocketPresence } from '../redis/redis.service';
 import { PlatformEventsService } from '../events/platform-events.service';
+import { RecordingsService } from '../recordings/recordings.service';
 import { RoomSignalService, type RoomSignalEnvelope } from './room-signal.service';
 import { planClassSessions } from '../class-sessions/class-session-planner';
 import {
@@ -133,9 +158,17 @@ export interface SocketUser {
 
 export interface ChatDeliveryResult {
   message: ChatMessage;
+  deliveryState: ChatDeliveryState;
   broadcastRoomId?: string;
   targetSocketIds?: string[];
   targets?: SocketDeliveryTarget[];
+}
+
+export interface ChatReadDeliveryResult {
+  state: ChatReadState;
+  receipt: ChatReadReceiptEvent;
+  targets?: SocketDeliveryTarget[];
+  targetSocketIds?: string[];
 }
 
 export interface SocketDeliveryTarget {
@@ -163,6 +196,35 @@ interface ClassSessionReadTarget {
   threadKey?: string;
   participantId?: string;
   student?: ParticipantMongoDocument;
+  rosterStudentId?: string;
+}
+
+interface ClassSessionChatDelivery {
+  scope: ChatMessageScope;
+  recipient?: ParticipantMongoDocument;
+  recipientId?: string;
+  threadKey?: string;
+  targets?: SocketDeliveryTarget[];
+  broadcastRoomId?: string;
+}
+
+interface PreparedChatAttachments {
+  attachments: ChatAttachment[];
+  fileAttachments: ChatAttachmentFileMongoDocument[];
+}
+
+export interface ClassSessionChatAttachmentUploadFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
+export interface ClassSessionChatAttachmentDownload {
+  stream: ReadStream;
+  fileName: string;
+  mimeType: string;
+  size: number;
 }
 
 export interface EnsureClassSessionRoomRequest {
@@ -178,9 +240,36 @@ export interface CloseClassSessionRoomRequest {
   actorLabel?: string;
 }
 
+export interface ClassSessionAttendanceExportRequest {
+  sessionId: string;
+  batchId: string;
+  roomId: string;
+  completedAt?: Date;
+}
+
+export interface ClassSessionAttendanceSummary {
+  enrolled: number;
+  present: number;
+  absent: number;
+  reconnects: number;
+  averageDurationSeconds: number;
+}
+
+export interface ClassSessionAttendanceRow {
+  studentId: string;
+  displayName: string;
+  email: string;
+  firstJoinAt?: Date;
+  lastLeaveAt?: Date;
+  totalDurationSeconds: number;
+  reconnectCount: number;
+  status: 'present' | 'absent';
+}
+
 export type ClassSessionLifecycleEventName = 'session:started' | 'session:ended';
 
 export const CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS = 5 * 60 * 1000;
+const CLASS_SESSION_TEACHER_RECONNECT_SWEEP_MS = 60 * 1000;
 
 export interface StudentMediaModerationResult {
   event: StudentMediaModerationEvent;
@@ -189,6 +278,12 @@ export interface StudentMediaModerationResult {
   targetSocketId?: string;
   targetSocketIds?: string[];
   targets?: SocketDeliveryTarget[];
+}
+
+export interface ClassStudentSpeakResult {
+  event: ClassStudentSpeakEvent;
+  participantPatch: ParticipantPatch;
+  moderation: StudentMediaModerationResult;
 }
 
 export interface ProducerDynacastSignalTarget {
@@ -322,7 +417,7 @@ interface LocalRoomCleanupMetrics {
 }
 
 @Injectable()
-export class RoomsService {
+export class RoomsService implements OnModuleInit, OnModuleDestroy {
   private readonly layerEventListeners = new Set<(event: ConsumerLayerEvent) => void>();
   private readonly producerDynacastEventListeners = new Set<(event: ProducerDynacastEvent) => void>();
   private readonly consumerQualityEventListeners = new Set<(state: ConsumerQualityState) => void>();
@@ -335,6 +430,7 @@ export class RoomsService {
   private readonly roomIncidentTimelineEventListeners = new Set<(event: RoomIncidentTimelineEvent) => void>();
   private readonly roomSnapshotGeneratedEventListeners = new Set<(summary: RoomSnapshotBundleSummary) => void>();
   private readonly roomClosedEventListeners = new Set<(roomId: string) => void>();
+  private readonly chatReadReceiptEventListeners = new Set<(delivery: ChatReadDeliveryResult) => void>();
   private readonly classSessionLifecycleEventListeners = new Set<
     (event: ClassSessionLifecycleEventName, payload: ClassSessionLifecycleEvent) => void
   >();
@@ -352,6 +448,7 @@ export class RoomsService {
   private readonly distributedProducerTombstones = new Map<string, number>();
   private readonly appliedRoomProfileSignatures = new Map<string, string>();
   private readonly classSessionTeacherReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private classSessionTeacherReconnectSweepTimer?: ReturnType<typeof setInterval>;
 
   constructor(
     @InjectModel(RoomDocument.name) private readonly rooms: Model<RoomMongoDocument>,
@@ -365,6 +462,7 @@ export class RoomsService {
     @InjectModel(ProducerDocument.name) private readonly producers: Model<ProducerMongoDocument>,
     @InjectModel(ConsumerDocument.name) private readonly consumers: Model<ConsumerMongoDocument>,
     @InjectModel(ModerationDocument.name) private readonly moderation: Model<ModerationMongoDocument>,
+    @InjectModel(ChatAttachmentFileDocument.name) private readonly chatAttachments: Model<ChatAttachmentFileMongoDocument>,
     @InjectModel(ChatMessageDocument.name) private readonly chat: Model<ChatMessageMongoDocument>,
     @InjectModel(ChatReadStateDocument.name) private readonly chatReadStates: Model<ChatReadStateMongoDocument>,
     private readonly redis: RedisService,
@@ -374,7 +472,9 @@ export class RoomsService {
     private readonly metrics: MetricsService,
     private readonly signals: RoomSignalService,
     private readonly platformEvents: PlatformEventsService,
-    private readonly studentEnrollments: StudentEnrollmentsService
+    private readonly studentEnrollments: StudentEnrollmentsService,
+    private readonly recordings: RecordingsService,
+    private readonly config: ConfigService
   ) {
     this.media.onConsumerLayerEvent((event) => {
       void this.handleConsumerLayerEvent(event);
@@ -392,6 +492,25 @@ export class RoomsService {
     this.signals.onSignal((signal) => {
       this.handleDistributedRoomSignal(signal);
     });
+  }
+
+  async onModuleInit(): Promise<void> {
+    await this.restoreClassSessionTeacherReconnectGrace();
+    this.classSessionTeacherReconnectSweepTimer = setInterval(() => {
+      void this.processExpiredClassSessionTeacherReconnectGrace();
+    }, CLASS_SESSION_TEACHER_RECONNECT_SWEEP_MS);
+    this.unrefTimer(this.classSessionTeacherReconnectSweepTimer);
+  }
+
+  onModuleDestroy(): void {
+    if (this.classSessionTeacherReconnectSweepTimer) {
+      clearInterval(this.classSessionTeacherReconnectSweepTimer);
+      this.classSessionTeacherReconnectSweepTimer = undefined;
+    }
+    for (const timer of this.classSessionTeacherReconnectTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.classSessionTeacherReconnectTimers.clear();
   }
 
   onConsumerLayerEvent(listener: (event: ConsumerLayerEvent) => void): () => void {
@@ -439,6 +558,11 @@ export class RoomsService {
     return () => this.roomClosedEventListeners.delete(listener);
   }
 
+  onChatReadReceipt(listener: (delivery: ChatReadDeliveryResult) => void): () => void {
+    this.chatReadReceiptEventListeners.add(listener);
+    return () => this.chatReadReceiptEventListeners.delete(listener);
+  }
+
   onClassSessionLifecycleEvent(
     listener: (event: ClassSessionLifecycleEventName, payload: ClassSessionLifecycleEvent) => void
   ): () => void {
@@ -449,6 +573,12 @@ export class RoomsService {
   emitClassSessionLifecycleEvent(event: ClassSessionLifecycleEventName, payload: ClassSessionLifecycleEvent): void {
     for (const listener of this.classSessionLifecycleEventListeners) {
       listener(event, payload);
+    }
+  }
+
+  private emitChatReadReceipt(delivery: ChatReadDeliveryResult): void {
+    for (const listener of this.chatReadReceiptEventListeners) {
+      listener(delivery);
     }
   }
 
@@ -596,7 +726,7 @@ export class RoomsService {
       }
       await this.replaceParticipantSocket(room.id, existingParticipant.id, socketId);
       if (classSession && this.isClassSessionTeacherUser(classSession, user)) {
-        this.cancelClassSessionTeacherReconnectGrace(classSession.id);
+        await this.clearClassSessionTeacherReconnectGrace(classSession.id);
       }
       this.metrics.roomJoinDuration.observe(performance.now() - startedAt);
       return {
@@ -644,9 +774,6 @@ export class RoomsService {
       await this.rooms.updateOne({ _id: room.id }, { $set: { hostId: participant.id } });
       room.hostId = participant.id;
     }
-    if (classSession && this.isClassSessionTeacherUser(classSession, user)) {
-      this.cancelClassSessionTeacherReconnectGrace(classSession.id);
-    }
     if (!admitted || joinDecision.action === 'soft-throttle') {
       await this.recordRoomIncidentEvent({
         roomId: room.id,
@@ -666,6 +793,9 @@ export class RoomsService {
       userId: participant.userId,
       nodeId: this.nodeRegistry.localNodeId()
     });
+    if (classSession && this.isClassSessionTeacherUser(classSession, user)) {
+      await this.clearClassSessionTeacherReconnectGrace(classSession.id);
+    }
     this.metrics.roomJoinDuration.observe(performance.now() - startedAt);
     const updatedRoom = await this.getRoom(room.id);
     await this.platformEvents.appendEvent({
@@ -842,7 +972,15 @@ export class RoomsService {
   async closeClassSessionRoom(request: CloseClassSessionRoomRequest): Promise<boolean> {
     const classSession = await this.classSessions.findOne({ roomId: request.roomId });
     if (classSession) {
-      this.cancelClassSessionTeacherReconnectGrace(classSession.id);
+      await this.clearClassSessionTeacherReconnectGrace(classSession.id);
+      await this.recordings
+        .stopActiveClassSessionRecording({
+          sessionId: classSession.id,
+          actorUserId: request.actorUserId,
+          actorLabel: request.actorLabel ?? 'Class session end',
+          reason: 'room_closed'
+        })
+        .catch(() => undefined);
     }
     const room = await this.findRoomDocumentById(request.roomId);
     if (!room || room.closedAt) {
@@ -928,6 +1066,33 @@ export class RoomsService {
       }
     });
     return room;
+  }
+
+  async assertClassSessionRoomJoinAllowed(
+    roomId: string,
+    teacherId: string,
+    user: { id: string; roles: readonly string[] }
+  ): Promise<void> {
+    const room = await this.findRoomDocumentById(roomId);
+    if (!room || room.closedAt) {
+      throw new NotFoundException('Room not found');
+    }
+    if (!room.settings.locked || this.isAdminSocketUser({ id: user.id, email: '', roles: [...user.roles] })) {
+      return;
+    }
+    if (user.roles.includes('TEACHER') && teacherId === user.id) {
+      return;
+    }
+    const existingParticipant = await this.participants.findOne({
+      roomId,
+      userId: user.id,
+      admitted: true,
+      leftAt: { $exists: false }
+    });
+    if (existingParticipant) {
+      return;
+    }
+    throw new ForbiddenException('Class is locked. Ask the teacher to unlock it before joining.');
   }
 
   async admit(roomId: string, actorParticipantId: string, participantId: string): Promise<Room> {
@@ -1282,7 +1447,7 @@ export class RoomsService {
     this.assertClassSessionRoomIsLive(classSession);
     const actor = await this.assertModerator(roomId, actorParticipantId, false);
     const target = await this.assertParticipant(roomId, targetParticipantId);
-    if (target.role === Role.HOST || target.role === Role.CO_HOST) {
+    if (target.role !== Role.PARTICIPANT) {
       throw new ForbiddenException('Only student participant media can be moderated.');
     }
 
@@ -1345,6 +1510,97 @@ export class RoomsService {
       ...(targets[0]?.socketId ? { targetSocketId: targets[0].socketId } : {}),
       ...(targets.length ? { targetSocketIds: targets.map((socketTarget) => socketTarget.socketId), targets } : {})
     };
+  }
+
+  async moderateAllStudentMedia(
+    roomId: string,
+    actorParticipantId: string,
+    action: Extract<StudentMediaModerationAction, 'mute-mic' | 'stop-camera'>
+  ): Promise<StudentMediaModerationResult[]> {
+    await this.nodeRegistry.assertLocalRoomOwner(roomId);
+    const classSession = await this.classSessions.findOne({ roomId });
+    if (!classSession) {
+      throw new NotFoundException('Class session room not found');
+    }
+    this.assertClassSessionRoomIsLive(classSession);
+    await this.assertModerator(roomId, actorParticipantId, false);
+    const students = await this.participants.find({
+      roomId,
+      role: Role.PARTICIPANT,
+      admitted: true,
+      leftAt: { $exists: false }
+    });
+    const results: StudentMediaModerationResult[] = [];
+    for (const student of students) {
+      results.push(await this.moderateStudentMedia(roomId, actorParticipantId, student.id, action));
+    }
+    return results;
+  }
+
+  async exportClassSessionAttendanceCsv(request: ClassSessionAttendanceExportRequest): Promise<string> {
+    const attendanceRows = await this.classSessionAttendanceRows(request);
+    const rows: string[][] = [
+      ['Student Name', 'Email', 'Student ID', 'First Join Time', 'Last Leave Time', 'Total Duration', 'Reconnect Count', 'Status']
+    ];
+    for (const row of attendanceRows) {
+      rows.push([
+        row.displayName || 'Student',
+        row.email,
+        row.studentId,
+        row.firstJoinAt ? row.firstJoinAt.toISOString() : '',
+        row.lastLeaveAt ? row.lastLeaveAt.toISOString() : '',
+        this.formatAttendanceDuration(row.totalDurationSeconds * 1000),
+        String(row.reconnectCount),
+        row.status
+      ]);
+    }
+
+    return `${rows.map((row) => row.map((value) => this.csvEscape(value)).join(',')).join('\n')}\n`;
+  }
+
+  async summarizeClassSessionAttendance(request: ClassSessionAttendanceExportRequest): Promise<ClassSessionAttendanceSummary> {
+    const attendanceRows = await this.classSessionAttendanceRows(request);
+    const enrolled = attendanceRows.length;
+    const present = attendanceRows.filter((row) => row.status === 'present').length;
+    const totalDurationSeconds = attendanceRows.reduce((total, row) => total + row.totalDurationSeconds, 0);
+    const reconnects = attendanceRows.reduce((total, row) => total + row.reconnectCount, 0);
+    return {
+      enrolled,
+      present,
+      absent: Math.max(0, enrolled - present),
+      reconnects,
+      averageDurationSeconds: present ? Math.round(totalDurationSeconds / present) : 0
+    };
+  }
+
+  async classSessionAttendanceRows(request: ClassSessionAttendanceExportRequest): Promise<ClassSessionAttendanceRow[]> {
+    const [roster, participantDocs] = await Promise.all([
+      this.studentEnrollments.listBatchRoster(request.batchId, { includeInactive: true }),
+      this.participants.find({ roomId: request.roomId, role: Role.PARTICIPANT, admitted: true }).sort({ joinedAt: 1 }).exec()
+    ]);
+    const participantsByStudentId = new Map<string, ParticipantMongoDocument[]>();
+    for (const participant of participantDocs) {
+      const studentId = this.participantChatIdentity(participant);
+      const items = participantsByStudentId.get(studentId) ?? [];
+      items.push(participant);
+      participantsByStudentId.set(studentId, items);
+    }
+
+    const rows: ClassSessionAttendanceRow[] = [];
+    const includedStudentIds = new Set<string>();
+    const fallbackLeaveAt = request.completedAt ?? new Date();
+    for (const student of roster) {
+      includedStudentIds.add(student.userId);
+      rows.push(this.classSessionAttendanceRow(student.userId, student.displayName, student.email, participantsByStudentId.get(student.userId) ?? [], fallbackLeaveAt));
+    }
+    for (const [studentId, participants] of participantsByStudentId) {
+      if (includedStudentIds.has(studentId)) {
+        continue;
+      }
+      const latest = participants[participants.length - 1];
+      rows.push(this.classSessionAttendanceRow(studentId, latest?.displayName ?? 'Student', '', participants, fallbackLeaveAt));
+    }
+    return rows;
   }
 
   async setProducerPriority(producerId: string, participantId: string, priority: number): Promise<Producer> {
@@ -2416,12 +2672,19 @@ export class RoomsService {
     }
   }
 
-  async sendChat(request: { roomId: string; message: string; recipientId?: string; scope?: ChatMessageScope }, senderId: string): Promise<ChatDeliveryResult> {
+  async sendChat(
+    request: { roomId: string; message: string; recipientId?: string; scope?: ChatMessageScope; attachments?: SendChatAttachment[] },
+    senderId: string
+  ): Promise<ChatDeliveryResult> {
     await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
     const sender = await this.assertParticipant(request.roomId, senderId);
     const messageBody = request.message.trim();
-    if (!messageBody) {
-      throw new BadRequestException('Chat message cannot be blank.');
+    const requestedAttachments = request.attachments ?? [];
+    if (!messageBody && !requestedAttachments.length) {
+      throw new BadRequestException('Chat message or attachment is required.');
+    }
+    if (requestedAttachments.length > CHAT_ATTACHMENT_MAX_COUNT) {
+      throw new BadRequestException(`Chat messages can include up to ${CHAT_ATTACHMENT_MAX_COUNT} attachments.`);
     }
     if (messageBody.length > CHAT_MESSAGE_MAX_LENGTH) {
       throw new BadRequestException(`Chat message cannot exceed ${CHAT_MESSAGE_MAX_LENGTH} characters.`);
@@ -2442,13 +2705,7 @@ export class RoomsService {
       throw new ForbiddenException('Chat permission denied');
     }
     const shadowMuted = await this.moderation.exists({ roomId: request.roomId, participantId: senderId, action: 'shadow-mute', active: true });
-    const delivery: {
-      scope: ChatMessageScope;
-      recipient?: ParticipantMongoDocument;
-      threadKey?: string;
-      targets?: SocketDeliveryTarget[];
-      broadcastRoomId?: string;
-    } = classSession
+    const delivery: ClassSessionChatDelivery = classSession
       ? await this.resolveClassSessionChatDelivery(classSession, sender, request)
       : {
           scope: 'broadcast' as ChatMessageScope,
@@ -2456,6 +2713,9 @@ export class RoomsService {
           threadKey: undefined,
           broadcastRoomId: request.roomId
         };
+    const preparedAttachments = classSession
+      ? await this.prepareClassSessionChatAttachments(classSession, sender, delivery, requestedAttachments)
+      : { attachments: this.normalizeChatAttachments(requestedAttachments), fileAttachments: [] };
     const doc = await this.chat.create({
       ...(classSession
         ? {
@@ -2469,14 +2729,26 @@ export class RoomsService {
       senderId: sender.id,
       senderName: sender.displayName,
       senderRole: this.chatSenderRole(sender.role),
-      recipientId: delivery.recipient?.id,
+      recipientId: delivery.recipientId ?? delivery.recipient?.id,
       scope: delivery.scope,
       ...(delivery.threadKey ? { threadKey: delivery.threadKey } : {}),
       message: messageBody,
+      ...(preparedAttachments.attachments.length ? { attachments: preparedAttachments.attachments } : {}),
       shadowMuted: Boolean(shadowMuted)
     });
+    if (classSession && preparedAttachments.fileAttachments.length) {
+      await this.bindClassSessionChatAttachments(classSession, doc, delivery, preparedAttachments.fileAttachments);
+    }
+    const deliveryState = this.chatDeliveryState(delivery);
+    const deliveryTimestamp = deliveryState === 'delivered' ? this.dateToIso(new Date()) : undefined;
+    const message = {
+      ...this.toChatMessage(doc),
+      deliveryState,
+      ...(deliveryTimestamp ? { deliveredAt: deliveryTimestamp } : {})
+    };
     return {
-      message: this.toChatMessage(doc),
+      message,
+      deliveryState,
       ...(delivery.broadcastRoomId ? { broadcastRoomId: delivery.broadcastRoomId } : {}),
       ...(delivery.targets?.length ? { targets: delivery.targets, targetSocketIds: delivery.targets.map((target) => target.socketId) } : {})
     };
@@ -2586,7 +2858,128 @@ export class RoomsService {
     });
   }
 
+  async createClassSessionChatAttachments(request: {
+    sessionId: string;
+    batchId: string;
+    roomId: string;
+    channelId: string;
+    teacherId: string;
+    requesterUserId: string;
+    files: ClassSessionChatAttachmentUploadFile[];
+  }): Promise<ChatAttachment[]> {
+    if (!request.files.length) {
+      throw new BadRequestException('At least one attachment file is required.');
+    }
+    if (request.files.length > CHAT_ATTACHMENT_MAX_COUNT) {
+      throw new BadRequestException(`You can upload up to ${CHAT_ATTACHMENT_MAX_COUNT} attachments at once.`);
+    }
+
+    const participant = await this.findActiveParticipantByUserId(request.roomId, request.requesterUserId);
+    if (!participant) {
+      throw new ForbiddenException('Join the classroom before uploading chat attachments.');
+    }
+    const permissions = await this.getPermissions(request.roomId, participant.id);
+    if (!permissions.canChat) {
+      throw new ForbiddenException('Chat permission denied');
+    }
+
+    const directory = join(this.chatAttachmentStorageRoot(), 'class-sessions', this.safeStorageSegment(request.sessionId));
+    await mkdir(directory, { recursive: true });
+    const created: ChatAttachmentFileMongoDocument[] = [];
+    for (const file of request.files) {
+      const mimeType = this.normalizeUploadedChatAttachmentMimeType(file.mimetype);
+      const type = this.chatAttachmentTypeForMimeType(mimeType);
+      if (file.size > this.chatAttachmentMaxFileSizeBytes()) {
+        throw new BadRequestException('Chat attachments cannot exceed 2 MB.');
+      }
+      if (!file.buffer?.length) {
+        throw new BadRequestException('Attachment upload is empty.');
+      }
+      const attachmentId = randomUUID();
+      const fileName = this.safeAttachmentFileName(file.originalname, type);
+      const storageKey = `class-sessions/${this.safeStorageSegment(request.sessionId)}/${attachmentId}/${fileName}`;
+      const storagePath = join(directory, `${attachmentId}-${fileName}`);
+      await writeFile(storagePath, file.buffer);
+      const doc = await this.chatAttachments.create({
+        attachmentId,
+        sessionId: request.sessionId,
+        batchId: request.batchId,
+        roomId: request.roomId,
+        channelId: request.channelId,
+        chatChannelId: request.channelId,
+        uploadedByUserId: this.participantChatIdentity(participant),
+        uploadedByParticipantId: participant.id,
+        scope: 'pending',
+        type,
+        fileName,
+        title: fileName,
+        mimeType,
+        size: file.size,
+        storageProvider: 'local',
+        storageKey,
+        path: storagePath
+      });
+      created.push(doc);
+    }
+    return created.map((doc) => this.toChatAttachmentFromFile(doc));
+  }
+
+  async readClassSessionChatAttachment(request: {
+    sessionId: string;
+    batchId: string;
+    roomId: string;
+    teacherId: string;
+    requesterUserId: string;
+    requesterRole: 'teacher' | 'student' | 'admin';
+    attachmentId: string;
+  }): Promise<ClassSessionChatAttachmentDownload> {
+    const doc = await this.chatAttachments.findOne({
+      attachmentId: request.attachmentId,
+      sessionId: request.sessionId,
+      roomId: request.roomId,
+      deletedAt: { $exists: false }
+    });
+    if (!doc) {
+      throw new NotFoundException('Attachment not found.');
+    }
+
+    if (!this.canReadClassSessionChatAttachment(doc, request)) {
+      throw new ForbiddenException('You are not allowed to open this attachment.');
+    }
+
+    return {
+      stream: createReadStream(doc.path),
+      fileName: doc.fileName,
+      mimeType: doc.mimeType,
+      size: doc.size
+    };
+  }
+
   async markClassSessionChatRead(request: ClassSessionChatContext & { readAt?: string }): Promise<ChatReadState> {
+    const detailed = await this.markClassSessionChatReadDetailed(request);
+    const reader = await this.findActiveParticipantByUserId(request.roomId, request.requesterUserId);
+    if (reader) {
+      const targets = await this.chatReadReceiptTargets(
+        {
+          id: request.sessionId,
+          batchId: request.batchId,
+          roomId: request.roomId,
+          teacherId: request.teacherId,
+          chatChannelId: request.channelId
+        } as ClassSessionMongoDocument,
+        reader,
+        detailed.target
+      );
+      this.emitChatReadReceipt({
+        state: detailed.state,
+        receipt: this.toChatReadReceiptEvent(detailed.state),
+        ...(targets.length ? { targets, targetSocketIds: targets.map((target) => target.socketId) } : {})
+      });
+    }
+    return detailed.state;
+  }
+
+  private async markClassSessionChatReadDetailed(request: ClassSessionChatContext & { readAt?: string }): Promise<{ state: ChatReadState; target: ClassSessionReadTarget }> {
     const target = await this.resolveClassSessionReadTarget(request);
     const lastReadAt = this.parseChatReadAt(request.readAt);
     const readStateKey = this.chatReadStateKey(request.sessionId, request.requesterUserId, target.scope, target.threadKey);
@@ -2614,14 +3007,17 @@ export class RoomsService {
     if (!doc) {
       throw new ServiceUnavailableException('Unable to update chat read state.');
     }
-    return this.toChatReadState(doc);
+    return {
+      state: this.toChatReadState(doc),
+      target
+    };
   }
 
   async markChatRead(
     request: { sessionId: string; roomId: string; participantId?: string; scope?: ChatMessageScope; readAt?: string },
     user: SocketUser,
     participantId: string | undefined
-  ): Promise<ChatReadState> {
+  ): Promise<ChatReadDeliveryResult> {
     await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
     const classSession = await this.classSessions.findOne({ _id: request.sessionId, roomId: request.roomId });
     if (!classSession) {
@@ -2635,7 +3031,7 @@ export class RoomsService {
       throw new ForbiddenException('Join the classroom before updating chat read state.');
     }
 
-    return this.markClassSessionChatRead({
+    const detailed = await this.markClassSessionChatReadDetailed({
       sessionId: classSession.id,
       batchId: classSession.batchId,
       roomId: classSession.roomId,
@@ -2647,10 +3043,16 @@ export class RoomsService {
       scope: request.scope,
       readAt: request.readAt
     });
+    const targets = await this.chatReadReceiptTargets(classSession, participant, detailed.target);
+    return {
+      state: detailed.state,
+      receipt: this.toChatReadReceiptEvent(detailed.state),
+      ...(targets.length ? { targets, targetSocketIds: targets.map((target) => target.socketId) } : {})
+    };
   }
 
-  async assertCanWatchClassSession(sessionId: string, user: SocketUser): Promise<void> {
-    const access = await this.resolveClassSessionAccessBySessionId(sessionId);
+  async assertCanWatchClassSession(sessionId: string, user: SocketUser, batchId?: string): Promise<void> {
+    const access = await this.resolveClassSessionAccessBySessionId(sessionId, batchId);
     await this.assertSocketCanAccessClassSessionBatch(access.batchId, access.teacherId, user);
   }
 
@@ -2875,17 +3277,285 @@ export class RoomsService {
     };
   }
 
+  private normalizeChatAttachments(attachments: readonly SendChatAttachment[] | undefined): ChatAttachment[] {
+    if (!attachments?.length) {
+      return [];
+    }
+    if (attachments.length > CHAT_ATTACHMENT_MAX_COUNT) {
+      throw new BadRequestException(`Chat messages can include up to ${CHAT_ATTACHMENT_MAX_COUNT} attachments.`);
+    }
+    return attachments.map((attachment) => this.normalizeChatAttachment(attachment));
+  }
+
+  private async prepareClassSessionChatAttachments(
+    classSession: ClassSessionMongoDocument,
+    sender: ParticipantMongoDocument,
+    delivery: ClassSessionChatDelivery,
+    attachments: readonly SendChatAttachment[]
+  ): Promise<PreparedChatAttachments> {
+    if (!attachments.length) {
+      return { attachments: [], fileAttachments: [] };
+    }
+    if (attachments.length > CHAT_ATTACHMENT_MAX_COUNT) {
+      throw new BadRequestException(`Chat messages can include up to ${CHAT_ATTACHMENT_MAX_COUNT} attachments.`);
+    }
+
+    const normalized: ChatAttachment[] = [];
+    const fileAttachments: ChatAttachmentFileMongoDocument[] = [];
+    for (const attachment of attachments) {
+      if (attachment.type === 'link') {
+        normalized.push(this.normalizeChatAttachment(attachment));
+        continue;
+      }
+
+      if (attachment.dataUrl) {
+        throw new BadRequestException('Upload file attachments before sending chat messages.');
+      }
+      const attachmentId = this.cleanAttachmentText(attachment.attachmentId ?? attachment.id, 120);
+      if (!attachmentId) {
+        throw new BadRequestException('Uploaded attachment id is required.');
+      }
+      const doc = await this.chatAttachments.findOne({
+        attachmentId,
+        sessionId: classSession.id,
+        roomId: classSession.roomId,
+        deletedAt: { $exists: false }
+      });
+      if (!doc) {
+        throw new NotFoundException('Uploaded chat attachment not found.');
+      }
+      if (doc.scope !== 'pending' || doc.messageId) {
+        throw new ConflictException('This attachment has already been sent.');
+      }
+      if (doc.uploadedByUserId !== this.participantChatIdentity(sender)) {
+        throw new ForbiddenException('You can only send attachments you uploaded.');
+      }
+      if (doc.type !== attachment.type) {
+        throw new BadRequestException('Attachment type does not match uploaded file.');
+      }
+      if (attachment.mimeType && attachment.mimeType.toLowerCase() !== doc.mimeType) {
+        throw new BadRequestException('Attachment MIME type does not match uploaded file.');
+      }
+      normalized.push(this.toChatAttachmentFromFile(doc));
+      fileAttachments.push(doc);
+    }
+
+    if (delivery.scope === 'broadcast' && !this.isTeacherChatParticipant(sender)) {
+      throw new ForbiddenException('Students cannot send broadcast attachments.');
+    }
+    return { attachments: normalized, fileAttachments };
+  }
+
+  private async bindClassSessionChatAttachments(
+    classSession: ClassSessionMongoDocument,
+    message: ChatMessageMongoDocument,
+    delivery: ClassSessionChatDelivery,
+    attachments: readonly ChatAttachmentFileMongoDocument[]
+  ): Promise<void> {
+    for (const attachment of attachments) {
+      const result = await this.chatAttachments.updateOne(
+        {
+          _id: attachment._id,
+          sessionId: classSession.id,
+          roomId: classSession.roomId,
+          scope: 'pending',
+          messageId: { $exists: false }
+        },
+        {
+          $set: {
+            scope: delivery.scope,
+            messageId: message.id,
+            ...(delivery.recipientId || delivery.recipient?.id ? { recipientId: delivery.recipientId ?? delivery.recipient?.id } : {}),
+            ...(delivery.threadKey ? { threadKey: delivery.threadKey } : {})
+          }
+        }
+      );
+      if (result.modifiedCount !== 1) {
+        throw new ConflictException('Attachment could not be attached to this message.');
+      }
+    }
+  }
+
+  private normalizeChatAttachment(attachment: SendChatAttachment): ChatAttachment {
+    if (!attachment || (attachment.type !== 'image' && attachment.type !== 'pdf' && attachment.type !== 'link')) {
+      throw new BadRequestException('Unsupported chat attachment type.');
+    }
+
+    const title = this.cleanAttachmentText(attachment.title, 180);
+    const fileName = this.cleanAttachmentText(attachment.fileName, 180);
+    const mimeType = this.cleanAttachmentText(attachment.mimeType, 120)?.toLowerCase();
+    const createdAt = new Date().toISOString();
+
+    if (attachment.type === 'link') {
+      const url = this.normalizeAttachmentUrl(attachment.url);
+      return {
+        id: randomUUID(),
+        type: 'link',
+        title: title || url,
+        url,
+        createdAt
+      };
+    }
+
+    const expectedMimeType = attachment.type === 'pdf' ? 'application/pdf' : mimeType;
+    if (!expectedMimeType || !CHAT_ATTACHMENT_FILE_MIME_TYPES.has(expectedMimeType)) {
+      throw new BadRequestException('Only PDF and common image attachments are allowed.');
+    }
+    if (attachment.type === 'image' && !CHAT_ATTACHMENT_IMAGE_MIME_TYPES.has(expectedMimeType)) {
+      throw new BadRequestException('Only JPEG, PNG, GIF, and WebP image attachments are allowed.');
+    }
+    if (attachment.type === 'pdf' && expectedMimeType !== 'application/pdf') {
+      throw new BadRequestException('PDF attachments must use application/pdf.');
+    }
+
+    const dataUrl = attachment.dataUrl ? this.normalizeAttachmentDataUrl(attachment.dataUrl, expectedMimeType) : undefined;
+    const url = attachment.url ? this.normalizeAttachmentUrl(attachment.url) : undefined;
+    if (!dataUrl && !url) {
+      throw new BadRequestException('File attachments require a data URL or safe URL.');
+    }
+
+    const size = dataUrl ? this.byteLengthFromDataUrl(dataUrl) : Math.max(0, Math.trunc(attachment.size ?? 0));
+    if (size > CHAT_ATTACHMENT_MAX_SIZE_BYTES) {
+      throw new BadRequestException('Chat attachments cannot exceed 2 MB.');
+    }
+
+    return {
+      id: randomUUID(),
+      type: attachment.type,
+      ...(fileName ? { fileName } : {}),
+      ...(title ? { title } : {}),
+      mimeType: expectedMimeType,
+      size,
+      ...(url ? { url } : {}),
+      ...(dataUrl ? { dataUrl } : {}),
+      createdAt
+    };
+  }
+
+  private cleanAttachmentText(value: string | undefined, maxLength: number): string {
+    return (value ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, maxLength);
+  }
+
+  private normalizeAttachmentUrl(value: string | undefined): string {
+    const raw = value?.trim();
+    if (!raw) {
+      throw new BadRequestException('Attachment URL is required.');
+    }
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      throw new BadRequestException('Attachment URL is invalid.');
+    }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      throw new BadRequestException('Attachment URLs must use http or https.');
+    }
+    return url.toString();
+  }
+
+  private normalizeAttachmentDataUrl(value: string, expectedMimeType: string): string {
+    const trimmed = value.trim();
+    const match = /^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/.exec(trimmed);
+    if (!match) {
+      throw new BadRequestException('Attachment data URL is invalid.');
+    }
+    const mimeType = match[1]?.toLowerCase();
+    if (mimeType !== expectedMimeType) {
+      throw new BadRequestException('Attachment data URL type does not match attachment metadata.');
+    }
+    if (this.byteLengthFromDataUrl(trimmed) > CHAT_ATTACHMENT_MAX_SIZE_BYTES) {
+      throw new BadRequestException('Chat attachments cannot exceed 2 MB.');
+    }
+    return trimmed;
+  }
+
+  private byteLengthFromDataUrl(value: string): number {
+    const base64 = value.split(',', 2)[1] ?? '';
+    return Buffer.byteLength(base64, 'base64');
+  }
+
+  private normalizeUploadedChatAttachmentMimeType(value: string | undefined): string {
+    const mimeType = value?.trim().toLowerCase();
+    if (!mimeType || !CHAT_ATTACHMENT_FILE_MIME_TYPES.has(mimeType)) {
+      throw new BadRequestException('Only PDF, JPEG, PNG, GIF, and WebP attachments are allowed.');
+    }
+    return mimeType;
+  }
+
+  private chatAttachmentTypeForMimeType(mimeType: string): 'image' | 'pdf' {
+    return mimeType === 'application/pdf' ? 'pdf' : 'image';
+  }
+
+  private chatAttachmentMaxFileSizeBytes(): number {
+    return this.config.get<number>('chatAttachments.maxFileSizeBytes', CHAT_ATTACHMENT_MAX_SIZE_BYTES);
+  }
+
+  private chatAttachmentStorageRoot(): string {
+    return this.config.get<string>('chatAttachments.localPath', './chat-attachments');
+  }
+
+  private safeStorageSegment(value: string): string {
+    return value.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 160) || 'chat';
+  }
+
+  private safeAttachmentFileName(value: string | undefined, type: 'image' | 'pdf'): string {
+    const fallback = type === 'pdf' ? 'attachment.pdf' : 'attachment';
+    const cleaned = this.cleanAttachmentText(value ?? fallback, 180)
+      .replace(/[\\/]/g, '_')
+      .replace(/\.{2,}/g, '.')
+      .replace(/^\.+/, '')
+      .trim();
+    return cleaned || fallback;
+  }
+
+  private toChatAttachmentFromFile(doc: ChatAttachmentFileMongoDocument): ChatAttachment {
+    return {
+      id: doc.attachmentId,
+      attachmentId: doc.attachmentId,
+      type: doc.type,
+      fileName: doc.fileName,
+      title: doc.title || doc.fileName,
+      mimeType: doc.mimeType,
+      size: doc.size,
+      storageProvider: doc.storageProvider,
+      downloadUrl: this.classSessionChatAttachmentDownloadUrl(doc.sessionId, doc.attachmentId),
+      createdAt: this.dateToIso(doc.createdAt)
+    };
+  }
+
+  private classSessionChatAttachmentDownloadUrl(sessionId: string, attachmentId: string): string {
+    return `/api/v1/class-sessions/${encodeURIComponent(sessionId)}/chat/attachments/${encodeURIComponent(attachmentId)}`;
+  }
+
+  private canReadClassSessionChatAttachment(
+    doc: ChatAttachmentFileMongoDocument,
+    request: {
+      sessionId: string;
+      teacherId: string;
+      requesterUserId: string;
+      requesterRole: 'teacher' | 'student' | 'admin';
+    }
+  ): boolean {
+    if (request.requesterRole === 'teacher' || request.requesterRole === 'admin') {
+      return true;
+    }
+    if (doc.uploadedByUserId === request.requesterUserId) {
+      return true;
+    }
+    if (doc.scope === 'broadcast') {
+      return true;
+    }
+    if (doc.scope !== 'private' || !doc.threadKey) {
+      return false;
+    }
+    return doc.threadKey === this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, request.requesterUserId);
+  }
+
   private async resolveClassSessionChatDelivery(
     classSession: ClassSessionMongoDocument,
     sender: ParticipantMongoDocument,
     request: { roomId: string; recipientId?: string; scope?: ChatMessageScope }
-  ): Promise<{
-    scope: ChatMessageScope;
-    recipient?: ParticipantMongoDocument;
-    threadKey?: string;
-    targets?: SocketDeliveryTarget[];
-    broadcastRoomId?: string;
-  }> {
+  ): Promise<ClassSessionChatDelivery> {
     if (request.scope && request.scope !== 'private' && request.scope !== 'broadcast') {
       throw new BadRequestException('Unsupported chat message scope.');
     }
@@ -2895,6 +3565,7 @@ export class RoomsService {
       return {
         scope: 'private',
         recipient: teacher,
+        recipientId: teacher.id,
         threadKey: this.privateClassSessionThreadKey(classSession.id, classSession.teacherId, sender),
         targets: await this.participantSocketTargets(classSession.roomId, [sender, teacher])
       };
@@ -2918,17 +3589,34 @@ export class RoomsService {
     if (!request.recipientId) {
       throw new BadRequestException('A student recipient is required for private teacher chat.');
     }
-    const recipient = await this.findActiveStudentParticipant(request.roomId, request.recipientId);
-    if (recipient.id === sender.id) {
-      throw new BadRequestException('Private chat recipient must be a student.');
-    }
+    const target = await this.resolveClassSessionStudentThreadTarget({
+      roomId: classSession.roomId,
+      batchId: classSession.batchId,
+      sessionId: classSession.id,
+      teacherId: classSession.teacherId,
+      participantId: request.recipientId
+    });
+    const recipients = target.participant ? [sender, target.participant] : [sender];
 
     return {
       scope: 'private',
-      recipient,
-      threadKey: this.privateClassSessionThreadKey(classSession.id, classSession.teacherId, recipient),
-      targets: await this.participantSocketTargets(classSession.roomId, [sender, recipient])
+      ...(target.participant ? { recipient: target.participant } : {}),
+      recipientId: target.participant?.id ?? target.studentId,
+      threadKey: target.threadKey,
+      targets: await this.participantSocketTargets(classSession.roomId, recipients)
     };
+  }
+
+  private chatDeliveryState(delivery: ClassSessionChatDelivery): ChatDeliveryState {
+    if (delivery.broadcastRoomId) {
+      return 'delivered';
+    }
+    if (!delivery.recipient) {
+      return 'sent';
+    }
+    const recipientIds = new Set([delivery.recipient.id, delivery.recipient.userId].filter((value): value is string => Boolean(value)));
+    const reachedRecipient = delivery.targets?.some((target) => recipientIds.has(target.participantId) || Boolean(target.userId && recipientIds.has(target.userId))) ?? false;
+    return reachedRecipient ? 'delivered' : 'sent';
   }
 
   private async findClassSessionTeacherParticipant(classSession: Pick<ClassSessionMongoDocument, 'roomId' | 'teacherId'>): Promise<ParticipantMongoDocument> {
@@ -2953,19 +3641,6 @@ export class RoomsService {
       throw new ConflictException('The teacher is not connected to chat yet.');
     }
     return activeTeacher;
-  }
-
-  private async findActiveStudentParticipant(roomId: string, participantId: string): Promise<ParticipantMongoDocument> {
-    const participant = await this.participants.findOne({
-      _id: participantId,
-      roomId,
-      admitted: true,
-      leftAt: { $exists: false }
-    });
-    if (!participant || participant.role !== Role.PARTICIPANT) {
-      throw new BadRequestException('Target student is not in this class session.');
-    }
-    return participant;
   }
 
   private async findActiveParticipantByUserId(roomId: string, userId: string): Promise<ParticipantMongoDocument | null> {
@@ -2993,6 +3668,9 @@ export class RoomsService {
     });
     if (participant) {
       const studentId = this.participantChatIdentity(participant);
+      if (!(await this.studentEnrollments.isStudentEnrolledInBatch(studentId, request.batchId))) {
+        throw new BadRequestException('Target student is not enrolled in this class session.');
+      }
       return {
         studentId,
         participant,
@@ -3005,11 +3683,57 @@ export class RoomsService {
     if (!rosterItem) {
       throw new BadRequestException('Target student is not enrolled in this class session.');
     }
+    const activeParticipant = await this.findActiveParticipantByUserId(request.roomId, rosterItem.userId);
+    if (activeParticipant?.role === Role.PARTICIPANT) {
+      return {
+        studentId: rosterItem.userId,
+        participant: activeParticipant,
+        rosterItem,
+        threadKey: this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, rosterItem.userId)
+      };
+    }
     return {
       studentId: rosterItem.userId,
       rosterItem,
       threadKey: this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, rosterItem.userId)
     };
+  }
+
+  private async chatReadReceiptTargets(
+    classSession: ClassSessionMongoDocument,
+    reader: ParticipantMongoDocument,
+    target: ClassSessionReadTarget
+  ): Promise<SocketDeliveryTarget[]> {
+    const participants: ParticipantMongoDocument[] = [reader];
+    if (target.scope === 'private') {
+      if (this.isTeacherChatParticipant(reader)) {
+        if (target.student) {
+          participants.push(target.student);
+        }
+      } else {
+        const teacher = await this.findClassSessionTeacherParticipantForReceipt(classSession);
+        if (teacher) {
+          participants.push(teacher);
+        }
+      }
+    } else if (!this.isTeacherChatParticipant(reader)) {
+      const teacher = await this.findClassSessionTeacherParticipantForReceipt(classSession);
+      if (teacher) {
+        participants.push(teacher);
+      }
+    }
+    return this.participantSocketTargets(classSession.roomId, participants);
+  }
+
+  private async findClassSessionTeacherParticipantForReceipt(classSession: ClassSessionMongoDocument): Promise<ParticipantMongoDocument | null> {
+    try {
+      return await this.findClassSessionTeacherParticipant(classSession);
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   private privateClassSessionThreadKey(sessionId: string, teacherId: string | undefined, student: ParticipantMongoDocument): string {
@@ -3024,6 +3748,47 @@ export class RoomsService {
 
   private participantChatIdentity(participant: ParticipantMongoDocument): string {
     return participant.userId?.trim() || participant.id;
+  }
+
+  private classSessionAttendanceRow(
+    studentId: string,
+    displayName: string,
+    email: string,
+    participants: readonly ParticipantMongoDocument[],
+    fallbackLeaveAt: Date
+  ): ClassSessionAttendanceRow {
+    const sorted = [...participants].sort((left, right) => left.joinedAt.getTime() - right.joinedAt.getTime());
+    const firstJoinAt = sorted[0]?.joinedAt;
+    const lastLeaveAt = [...sorted].reverse().find((participant) => participant.leftAt)?.leftAt;
+    const totalMs = sorted.reduce((total, participant) => {
+      const leaveAt = participant.leftAt ?? fallbackLeaveAt;
+        return total + Math.max(0, leaveAt.getTime() - participant.joinedAt.getTime());
+      }, 0);
+    return {
+      studentId,
+      displayName: displayName || 'Student',
+      email,
+      ...(firstJoinAt ? { firstJoinAt } : {}),
+      ...(lastLeaveAt ? { lastLeaveAt } : {}),
+      totalDurationSeconds: Math.round(totalMs / 1000),
+      reconnectCount: Math.max(0, sorted.length - 1),
+      status: sorted.length ? 'present' : 'absent'
+    };
+  }
+
+  private formatAttendanceDuration(milliseconds: number): string {
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':');
+  }
+
+  private csvEscape(value: string): string {
+    if (!/[",\n\r]/.test(value)) {
+      return value;
+    }
+    return `"${value.replace(/"/g, '""')}"`;
   }
 
   private async participantSocketTargets(roomId: string, participants: readonly ParticipantMongoDocument[]): Promise<SocketDeliveryTarget[]> {
@@ -3061,9 +3826,107 @@ export class RoomsService {
     return participant.role === Role.HOST || participant.role === Role.CO_HOST;
   }
 
-  async raiseHand(roomId: string, participantId: string, raised: boolean): Promise<void> {
+  async raiseHand(roomId: string, participantId: string, raised: boolean): Promise<ParticipantPatch> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
-    await this.participants.updateOne({ _id: participantId, roomId }, { handRaised: raised });
+    const classSession = await this.classSessions.findOne({ roomId });
+    if (!classSession) {
+      throw new NotFoundException('Class session room not found');
+    }
+    this.assertClassSessionRoomIsLive(classSession);
+    const participant = await this.assertParticipant(roomId, participantId);
+    if (participant.role !== Role.PARTICIPANT) {
+      throw new ForbiddenException('Only students can raise their hand.');
+    }
+    if (raised) {
+      const handRaisedAt = new Date();
+      await this.participants.updateOne(
+        { _id: participantId, roomId },
+        { $set: { handRaised: true, handRaisedAt } }
+      );
+      return { handRaised: true, handRaisedAt: handRaisedAt.toISOString() };
+    }
+    await this.participants.updateOne(
+      { _id: participantId, roomId },
+      { $set: { handRaised: false }, $unset: { handRaisedAt: '' } }
+    );
+    return { handRaised: false, handRaisedAt: null };
+  }
+
+  async lowerStudentHand(roomId: string, actorParticipantId: string, targetParticipantId: string): Promise<ParticipantPatch> {
+    await this.nodeRegistry.assertLocalRoomOwner(roomId);
+    const classSession = await this.classSessions.findOne({ roomId });
+    if (!classSession) {
+      throw new NotFoundException('Class session room not found');
+    }
+    this.assertClassSessionRoomIsLive(classSession);
+    await this.assertModerator(roomId, actorParticipantId, false);
+    const target = await this.assertParticipant(roomId, targetParticipantId);
+    if (target.role !== Role.PARTICIPANT) {
+      throw new ForbiddenException('Only student hand state can be moderated.');
+    }
+    await this.participants.updateOne(
+      { _id: targetParticipantId, roomId },
+      { $set: { handRaised: false }, $unset: { handRaisedAt: '' } }
+    );
+    return { handRaised: false, handRaisedAt: null };
+  }
+
+  async setStudentSpeakingPermission(
+    roomId: string,
+    actorParticipantId: string,
+    targetParticipantId: string,
+    allowedToSpeak: boolean
+  ): Promise<ClassStudentSpeakResult> {
+    const moderation = await this.moderateStudentMedia(
+      roomId,
+      actorParticipantId,
+      targetParticipantId,
+      allowedToSpeak ? 'unmute-mic' : 'mute-mic'
+    );
+    const now = new Date();
+    const participantPatch: ParticipantPatch = allowedToSpeak
+      ? {
+          handRaised: false,
+          handRaisedAt: null,
+          allowedToSpeak: true,
+          allowedToSpeakAt: now.toISOString(),
+          allowedToSpeakBy: moderation.event.moderatedByParticipantId
+        }
+      : {
+          allowedToSpeak: false,
+          allowedToSpeakAt: null,
+          allowedToSpeakBy: null
+        };
+    const update = allowedToSpeak
+      ? {
+          $set: {
+            handRaised: false,
+            allowedToSpeak: true,
+            allowedToSpeakAt: now,
+            allowedToSpeakBy: moderation.event.moderatedByParticipantId
+          },
+          $unset: { handRaisedAt: '' }
+        }
+      : {
+          $set: { allowedToSpeak: false },
+          $unset: { allowedToSpeakAt: '', allowedToSpeakBy: '' }
+        };
+    await this.participants.updateOne({ _id: targetParticipantId, roomId }, update);
+    return {
+      event: {
+        roomId,
+        participantId: targetParticipantId,
+        allowedToSpeak,
+        ...(allowedToSpeak ? { allowedToSpeakAt: now.toISOString(), allowedToSpeakBy: moderation.event.moderatedByParticipantId } : {}),
+        moderatedByParticipantId: moderation.event.moderatedByParticipantId,
+        permissions: moderation.permissions,
+        message: allowedToSpeak
+          ? 'Teacher allowed you to speak. Turn on your microphone when you are ready.'
+          : 'Teacher revoked your speaking permission and muted your microphone.'
+      },
+      participantPatch,
+      moderation
+    };
   }
 
   async lookupRoomOwner(roomId: string): Promise<RoomOwnerLookupResponse> {
@@ -4249,6 +5112,7 @@ export class RoomsService {
       videoEnabled: permissions.canPublishVideo,
       screenSharing: false,
       handRaised: false,
+      allowedToSpeak: false,
       admitted,
       joinedAt: new Date(),
       lastSeenAt: new Date(),
@@ -4264,6 +5128,7 @@ export class RoomsService {
     participant: ParticipantMongoDocument
   ): Promise<LeaveRoomForSocketResult> {
     const now = new Date();
+    const teacherReconnectDeadlineAt = new Date(now.getTime() + CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS);
     const activeProducers = await this.producers.find({
       roomId: session.roomId,
       participantId: participant.id,
@@ -4297,7 +5162,16 @@ export class RoomsService {
     );
     await this.redis.removePresence(session.roomId, participant.id);
     await this.media.closeParticipantTransports(participant.id);
-    this.scheduleClassSessionTeacherReconnectGrace(session);
+    await this.classSessions.updateOne(
+      { _id: session.id, status: 'live' },
+      {
+        $set: {
+          teacherDisconnectedAt: now,
+          teacherReconnectDeadlineAt
+        }
+      }
+    );
+    this.scheduleClassSessionTeacherReconnectGrace(session.id, teacherReconnectDeadlineAt);
     return {
       closed: false,
       left: true,
@@ -4310,12 +5184,13 @@ export class RoomsService {
     };
   }
 
-  private scheduleClassSessionTeacherReconnectGrace(session: ClassSessionMongoDocument): void {
-    this.cancelClassSessionTeacherReconnectGrace(session.id);
+  private scheduleClassSessionTeacherReconnectGrace(sessionId: string, deadlineAt: Date): void {
+    this.cancelClassSessionTeacherReconnectGrace(sessionId);
     const timer = setTimeout(() => {
-      void this.completeClassSessionAfterTeacherReconnectGrace(session.id);
-    }, CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS);
-    this.classSessionTeacherReconnectTimers.set(session.id, timer);
+      void this.completeClassSessionAfterTeacherReconnectGrace(sessionId);
+    }, Math.max(0, deadlineAt.getTime() - Date.now()));
+    this.unrefTimer(timer);
+    this.classSessionTeacherReconnectTimers.set(sessionId, timer);
   }
 
   private async completeClassSessionAfterTeacherReconnectGrace(sessionId: string): Promise<void> {
@@ -4324,30 +5199,29 @@ export class RoomsService {
     if (!session || session.status !== 'live') {
       return;
     }
-    const teacher = await this.participants.findOne({
-      roomId: session.roomId,
-      userId: session.teacherId,
-      leftAt: { $exists: false }
-    });
-    if (teacher?.socketId) {
+    const deadlineAt = session.teacherReconnectDeadlineAt;
+    if (!deadlineAt) {
       return;
     }
-    try {
-      await this.closeClassSessionRoom({
-        roomId: session.roomId,
-        actorUserId: session.teacherId,
-        actorLabel: 'Teacher reconnect timeout'
-      });
-    } catch {
+    if (deadlineAt.getTime() > Date.now()) {
+      this.scheduleClassSessionTeacherReconnectGrace(session.id, deadlineAt);
+      return;
+    }
+    if (await this.isClassSessionTeacherConnected(session)) {
+      await this.clearClassSessionTeacherReconnectGrace(session.id);
       return;
     }
     const completedAt = new Date();
     const updated = await this.classSessions.findOneAndUpdate(
-      { _id: sessionId, status: 'live' },
+      { _id: sessionId, status: 'live', teacherReconnectDeadlineAt: { $lte: completedAt } },
       {
         $set: {
           status: 'completed',
           completedAt
+        },
+        $unset: {
+          teacherDisconnectedAt: '',
+          teacherReconnectDeadlineAt: ''
         }
       },
       { new: true }
@@ -4355,7 +5229,74 @@ export class RoomsService {
     if (!updated) {
       return;
     }
+    try {
+      await this.closeClassSessionRoom({
+        roomId: updated.roomId,
+        actorUserId: updated.teacherId,
+        actorLabel: 'Teacher reconnect timeout'
+      });
+    } catch {
+      // The class session is durably completed; lifecycle sync still tells clients to leave.
+    }
     this.emitClassSessionLifecycleEvent('session:ended', this.classSessionLifecyclePayload(updated));
+  }
+
+  private async restoreClassSessionTeacherReconnectGrace(): Promise<void> {
+    const sessions = await this.classSessions.find({
+      status: 'live',
+      teacherReconnectDeadlineAt: { $exists: true }
+    });
+    for (const session of sessions) {
+      const deadlineAt = session.teacherReconnectDeadlineAt;
+      if (!deadlineAt) {
+        continue;
+      }
+      if (deadlineAt.getTime() <= Date.now()) {
+        await this.completeClassSessionAfterTeacherReconnectGrace(session.id);
+        continue;
+      }
+      this.scheduleClassSessionTeacherReconnectGrace(session.id, deadlineAt);
+    }
+  }
+
+  private async processExpiredClassSessionTeacherReconnectGrace(): Promise<void> {
+    const sessions = await this.classSessions.find({
+      status: 'live',
+      teacherReconnectDeadlineAt: { $lte: new Date() }
+    });
+    for (const session of sessions) {
+      await this.completeClassSessionAfterTeacherReconnectGrace(session.id);
+    }
+  }
+
+  private async clearClassSessionTeacherReconnectGrace(sessionId: string): Promise<void> {
+    this.cancelClassSessionTeacherReconnectGrace(sessionId);
+    await this.classSessions.updateOne(
+      { _id: sessionId },
+      {
+        $unset: {
+          teacherDisconnectedAt: '',
+          teacherReconnectDeadlineAt: ''
+        }
+      }
+    );
+  }
+
+  private async isClassSessionTeacherConnected(session: ClassSessionMongoDocument): Promise<boolean> {
+    const teacher = await this.participants.findOne({
+      roomId: session.roomId,
+      userId: session.teacherId,
+      leftAt: { $exists: false }
+    });
+    if (!teacher?.socketId) {
+      return false;
+    }
+    const presence = await this.redis.participantPresence(session.roomId, teacher.id);
+    return presence.length > 0;
+  }
+
+  private unrefTimer(timer: ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>): void {
+    (timer as { unref?: () => void }).unref?.();
   }
 
   private assertClassSessionRoomIsLive(session: ClassSessionMongoDocument): void {
@@ -4365,24 +5306,28 @@ export class RoomsService {
     throw new ConflictException(this.classSessionJoinBlockedMessage(session.status));
   }
 
-  private async resolveClassSessionAccessBySessionId(sessionId: string): Promise<{ batchId: string; teacherId: string }> {
+  private async resolveClassSessionAccessBySessionId(sessionId: string, batchId?: string): Promise<{ batchId: string; teacherId: string }> {
     const persisted = await this.classSessions.findById(sessionId);
     if (persisted) {
       return { batchId: persisted.batchId, teacherId: persisted.teacherId };
     }
 
-    const batches = await this.batches.find({ deletedAt: { $exists: false } });
-    for (const batch of batches) {
-      if (!sessionId.startsWith(`${batch.id}-`)) {
-        continue;
-      }
-      const schedules = await this.batchSchedules.find({ batchId: batch.id }).sort({ dayOfWeek: 1 });
-      if (planClassSessions(batch, schedules).some((session) => session.id === sessionId)) {
-        return { batchId: batch.id, teacherId: batch.teacherId };
-      }
+    if (!batchId) {
+      throw new NotFoundException('Class session not found.');
     }
 
-    throw new NotFoundException('Class session not found.');
+    const batch = await this.batches.findOne({ _id: batchId, deletedAt: { $exists: false } });
+    if (!batch) {
+      throw new NotFoundException('Class session not found.');
+    }
+
+    const resolvedBatchId = String(batch.id ?? batch._id ?? batchId);
+    const schedules = await this.batchSchedules.find({ batchId: resolvedBatchId }).sort({ dayOfWeek: 1 });
+    if (!planClassSessions(batch, schedules).some((session) => session.id === sessionId)) {
+      throw new NotFoundException('Class session not found.');
+    }
+
+    return { batchId: resolvedBatchId, teacherId: batch.teacherId };
   }
 
   private async assertSocketCanAccessClassSessionBatch(batchId: string, teacherId: string, user: SocketUser): Promise<void> {
@@ -4501,6 +5446,24 @@ export class RoomsService {
       scope: doc.scope ?? (doc.recipientId ? 'private' : 'broadcast'),
       ...(doc.threadKey ? { threadKey: doc.threadKey } : {}),
       message: doc.message,
+      ...(doc.attachments?.length
+        ? {
+            attachments: doc.attachments.map((attachment) => ({
+              id: attachment.id,
+              ...(attachment.attachmentId ? { attachmentId: attachment.attachmentId } : {}),
+              type: attachment.type,
+              ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+              ...(attachment.title ? { title: attachment.title } : {}),
+              ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+              ...(typeof attachment.size === 'number' ? { size: attachment.size } : {}),
+              ...(attachment.storageProvider ? { storageProvider: attachment.storageProvider } : {}),
+              ...(attachment.downloadUrl ? { downloadUrl: attachment.downloadUrl } : {}),
+              ...(attachment.url ? { url: attachment.url } : {}),
+              ...(attachment.dataUrl ? { dataUrl: attachment.dataUrl } : {}),
+              ...(attachment.createdAt ? { createdAt: this.dateToIso(attachment.createdAt) } : {})
+            }))
+          }
+        : {}),
       shadowMuted: doc.shadowMuted,
       createdAt: this.dateToIso(doc.createdAt),
       ...(doc.deletedAt ? { deletedAt: this.dateToIso(doc.deletedAt) } : {})
@@ -4521,6 +5484,21 @@ export class RoomsService {
       ...(doc.threadKey ? { threadKey: doc.threadKey } : {}),
       lastReadAt: this.dateToIso(doc.lastReadAt),
       updatedAt: this.dateToIso(doc.updatedAt ?? doc.lastReadAt)
+    };
+  }
+
+  private toChatReadReceiptEvent(state: ChatReadState): ChatReadReceiptEvent {
+    return {
+      sessionId: state.sessionId,
+      ...(state.batchId ? { batchId: state.batchId } : {}),
+      roomId: state.roomId,
+      ...(state.channelId ? { channelId: state.channelId } : {}),
+      ...(state.chatChannelId ? { chatChannelId: state.chatChannelId } : {}),
+      scope: state.scope,
+      ...(state.threadKey ? { threadKey: state.threadKey } : {}),
+      ...(state.participantId ? { participantId: state.participantId } : {}),
+      userId: state.userId,
+      lastReadAt: state.lastReadAt
     };
   }
 
@@ -5191,6 +6169,10 @@ export class RoomsService {
       videoEnabled: doc.videoEnabled,
       screenSharing: doc.screenSharing,
       handRaised: doc.handRaised,
+      ...(doc.handRaisedAt ? { handRaisedAt: doc.handRaisedAt.toISOString() } : {}),
+      allowedToSpeak: doc.allowedToSpeak,
+      ...(doc.allowedToSpeakAt ? { allowedToSpeakAt: doc.allowedToSpeakAt.toISOString() } : {}),
+      ...(doc.allowedToSpeakBy ? { allowedToSpeakBy: doc.allowedToSpeakBy } : {}),
       admitted: doc.admitted,
       permissions,
       consumerLayers,

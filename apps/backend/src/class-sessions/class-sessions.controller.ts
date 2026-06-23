@@ -1,11 +1,33 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Param,
+  Post,
+  Query,
+  Res,
+  StreamableFile,
+  UploadedFiles,
+  UseGuards,
+  UseInterceptors
+} from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { ChatHistoryResponse, ChatMessageScope, ChatReadState, ChatThreadSummaryResponse } from '@native-sfu/contracts';
+import type { ChatAttachment, ChatHistoryResponse, ChatMessageScope, ChatReadState, ChatThreadSummaryResponse, Recording } from '@native-sfu/contracts';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AuthenticatedUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
+import type { ClassSessionChatAttachmentUploadFile } from '../rooms/rooms.service';
 import { ClassroomPayload, ClassSessionsService } from './class-sessions.service';
+
+const CHAT_ATTACHMENT_MAX_COUNT = 3;
+const CHAT_ATTACHMENT_MAX_SIZE_BYTES = 2 * 1024 * 1024;
+
+interface HeaderResponse {
+  setHeader(name: string, value: string | number): void;
+}
 
 interface StartClassSessionBody {
   batchId?: string;
@@ -65,6 +87,44 @@ export class ClassSessionsController {
     });
   }
 
+  @Post(':sessionId/chat/attachments')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @UseInterceptors(
+    FilesInterceptor('files', CHAT_ATTACHMENT_MAX_COUNT, {
+      limits: {
+        files: CHAT_ATTACHMENT_MAX_COUNT,
+        fileSize: CHAT_ATTACHMENT_MAX_SIZE_BYTES
+      }
+    })
+  )
+  @ApiOperation({ summary: 'Upload server-stored class session chat attachments' })
+  uploadChatAttachments(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @UploadedFiles() files: ClassSessionChatAttachmentUploadFile[] | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ChatAttachment[]> {
+    return this.classSessions.uploadChatAttachments(sessionId, batchId, user, files ?? []);
+  }
+
+  @Get(':sessionId/chat/attachments/:attachmentId')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Download an authorized class session chat attachment' })
+  async downloadChatAttachment(
+    @Param('sessionId') sessionId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) response: HeaderResponse
+  ): Promise<StreamableFile> {
+    const download = await this.classSessions.downloadChatAttachment(sessionId, attachmentId, batchId, user);
+    response.setHeader('Content-Type', download.mimeType);
+    response.setHeader('Content-Length', download.size);
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('Content-Disposition', `inline; filename="${this.contentDispositionFileName(download.fileName)}"`);
+    return new StreamableFile(download.stream);
+  }
+
   @Get(':sessionId/chat/summary')
   @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
   @ApiOperation({ summary: 'Get class session private chat thread summaries and unread counts' })
@@ -90,6 +150,59 @@ export class ClassSessionsController {
       scope: body.scope,
       readAt: body.readAt
     });
+  }
+
+  @Get(':sessionId/attendance.csv')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="class-session-attendance.csv"')
+  @ApiOperation({ summary: 'Download class session attendance CSV' })
+  downloadAttendance(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<string> {
+    return this.classSessions.exportAttendanceCsv(sessionId, batchId, user);
+  }
+
+  @Get(':sessionId/recordings')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'List authorized class session recordings' })
+  listRecordings(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<Recording[]> {
+    return this.classSessions.listRecordings(sessionId, batchId, user);
+  }
+
+  @Get(':sessionId/recordings/:recordingId/download')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @Header('Content-Type', 'application/vnd.native-sfu.recording-manifest+json; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="class-session-recording.json"')
+  @ApiOperation({ summary: 'Download an authorized class session recording manifest' })
+  async downloadRecording(
+    @Param('sessionId') sessionId: string,
+    @Param('recordingId') recordingId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<string> {
+    const download = await this.classSessions.downloadRecording(sessionId, recordingId, batchId, user);
+    return download.content;
+  }
+
+  @Post(':sessionId/recording/start')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Start server-side recording for a live class session' })
+  startRecording(@Param('sessionId') sessionId: string, @CurrentUser() user: AuthenticatedUser): Promise<Recording> {
+    return this.classSessions.startRecording(sessionId, user);
+  }
+
+  @Post(':sessionId/recording/stop')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Stop active server-side recording for a class session' })
+  stopRecording(@Param('sessionId') sessionId: string, @CurrentUser() user: AuthenticatedUser): Promise<Recording> {
+    return this.classSessions.stopRecording(sessionId, user);
   }
 
   @Post(':sessionId/start')
@@ -119,5 +232,9 @@ export class ClassSessionsController {
     @CurrentUser() user: AuthenticatedUser
   ): Promise<ClassroomPayload> {
     return this.classSessions.joinSession(sessionId, body.batchId, user);
+  }
+
+  private contentDispositionFileName(fileName: string): string {
+    return fileName.replace(/["\r\n\\]/g, '_').slice(0, 180) || 'attachment';
   }
 }

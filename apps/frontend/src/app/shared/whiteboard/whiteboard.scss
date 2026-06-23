@@ -45,6 +45,8 @@
   align-items: center;
   gap: 6px;
   width: 52px;
+  min-height: 0;
+  overflow: hidden;
   background:
     linear-gradient(180deg, var(--wb-rail-bg), color-mix(in srgb, var(--panel) 88%, var(--wb-base) 12%));
   border-right: 1px solid var(--wb-control-border);
@@ -78,8 +80,11 @@ h1 {
   align-items: center;
   gap: 5px;
   width: 100%;
+  min-height: 0;
+  overflow-y: auto;
   background: transparent;
   padding: 0;
+  scrollbar-width: thin;
 }
 
 .tool-divider {
@@ -136,6 +141,9 @@ h1 {
   display: flex;
   flex-direction: column;
   min-width: 218px;
+  max-width: min(280px, calc(100vw - 24px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
   padding: 7px;
   border: 1px solid var(--wb-control-border);
   border-radius: 8px;
@@ -214,6 +222,9 @@ h1 {
   z-index: 11;
   display: flex;
   flex-direction: row;
+  max-width: min(280px, calc(100vw - 24px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
   gap: 5px;
   padding: 7px;
   border: 1px solid var(--wb-control-border);
@@ -409,6 +420,9 @@ h1 {
   margin-left: 8px;
   z-index: 11;
   display: flex;
+  max-width: min(280px, calc(100vw - 24px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
   border: 1px solid var(--wb-control-border);
   border-radius: 8px;
   background: var(--wb-menu-bg);
@@ -604,9 +618,12 @@ h1 {
 }
 
 .page-tabs button {
+  max-width: min(180px, 42vw);
+  overflow: hidden;
   min-height: 34px;
   padding: 0 13px;
   white-space: nowrap;
+  text-overflow: ellipsis;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
@@ -632,11 +649,15 @@ h1 {
 
 .end-session-button {
   flex: 0 0 auto;
+  max-width: min(156px, 36vw);
+  overflow: hidden;
   border-color: color-mix(in srgb, var(--danger) 42%, var(--line-soft));
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--danger) 96%, #ffffff 4%), color-mix(in srgb, var(--wb-primary) 72%, var(--danger) 28%));
   color: #ffffff;
   font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   box-shadow: 0 12px 22px color-mix(in srgb, var(--danger) 20%, transparent);
 }
 
@@ -807,6 +828,9 @@ h1 {
   z-index: 4;
   display: grid;
   min-width: 172px;
+  max-width: min(240px, calc(100% - 16px));
+  max-height: min(340px, calc(100% - 16px));
+  overflow: auto;
   padding: 6px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1155,6 +1179,7 @@ h1 {
     justify-content: start;
     max-width: 100%;
     overflow-x: auto;
+    overflow-y: hidden;
     padding-bottom: 2px;
   }
 
@@ -1171,6 +1196,12 @@ h1 {
     top: calc(100% + 8px);
     left: 0;
     margin-left: 0;
+    max-width: calc(100vw - 24px);
+    max-height: min(320px, calc(100dvh - 96px));
+  }
+
+  .color-dropdown {
+    flex-wrap: wrap;
   }
 
   .whiteboard-surface,

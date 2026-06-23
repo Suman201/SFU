@@ -13,6 +13,35 @@
   <main class="student-session-state">
     <h1>{{ session()?.status === 'completed' ? 'Class ended' : 'Waiting room' }}</h1>
     <p>{{ blockedMessage() }}</p>
+    @if (latestRecording(); as recording) {
+      <div class="recording-playback-card" [class.failed]="recording.status === 'failed' || recordingExpired(recording)">
+        <strong>
+          {{
+            recordingExpired(recording)
+              ? 'Recording expired'
+              : recording.status === 'failed'
+                ? 'Recording failed'
+                : recording.status === 'stopped'
+                  ? 'Recording manifest ready'
+                  : 'Recording processing'
+          }}
+        </strong>
+        <span>
+          {{
+            recordingExpired(recording)
+              ? 'This recording is past its retention window.'
+              : recording.status === 'failed'
+              ? recording.failureReason || 'The server could not finalize this recording.'
+              : 'Your authorized class recording manifest is available.'
+          }}
+        </span>
+        @if (recording.status === 'stopped' && !recordingExpired(recording)) {
+          <button class="button secondary" type="button" [disabled]="downloadingRecording()" (click)="downloadLatestRecording()">
+            {{ downloadingRecording() ? 'Downloading...' : 'Download manifest' }}
+          </button>
+        }
+      </div>
+    }
     <a class="button primary" routerLink="/student/dashboard">Back to dashboard</a>
   </main>
 } @else {
@@ -23,6 +52,12 @@
         <div class="teacher-reconnect-banner" role="status">
           <strong>Teacher reconnecting</strong>
           <span>The class is still live. Please stay here.</span>
+        </div>
+      }
+      @if (recordingStatusLabel()) {
+        <div class="student-recording-badge" [class.live]="recordingActive()" role="status">
+          <span aria-hidden="true"></span>
+          {{ recordingStatusLabel() }}
         </div>
       }
       @if (stageStream(); as stream) {
@@ -72,7 +107,15 @@
             <p>Live class</p>
             <h1 id="student-prejoin-title">Ready to join?</h1>
           </div>
-          <span class="prejoin-status" aria-live="polite">{{ localMediaStatus() }}</span>
+          <div class="prejoin-status-group">
+            @if (recordingStatusLabel()) {
+              <span class="student-recording-badge compact" [class.live]="recordingActive()">
+                <span aria-hidden="true"></span>
+                {{ recordingStatusLabel() }}
+              </span>
+            }
+            <span class="prejoin-status" aria-live="polite">{{ localMediaStatus() }}</span>
+          </div>
         </header>
 
         <div class="prejoin-preview" [class.camera-off]="!localVideoPreviewStream()">
@@ -271,7 +314,24 @@
     >
       <span aria-hidden="true"></span>
     </button>
+    <button
+      class="student-hand-button"
+      type="button"
+      [class.raised]="handRaised()"
+      [class.allowed]="allowedToSpeak()"
+      [class.pending]="updatingHandRaise()"
+      [disabled]="updatingHandRaise() || !roomJoined() || !sessionLive()"
+      [attr.aria-pressed]="handRaised()"
+      [title]="speakingPermissionLabel()"
+      (click)="toggleHandRaise()"
+    >
+      <span class="hand-icon" aria-hidden="true"></span>
+      {{ handRaiseLabel() }}
+    </button>
     <span class="local-media-status" aria-live="polite">{{ localMediaStatus() }}</span>
+    <span class="speaking-permission-status" [class.waiting]="handRaised()" [class.allowed]="allowedToSpeak()" aria-live="polite">
+      {{ speakingPermissionLabel() }}
+    </span>
     @if (mediaDeviceProblem(); as message) {
       <span class="device-problem-message" role="alert">{{ message }}</span>
     }
@@ -314,14 +374,21 @@
 
     <div class="participant-list">
       @for (participant of participants(); track participant.id) {
-        <article class="participant-row" [class.speaking]="participant.speaking" [class.reconnecting]="participant.reconnecting">
+        <article
+          class="participant-row"
+          [class.speaking]="participant.speaking || participant.allowedToSpeak"
+          [class.hand-raised]="participant.handRaised"
+          [class.reconnecting]="participant.reconnecting"
+        >
           <span class="participant-avatar">{{ participant.initials }}</span>
           <div>
             <strong>{{ participant.name }}</strong>
-            <span>{{ participant.reconnecting ? 'Reconnecting' : participant.role }}</span>
+            <span>{{ participant.reconnecting ? 'Reconnecting' : participant.allowedToSpeak ? 'Allowed to speak' : participant.handRaised ? 'Hand raised' : participant.role }}</span>
           </div>
-          @if (participant.speaking) {
+          @if (participant.speaking || participant.allowedToSpeak) {
             <span class="speaking-dot" aria-label="Speaking"></span>
+          } @else if (participant.handRaised) {
+            <span class="hand-dot" aria-label="Hand raised"></span>
           }
         </article>
       }

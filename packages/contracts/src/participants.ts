@@ -13,6 +13,10 @@ export interface Participant {
   videoEnabled: boolean;
   screenSharing: boolean;
   handRaised: boolean;
+  handRaisedAt?: string;
+  allowedToSpeak?: boolean;
+  allowedToSpeakAt?: string;
+  allowedToSpeakBy?: string;
   admitted: boolean;
   permissions: Permissions;
   consumerLayers?: ConsumerLayerState[];
@@ -25,6 +29,10 @@ export interface ParticipantPatch {
   videoEnabled?: boolean;
   screenSharing?: boolean;
   handRaised?: boolean;
+  handRaisedAt?: string | null;
+  allowedToSpeak?: boolean;
+  allowedToSpeakAt?: string | null;
+  allowedToSpeakBy?: string | null;
   permissions?: Partial<Permissions>;
   role?: Role;
   connected?: boolean;

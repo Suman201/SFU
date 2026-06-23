@@ -12,11 +12,13 @@
     "packages/sfu-core",
     "packages/nest-sfu",
     "apps/backend",
-    "apps/frontend"
+    "apps/frontend",
+    "apps/admin-portal"
   ],
   "scripts": {
     "build": "npm run build --workspaces",
     "build:frontend": "npm run build -w @native-sfu/frontend",
+    "build:admin-portal": "npm run build -w @native-sfu/admin-portal",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run test:e2e -w @native-sfu/backend",
     "test:browser": "node scripts/patch-playwright-loader.cjs && playwright test",
@@ -35,6 +37,7 @@
     "seed:dummy-users": "npm run seed:dummy-users -w @native-sfu/backend",
     "dev:backend": "npm run start:dev -w @native-sfu/backend",
     "dev:frontend": "npm run start -w @native-sfu/frontend",
+    "dev:admin-portal": "npm run start -w @native-sfu/admin-portal",
     "docker:up": "docker compose -f infra/docker-compose.dev.yml up --build",
     "docker:down": "docker compose -f infra/docker-compose.dev.yml down --remove-orphans"
   },

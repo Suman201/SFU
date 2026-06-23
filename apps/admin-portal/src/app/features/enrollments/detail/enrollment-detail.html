@@ -1,0 +1,93 @@
+<a class="back-link" routerLink="/enrollments">Back to enrollments</a>
+
+@if (loading()) {
+  <section class="detail-state">Loading enrollment...</section>
+} @else if (error()) {
+  <section class="detail-state error" role="alert">{{ error() }}</section>
+} @else if (enrollment(); as item) {
+  <section class="detail-head">
+    <div>
+      <p class="eyebrow">Enrollment</p>
+      <h1>{{ item.studentName }}</h1>
+      <p>{{ item.studentEmail || item.studentId }}</p>
+    </div>
+    <span class="data-pill {{ statusClass(item) }}">{{ item.status }}</span>
+  </section>
+
+  @if (success()) {
+    <p class="detail-state success" role="status">{{ success() }}</p>
+  }
+
+  <section class="access-card" [class.blocked]="!item.access.canAccessClassSessions">
+    <div>
+      <p class="eyebrow">Class-session access</p>
+      <h2>{{ item.access.canAccessClassSessions ? 'Allowed' : 'Blocked' }}</h2>
+      <p>{{ item.access.reason }}</p>
+    </div>
+    <div class="actions">
+      @if (item.status === 'active') {
+        <button type="button" class="table-action accent" [disabled]="pendingAction()" (click)="transition('suspend')">
+          {{ pendingAction() === 'suspend' ? 'Suspending...' : 'Suspend' }}
+        </button>
+      } @else {
+        <button type="button" class="table-action primary" [disabled]="pendingAction()" (click)="transition('reactivate')">
+          {{ pendingAction() === 'reactivate' ? 'Reactivating...' : 'Reactivate' }}
+        </button>
+      }
+      @if (item.status !== 'completed') {
+        <button type="button" class="table-action" [disabled]="pendingAction()" (click)="transition('complete')">
+          {{ pendingAction() === 'complete' ? 'Completing...' : 'Complete' }}
+        </button>
+      }
+      @if (item.status !== 'cancelled') {
+        <button type="button" class="table-action danger" [disabled]="pendingAction()" (click)="transition('cancel')">
+          {{ pendingAction() === 'cancel' ? 'Cancelling...' : 'Cancel' }}
+        </button>
+      }
+    </div>
+  </section>
+
+  <section class="detail-grid">
+    <article>
+      <span>Batch</span>
+      <strong>{{ item.batchName }}</strong>
+      <small>{{ item.batchId }}</small>
+    </article>
+    <article>
+      <span>Course</span>
+      <strong>{{ item.courseId || 'Not assigned' }}</strong>
+      <small>{{ item.teacherId || 'No teacher' }}</small>
+    </article>
+    <article>
+      <span>Enrolled</span>
+      <strong>{{ item.enrolledAt ? (item.enrolledAt | date: 'medium') : 'Not active' }}</strong>
+    </article>
+    <article>
+      <span>Updated</span>
+      <strong>{{ item.updatedAt ? (item.updatedAt | date: 'medium') : 'Not updated' }}</strong>
+    </article>
+  </section>
+
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Status timeline</h2>
+        <p>Current lifecycle timestamps recorded for this enrollment.</p>
+      </div>
+    </div>
+    <div class="metadata-grid">
+      <span>Enrollment ID</span>
+      <code>{{ item.id }}</code>
+      <span>Created</span>
+      <code>{{ item.createdAt ? (item.createdAt | date: 'medium') : 'Unknown' }}</code>
+      <span>Suspended</span>
+      <code>{{ item.suspendedAt ? (item.suspendedAt | date: 'medium') : 'Never' }}</code>
+      <span>Cancelled</span>
+      <code>{{ item.cancelledAt ? (item.cancelledAt | date: 'medium') : 'Never' }}</code>
+      <span>Completed</span>
+      <code>{{ item.completedAt ? (item.completedAt | date: 'medium') : 'Never' }}</code>
+      <span>Updated by</span>
+      <code>{{ item.updatedBy || 'Unknown' }}</code>
+    </div>
+  </section>
+}

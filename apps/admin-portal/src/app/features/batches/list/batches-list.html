@@ -1,0 +1,175 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Batch operations</p>
+    <h1>Batches</h1>
+    <p>Manage teacher assignment, schedules, capacity, roster, and planned class sessions.</p>
+  </div>
+  <button type="button" class="primary-action" (click)="toggleCreate()">
+    {{ showCreate() ? 'Close' : 'Create batch' }}
+  </button>
+</section>
+
+<section class="summary-grid" aria-label="Batch summary">
+  <article>
+    <span>Total batches</span>
+    <strong>{{ summary()?.totalBatches ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Active</span>
+    <strong>{{ summary()?.activeBatches ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Completed</span>
+    <strong>{{ summary()?.completedBatches ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Cancelled</span>
+    <strong>{{ summary()?.cancelledBatches ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Students</span>
+    <strong>{{ summary()?.activeStudents ?? 0 }}</strong>
+  </article>
+</section>
+
+@if (showCreate()) {
+  <section class="create-panel">
+    <div>
+      <p class="eyebrow">New batch</p>
+      <h2>Create under a course</h2>
+      <p>Teacher assignment is validated by the backend against active teacher accounts.</p>
+    </div>
+    <form [formGroup]="createForm" (ngSubmit)="createBatch()">
+      <input type="search" formControlName="courseId" placeholder="Course ID" aria-label="Course ID" />
+      <input type="text" formControlName="courseName" placeholder="Course name" aria-label="Course name" />
+      <input type="text" formControlName="name" placeholder="Batch name" aria-label="Batch name" />
+      <input type="search" formControlName="teacherId" placeholder="Teacher ID" aria-label="Teacher ID" />
+      <input type="number" formControlName="year" placeholder="Year" aria-label="Year" />
+      <input type="number" formControlName="maxCapacity" placeholder="Capacity" aria-label="Capacity" />
+      <select formControlName="dayOfWeek" aria-label="Weekday">
+        <option value="MONDAY">Monday</option>
+        <option value="TUESDAY">Tuesday</option>
+        <option value="WEDNESDAY">Wednesday</option>
+        <option value="THURSDAY">Thursday</option>
+        <option value="FRIDAY">Friday</option>
+        <option value="SATURDAY">Saturday</option>
+        <option value="SUNDAY">Sunday</option>
+      </select>
+      <input type="time" formControlName="startTime" aria-label="Start time" />
+      <button type="submit" class="table-action primary" [disabled]="saving()">{{ saving() ? 'Creating...' : 'Create' }}</button>
+    </form>
+  </section>
+}
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Batch directory</h2>
+      <p>{{ total() }} records found</p>
+    </div>
+    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+      <select formControlName="status" aria-label="Status">
+        <option value="all">All statuses</option>
+        <option value="ACTIVE">Active</option>
+        <option value="INACTIVE">Inactive</option>
+        <option value="COMPLETED">Completed</option>
+        <option value="CANCELLED">Cancelled</option>
+      </select>
+      <input type="search" formControlName="courseId" placeholder="Course ID" aria-label="Course ID" />
+      <input type="search" formControlName="teacherId" placeholder="Teacher ID" aria-label="Teacher ID" />
+      <input type="date" formControlName="dateFrom" aria-label="Date from" />
+      <input type="date" formControlName="dateTo" aria-label="Date to" />
+      <select formControlName="sort" aria-label="Sort batches">
+        <option value="updated_desc">Newest updated</option>
+        <option value="updated_asc">Oldest updated</option>
+        <option value="start_asc">Start date ascending</option>
+        <option value="start_desc">Start date descending</option>
+        <option value="name_asc">Name A-Z</option>
+        <option value="name_desc">Name Z-A</option>
+      </select>
+      <input type="search" formControlName="search" placeholder="Search batch or course" aria-label="Search batches" />
+      <button type="submit" class="table-action primary">Apply</button>
+      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+    </form>
+  </div>
+
+  @if (error()) {
+    <p class="table-error" role="alert">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="table-success" role="status">{{ success() }}</p>
+  }
+
+  <div class="data-table-wrap" style="--data-table-min-width: 1220px">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Batch</th>
+          <th>Course</th>
+          <th>Teacher</th>
+          <th>Status</th>
+          <th>Schedule</th>
+          <th>Students</th>
+          <th>Next session</th>
+          <th class="row-menu-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr>
+            <td colspan="8" class="empty-state">Loading batches...</td>
+          </tr>
+        } @else if (!rows().length) {
+          <tr>
+            <td colspan="8" class="empty-state">No batches match these filters.</td>
+          </tr>
+        } @else {
+          @for (row of rows(); track trackByBatch($index, row)) {
+            <tr>
+              <td>
+                <strong>{{ row.name }}</strong>
+                <small>{{ row.id }}</small>
+              </td>
+              <td>
+                <strong>{{ row.courseName || row.courseId || 'Unassigned' }}</strong>
+                <small>{{ row.courseId || 'No course id' }}</small>
+              </td>
+              <td>
+                <strong>{{ row.teacherName || row.teacherId }}</strong>
+                <small>{{ row.teacherEmail || row.teacherId }}</small>
+              </td>
+              <td><span class="data-pill {{ statusClass(row.status) }}">{{ row.status.toLowerCase() }}</span></td>
+              <td>{{ scheduleLabel(row) }}</td>
+              <td>{{ row.enrolledCount }} / {{ row.maxCapacity }}</td>
+              <td>{{ row.nextSessionAt ? (row.nextSessionAt | date: 'short') : 'None planned' }}</td>
+              <td class="row-menu-cell">
+                <div class="table-row-menu">
+                  <a class="table-action" [routerLink]="['/batches', row.id]">View</a>
+                  @if (row.status === 'ACTIVE') {
+                    <button type="button" class="table-action accent" [disabled]="pendingBatchId() === row.id" (click)="transition(row, 'pause')">Pause</button>
+                  } @else {
+                    <button type="button" class="table-action primary" [disabled]="pendingBatchId() === row.id" (click)="transition(row, 'activate')">Activate</button>
+                  }
+                  @if (row.status !== 'COMPLETED') {
+                    <button type="button" class="table-action" [disabled]="pendingBatchId() === row.id" (click)="transition(row, 'complete')">Complete</button>
+                  }
+                  @if (row.status !== 'CANCELLED') {
+                    <button type="button" class="table-action danger" [disabled]="pendingBatchId() === row.id" (click)="transition(row, 'cancel')">Cancel</button>
+                  }
+                </div>
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-footer">
+    <span>Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() <= 1" (click)="previousPage()">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,134 @@
+<a class="back-link" routerLink="/users">Back to users</a>
+
+@if (loading()) {
+  <section class="detail-state">Loading user...</section>
+} @else if (error() && !user()) {
+  <section class="detail-state error" role="alert">{{ error() }}</section>
+} @else if (user(); as item) {
+  <section class="detail-head">
+    <div class="profile-title">
+      <span class="table-avatar">{{ (item.name || item.email).charAt(0).toUpperCase() }}</span>
+      <div>
+        <p class="eyebrow">User account</p>
+        <h1>{{ item.name }}</h1>
+        <p>{{ item.email }}</p>
+      </div>
+    </div>
+    <div class="head-pills">
+      <span class="data-pill {{ roleClass(item.primaryRole) }}">{{ roleLabel(item.primaryRole) }}</span>
+      <span class="data-pill {{ statusClass(item) }}">{{ item.disabled ? 'disabled' : item.status }}</span>
+    </div>
+  </section>
+
+  @if (error()) {
+    <p class="detail-state error" role="alert">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="detail-state success" role="status">{{ success() }}</p>
+  }
+
+  <section class="access-card" [class.blocked]="item.disabled || item.status !== 'active'">
+    <div>
+      <p class="eyebrow">Account access</p>
+      <h2>{{ item.disabled || item.status !== 'active' ? 'Blocked' : 'Allowed' }}</h2>
+      <p>
+        {{ item.disabled || item.status !== 'active' ? 'This user cannot sign in until reactivated.' : 'This user can access the product based on assigned roles.' }}
+      </p>
+    </div>
+    <div class="actions">
+      @if (item.disabled || item.status !== 'active') {
+        <button type="button" class="table-action primary" [disabled]="pendingAction()" (click)="activate()">
+          {{ pendingAction() === 'activate' ? 'Activating...' : 'Activate' }}
+        </button>
+      } @else {
+        <button type="button" class="table-action danger" [disabled]="pendingAction()" (click)="deactivate()">
+          {{ pendingAction() === 'deactivate' ? 'Deactivating...' : 'Deactivate' }}
+        </button>
+      }
+    </div>
+  </section>
+
+  <section class="detail-grid">
+    <article>
+      <span>User ID</span>
+      <strong>{{ item.id }}</strong>
+    </article>
+    <article>
+      <span>Created</span>
+      <strong>{{ item.createdAt ? (item.createdAt | date: 'medium') : 'Unknown' }}</strong>
+    </article>
+    <article>
+      <span>Updated</span>
+      <strong>{{ item.updatedAt ? (item.updatedAt | date: 'medium') : 'Unknown' }}</strong>
+    </article>
+    <article>
+      <span>Last login</span>
+      <strong>{{ item.lastLoginAt ? (item.lastLoginAt | date: 'medium') : 'Never' }}</strong>
+    </article>
+  </section>
+
+  <section class="data-table-shell edit-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Profile and access</h2>
+        <p>Edit safe account fields. Passwords and token data are never shown here.</p>
+      </div>
+    </div>
+
+    <form class="edit-form" [formGroup]="form" (ngSubmit)="save()">
+      <label>
+        <span>Name</span>
+        <input type="text" formControlName="name" />
+      </label>
+      <label>
+        <span>Display name</span>
+        <input type="text" formControlName="displayName" />
+      </label>
+      <label>
+        <span>Phone</span>
+        <input type="text" formControlName="phone" />
+      </label>
+      <label>
+        <span>Primary role</span>
+        <select formControlName="role">
+          <option value="student">Student</option>
+          <option value="teacher">Teacher</option>
+          <option value="admin">Admin</option>
+          <option value="super_admin">Super admin</option>
+        </select>
+      </label>
+      <label>
+        <span>Status</span>
+        <select formControlName="status">
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="suspended">Suspended</option>
+          <option value="invited">Invited</option>
+        </select>
+      </label>
+      <label class="toggle-row">
+        <input type="checkbox" formControlName="disabled" />
+        <span>Disable login</span>
+      </label>
+      <div class="form-actions">
+        <button type="submit" class="table-action primary" [disabled]="saving()">{{ saving() ? 'Saving...' : 'Save changes' }}</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Permissions</h2>
+        <p>Derived from the current role assignment.</p>
+      </div>
+    </div>
+    <div class="permission-list">
+      @for (permission of item.permissions; track permission) {
+        <span>{{ permission }}</span>
+      } @empty {
+        <span>No permissions assigned.</span>
+      }
+    </div>
+  </section>
+}

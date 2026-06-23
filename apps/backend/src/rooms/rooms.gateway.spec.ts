@@ -2,6 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import type {
   ChatMessage,
   ChatReadState,
+  ClassStudentSpeakEvent,
   ConsumerLayerEvent,
   ClassSessionLifecycleEvent,
   ProducerDynacastEvent,
@@ -104,13 +105,13 @@ describe('RoomsGateway', () => {
       };
       const ack = jest.fn();
 
-      await gateway.watchSession(socket as never, { sessionId: 'session-1' }, ack);
+      await gateway.watchSession(socket as never, { sessionId: 'session-1', batchId: 'batch-1' }, ack);
 
       expect(rooms.assertCanWatchClassSession).toHaveBeenCalledWith('session-1', {
         id: 'student-1',
         email: 'student@example.test',
         roles: ['STUDENT']
-      });
+      }, 'batch-1');
       expect(socket.join).toHaveBeenCalledWith('class-session:session-1:lifecycle');
       expect(ack).toHaveBeenCalledWith({ ok: true, data: undefined });
     });
@@ -153,6 +154,27 @@ describe('RoomsGateway', () => {
         error: {
           code: 'BadRequestException',
           message: 'Invalid class session id.'
+        }
+      });
+    });
+
+    it('rejects malformed lifecycle watch batch ids before joining a room', async () => {
+      const { gateway, rooms } = createGatewayHarness();
+      const socket = {
+        data: { user: { id: 'student-1', email: 'student@example.test', roles: ['STUDENT'] } },
+        join: jest.fn(async (_roomId: string) => undefined)
+      };
+      const ack = jest.fn();
+
+      await gateway.watchSession(socket as never, { sessionId: 'session-1', batchId: 'batch 1' }, ack);
+
+      expect(rooms.assertCanWatchClassSession).not.toHaveBeenCalled();
+      expect(socket.join).not.toHaveBeenCalled();
+      expect(ack.mock.calls[0]?.[0]).toEqual({
+        ok: false,
+        error: {
+          code: 'BadRequestException',
+          message: 'Invalid batch id.'
         }
       });
     });
@@ -295,7 +317,7 @@ describe('RoomsGateway', () => {
       expect(ack).toHaveBeenCalledWith({ ok: true, data: message });
     });
 
-    it('acks chat read state updates without broadcasting them to the room', async () => {
+    it('targets chat read receipts without broadcasting them to the room', async () => {
       const { gateway, rooms, emissions, signals } = createGatewayHarness();
       const readState: ChatReadState = {
         id: 'read-1',
@@ -308,7 +330,23 @@ describe('RoomsGateway', () => {
         lastReadAt: '2026-06-22T10:12:00.000Z',
         updatedAt: '2026-06-22T10:12:00.000Z'
       };
-      rooms.markChatRead.mockResolvedValue(readState);
+      const receipt = {
+        sessionId: 'session-1',
+        roomId: 'room-1',
+        userId: 'student-1',
+        participantId: 'student-participant',
+        scope: 'private',
+        threadKey: 'session-1:teacher:teacher-1:student:student-1',
+        lastReadAt: '2026-06-22T10:12:00.000Z'
+      };
+      rooms.markChatRead.mockResolvedValue({
+        state: readState,
+        receipt,
+        targets: [
+          { roomId: 'room-1', participantId: 'student-participant', socketId: 'student-socket', userId: 'student-1', nodeId: 'node-a' },
+          { roomId: 'room-1', participantId: 'teacher-participant', socketId: 'teacher-socket', userId: 'teacher-1', nodeId: 'node-a' }
+        ]
+      });
       const ack = jest.fn();
 
       await gateway.markChatRead(
@@ -328,8 +366,22 @@ describe('RoomsGateway', () => {
         { id: 'student-1', email: 'student@example.test', roles: ['STUDENT'] },
         'student-participant'
       );
-      expect(emissions).toEqual([{ target: 'student-socket', event: 'chat:read', payload: readState }]);
-      expect(signals.publish).not.toHaveBeenCalledWith('room-1', 'chat:read', readState);
+      expect(emissions).toEqual([
+        { target: 'student-socket', event: 'chat:read', payload: receipt },
+        { target: 'teacher-socket', event: 'chat:read', payload: receipt }
+      ]);
+      expect(signals.publish).not.toHaveBeenCalledWith('room-1', 'chat:read', receipt);
+      expect(signals.publishTargeted).toHaveBeenCalledWith(
+        'room-1',
+        {
+          socketIds: ['student-socket', 'teacher-socket'],
+          participantIds: ['student-participant', 'teacher-participant'],
+          userIds: ['student-1', 'teacher-1'],
+          nodeIds: ['node-a']
+        },
+        'chat:read',
+        receipt
+      );
       expect(ack).toHaveBeenCalledWith({ ok: true, data: readState });
     });
 
@@ -402,6 +454,149 @@ describe('RoomsGateway', () => {
         event
       );
       expect(ack).toHaveBeenCalledWith({ ok: true, data: event });
+    });
+
+    it('mutes all class-session students through the bulk moderation event', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      const permissions = {
+        canPublishAudio: false,
+        canPublishVideo: true,
+        canShareScreen: false,
+        canChat: true
+      };
+      const event: StudentMediaModerationEvent = {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        producerId: 'producer-audio',
+        kind: 'audio',
+        action: 'mute-mic',
+        moderatedByParticipantId: 'teacher-participant',
+        permissions
+      };
+      const producer = {
+        id: 'producer-audio',
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        kind: 'audio',
+        status: 'paused'
+      };
+      rooms.moderateAllStudentMedia.mockResolvedValue([
+        {
+          event,
+          permissions,
+          producer,
+          targets: [{ roomId: 'room-1', participantId: 'student-participant', socketId: 'student-socket', userId: 'student-1', nodeId: 'node-a' }]
+        }
+      ]);
+      const ack = jest.fn();
+
+      await gateway.muteAllStudents({ data: { participantId: 'teacher-participant' } } as never, { roomId: 'room-1' }, ack);
+
+      expect(rooms.moderateAllStudentMedia).toHaveBeenCalledWith('room-1', 'teacher-participant', 'mute-mic');
+      expect(emissions).toEqual([
+        { target: 'room-1', event: 'producer:updated', payload: producer },
+        { target: 'room-1', event: 'participant:updated', payload: ['student-participant', { audioEnabled: false }] },
+        { target: 'room-1', event: 'permissions:updated', payload: ['student-participant', permissions] },
+        { target: 'student-socket', event: 'student:media-moderated', payload: event }
+      ]);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'participant:updated', 'student-participant', { audioEnabled: false });
+      expect(signals.publishTargeted).toHaveBeenCalledWith(
+        'room-1',
+        {
+          socketIds: ['student-socket'],
+          participantIds: ['student-participant'],
+          userIds: ['student-1'],
+          nodeIds: ['node-a']
+        },
+        'student:media-moderated',
+        event
+      );
+      expect(ack).toHaveBeenCalledWith({
+        ok: true,
+        data: {
+          roomId: 'room-1',
+          action: 'mute-mic',
+          moderatedCount: 1,
+          events: [event]
+        }
+      });
+    });
+
+    it('raises a student hand and broadcasts the participant patch', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      const patch = { handRaised: true, handRaisedAt: '2026-06-23T08:00:00.000Z' };
+      rooms.raiseHand.mockResolvedValue(patch);
+      const ack = jest.fn();
+
+      await gateway.raiseHand(
+        { data: { participantId: 'student-participant' } } as never,
+        { roomId: 'room-1', raised: true },
+        ack
+      );
+
+      expect(rooms.raiseHand).toHaveBeenCalledWith('room-1', 'student-participant', true);
+      expect(emissions).toEqual([{ target: 'room-1', event: 'participant:updated', payload: ['student-participant', patch] }]);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'participant:updated', 'student-participant', patch);
+      expect(ack).toHaveBeenCalledWith({ ok: true, data: patch });
+    });
+
+    it('allows a raised student to speak through moderation and participant state updates', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      const permissions = {
+        canPublishAudio: true,
+        canPublishVideo: true,
+        canShareScreen: false,
+        canChat: true
+      };
+      const speakEvent: ClassStudentSpeakEvent = {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        allowedToSpeak: true,
+        allowedToSpeakAt: '2026-06-23T08:00:00.000Z',
+        allowedToSpeakBy: 'teacher-participant',
+        moderatedByParticipantId: 'teacher-participant',
+        permissions,
+        message: 'Teacher allowed you to speak. Turn on your microphone when you are ready.'
+      };
+      const moderationEvent: StudentMediaModerationEvent = {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        kind: 'audio',
+        action: 'unmute-mic',
+        moderatedByParticipantId: 'teacher-participant',
+        permissions
+      };
+      const participantPatch = {
+        handRaised: false,
+        handRaisedAt: null,
+        allowedToSpeak: true,
+        allowedToSpeakAt: '2026-06-23T08:00:00.000Z',
+        allowedToSpeakBy: 'teacher-participant'
+      };
+      rooms.setStudentSpeakingPermission.mockResolvedValue({
+        event: speakEvent,
+        participantPatch,
+        moderation: {
+          event: moderationEvent,
+          permissions
+        }
+      });
+      const ack = jest.fn();
+
+      await gateway.allowStudentToSpeak(
+        { data: { participantId: 'teacher-participant' } } as never,
+        { roomId: 'room-1', participantId: 'student-participant' },
+        ack
+      );
+
+      expect(rooms.setStudentSpeakingPermission).toHaveBeenCalledWith('room-1', 'teacher-participant', 'student-participant', true);
+      expect(emissions).toEqual([
+        { target: 'room-1', event: 'permissions:updated', payload: ['student-participant', permissions] },
+        { target: 'room-1', event: 'participant:updated', payload: ['student-participant', participantPatch] }
+      ]);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'permissions:updated', 'student-participant', permissions);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'participant:updated', 'student-participant', participantPatch);
+      expect(ack).toHaveBeenCalledWith({ ok: true, data: speakEvent });
     });
 
     it('targets class-session student media restore without broadcasting participant media on', async () => {
@@ -537,6 +732,85 @@ describe('RoomsGateway', () => {
       });
       expect(signals.publish).toHaveBeenCalledWith('room-1', 'room:updated', room);
       expect(emissions.some((emission) => emission.event === 'participant:left')).toBe(false);
+    });
+
+    it('uses reconnect grace semantics when a class-session teacher explicitly leaves the room', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      const room = { id: 'room-1', participants: [], producers: [], consumers: [] };
+      rooms.leaveRoomForSocket.mockResolvedValueOnce({
+        closed: false,
+        left: true,
+        reconnecting: true,
+        participantPatch: { connected: false, screenSharing: false },
+        room
+      });
+      const socket = {
+        id: 'teacher-socket',
+        data: { participantId: 'teacher-participant' },
+        leave: jest.fn(async (_roomId: string) => undefined)
+      };
+      const ack = jest.fn();
+
+      await gateway.leaveRoom(socket as never, { roomId: 'room-1' }, ack);
+
+      expect(rooms.leaveRoomForSocket).toHaveBeenCalledWith('room-1', 'teacher-participant', 'teacher-socket');
+      expect(socket.leave).toHaveBeenCalledWith('room-1');
+      expect(emissions).toEqual([
+        {
+          target: 'room-1',
+          event: 'participant:updated',
+          payload: ['teacher-participant', { connected: false, screenSharing: false }]
+        },
+        { target: 'room-1', event: 'room:updated', payload: room }
+      ]);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'participant:updated', 'teacher-participant', {
+        connected: false,
+        screenSharing: false
+      });
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'room:updated', room);
+      expect(emissions.some((emission) => emission.event === 'participant:left')).toBe(false);
+      expect(emissions.some((emission) => emission.event === 'room:closed')).toBe(false);
+      expect(ack).toHaveBeenCalledWith({ ok: true, data: undefined });
+    });
+
+    it('keeps normal participant leave events for explicit student room leave', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      rooms.leaveRoomForSocket.mockResolvedValueOnce({ closed: false, left: true });
+      const socket = {
+        id: 'student-socket',
+        data: { participantId: 'student-participant' },
+        leave: jest.fn(async (_roomId: string) => undefined)
+      };
+      const ack = jest.fn();
+
+      await gateway.leaveRoom(socket as never, { roomId: 'room-1' }, ack);
+
+      expect(rooms.leaveRoomForSocket).toHaveBeenCalledWith('room-1', 'student-participant', 'student-socket');
+      expect(emissions).toEqual([{ target: 'room-1', event: 'participant:left', payload: 'student-participant' }]);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'participant:left', 'student-participant');
+      expect(ack).toHaveBeenCalledWith({ ok: true, data: undefined });
+    });
+
+    it('keeps normal host close behavior for explicit non-class room leave', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      rooms.leaveRoomForSocket.mockResolvedValueOnce({ closed: true, left: true });
+      const socket = {
+        id: 'host-socket',
+        data: { participantId: 'host-participant' },
+        leave: jest.fn(async (_roomId: string) => undefined)
+      };
+      const ack = jest.fn();
+
+      await gateway.leaveRoom(socket as never, { roomId: 'room-1' }, ack);
+
+      expect(rooms.leaveRoomForSocket).toHaveBeenCalledWith('room-1', 'host-participant', 'host-socket');
+      expect(emissions).toEqual([
+        { target: 'room-1', event: 'participant:left', payload: 'host-participant' },
+        { target: 'room-1', event: 'room:closed', payload: 'room-1' }
+      ]);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'participant:left', 'host-participant');
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'room:closed', 'room-1');
+      expect(ack).toHaveBeenCalledWith({ ok: true, data: undefined });
     });
 
     it('emits SVC layer events on SVC-specific socket channels', () => {
@@ -913,6 +1187,7 @@ interface GatewayRoomsHarness {
   onRoomSnapshotGenerated: jest.Mock;
   onRoomFailed: jest.Mock;
   onRoomClosed: jest.Mock;
+  onChatReadReceipt: jest.Mock;
   onClassSessionLifecycleEvent: jest.Mock;
   assertCanWatchClassSession: jest.Mock;
   lookupRoomOwner: jest.Mock;
@@ -925,7 +1200,11 @@ interface GatewayRoomsHarness {
   admit: jest.Mock;
   sendChat: jest.Mock;
   markChatRead: jest.Mock;
+  raiseHand: jest.Mock;
+  lowerStudentHand: jest.Mock;
+  setStudentSpeakingPermission: jest.Mock;
   moderateStudentMedia: jest.Mock;
+  moderateAllStudentMedia: jest.Mock;
   producerDynacastSignalTarget: jest.Mock;
   recordDynacastSignalDelivery: jest.Mock;
   recordDynacastSignalFailure: jest.Mock;
@@ -1010,6 +1289,7 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
       roomClosedListener = listener;
       return jest.fn();
     }),
+    onChatReadReceipt: jest.fn(() => jest.fn()),
     onClassSessionLifecycleEvent: jest.fn((listener: (event: 'session:started' | 'session:ended', payload: ClassSessionLifecycleEvent) => void) => {
       classSessionLifecycleListener = listener;
       return jest.fn();
@@ -1098,7 +1378,11 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
     admit: jest.fn(),
     sendChat: jest.fn(),
     markChatRead: jest.fn(),
+    raiseHand: jest.fn(),
+    lowerStudentHand: jest.fn(),
+    setStudentSpeakingPermission: jest.fn(),
     moderateStudentMedia: jest.fn(),
+    moderateAllStudentMedia: jest.fn(),
     producerDynacastSignalTarget: jest.fn(async (_event: ProducerDynacastEvent, roomSocketCount: number) =>
       options.targetMissing
         ? undefined
@@ -1120,7 +1404,10 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
     publish: jest.fn(async () => undefined),
     publishTargeted: jest.fn(async () => undefined)
   };
-  const gateway = new RoomsGateway(rooms as never, {} as never, signals as never);
+  const recordings = {
+    onClassSessionRecordingEvent: jest.fn(() => jest.fn())
+  };
+  const gateway = new RoomsGateway(rooms as never, {} as never, signals as never, recordings as never);
   const emissions: Array<{ target: string; event: string; payload: unknown }> = [];
   const socketRegistry = new Map<string, ReturnType<typeof socketStub>>();
   gateway.server = {

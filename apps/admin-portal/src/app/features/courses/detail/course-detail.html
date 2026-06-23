@@ -1,0 +1,111 @@
+<a class="back-link" routerLink="/courses">Back to courses</a>
+
+@if (loading()) {
+  <section class="detail-state">Loading course...</section>
+} @else if (error() && !course()) {
+  <section class="detail-state error" role="alert">{{ error() }}</section>
+} @else if (course(); as item) {
+  <section class="detail-head">
+    <div>
+      <p class="eyebrow">Course group</p>
+      <h1>{{ item.courseName }}</h1>
+      <p>{{ item.courseId }}</p>
+    </div>
+    <span class="data-pill {{ statusClass(item.status) }}">{{ item.status }}</span>
+  </section>
+
+  @if (error()) {
+    <p class="detail-state error" role="alert">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="detail-state success" role="status">{{ success() }}</p>
+  }
+
+  <section class="detail-grid">
+    <article>
+      <span>Batches</span>
+      <strong>{{ item.batchCount }}</strong>
+    </article>
+    <article>
+      <span>Active students</span>
+      <strong>{{ item.activeStudentCount }}</strong>
+    </article>
+    <article>
+      <span>Teachers</span>
+      <strong>{{ item.teacherCount }}</strong>
+    </article>
+    <article>
+      <span>Updated</span>
+      <strong>{{ item.updatedAt ? (item.updatedAt | date: 'medium') : 'Unknown' }}</strong>
+    </article>
+  </section>
+
+  <section class="data-table-shell edit-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Course label</h2>
+        <p>Renaming updates the course name on batches in this course group.</p>
+      </div>
+    </div>
+    <form class="edit-form" [formGroup]="form" (ngSubmit)="save()">
+      <label>
+        <span>Course name</span>
+        <input type="text" formControlName="courseName" />
+      </label>
+      <button type="submit" class="table-action primary" [disabled]="saving()">{{ saving() ? 'Saving...' : 'Save' }}</button>
+    </form>
+  </section>
+
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Batches</h2>
+        <p>{{ item.batches.length }} batches in this course group</p>
+      </div>
+      <div class="toolbar-actions">
+        <a class="table-action" routerLink="/batches" [queryParams]="{ courseId: item.courseId }">Open batch manager</a>
+        <a class="table-action primary" routerLink="/batches" [queryParams]="{ courseId: item.courseId, create: 1 }">Create batch</a>
+      </div>
+    </div>
+    <div class="data-table-wrap" style="--data-table-min-width: 980px">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Batch</th>
+            <th>Teacher</th>
+            <th>Status</th>
+            <th>Schedule</th>
+            <th>Students</th>
+            <th>Next session</th>
+            <th class="row-menu-cell">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (batch of item.batches; track trackByBatch($index, batch)) {
+            <tr>
+              <td>
+                <strong>{{ batch.name }}</strong>
+                <small>{{ batch.id }}</small>
+              </td>
+              <td>
+                <strong>{{ batch.teacherName || batch.teacherId }}</strong>
+                <small>{{ batch.teacherEmail || batch.teacherId }}</small>
+              </td>
+              <td><span class="data-pill status-{{ batch.status.toLowerCase() }}">{{ batch.status.toLowerCase() }}</span></td>
+              <td>{{ scheduleLabel(batch.schedule) }}</td>
+              <td>{{ batch.enrolledCount }} / {{ batch.maxCapacity }}</td>
+              <td>{{ batch.nextSessionAt ? (batch.nextSessionAt | date: 'short') : 'None planned' }}</td>
+              <td class="row-menu-cell">
+                <a class="table-action" [routerLink]="['/batches', batch.id]">View</a>
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="7" class="empty-state">No batches in this course group.</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+}

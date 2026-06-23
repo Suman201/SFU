@@ -1,10 +1,22 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormField, FormRoot, form as signalForm } from '@angular/forms/signals';
-import type { ChatMessage, ChatMessageScope, ChatThreadSummary, ChatThreadSummaryResponse, SendChatMessageRequest } from '@native-sfu/contracts';
+import type {
+  ChatAttachment,
+  ChatDeliveryState as PersistedChatDeliveryState,
+  ChatMessage,
+  ChatMessageScope,
+  ChatReadReceiptEvent,
+  ChatReadState,
+  ChatThreadSummary,
+  ChatThreadSummaryResponse,
+  SendChatAttachment,
+  SendChatMessageRequest
+} from '@native-sfu/contracts';
 import { AuthService } from '../../../core/services/auth.service';
 import { RoomStore } from '../../../core/services/room.store';
 import { SocketService } from '../../../core/services/socket.service';
 import { ClassSessionService } from '../class-session.service';
+import { firstValueFrom } from 'rxjs';
 
 interface ChatPosition {
   x: number;
@@ -23,9 +35,17 @@ interface ChatComposerFormModel {
   message: string;
 }
 
-type ChatDeliveryState = 'sending' | 'sent' | 'failed';
+const CHAT_ATTACHMENT_MAX_COUNT = 3;
+const CHAT_ATTACHMENT_MAX_SIZE_BYTES = 2 * 1024 * 1024;
+const CHAT_ATTACHMENT_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const CHAT_ATTACHMENT_FILE_MIME_TYPES = new Set([...CHAT_ATTACHMENT_IMAGE_MIME_TYPES, 'application/pdf']);
 
-type UiChatMessage = ChatMessage & {
+type PendingChatAttachment = ChatAttachment & { id: string };
+type ChatDeliveryState = PersistedChatDeliveryState | 'sending' | 'failed';
+
+type ChatMessageCore = Omit<ChatMessage, 'deliveryState'>;
+
+type UiChatMessage = ChatMessageCore & {
   deliveryState?: ChatDeliveryState;
   failedRequest?: SendChatMessageRequest;
   localOnly?: boolean;
@@ -78,9 +98,11 @@ export class SessionChat {
   protected readonly chatModel = signal<ChatComposerFormModel>({ message: '' });
   protected readonly chatForm = signalForm(this.chatModel);
   protected readonly messages = signal<UiChatMessage[]>([]);
+  protected readonly pendingAttachments = signal<PendingChatAttachment[]>([]);
   protected readonly chatSummary = signal<ChatThreadSummaryResponse | null>(null);
   protected readonly loadingHistory = signal(false);
   protected readonly sending = signal(false);
+  protected readonly uploadingAttachments = signal(0);
   protected readonly socketConnected = signal(this.realtimeSocket.connected);
   protected readonly chatError = signal('');
   protected readonly nextBefore = signal<string | null>(null);
@@ -106,11 +128,20 @@ export class SessionChat {
   protected readonly activeRecipientId = computed(() => (this.isTeacherChat() && this.chatMode() === 'private' ? this.selectedThreadParticipantId() : ''));
   protected readonly visibleMessages = computed(() => this.messages().filter((message) => this.messageBelongsToActiveView(message)));
   protected readonly threadSummaryMap = computed(() => new Map(this.chatSummary()?.threads.map((thread) => [thread.participantId ?? thread.id, thread]) ?? []));
+  protected readonly privateThreadKeys = computed(
+    () =>
+      new Set(
+        (this.chatSummary()?.threads ?? [])
+          .filter((thread) => thread.scope === 'private' && thread.threadKey)
+          .map((thread) => thread.threadKey as string)
+      )
+  );
   protected readonly broadcastSummary = computed(() => this.chatSummary()?.broadcast ?? null);
   protected readonly totalUnreadCount = computed(() => (this.chatSummary()?.threads ?? []).reduce((total, thread) => total + thread.unreadCount, 0));
   protected readonly unreadCount = computed(() => (this.isCollapsed() ? this.totalUnreadCount() : 0));
+  protected readonly composerHasContent = computed(() => Boolean(this.chatModel().message.trim() || this.pendingAttachments().length));
   protected readonly canSend = computed(() => {
-    if (!this.live() || !this.joined() || !this.socketConnected() || this.sending() || !this.roomId()) {
+    if (!this.live() || !this.joined() || !this.socketConnected() || this.sending() || this.uploadingAttachments() > 0 || !this.roomId()) {
       return false;
     }
     return !this.isTeacherChat() || this.chatMode() === 'broadcast' || Boolean(this.activeRecipientId());
@@ -134,6 +165,7 @@ export class SessionChat {
     if (!this.live()) return 'Chat opens when the session is live.';
     if (!this.joined()) return 'Join the classroom before sending chat.';
     if (!this.socketConnected()) return 'Reconnecting to chat.';
+    if (this.uploadingAttachments() > 0) return 'Uploading attachment.';
     if (this.sending()) return 'Sending message.';
     if (this.isTeacherChat() && this.chatMode() === 'private' && !this.activeRecipientId()) return 'Select a student thread.';
     return '';
@@ -141,6 +173,7 @@ export class SessionChat {
 
   private dragState: ChatDragState | null = null;
   private suppressNextToggle = false;
+  private readonly attachmentBlobUrls: string[] = [];
 
   constructor() {
     effect(() => {
@@ -170,6 +203,9 @@ export class SessionChat {
   ngOnDestroy(): void {
     for (const dispose of this.socketDisposers.splice(0)) {
       dispose();
+    }
+    for (const url of this.attachmentBlobUrls.splice(0)) {
+      URL.revokeObjectURL(url);
     }
   }
 
@@ -263,8 +299,9 @@ export class SessionChat {
     this.chatForm().markAsTouched();
 
     const body = this.chatModel().message.trim();
+    const attachments = this.pendingAttachments().map((attachment) => this.pendingAttachmentToRequest(attachment));
 
-    if (!body || !this.canSend()) {
+    if ((!body && !attachments.length) || !this.canSend()) {
       return;
     }
 
@@ -273,10 +310,93 @@ export class SessionChat {
       message: body,
       scope: this.isTeacherChat() ? this.chatMode() : 'private'
     };
+    if (attachments.length) {
+      request.attachments = attachments;
+    }
     if (this.isTeacherChat() && this.chatMode() === 'private') {
       request.recipientId = this.activeRecipientId();
     }
     this.sendChatRequest(request);
+  }
+
+  protected attachFiles(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    input.value = '';
+    const remainingSlots = CHAT_ATTACHMENT_MAX_COUNT - this.pendingAttachments().length - this.uploadingAttachments();
+    if (remainingSlots <= 0) {
+      this.chatError.set(`You can attach up to ${CHAT_ATTACHMENT_MAX_COUNT} items.`);
+      return;
+    }
+    if (files.length > remainingSlots) {
+      this.chatError.set(`You can attach up to ${CHAT_ATTACHMENT_MAX_COUNT} items.`);
+    }
+    for (const file of files.slice(0, remainingSlots)) {
+      void this.addFileAttachment(file);
+    }
+  }
+
+  protected addLinkAttachment(): void {
+    const rawUrl = globalThis.prompt('Paste a link to attach');
+    if (!rawUrl?.trim()) {
+      return;
+    }
+    let url: URL;
+    try {
+      url = new URL(rawUrl.trim());
+    } catch {
+      this.chatError.set('Enter a valid link.');
+      return;
+    }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      this.chatError.set('Links must use http or https.');
+      return;
+    }
+    if (!this.canAddAttachment()) {
+      return;
+    }
+    this.pendingAttachments.update((attachments) => [
+      ...attachments,
+      {
+        id: this.localMessageId(),
+        type: 'link',
+        title: url.hostname,
+        url: url.toString()
+      }
+    ]);
+    this.chatError.set('');
+  }
+
+  protected removePendingAttachment(id: string): void {
+    this.pendingAttachments.update((attachments) => attachments.filter((attachment) => attachment.id !== id));
+  }
+
+  protected openAttachment(event: Event, attachment: ChatAttachment | PendingChatAttachment): void {
+    if (attachment.type === 'link') {
+      return;
+    }
+    event.preventDefault();
+    const attachmentId = attachment.attachmentId ?? attachment.id;
+    const sessionId = this.sessionId();
+    if (!sessionId || !attachmentId) {
+      this.chatError.set('Attachment is not available yet.');
+      return;
+    }
+    firstValueFrom(this.classSessions.downloadChatAttachment(sessionId, attachmentId, { batchId: this.batchId() }))
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        this.attachmentBlobUrls.push(url);
+        const opened = window.open(url, '_blank', 'noopener,noreferrer');
+        if (!opened) {
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = this.attachmentDownloadName(attachment) ?? 'class-chat-attachment';
+          link.click();
+        }
+      })
+      .catch((error: unknown) => {
+        this.chatError.set(this.classSessions.errorMessage(error));
+      });
   }
 
   protected retryMessage(message: UiChatMessage): void {
@@ -291,6 +411,8 @@ export class SessionChat {
     if (!this.isMine(message)) return '';
     if (message.deliveryState === 'sending') return 'Sending';
     if (message.deliveryState === 'failed') return 'Failed';
+    if (message.deliveryState === 'read') return 'Read';
+    if (message.deliveryState === 'delivered') return 'Delivered';
     return 'Sent';
   }
 
@@ -320,6 +442,7 @@ export class SessionChat {
     const optimisticMessage = this.optimisticMessage(tempId, request, body);
     this.upsertMessages([optimisticMessage]);
     this.chatModel.set({ message: '' });
+    this.pendingAttachments.set([]);
     this.chatForm().reset();
     this.sending.set(true);
     this.chatError.set('');
@@ -328,7 +451,7 @@ export class SessionChat {
       .then((message) => {
         this.reconcileLocalEcho(message, tempId);
         this.messages.update((messages) => messages.filter((item) => item.id !== tempId));
-        this.upsertMessages([{ ...message, deliveryState: 'sent' }]);
+        this.upsertMessages([{ ...message, deliveryState: message.deliveryState ?? 'sent' }]);
         this.loadChatSummary(true);
       })
       .catch((error: unknown) => {
@@ -350,18 +473,78 @@ export class SessionChat {
       });
   }
 
-  protected senderName(message: ChatMessage): string {
+  private async addFileAttachment(file: File): Promise<void> {
+    if (!this.canAddAttachment()) {
+      return;
+    }
+    if (!CHAT_ATTACHMENT_FILE_MIME_TYPES.has(file.type)) {
+      this.chatError.set('Only PDF, JPEG, PNG, GIF, and WebP attachments are allowed.');
+      return;
+    }
+    if (file.size > CHAT_ATTACHMENT_MAX_SIZE_BYTES) {
+      this.chatError.set('Attachments cannot exceed 2 MB.');
+      return;
+    }
+    const sessionId = this.sessionId();
+    if (!sessionId) {
+      this.chatError.set('Join the classroom before attaching files.');
+      return;
+    }
+    this.uploadingAttachments.update((count) => count + 1);
+    try {
+      const uploaded = await firstValueFrom(this.classSessions.uploadChatAttachments(sessionId, [file], { batchId: this.batchId() }));
+      const attachment = uploaded[0];
+      if (!attachment) {
+        throw new Error('No attachment returned');
+      }
+      this.pendingAttachments.update((attachments) => [
+        ...attachments,
+        {
+          ...attachment,
+          id: attachment.id || attachment.attachmentId || this.localMessageId()
+        }
+      ]);
+      this.chatError.set('');
+    } catch (error: unknown) {
+      this.chatError.set(this.classSessions.errorMessage(error));
+    } finally {
+      this.uploadingAttachments.update((count) => Math.max(0, count - 1));
+    }
+  }
+
+  private canAddAttachment(): boolean {
+    if (this.pendingAttachments().length + this.uploadingAttachments() >= CHAT_ATTACHMENT_MAX_COUNT) {
+      this.chatError.set(`You can attach up to ${CHAT_ATTACHMENT_MAX_COUNT} items.`);
+      return false;
+    }
+    return true;
+  }
+
+  private pendingAttachmentToRequest(attachment: PendingChatAttachment): SendChatAttachment {
+    return {
+      id: attachment.id,
+      ...(attachment.attachmentId ? { attachmentId: attachment.attachmentId } : {}),
+      type: attachment.type,
+      ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+      ...(attachment.title ? { title: attachment.title } : {}),
+      ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+      ...(typeof attachment.size === 'number' ? { size: attachment.size } : {}),
+      ...(attachment.url ? { url: attachment.url } : {})
+    };
+  }
+
+  protected senderName(message: ChatMessageCore): string {
     return message.senderName || this.currentUser();
   }
 
-  protected senderRole(message: ChatMessage): string {
+  protected senderRole(message: ChatMessageCore): string {
     const role = message.senderRole?.toLowerCase();
     if (role === 'teacher' || role === 'host' || role === 'co_host') return 'Teacher';
     if (role === 'admin') return 'Admin';
     return 'Student';
   }
 
-  protected messageTime(message: ChatMessage): string {
+  protected messageTime(message: ChatMessageCore): string {
     return new Intl.DateTimeFormat('en', {
       hour: '2-digit',
       minute: '2-digit',
@@ -369,14 +552,38 @@ export class SessionChat {
     }).format(new Date(message.createdAt));
   }
 
-  protected isMine(message: ChatMessage): boolean {
+  protected isMine(message: ChatMessageCore): boolean {
     const localParticipantId = this.store.localParticipantId();
     const userId = this.auth.user()?.id;
     return Boolean(message.senderId && (message.senderId === localParticipantId || message.senderId === userId));
   }
 
-  protected isAnnouncement(message: ChatMessage): boolean {
+  protected isAnnouncement(message: ChatMessageCore): boolean {
     return message.scope === 'broadcast';
+  }
+
+  protected attachmentTitle(attachment: ChatAttachment | PendingChatAttachment): string {
+    return attachment.title || attachment.fileName || attachment.url || 'Attachment';
+  }
+
+  protected attachmentDetail(attachment: ChatAttachment | PendingChatAttachment): string {
+    if (attachment.type === 'link' && attachment.url) {
+      return this.linkHost(attachment.url);
+    }
+    const parts = [attachment.mimeType ?? (attachment.type === 'pdf' ? 'PDF' : attachment.type), this.formatAttachmentSize(attachment.size)];
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  protected attachmentHref(attachment: ChatAttachment | PendingChatAttachment): string {
+    return attachment.type === 'link' ? attachment.url || '#' : '#';
+  }
+
+  protected attachmentDownloadName(attachment: ChatAttachment | PendingChatAttachment): string | null {
+    return attachment.type === 'link' ? null : attachment.fileName || attachment.title || 'class-chat-attachment';
+  }
+
+  protected isImageAttachment(attachment: ChatAttachment | PendingChatAttachment): boolean {
+    return attachment.type === 'image' && Boolean(attachment.dataUrl || attachment.url);
   }
 
   private bindSocketEvents(): void {
@@ -388,9 +595,16 @@ export class SessionChat {
         return;
       }
       this.reconcileLocalEcho(message);
-      this.upsertMessages([{ ...message, deliveryState: this.isMine(message) ? 'sent' : undefined }]);
+      this.upsertMessages([{ ...message, deliveryState: this.isMine(message) ? message.deliveryState ?? 'sent' : undefined }]);
       this.loadChatSummary(true);
       queueMicrotask(() => this.markActiveViewRead());
+    };
+    const handleRead = (receipt: ChatReadReceiptEvent) => {
+      if (receipt.sessionId !== this.sessionId() || receipt.roomId !== this.roomId()) {
+        return;
+      }
+      this.applyReadReceipt(receipt);
+      this.loadChatSummary(true);
     };
     const handleConnect = () => {
       this.socketConnected.set(true);
@@ -402,10 +616,12 @@ export class SessionChat {
     };
 
     this.socket.on('chat:message', handleMessage);
+    this.socket.on('chat:read', handleRead);
     this.realtimeSocket.on('connect', handleConnect);
     this.realtimeSocket.on('disconnect', handleDisconnect);
     this.socketDisposers.push(() => {
       this.socket.off('chat:message', handleMessage);
+      this.socket.off('chat:read', handleRead);
       this.realtimeSocket.off('connect', handleConnect);
       this.realtimeSocket.off('disconnect', handleDisconnect);
     });
@@ -432,7 +648,7 @@ export class SessionChat {
     this.chatError.set('');
     this.classSessions.getChatHistory(sessionId, { batchId, participantId, scope, limit: 80 }).subscribe({
       next: (history) => {
-        this.upsertMessages(history.messages.map((message) => ({ ...message, deliveryState: this.isMine(message) ? 'sent' : undefined })));
+        this.upsertMessages(history.messages.map((message) => ({ ...message, deliveryState: this.isMine(message) ? message.deliveryState ?? 'sent' : undefined })));
         this.nextBefore.set(history.nextBefore ?? null);
         this.loadingHistory.set(false);
         this.markActiveViewRead();
@@ -460,7 +676,7 @@ export class SessionChat {
       next: (summary) => {
         this.chatSummary.set(summary);
         const summaryMessages = summary.threads.flatMap((thread) => (thread.lastMessage ? [thread.lastMessage] : []));
-        this.upsertMessages(summaryMessages.map((message) => ({ ...message, deliveryState: this.isMine(message) ? 'sent' : undefined })));
+        this.upsertMessages(summaryMessages.map((message) => ({ ...message, deliveryState: this.isMine(message) ? message.deliveryState ?? 'sent' : undefined })));
       },
       error: () => undefined
     });
@@ -503,15 +719,16 @@ export class SessionChat {
     if (!force && this.lastMarkedReadKeys.has(key)) {
       return;
     }
-    this.classSessions.markChatRead(sessionId, { batchId, roomId, participantId, scope, readAt: latestReadAt }).subscribe({
-      next: () => {
+    this.socket
+      .emitAck('chat:mark-read', { sessionId, roomId, participantId, scope, readAt: latestReadAt })
+      .then((state: ChatReadState) => {
         this.lastMarkedReadKeys.add(key);
+        this.applyReadReceipt(state);
         this.loadChatSummary(true);
-      },
-      error: () => {
+      })
+      .catch(() => {
         this.lastMarkedReadKeys.delete(key);
-      }
-    });
+      });
   }
 
   private latestReadAtFor(scope: ChatMessageScope, participantId: string | undefined): string {
@@ -520,7 +737,7 @@ export class SessionChat {
       .filter((message) => {
         if (scope === 'broadcast') return true;
         if (!this.isTeacherChat()) return true;
-        return Boolean(participantId && (message.senderId === participantId || message.recipientId === participantId));
+        return this.messageMatchesTeacherThread(message, participantId);
       })
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
     return messages[0]?.createdAt ?? '';
@@ -543,7 +760,7 @@ export class SessionChat {
         byId.set(message.id, {
           ...current,
           ...message,
-          deliveryState: message.deliveryState ?? current?.deliveryState,
+          deliveryState: this.mergeDeliveryState(current?.deliveryState, message.deliveryState),
           failedRequest: message.failedRequest ?? current?.failedRequest
         });
       }
@@ -564,6 +781,21 @@ export class SessionChat {
       ...(request.recipientId ? { recipientId: request.recipientId } : {}),
       scope: request.scope ?? 'private',
       message: body,
+      ...(request.attachments?.length
+        ? {
+            attachments: request.attachments.map((attachment, index) => ({
+              id: `${id}-attachment-${index}`,
+              type: attachment.type,
+              ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+              ...(attachment.title ? { title: attachment.title } : {}),
+              ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+              ...(typeof attachment.size === 'number' ? { size: attachment.size } : {}),
+              ...(attachment.id ? { attachmentId: attachment.attachmentId ?? attachment.id } : {}),
+              ...(attachment.url ? { url: attachment.url } : {}),
+              createdAt: now
+            }))
+          }
+        : {}),
       shadowMuted: false,
       createdAt: now,
       deliveryState: 'sending',
@@ -586,7 +818,67 @@ export class SessionChat {
     });
   }
 
-  private findMatchingLocalMessage(messages: readonly UiChatMessage[], message: ChatMessage, preferredTempId?: string): UiChatMessage | undefined {
+  private applyReadReceipt(receipt: Pick<ChatReadReceiptEvent, 'scope' | 'threadKey' | 'participantId' | 'userId' | 'lastReadAt'>): void {
+    if (receipt.scope !== 'private') {
+      return;
+    }
+    if (receipt.userId === this.auth.user()?.id) {
+      return;
+    }
+    const lastReadTime = Date.parse(receipt.lastReadAt);
+    if (Number.isNaN(lastReadTime)) {
+      return;
+    }
+    this.messages.update((messages) =>
+      messages.map((message) => {
+        if (!this.isMine(message) || message.localOnly || message.scope !== 'private' || !this.messageMatchesReadReceipt(message, receipt)) {
+          return message;
+        }
+        const messageTime = Date.parse(message.createdAt);
+        if (Number.isNaN(messageTime) || messageTime > lastReadTime) {
+          return message;
+        }
+        return {
+          ...message,
+          deliveryState: 'read',
+          readAt: receipt.lastReadAt
+        };
+      })
+    );
+  }
+
+  private messageMatchesReadReceipt(
+    message: ChatMessageCore,
+    receipt: Pick<ChatReadReceiptEvent, 'threadKey' | 'participantId'>
+  ): boolean {
+    if (receipt.threadKey && message.threadKey) {
+      return receipt.threadKey === message.threadKey;
+    }
+    if (!receipt.participantId) {
+      return false;
+    }
+    return message.senderId === receipt.participantId || message.recipientId === receipt.participantId;
+  }
+
+  private mergeDeliveryState(current: ChatDeliveryState | undefined, incoming: ChatDeliveryState | undefined): ChatDeliveryState | undefined {
+    if (!incoming) {
+      return current;
+    }
+    if (!current || current === 'sending' || current === 'failed') {
+      return incoming;
+    }
+    const rank: Record<Exclude<ChatDeliveryState, 'sending' | 'failed'>, number> = {
+      sent: 1,
+      delivered: 2,
+      read: 3
+    };
+    if (incoming === 'sending' || incoming === 'failed') {
+      return current;
+    }
+    return rank[incoming] >= rank[current] ? incoming : current;
+  }
+
+  private findMatchingLocalMessage(messages: readonly UiChatMessage[], message: ChatMessageCore, preferredTempId?: string): UiChatMessage | undefined {
     return messages.find((item) => {
       if (!item.localOnly) return false;
       if (preferredTempId && item.id === preferredTempId) return true;
@@ -594,6 +886,7 @@ export class SessionChat {
         return (
           item.message === message.message &&
           item.scope === message.scope &&
+          this.attachmentsMatchLoosely(item, message) &&
           this.recipientsMatchLoosely(item, message) &&
           Math.abs(Date.parse(message.createdAt) - Date.parse(item.createdAt)) < 120_000
         );
@@ -601,8 +894,30 @@ export class SessionChat {
       return (
         item.message === message.message &&
         item.scope === message.scope &&
+        this.attachmentsMatchLoosely(item, message) &&
         this.recipientsMatchLoosely(item, message) &&
         Math.abs(Date.parse(message.createdAt) - Date.parse(item.createdAt)) < 30_000
+      );
+    });
+  }
+
+  private attachmentsMatchLoosely(local: UiChatMessage, persisted: ChatMessageCore): boolean {
+    const localAttachments = local.attachments ?? [];
+    const persistedAttachments = persisted.attachments ?? [];
+    if (!localAttachments.length && !persistedAttachments.length) {
+      return true;
+    }
+    if (localAttachments.length !== persistedAttachments.length) {
+      return false;
+    }
+    return localAttachments.every((attachment, index) => {
+      const persistedAttachment = persistedAttachments[index];
+      return (
+        attachment.type === persistedAttachment?.type &&
+        (attachment.attachmentId || attachment.id || '') ===
+          (persistedAttachment.attachmentId || persistedAttachment.id || '') &&
+        (attachment.url || '') === (persistedAttachment.url || '') &&
+        (attachment.fileName || attachment.title || '') === (persistedAttachment.fileName || persistedAttachment.title || '')
       );
     });
   }
@@ -629,7 +944,7 @@ export class SessionChat {
     this.selectedThreadParticipantId.set(participants[0]?.id ?? '');
   }
 
-  private messageBelongsToActiveView(message: ChatMessage): boolean {
+  private messageBelongsToActiveView(message: ChatMessageCore): boolean {
     if (message.scope === 'broadcast') {
       return !this.isTeacherChat() || this.chatMode() === 'broadcast';
     }
@@ -643,10 +958,10 @@ export class SessionChat {
       return false;
     }
     const participantId = this.activeRecipientId();
-    return Boolean(participantId && (message.senderId === participantId || message.recipientId === participantId));
+    return this.messageMatchesTeacherThread(message, participantId);
   }
 
-  private messageIsRelevantToCurrentUser(message: ChatMessage): boolean {
+  private messageIsRelevantToCurrentUser(message: ChatMessageCore): boolean {
     if (message.scope === 'broadcast') {
       return true;
     }
@@ -660,7 +975,42 @@ export class SessionChat {
       return false;
     }
 
+    if (message.threadKey && this.privateThreadKeys().has(message.threadKey)) {
+      return true;
+    }
     return this.threadParticipants().some((participant) => message.senderId === participant.id || message.recipientId === participant.id);
+  }
+
+  private messageMatchesTeacherThread(message: ChatMessageCore, participantId: string | undefined): boolean {
+    if (!participantId) {
+      return false;
+    }
+    const summary = this.threadSummaryMap().get(participantId);
+    if (summary?.threadKey && message.threadKey === summary.threadKey) {
+      return true;
+    }
+    return message.senderId === participantId || message.recipientId === participantId;
+  }
+
+  private formatAttachmentSize(size: number | undefined): string {
+    if (!size) {
+      return '';
+    }
+    if (size < 1024) {
+      return `${size} B`;
+    }
+    if (size < 1024 * 1024) {
+      return `${Math.round(size / 1024)} KB`;
+    }
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  private linkHost(value: string): string {
+    try {
+      return new URL(value).hostname;
+    } catch {
+      return value;
+    }
   }
 
   private clampOffset(chatElement: HTMLElement, nextOffset: ChatPosition): ChatPosition {

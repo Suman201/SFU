@@ -1,6 +1,17 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import type { Consumer, Participant, Producer, ServerToClientEvents, StudentMediaModerationEvent } from '@native-sfu/contracts';
+import type {
+  ClassSessionRecordingEvent,
+  ClassStudentSpeakEvent,
+  ClassStudentMediaModerationResponse,
+  Consumer,
+  Participant,
+  ParticipantPatch,
+  Producer,
+  Recording,
+  ServerToClientEvents,
+  StudentMediaModerationEvent
+} from '@native-sfu/contracts';
 import { AuthService } from '../../../core/services/auth.service';
 import { RoomStore } from '../../../core/services/room.store';
 import { SocketService } from '../../../core/services/socket.service';
@@ -13,18 +24,26 @@ import { SessionChat } from '../session-chat/session-chat';
 interface SessionParticipant {
   id: string;
   name: string;
-  role: 'Teacher' | 'Student' | 'Admin';
+  role: 'Teacher' | 'Student' | 'Admin' | 'Co-host' | 'Viewer';
+  isStudent: boolean;
+  canModerate: boolean;
   initials: string;
   muted: boolean;
   cameraOff: boolean;
   screenSharing: boolean;
+  handRaised: boolean;
+  handRaisedAt?: string;
+  allowedToSpeak: boolean;
+  allowedToSpeakAt?: string;
+  connected: boolean;
 }
 
 type DeviceIdSignal = (() => string | null) & { set(value: string | null): void };
 type DeviceIdState = DeviceIdSignal | (() => string | null) | string | null | undefined;
 type ParticipantMediaState = 'video' | 'audio-only' | 'muted' | 'camera-off' | 'local-hidden' | 'unavailable';
-type ParticipantCardAction = 'mute' | 'camera' | 'visibility';
+type ParticipantCardAction = 'mute' | 'camera' | 'visibility' | 'speak' | 'hand';
 type ParticipantActionState = Partial<Record<ParticipantCardAction, boolean>>;
+type TeacherPreflightMode = 'start' | 'enter';
 
 interface DeviceSwitchingWebRtc {
   refreshDevices(): Promise<void>;
@@ -63,6 +82,10 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   private destroyed = false;
   private reconnectingRoom = false;
   private socketWasDisconnected = false;
+  private watchedSessionId = '';
+  private preflightAudioContext?: AudioContext;
+  private preflightAnalyser?: AnalyserNode;
+  private preflightMeterFrame = 0;
   private readonly socketDisposers: Array<() => void> = [];
   private readonly localProducerIds = new Set<string>();
   private readonly consumedStudentProducerIds = new Set<string>();
@@ -83,6 +106,18 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   protected readonly refreshingDevices = signal(false);
   protected readonly switchingAudioDevice = signal(false);
   protected readonly switchingVideoDevice = signal(false);
+  protected readonly preflightOpen = signal(false);
+  protected readonly preflightPreparing = signal(false);
+  protected readonly preflightActionPending = signal(false);
+  protected readonly preflightError = signal('');
+  protected readonly preflightSocketReady = signal(false);
+  protected readonly microphoneLevel = signal(0);
+  protected readonly mutingAllStudents = signal(false);
+  protected readonly stoppingAllStudentCameras = signal(false);
+  protected readonly lockingClass = signal(false);
+  protected readonly downloadingAttendance = signal(false);
+  protected readonly recordingActionPending = signal(false);
+  protected readonly downloadingRecording = signal(false);
   protected readonly ending = signal(false);
   protected readonly participants = signal<SessionParticipant[]>([]);
   protected readonly studentCursors = signal<WhiteboardCursor[]>([]);
@@ -95,10 +130,74 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   private readonly localSelectedAudioDeviceId = signal('');
   private readonly localSelectedVideoDeviceId = signal('');
   protected readonly sessionLive = computed(() => this.session()?.status === 'live');
+  protected readonly roomLocked = computed(() => Boolean(this.store.room()?.settings.locked));
+  protected readonly studentControlTargets = computed(() => this.participants().filter((participant) => participant.canModerate));
+  protected readonly raisedHandParticipants = computed(() =>
+    this.studentControlTargets()
+      .filter((participant) => participant.handRaised)
+      .sort((left, right) => (left.handRaisedAt ?? '').localeCompare(right.handRaisedAt ?? ''))
+  );
+  protected readonly raisedHandCount = computed(() => this.raisedHandParticipants().length);
+  protected readonly classControlsBusy = computed(
+    () =>
+      this.mutingAllStudents() ||
+      this.stoppingAllStudentCameras() ||
+      this.lockingClass() ||
+      this.downloadingAttendance() ||
+      this.recordingActionPending() ||
+      this.downloadingRecording() ||
+      this.ending()
+  );
+  protected readonly activeRecording = computed(() => this.session()?.activeRecording ?? null);
+  protected readonly latestRecording = computed(() => this.session()?.latestRecording ?? null);
+  protected readonly recordingActive = computed(() => this.isActiveRecording(this.activeRecording()));
+  protected readonly recordingControlLabel = computed(() => {
+    if (this.recordingActionPending()) return this.recordingActive() ? 'Stopping...' : 'Starting...';
+    return this.recordingActive() ? 'Stop Recording' : 'Start Recording';
+  });
+  protected readonly recordingStatusLabel = computed(() => {
+    const active = this.activeRecording();
+    if (active?.status === 'stopping') return 'Recording stopping';
+    if (active?.status === 'starting') return 'Recording starting';
+    if (active?.status === 'recording') return 'Recording live';
+    const latest = this.latestRecording();
+    if (latest?.status === 'stopped') return 'Recording ready';
+    if (latest?.status === 'failed') return 'Recording failed';
+    return 'Not recording';
+  });
   protected readonly audioInputDevices = computed(() => this.webrtc.devices().audioInputs);
   protected readonly videoInputDevices = computed(() => this.webrtc.devices().videoInputs);
   protected readonly selectedAudioDeviceId = computed(() => this.readSelectedDeviceId('audio'));
   protected readonly selectedVideoDeviceId = computed(() => this.readSelectedDeviceId('video'));
+  protected readonly preflightPreviewStream = this.webrtc.localStream;
+  protected readonly preflightMode = computed<TeacherPreflightMode>(() => (this.sessionLive() ? 'enter' : 'start'));
+  protected readonly preflightTitle = computed(() => (this.preflightMode() === 'start' ? 'Start live class' : 'Enter live class'));
+  protected readonly preflightPrimaryLabel = computed(() => {
+    if (this.preflightActionPending()) {
+      return this.preflightMode() === 'start' ? 'Starting...' : 'Entering...';
+    }
+    return this.preflightMode() === 'start' ? 'Start Live Class' : 'Enter Live Class';
+  });
+  protected readonly cameraPreviewReady = computed(() => Boolean(this.preflightPreviewStream()?.getVideoTracks().some((track) => track.readyState === 'live')));
+  protected readonly microphonePreviewReady = computed(() => Boolean(this.preflightPreviewStream()?.getAudioTracks().some((track) => track.readyState === 'live')));
+  protected readonly preflightCanConfirm = computed(
+    () =>
+      Boolean(this.session()) &&
+      this.preflightOpen() &&
+      !this.preflightPreparing() &&
+      !this.preflightActionPending() &&
+      this.preflightSocketReady() &&
+      this.cameraPreviewReady() &&
+      this.microphonePreviewReady()
+  );
+  protected readonly socketReadinessLabel = computed(() => (this.preflightSocketReady() ? 'Socket connected' : 'Connecting socket'));
+  protected readonly cameraReadinessLabel = computed(() => (this.cameraPreviewReady() ? 'Camera ready' : 'Camera permission needed'));
+  protected readonly microphoneReadinessLabel = computed(() => (this.microphonePreviewReady() ? 'Microphone ready' : 'Microphone permission needed'));
+  protected readonly deviceReadinessLabel = computed(() => {
+    if (this.audioInputDevices().length && this.videoInputDevices().length) return 'Devices detected';
+    if (this.preflightPreparing()) return 'Checking devices';
+    return 'Device list pending';
+  });
   protected readonly mediaBusy = computed(() =>
     this.joiningRoom() ||
     this.publishingCamera() ||
@@ -116,7 +215,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   );
   protected readonly chatThreadParticipants = computed(() =>
     this.participants()
-      .filter((participant) => participant.role === 'Student')
+      .filter((participant) => participant.isStudent)
       .map((participant) => ({
         id: participant.id,
         name: participant.name,
@@ -144,12 +243,15 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   );
 
   ngOnInit(): void {
+    this.preflightSocketReady.set(this.realtimeSocket.connected);
     this.bindSocketEvents();
     this.loadSession();
   }
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    this.unwatchSession();
+    void this.stopPreflightPreview();
     for (const dispose of this.socketDisposers.splice(0)) {
       dispose();
     }
@@ -158,7 +260,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   protected async muteStudentMicrophone(participantId: string): Promise<void> {
     const roomId = this.currentRoomId();
-    if (!roomId || this.isParticipantActionPending(participantId, 'mute') || this.isParticipantMicTeacherDisabled(participantId)) {
+    if (!this.canModerateParticipant(participantId) || !roomId || this.isParticipantActionPending(participantId, 'mute') || this.isParticipantMicTeacherDisabled(participantId)) {
       return;
     }
 
@@ -177,7 +279,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   protected async unmuteStudentMicrophone(participantId: string): Promise<void> {
     const roomId = this.currentRoomId();
-    if (!roomId || this.isParticipantActionPending(participantId, 'mute') || !this.isParticipantMicTeacherDisabled(participantId)) {
+    if (!this.canModerateParticipant(participantId) || !roomId || this.isParticipantActionPending(participantId, 'mute') || !this.isParticipantMicTeacherDisabled(participantId)) {
       return;
     }
 
@@ -194,9 +296,66 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     }
   }
 
+  protected async allowStudentToSpeak(participantId: string): Promise<void> {
+    const roomId = this.currentRoomId();
+    if (!this.canModerateParticipant(participantId) || !roomId || this.isParticipantActionPending(participantId, 'speak')) {
+      return;
+    }
+
+    this.setParticipantActionPending(participantId, 'speak', true);
+    this.mediaError.set('');
+    try {
+      const event = await this.socket.emitAck('class:allow-speak', { roomId, participantId });
+      this.applyStudentSpeakResult(event);
+      this.mediaNotice.set('Student can speak now.');
+    } catch (error) {
+      this.mediaError.set(error instanceof Error ? error.message : 'Unable to allow student to speak.');
+    } finally {
+      this.setParticipantActionPending(participantId, 'speak', false);
+    }
+  }
+
+  protected async revokeStudentSpeaking(participantId: string): Promise<void> {
+    const roomId = this.currentRoomId();
+    if (!this.canModerateParticipant(participantId) || !roomId || this.isParticipantActionPending(participantId, 'speak')) {
+      return;
+    }
+
+    this.setParticipantActionPending(participantId, 'speak', true);
+    this.mediaError.set('');
+    try {
+      const event = await this.socket.emitAck('class:revoke-speak', { roomId, participantId });
+      this.applyStudentSpeakResult(event);
+      this.mediaNotice.set('Student speaking permission revoked.');
+    } catch (error) {
+      this.mediaError.set(error instanceof Error ? error.message : 'Unable to revoke speaking permission.');
+    } finally {
+      this.setParticipantActionPending(participantId, 'speak', false);
+    }
+  }
+
+  protected async lowerRaisedHand(participantId: string): Promise<void> {
+    const roomId = this.currentRoomId();
+    if (!this.canModerateParticipant(participantId) || !roomId || this.isParticipantActionPending(participantId, 'hand')) {
+      return;
+    }
+
+    this.setParticipantActionPending(participantId, 'hand', true);
+    this.mediaError.set('');
+    try {
+      const patch = await this.socket.emitAck('class:lower-hand', { roomId, participantId });
+      this.applyParticipantPatch(participantId, patch);
+      this.mediaNotice.set('Raised hand cleared.');
+    } catch (error) {
+      this.mediaError.set(error instanceof Error ? error.message : 'Unable to clear raised hand.');
+    } finally {
+      this.setParticipantActionPending(participantId, 'hand', false);
+    }
+  }
+
   protected async stopStudentCamera(participantId: string): Promise<void> {
     const roomId = this.currentRoomId();
-    if (!roomId || this.isParticipantActionPending(participantId, 'camera') || this.isParticipantCameraTeacherDisabled(participantId)) {
+    if (!this.canModerateParticipant(participantId) || !roomId || this.isParticipantActionPending(participantId, 'camera') || this.isParticipantCameraTeacherDisabled(participantId)) {
       return;
     }
 
@@ -215,7 +374,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   protected async restoreStudentCamera(participantId: string): Promise<void> {
     const roomId = this.currentRoomId();
-    if (!roomId || this.isParticipantActionPending(participantId, 'camera') || !this.isParticipantCameraTeacherDisabled(participantId)) {
+    if (!this.canModerateParticipant(participantId) || !roomId || this.isParticipantActionPending(participantId, 'camera') || !this.isParticipantCameraTeacherDisabled(participantId)) {
       return;
     }
 
@@ -233,7 +392,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   }
 
   protected async toggleStudentMediaVisibility(participantId: string): Promise<void> {
-    if (this.isParticipantActionPending(participantId, 'visibility')) {
+    if (!this.canModerateParticipant(participantId) || this.isParticipantActionPending(participantId, 'visibility')) {
       return;
     }
 
@@ -336,6 +495,223 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     });
   }
 
+  protected async muteAllStudents(): Promise<void> {
+    const roomId = this.currentRoomId();
+    if (!roomId || !this.sessionLive() || !this.roomJoined() || this.mutingAllStudents() || !this.studentControlTargets().length) {
+      return;
+    }
+
+    this.mutingAllStudents.set(true);
+    this.setAllStudentActionPending('mute', true);
+    this.mediaError.set('');
+    try {
+      const response = await this.socket.emitAck('class:mute-all-students', { roomId });
+      this.applyClassModerationResult(response);
+      this.mediaNotice.set(response.moderatedCount ? `Muted ${response.moderatedCount} student microphone${response.moderatedCount === 1 ? '' : 's'}.` : 'No active student microphones to mute.');
+    } catch (error) {
+      this.mediaError.set(error instanceof Error ? error.message : 'Unable to mute all student microphones.');
+    } finally {
+      this.setAllStudentActionPending('mute', false);
+      this.mutingAllStudents.set(false);
+    }
+  }
+
+  protected async stopAllStudentCameras(): Promise<void> {
+    const roomId = this.currentRoomId();
+    if (!roomId || !this.sessionLive() || !this.roomJoined() || this.stoppingAllStudentCameras() || !this.studentControlTargets().length) {
+      return;
+    }
+    const confirmed = globalThis.confirm('Stop all student cameras? Students will need permission to publish video again.');
+    if (!confirmed) {
+      return;
+    }
+
+    this.stoppingAllStudentCameras.set(true);
+    this.setAllStudentActionPending('camera', true);
+    this.mediaError.set('');
+    try {
+      const response = await this.socket.emitAck('class:stop-all-cameras', { roomId });
+      this.applyClassModerationResult(response);
+      this.mediaNotice.set(response.moderatedCount ? `Stopped ${response.moderatedCount} student camera${response.moderatedCount === 1 ? '' : 's'}.` : 'No active student cameras to stop.');
+    } catch (error) {
+      this.mediaError.set(error instanceof Error ? error.message : 'Unable to stop all student cameras.');
+    } finally {
+      this.setAllStudentActionPending('camera', false);
+      this.stoppingAllStudentCameras.set(false);
+    }
+  }
+
+  protected async toggleClassLock(): Promise<void> {
+    const roomId = this.currentRoomId();
+    if (!roomId || !this.sessionLive() || !this.roomJoined() || this.lockingClass()) {
+      return;
+    }
+
+    const nextLocked = !this.roomLocked();
+    this.lockingClass.set(true);
+    this.mediaError.set('');
+    try {
+      if (nextLocked) {
+        await this.socket.emitAck('room:lock', { roomId });
+      } else {
+        await this.socket.emitAck('room:unlock', { roomId });
+      }
+      this.mediaNotice.set(nextLocked ? 'Class locked for new joins.' : 'Class unlocked.');
+    } catch (error) {
+      this.mediaError.set(error instanceof Error ? error.message : nextLocked ? 'Unable to lock class.' : 'Unable to unlock class.');
+    } finally {
+      this.lockingClass.set(false);
+    }
+  }
+
+  protected downloadAttendance(): void {
+    const session = this.session();
+    if (!session || this.downloadingAttendance()) {
+      return;
+    }
+
+    this.downloadingAttendance.set(true);
+    this.mediaError.set('');
+    this.classSessions.downloadAttendance(session.sessionId, session.batchId).subscribe({
+      next: (blob) => {
+        this.saveBlob(blob, `class-session-${session.sessionNumber}-attendance.csv`);
+        this.mediaNotice.set('Attendance downloaded.');
+        this.downloadingAttendance.set(false);
+      },
+      error: (error) => {
+        this.mediaError.set(this.classSessions.errorMessage(error));
+        this.downloadingAttendance.set(false);
+      }
+    });
+  }
+
+  protected startRecording(): void {
+    const session = this.session();
+    if (!session || !this.sessionLive() || this.recordingActionPending() || this.recordingActive()) {
+      return;
+    }
+    const confirmed = globalThis.confirm('Start server-side recording for this class? Students will see a recording indicator.');
+    if (!confirmed) {
+      return;
+    }
+    this.recordingActionPending.set(true);
+    this.mediaError.set('');
+    this.classSessions.startRecording(session.sessionId).subscribe({
+      next: (recording) => {
+        this.applyRecording(recording);
+        this.mediaNotice.set('Recording started.');
+        this.recordingActionPending.set(false);
+      },
+      error: (error) => {
+        this.mediaError.set(this.classSessions.errorMessage(error));
+        this.recordingActionPending.set(false);
+      }
+    });
+  }
+
+  protected stopRecording(): void {
+    const session = this.session();
+    if (!session || !this.recordingActive() || this.recordingActionPending()) {
+      return;
+    }
+    this.recordingActionPending.set(true);
+    this.mediaError.set('');
+    this.classSessions.stopRecording(session.sessionId).subscribe({
+      next: (recording) => {
+        this.applyRecording(recording);
+        this.mediaNotice.set('Recording stopped. The manifest is ready for playback/download.');
+        this.recordingActionPending.set(false);
+      },
+      error: (error) => {
+        this.mediaError.set(this.classSessions.errorMessage(error));
+        this.recordingActionPending.set(false);
+      }
+    });
+  }
+
+  protected toggleRecording(): void {
+    if (this.recordingActive()) {
+      this.stopRecording();
+      return;
+    }
+    this.startRecording();
+  }
+
+  protected downloadLatestRecording(): void {
+    const session = this.session();
+    const recording = this.latestRecording();
+    const recordingId = recording?.recordingId ?? recording?.id;
+    if (!session || !recordingId || this.downloadingRecording()) {
+      return;
+    }
+    this.downloadingRecording.set(true);
+    this.mediaError.set('');
+    this.classSessions.downloadRecording(session.sessionId, recordingId, session.batchId).subscribe({
+      next: (blob) => {
+        this.saveBlob(blob, `class-session-${session.sessionNumber}-recording.json`);
+        this.mediaNotice.set('Recording downloaded.');
+        this.downloadingRecording.set(false);
+      },
+      error: (error) => {
+        this.mediaError.set(this.classSessions.errorMessage(error));
+        this.downloadingRecording.set(false);
+      }
+    });
+  }
+
+  protected async openPreflight(): Promise<void> {
+    const session = this.session();
+    if (!session || this.preflightOpen() || this.roomJoined() || session.status === 'completed' || session.status === 'cancelled') {
+      return;
+    }
+    this.preflightOpen.set(true);
+    this.preflightError.set('');
+    await this.preparePreflightPreview();
+  }
+
+  protected async cancelPreflight(): Promise<void> {
+    await this.stopPreflightPreview();
+    this.preflightOpen.set(false);
+    const batchId = this.session()?.batchId;
+    await this.router.navigate(batchId ? ['/teacher/dashboard/batches', batchId] : ['/teacher/dashboard']);
+  }
+
+  protected async refreshPreflightDevices(): Promise<void> {
+    await this.preparePreflightPreview();
+  }
+
+  protected async switchPreflightMicrophone(deviceId: string): Promise<void> {
+    await this.switchPreflightDevice('audio', deviceId);
+  }
+
+  protected async switchPreflightCamera(deviceId: string): Promise<void> {
+    await this.switchPreflightDevice('video', deviceId);
+  }
+
+  protected confirmPreflight(): void {
+    const session = this.session();
+    if (!session || !this.preflightCanConfirm()) {
+      return;
+    }
+    this.preflightActionPending.set(true);
+    this.preflightError.set('');
+    this.mediaError.set('');
+    if (this.preflightMode() === 'start') {
+      this.classSessions.startSession(session.sessionId, session.batchId).subscribe({
+        next: (payload) => {
+          this.applyPayload(payload);
+          void this.enterLiveClassFromPreflight(payload);
+        },
+        error: (error) => {
+          this.preflightError.set(this.classSessions.errorMessage(error));
+          this.preflightActionPending.set(false);
+        }
+      });
+      return;
+    }
+    void this.enterLiveClassFromPreflight(session);
+  }
+
   private loadSession(): void {
     const sessionId = this.route.snapshot.queryParamMap.get('sessionId') ?? '';
     const batchId = this.route.snapshot.queryParamMap.get('batchId') ?? '';
@@ -349,11 +725,10 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     this.classSessions.getSession(sessionId, batchId).subscribe({
       next: (payload) => {
         this.applyPayload(payload);
-        if (payload.status === 'live' && payload.roomId) {
-          void this.joinAndPublish(payload, { showLoading: true });
-          return;
-        }
         this.loading.set(false);
+        if (payload.status === 'live' || payload.status === 'scheduled') {
+          void this.openPreflight();
+        }
       },
       error: (error) => {
         this.error.set(this.classSessions.errorMessage(error));
@@ -364,12 +739,13 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   private applyPayload(payload: ClassroomPayload): void {
     this.session.set(payload);
+    this.watchSession(payload.sessionId, payload.batchId);
     this.participants.set(payload.participants.map((participant) => this.classroomParticipantToCard(participant)));
   }
 
-  private async joinAndPublish(payload: ClassroomPayload, options: { showLoading: boolean }): Promise<void> {
+  private async joinAndPublish(payload: ClassroomPayload, options: { showLoading: boolean }): Promise<boolean> {
     if (!payload.roomId || payload.status !== 'live' || this.joiningRoom()) {
-      return;
+      return false;
     }
     if (options.showLoading) {
       this.loading.set(true);
@@ -386,7 +762,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       });
       if (this.destroyed) {
         await this.socket.emitAck('room:leave', { roomId: payload.roomId }).catch(() => undefined);
-        return;
+        return false;
       }
       this.joinedRoomId = payload.roomId;
       this.roomJoined.set(true);
@@ -397,9 +773,12 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       this.joiningRoom.set(false);
       if (await this.publishCamera(payload.roomId)) {
         this.mediaNotice.set('Camera and audio are live.');
+        return true;
       }
+      return false;
     } catch (error) {
       this.mediaError.set(error instanceof Error ? error.message : 'Unable to join the live room.');
+      return false;
     } finally {
       this.joiningRoom.set(false);
       if (options.showLoading) {
@@ -414,7 +793,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     let audioProducer: Producer | null = null;
     let videoProducer: Producer | null = null;
     try {
-      const stream = await this.webrtc.startCamera(this.selectedAudioDeviceId() || undefined, this.selectedVideoDeviceId() || undefined);
+      const stream = await this.ensureTeacherPreviewStream();
       this.syncSelectedDevices(stream);
       const transport = await this.webrtc.preparePeer(roomId);
       audioProducer = await this.webrtc.publish(roomId, transport, 'audio', stream);
@@ -434,6 +813,166 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     } finally {
       this.publishingCamera.set(false);
     }
+  }
+
+  private async enterLiveClassFromPreflight(payload: ClassroomPayload): Promise<void> {
+    if (this.destroyed) {
+      return;
+    }
+    if (payload.status !== 'live' || !payload.roomId) {
+      this.preflightError.set('This session is not live yet.');
+      this.preflightActionPending.set(false);
+      return;
+    }
+    const joined = await this.joinAndPublish(payload, { showLoading: true });
+    this.preflightActionPending.set(false);
+    if (!joined) {
+      this.preflightError.set(this.mediaError() || 'Unable to enter the live room. Check your setup and try again.');
+      this.preflightOpen.set(true);
+      return;
+    }
+    this.preflightOpen.set(false);
+    await this.stopPreflightPreview({ keepStream: true });
+  }
+
+  private async preparePreflightPreview(): Promise<void> {
+    if (this.preflightPreparing()) {
+      return;
+    }
+    this.preflightPreparing.set(true);
+    this.preflightError.set('');
+    this.preflightSocketReady.set(this.realtimeSocket.connected);
+    try {
+      await this.deviceWebRtc.refreshDevices();
+      this.stopMicrophoneMeter();
+      this.webrtc.stopCamera();
+      const stream = await this.webrtc.startCamera(this.selectedAudioDeviceId() || undefined, this.selectedVideoDeviceId() || undefined);
+      this.syncSelectedDevices(stream);
+      await this.startMicrophoneMeter(stream);
+      this.preflightSocketReady.set(this.realtimeSocket.connected);
+    } catch (error) {
+      this.preflightError.set(this.mediaDeviceErrorMessage(error, 'Unable to start camera and microphone preview.'));
+      this.stopMicrophoneMeter();
+    } finally {
+      this.preflightPreparing.set(false);
+    }
+  }
+
+  private async switchPreflightDevice(kind: 'audio' | 'video', deviceId: string): Promise<void> {
+    const nextDeviceId = deviceId.trim();
+    const switchingSignal = kind === 'audio' ? this.switchingAudioDevice : this.switchingVideoDevice;
+    if (switchingSignal()) {
+      return;
+    }
+    this.preflightError.set('');
+    switchingSignal.set(true);
+    try {
+      if (!this.preflightPreviewStream()) {
+        this.setSelectedDeviceId(kind, nextDeviceId);
+        await this.preparePreflightPreview();
+        return;
+      }
+      if (kind === 'audio') {
+        if (typeof this.deviceWebRtc.switchMicrophone !== 'function') {
+          throw new Error('Microphone switching is not available.');
+        }
+        await this.deviceWebRtc.switchMicrophone(nextDeviceId);
+      } else {
+        if (typeof this.deviceWebRtc.switchCamera !== 'function') {
+          throw new Error('Camera switching is not available.');
+        }
+        await this.deviceWebRtc.switchCamera(nextDeviceId);
+      }
+      this.setSelectedDeviceId(kind, nextDeviceId);
+      const stream = this.preflightPreviewStream();
+      if (stream) {
+        this.syncSelectedDevices(stream);
+        if (kind === 'audio') {
+          await this.startMicrophoneMeter(stream);
+        }
+      }
+    } catch (error) {
+      this.preflightError.set(this.mediaDeviceErrorMessage(error, kind === 'audio' ? 'Unable to switch microphone.' : 'Unable to switch camera.'));
+    } finally {
+      switchingSignal.set(false);
+    }
+  }
+
+  private async ensureTeacherPreviewStream(): Promise<MediaStream> {
+    const stream = this.preflightPreviewStream();
+    const hasAudio = stream?.getAudioTracks().some((track) => track.readyState === 'live');
+    const hasVideo = stream?.getVideoTracks().some((track) => track.readyState === 'live');
+    if (stream && hasAudio && hasVideo) {
+      return stream;
+    }
+    return this.webrtc.startCamera(this.selectedAudioDeviceId() || undefined, this.selectedVideoDeviceId() || undefined);
+  }
+
+  private async stopPreflightPreview(options: { keepStream?: boolean } = {}): Promise<void> {
+    this.stopMicrophoneMeter();
+    this.microphoneLevel.set(0);
+    this.preflightPreparing.set(false);
+    if (!options.keepStream) {
+      this.webrtc.stopCamera();
+    }
+  }
+
+  private async startMicrophoneMeter(stream: MediaStream): Promise<void> {
+    this.stopMicrophoneMeter();
+    const audioTrack = stream.getAudioTracks()[0];
+    if (!audioTrack) {
+      this.microphoneLevel.set(0);
+      return;
+    }
+    const audioContext = new AudioContext();
+    await audioContext.resume().catch(() => undefined);
+    const source = audioContext.createMediaStreamSource(new MediaStream([audioTrack]));
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    this.preflightAudioContext = audioContext;
+    this.preflightAnalyser = analyser;
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+      if (!this.preflightAnalyser) {
+        return;
+      }
+      this.preflightAnalyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (const value of data) {
+        const offset = value - 128;
+        sum += offset * offset;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      this.microphoneLevel.set(Math.min(100, Math.round(rms * 4)));
+      this.preflightMeterFrame = window.requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  private stopMicrophoneMeter(): void {
+    if (this.preflightMeterFrame) {
+      window.cancelAnimationFrame(this.preflightMeterFrame);
+      this.preflightMeterFrame = 0;
+    }
+    const audioContext = this.preflightAudioContext;
+    this.preflightAnalyser = undefined;
+    this.preflightAudioContext = undefined;
+    if (audioContext && audioContext.state !== 'closed') {
+      void audioContext.close().catch(() => undefined);
+    }
+  }
+
+  private mediaDeviceErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof DOMException) {
+      if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+        return 'Camera or microphone permission was blocked. Allow access in your browser, then try again.';
+      }
+      if (error.name === 'NotFoundError' || error.name === 'OverconstrainedError') {
+        return 'Selected camera or microphone is unavailable. Choose another device.';
+      }
+    }
+    return error instanceof Error && error.message ? error.message : fallback;
   }
 
   private async shareScreen(): Promise<void> {
@@ -533,6 +1072,8 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   }
 
   private cleanupRoomMediaLocally(): void {
+    this.stopMicrophoneMeter();
+    this.microphoneLevel.set(0);
     this.screenProducerId = '';
     this.roomJoined.set(false);
     this.cameraPublished.set(false);
@@ -646,11 +1187,11 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     const hasLiveAudioProducer = participantProducers.some((producer) => producer.kind === 'audio' && producer.status === 'live');
     const hasPausedAudioProducer = participantProducers.some((producer) => producer.kind === 'audio' && producer.status === 'paused');
     const hasPausedVideoProducer = participantProducers.some((producer) => producer.kind === 'video' && producer.status === 'paused');
-    if (this.studentVideoStream(participantId)) {
-      return 'video';
-    }
     if (hasPausedVideoProducer || participant?.videoEnabled === false) {
       return 'camera-off';
+    }
+    if (this.studentVideoStream(participantId)) {
+      return 'video';
     }
     if (hasLiveAudioProducer) {
       return participant?.audioEnabled === false ? 'muted' : 'audio-only';
@@ -725,6 +1266,17 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     return this.studentMediaProducers(participantId).some((producer) => producer.status === 'live');
   }
 
+  protected participantRoleLabel(participant: SessionParticipant): string {
+    if (participant.role === 'Teacher') {
+      return 'Host';
+    }
+    return participant.role;
+  }
+
+  private canModerateParticipant(participantId: string): boolean {
+    return this.participants().some((participant) => participant.id === participantId && participant.canModerate);
+  }
+
   private setParticipantActionPending(participantId: string, action: ParticipantCardAction, pending: boolean): void {
     this.pendingParticipantActions.update((state) => {
       const nextActionState: ParticipantActionState = { ...(state[participantId] ?? {}) };
@@ -744,6 +1296,12 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     });
   }
 
+  private setAllStudentActionPending(action: ParticipantCardAction, pending: boolean): void {
+    for (const participant of this.studentControlTargets()) {
+      this.setParticipantActionPending(participant.id, action, pending);
+    }
+  }
+
   private setParticipantMediaHidden(participantId: string, hidden: boolean): void {
     this.locallyHiddenParticipantIds.update((participantIds) => {
       if (hidden) {
@@ -751,6 +1309,12 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       }
       return participantIds.filter((id) => id !== participantId);
     });
+  }
+
+  private applyClassModerationResult(response: ClassStudentMediaModerationResponse): void {
+    for (const event of response.events) {
+      this.applyStudentModerationResult(event);
+    }
   }
 
   private applyStudentModerationResult(event: StudentMediaModerationEvent): void {
@@ -776,6 +1340,107 @@ export class TeacherClassSession implements OnInit, OnDestroy {
           : participant
     );
     this.syncParticipantsFromRoom();
+  }
+
+  private applyStudentSpeakResult(event: ClassStudentSpeakEvent): void {
+    this.applyParticipantPatch(event.participantId, {
+      handRaised: event.allowedToSpeak ? false : undefined,
+      handRaisedAt: event.allowedToSpeak ? null : undefined,
+      allowedToSpeak: event.allowedToSpeak,
+      allowedToSpeakAt: 'allowedToSpeakAt' in event && typeof event.allowedToSpeakAt === 'string' ? event.allowedToSpeakAt : null,
+      allowedToSpeakBy: 'allowedToSpeakBy' in event && typeof event.allowedToSpeakBy === 'string' ? event.allowedToSpeakBy : null,
+      permissions: 'permissions' in event && event.permissions ? event.permissions : undefined
+    });
+  }
+
+  private applyParticipantPatch(participantId: string, patch: ParticipantPatch): void {
+    const cleanedPatch = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) as ParticipantPatch;
+    this.store.patchParticipant(participantId, cleanedPatch as Partial<Participant>);
+    this.updateParticipant(participantId, (participant) => ({
+      ...participant,
+      handRaised: cleanedPatch.handRaised ?? participant.handRaised,
+      handRaisedAt: cleanedPatch.handRaisedAt === null ? undefined : (cleanedPatch.handRaisedAt ?? participant.handRaisedAt),
+      allowedToSpeak: cleanedPatch.allowedToSpeak ?? participant.allowedToSpeak,
+      allowedToSpeakAt: cleanedPatch.allowedToSpeakAt === null ? undefined : (cleanedPatch.allowedToSpeakAt ?? participant.allowedToSpeakAt),
+      muted: cleanedPatch.allowedToSpeak === true ? false : cleanedPatch.allowedToSpeak === false ? true : participant.muted
+    }));
+    this.syncParticipantsFromRoom();
+  }
+
+  private saveBlob(blob: Blob, fileName: string): void {
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+  }
+
+  private applyRecording(recording: Recording): void {
+    this.session.update((session) => {
+      if (!session || recording.sessionId !== session.sessionId) {
+        return session;
+      }
+      return {
+        ...session,
+        activeRecording: this.isActiveRecording(recording) ? recording : undefined,
+        latestRecording: recording
+      };
+    });
+  }
+
+  private applyRecordingEvent(event: ClassSessionRecordingEvent): void {
+    const session = this.session();
+    if (!session || event.sessionId !== session.sessionId) {
+      return;
+    }
+    this.applyRecording(event.recording);
+    if (event.status === 'recording') {
+      this.mediaNotice.set('Recording started.');
+    } else if (event.status === 'stopped') {
+      this.mediaNotice.set('Recording stopped.');
+    } else if (event.status === 'failed') {
+      this.mediaError.set(event.reason || event.recording.failureReason || 'Recording failed.');
+    }
+  }
+
+  private isActiveRecording(recording: Recording | null | undefined): boolean {
+    return recording?.status === 'starting' || recording?.status === 'recording' || recording?.status === 'stopping';
+  }
+
+  protected recordingExpired(recording: Recording | null | undefined): boolean {
+    const expiresAt = recording?.retentionExpiresAt;
+    if (!expiresAt) {
+      return false;
+    }
+    const timestamp = Date.parse(expiresAt);
+    return Number.isFinite(timestamp) && timestamp <= Date.now();
+  }
+
+  private watchSession(sessionId: string, batchId?: string, force = false): void {
+    if (!sessionId || (this.watchedSessionId === sessionId && !force)) {
+      return;
+    }
+    const previousSessionId = this.watchedSessionId;
+    this.watchedSessionId = sessionId;
+    if (previousSessionId && previousSessionId !== sessionId && this.realtimeSocket.connected) {
+      void this.socket.emitAck('session:unwatch', { sessionId: previousSessionId }).catch(() => undefined);
+    }
+    if (!this.realtimeSocket.connected) {
+      return;
+    }
+    void this.socket.emitAck('session:watch', { sessionId, ...(batchId ? { batchId } : {}) }).catch(() => undefined);
+  }
+
+  private unwatchSession(): void {
+    const sessionId = this.watchedSessionId;
+    this.watchedSessionId = '';
+    if (!sessionId || !this.realtimeSocket.connected) {
+      return;
+    }
+    void this.socket.emitAck('session:unwatch', { sessionId }).catch(() => undefined);
   }
 
   private updateParticipant(participantId: string, update: (participant: SessionParticipant) => SessionParticipant): void {
@@ -892,6 +1557,10 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     this.registerSocketHandler('consumer:svc-layers-unavailable', (event) => this.store.applyConsumerLayerEvent(event));
     this.registerSocketHandler('consumer:svc-layers-switch-failed', (event) => this.store.applyConsumerLayerEvent(event));
     this.registerSocketHandler('room:failed', (event) => this.mediaError.set(event.message));
+    this.registerSocketHandler('recording:started', (event) => this.applyRecordingEvent(event));
+    this.registerSocketHandler('recording:updated', (event) => this.applyRecordingEvent(event));
+    this.registerSocketHandler('recording:stopped', (event) => this.applyRecordingEvent(event));
+    this.registerSocketHandler('recording:failed', (event) => this.applyRecordingEvent(event));
     this.registerSocketHandler('room:closed', (roomId) => {
       if (roomId === this.joinedRoomId) {
         this.mediaError.set('This room has closed.');
@@ -924,6 +1593,11 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   private bindSocketLifecycle(): void {
     const handleConnect = () => {
+      this.preflightSocketReady.set(true);
+      const session = this.session();
+      if (session) {
+        this.watchSession(session.sessionId, session.batchId, true);
+      }
       if (!this.socketWasDisconnected) {
         return;
       }
@@ -931,10 +1605,12 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       void this.restoreRoomAfterReconnect();
     };
     const handleDisconnect = () => {
+      this.preflightSocketReady.set(false);
       this.socketWasDisconnected = true;
       this.handleSocketDisconnect();
     };
     const handleConnectError = (error: Error) => {
+      this.preflightSocketReady.set(false);
       if (this.joinedRoomId && this.sessionLive()) {
         this.mediaError.set(error.message || 'Unable to reconnect to the live room.');
       }
@@ -1052,27 +1728,54 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   }
 
   private classroomParticipantToCard(participant: ClassroomPayload['participants'][number]): SessionParticipant {
+    const isStudent = participant.role === 'student';
     return {
       id: participant.id,
       name: participant.displayName,
       role: participant.role === 'student' ? 'Student' : participant.role === 'admin' ? 'Admin' : 'Teacher',
+      isStudent,
+      canModerate: false,
       initials: this.initials(participant.displayName),
       muted: false,
       cameraOff: false,
-      screenSharing: false
+      screenSharing: false,
+      handRaised: false,
+      allowedToSpeak: false,
+      connected: false
     };
   }
 
   private roomParticipantToCard(participant: Participant): SessionParticipant {
+    const isStudent = participant.role === 'PARTICIPANT' && this.isStudentParticipantId(participant.id);
     return {
       id: participant.id,
       name: participant.displayName,
-      role: participant.role === 'HOST' || participant.role === 'CO_HOST' ? 'Teacher' : 'Student',
+      role: this.roomParticipantRoleLabel(participant),
+      isStudent,
+      canModerate: isStudent,
       initials: this.initials(participant.displayName),
-      muted: !participant.audioEnabled,
-      cameraOff: !participant.videoEnabled,
-      screenSharing: participant.screenSharing
+      muted: this.isParticipantMicMuted(participant.id),
+      cameraOff: this.isParticipantCameraStopped(participant.id),
+      screenSharing: participant.screenSharing,
+      handRaised: participant.handRaised,
+      handRaisedAt: participant.handRaisedAt,
+      allowedToSpeak: Boolean(participant.allowedToSpeak),
+      allowedToSpeakAt: participant.allowedToSpeakAt,
+      connected: participant.connected !== false
     };
+  }
+
+  private roomParticipantRoleLabel(participant: Participant): SessionParticipant['role'] {
+    if (participant.role === 'HOST') {
+      return 'Teacher';
+    }
+    if (participant.role === 'CO_HOST') {
+      return 'Co-host';
+    }
+    if (participant.role === 'VIEWER') {
+      return 'Viewer';
+    }
+    return 'Student';
   }
 
   private teacherDisplayName(payload: ClassroomPayload): string {
@@ -1321,7 +2024,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     return Math.min(72, Math.max(28, value));
   }
 
-  private initials(value: string): string {
+  protected initials(value: string): string {
     const parts = value.trim().split(/\s+/).filter(Boolean);
     const letters = parts.length > 1 ? `${parts[0]![0]}${parts[1]![0]}` : value.slice(0, 2);
     return letters.toUpperCase();

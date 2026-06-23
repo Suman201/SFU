@@ -10,6 +10,8 @@ import {
   BatchScheduleSchema,
   BatchSchema,
   ChatMessageDocument,
+  ChatAttachmentFileDocument,
+  ChatAttachmentFileSchema,
   ChatMessageSchema,
   ChatReadStateDocument,
   ChatReadStateSchema,
@@ -87,6 +89,7 @@ import {
       { name: ConsumerDocument.name, schema: ConsumerSchema },
       { name: PermissionDocument.name, schema: PermissionSchema },
       { name: ModerationDocument.name, schema: ModerationSchema },
+      { name: ChatAttachmentFileDocument.name, schema: ChatAttachmentFileSchema },
       { name: ChatMessageDocument.name, schema: ChatMessageSchema },
       { name: ChatReadStateDocument.name, schema: ChatReadStateSchema },
       { name: RecordingDocument.name, schema: RecordingSchema }

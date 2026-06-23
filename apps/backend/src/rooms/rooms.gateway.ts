@@ -12,6 +12,8 @@ import {
 } from '@nestjs/websockets';
 import type {
   Ack as SocketAck,
+  ClassStudentSpeakEvent,
+  ClassStudentMediaModerationResponse,
   ChatMessage,
   ChatReadState,
   ClientToServerEvents,
@@ -22,6 +24,7 @@ import type {
   CreateRoomRequest,
   JoinRoomRequest,
   JoinRoomResponse,
+  ParticipantPatch,
   Producer,
   ProducerDynacastEvent,
   ProducerLayerState,
@@ -43,8 +46,9 @@ import type {
 import type { Server, Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import { socketAck } from '../common/utils/ack';
+import { RecordingsService } from '../recordings/recordings.service';
 import { RoomSignalService, type RoomSignalEnvelope, type RoomSignalTarget } from './room-signal.service';
-import { RoomsService, SocketUser, type SocketDeliveryTarget } from './rooms.service';
+import { RoomsService, SocketUser, type SocketDeliveryTarget, type StudentMediaModerationResult } from './rooms.service';
 
 type SfuSocket = Socket<ClientToServerEvents, ServerToClientEvents> & {
   data: {
@@ -127,7 +131,8 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly rooms: RoomsService,
     private readonly auth: AuthService,
-    private readonly signals: RoomSignalService
+    private readonly signals: RoomSignalService,
+    private readonly recordings: RecordingsService
   ) {
     this.signals.onSignal((signal) => {
       if (signal.target) {
@@ -139,7 +144,18 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.rooms.onRoomClosed((roomId) => {
       void this.emitRoomEvent(roomId, 'room:closed', roomId);
     });
+    this.rooms.onChatReadReceipt((delivery) => {
+      void this.emitTargetedRoomEvent(
+        delivery.state.roomId,
+        delivery.targets ?? this.socketIdsToDeliveryTargets(delivery.state.roomId, delivery.targetSocketIds),
+        'chat:read',
+        delivery.receipt
+      );
+    });
     this.rooms.onClassSessionLifecycleEvent((event, payload) => {
+      void this.emitRoomEvent(this.classSessionLifecycleRoomId(payload.sessionId), event, payload);
+    });
+    this.recordings.onClassSessionRecordingEvent((event, payload) => {
       void this.emitRoomEvent(this.classSessionLifecycleRoomId(payload.sessionId), event, payload);
     });
     this.rooms.onConsumerLayerEvent((event) => {
@@ -214,20 +230,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleDisconnect(socket: SfuSocket): Promise<void> {
     if (socket.data.roomId && socket.data.participantId) {
       const result = await this.rooms.leaveRoomForSocket(socket.data.roomId, socket.data.participantId, socket.id);
-      if (!result.left) {
-        return;
-      }
-      if (result.reconnecting) {
-        await this.emitRoomEvent(socket.data.roomId, 'participant:updated', socket.data.participantId, result.participantPatch ?? {});
-        if (result.room) {
-          await this.emitRoomEvent(socket.data.roomId, 'room:updated', result.room);
-        }
-        return;
-      }
-      await this.emitRoomEvent(socket.data.roomId, 'participant:left', socket.data.participantId);
-      if (result.closed) {
-        await this.emitRoomEvent(socket.data.roomId, 'room:closed', socket.data.roomId);
-      }
+      await this.emitRoomLeaveResult(socket.data.roomId, socket.data.participantId, result);
     }
   }
 
@@ -249,8 +252,9 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WsAck() ack: SocketAck<void>
   ): Promise<void> {
     return socketAck(ack, async () => {
-      const sessionId = this.normalizeClassSessionId(request.sessionId);
-      await this.rooms.assertCanWatchClassSession(sessionId, this.requireUser(socket));
+      const sessionId = this.normalizeClassSessionId(request?.sessionId);
+      const batchId = this.normalizeOptionalClassSessionBatchId(request?.batchId);
+      await this.rooms.assertCanWatchClassSession(sessionId, this.requireUser(socket), batchId);
       await socket.join(this.classSessionLifecycleRoomId(sessionId));
     });
   }
@@ -296,12 +300,9 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   leaveRoom(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { roomId: string }, @WsAck() ack: SocketAck<void>): Promise<void> {
     return socketAck(ack, async () => {
       const participantId = this.requireParticipant(socket);
-      const result = await this.rooms.leaveRoom(request.roomId, participantId);
+      const result = await this.rooms.leaveRoomForSocket(request.roomId, participantId, socket.id);
       await socket.leave(request.roomId);
-      await this.emitRoomEvent(request.roomId, 'participant:left', participantId);
-      if (result.closed) {
-        await this.emitRoomEvent(request.roomId, 'room:closed', request.roomId);
-      }
+      await this.emitRoomLeaveResult(request.roomId, participantId, result);
     });
   }
 
@@ -622,6 +623,55 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  @SubscribeMessage('class:mute-all-students')
+  muteAllStudents(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['class:mute-all-students']>[0],
+    @WsAck() ack: SocketAck<ClassStudentMediaModerationResponse>
+  ): Promise<void> {
+    return this.moderateClassStudentMedia(socket, request, 'mute-mic', ack);
+  }
+
+  @SubscribeMessage('class:stop-all-cameras')
+  stopAllStudentCameras(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['class:stop-all-cameras']>[0],
+    @WsAck() ack: SocketAck<ClassStudentMediaModerationResponse>
+  ): Promise<void> {
+    return this.moderateClassStudentMedia(socket, request, 'stop-camera', ack);
+  }
+
+  @SubscribeMessage('class:allow-speak')
+  allowStudentToSpeak(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['class:allow-speak']>[0],
+    @WsAck() ack: SocketAck<ClassStudentSpeakEvent>
+  ): Promise<void> {
+    return this.setStudentSpeakingPermission(socket, request, true, ack);
+  }
+
+  @SubscribeMessage('class:revoke-speak')
+  revokeStudentSpeak(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['class:revoke-speak']>[0],
+    @WsAck() ack: SocketAck<ClassStudentSpeakEvent>
+  ): Promise<void> {
+    return this.setStudentSpeakingPermission(socket, request, false, ack);
+  }
+
+  @SubscribeMessage('class:lower-hand')
+  lowerStudentHand(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['class:lower-hand']>[0],
+    @WsAck() ack: SocketAck<ParticipantPatch>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const patch = await this.rooms.lowerStudentHand(request.roomId, this.requireParticipant(socket), request.participantId);
+      await this.emitRoomEvent(request.roomId, 'participant:updated', request.participantId, patch);
+      return patch;
+    });
+  }
+
   @SubscribeMessage('student:mute-mic')
   muteStudentMicrophone(
     @ConnectedSocket() socket: SfuSocket,
@@ -689,17 +739,24 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('chat:mark-read')
   markChatRead(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: Parameters<ClientToServerEvents['chat:mark-read']>[0], @WsAck() ack: SocketAck<ChatReadState>): Promise<void> {
     return socketAck(ack, async () => {
-      const state = await this.rooms.markChatRead(request, this.requireUser(socket), socket.data.participantId);
-      this.emitParticipantEvent(socket.id, 'chat:read', state);
-      return state;
+      const delivery = await this.rooms.markChatRead(request, this.requireUser(socket), socket.data.participantId);
+      await this.emitTargetedRoomEvent(
+        request.roomId,
+        delivery.targets ?? this.socketIdsToDeliveryTargets(request.roomId, delivery.targetSocketIds),
+        'chat:read',
+        delivery.receipt
+      );
+      return delivery.state;
     });
   }
 
   @SubscribeMessage('hand:raise')
-  raiseHand(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { roomId: string; raised: boolean }, @WsAck() ack: SocketAck<void>): Promise<void> {
+  raiseHand(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: { roomId: string; raised: boolean }, @WsAck() ack: SocketAck<ParticipantPatch>): Promise<void> {
     return socketAck(ack, async () => {
-      await this.rooms.raiseHand(request.roomId, this.requireParticipant(socket), request.raised);
-      await this.emitRoomEvent(request.roomId, 'participant:updated', this.requireParticipant(socket), { handRaised: request.raised });
+      const participantId = this.requireParticipant(socket);
+      const patch = await this.rooms.raiseHand(request.roomId, participantId, request.raised);
+      await this.emitRoomEvent(request.roomId, 'participant:updated', participantId, patch);
+      return patch;
     });
   }
 
@@ -732,23 +789,61 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ): Promise<void> {
     return socketAck(ack, async () => {
       const result = await this.rooms.moderateStudentMedia(request.roomId, this.requireParticipant(socket), request.participantId, action);
-      if (result.producer) {
-        await this.emitRoomEvent(request.roomId, 'producer:updated', result.producer);
-      }
-      const participantPatch =
-        action === 'mute-mic' ? { audioEnabled: false } : action === 'stop-camera' ? { videoEnabled: false } : null;
-      if (participantPatch) {
-        await this.emitRoomEvent(request.roomId, 'participant:updated', request.participantId, participantPatch);
-      }
-      await this.emitRoomEvent(request.roomId, 'permissions:updated', request.participantId, result.permissions);
-      await this.emitTargetedRoomEvent(
-        request.roomId,
-        result.targets ?? this.socketIdsToDeliveryTargets(request.roomId, result.targetSocketIds ?? (result.targetSocketId ? [result.targetSocketId] : undefined)),
-        'student:media-moderated',
-        result.event
-      );
+      await this.emitStudentMediaModerationResult(request.roomId, result);
       return result.event;
     });
+  }
+
+  private moderateClassStudentMedia(
+    socket: SfuSocket,
+    request: Parameters<ClientToServerEvents['class:mute-all-students']>[0],
+    action: Extract<StudentMediaModerationAction, 'mute-mic' | 'stop-camera'>,
+    ack: SocketAck<ClassStudentMediaModerationResponse>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const results = await this.rooms.moderateAllStudentMedia(request.roomId, this.requireParticipant(socket), action);
+      for (const result of results) {
+        await this.emitStudentMediaModerationResult(request.roomId, result);
+      }
+      return {
+        roomId: request.roomId,
+        action,
+        moderatedCount: results.length,
+        events: results.map((result) => result.event)
+      };
+    });
+  }
+
+  private setStudentSpeakingPermission(
+    socket: SfuSocket,
+    request: Parameters<ClientToServerEvents['class:allow-speak']>[0],
+    allowedToSpeak: boolean,
+    ack: SocketAck<ClassStudentSpeakEvent>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const result = await this.rooms.setStudentSpeakingPermission(request.roomId, this.requireParticipant(socket), request.participantId, allowedToSpeak);
+      await this.emitStudentMediaModerationResult(request.roomId, result.moderation);
+      await this.emitRoomEvent(request.roomId, 'participant:updated', request.participantId, result.participantPatch);
+      return result.event;
+    });
+  }
+
+  private async emitStudentMediaModerationResult(roomId: string, result: StudentMediaModerationResult): Promise<void> {
+    if (result.producer) {
+      await this.emitRoomEvent(roomId, 'producer:updated', result.producer);
+    }
+    const participantPatch =
+      result.event.action === 'mute-mic' ? { audioEnabled: false } : result.event.action === 'stop-camera' ? { videoEnabled: false } : null;
+    if (participantPatch) {
+      await this.emitRoomEvent(roomId, 'participant:updated', result.event.participantId, participantPatch);
+    }
+    await this.emitRoomEvent(roomId, 'permissions:updated', result.event.participantId, result.permissions);
+    await this.emitTargetedRoomEvent(
+      roomId,
+      result.targets ?? this.socketIdsToDeliveryTargets(roomId, result.targetSocketIds ?? (result.targetSocketId ? [result.targetSocketId] : undefined)),
+      'student:media-moderated',
+      result.event
+    );
   }
 
   private async emitProducerDynacastEvent(event: ProducerDynacastEvent): Promise<void> {
@@ -796,6 +891,27 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private async emitRoomEvent(roomId: string, event: keyof ServerToClientEvents, ...payload: unknown[]): Promise<void> {
     (this.server.to(roomId) as unknown as { emit: (event: string, ...payload: unknown[]) => void }).emit(event, ...payload);
     await this.signals.publish(roomId, event, ...payload);
+  }
+
+  private async emitRoomLeaveResult(
+    roomId: string,
+    participantId: string,
+    result: Awaited<ReturnType<RoomsService['leaveRoomForSocket']>>
+  ): Promise<void> {
+    if (!result.left) {
+      return;
+    }
+    if (result.reconnecting) {
+      await this.emitRoomEvent(roomId, 'participant:updated', participantId, result.participantPatch ?? {});
+      if (result.room) {
+        await this.emitRoomEvent(roomId, 'room:updated', result.room);
+      }
+      return;
+    }
+    await this.emitRoomEvent(roomId, 'participant:left', participantId);
+    if (result.closed) {
+      await this.emitRoomEvent(roomId, 'room:closed', roomId);
+    }
   }
 
   private async emitTargetedRoomEvent(
@@ -891,13 +1007,24 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return `class-session:${this.normalizeClassSessionId(sessionId)}:lifecycle`;
   }
 
-  private normalizeClassSessionId(sessionId: string): string {
+  private normalizeClassSessionId(sessionId: string | undefined): string {
     const normalized = sessionId?.trim();
     if (!normalized) {
       throw new BadRequestException('Class session id is required.');
     }
     if (normalized.length > 200 || /[\s\x00-\x1F\x7F]/.test(normalized)) {
       throw new BadRequestException('Invalid class session id.');
+    }
+    return normalized;
+  }
+
+  private normalizeOptionalClassSessionBatchId(batchId: string | undefined): string | undefined {
+    const normalized = batchId?.trim();
+    if (!normalized) {
+      return undefined;
+    }
+    if (normalized.length > 120 || /[\s\x00-\x1F\x7F]/.test(normalized)) {
+      throw new BadRequestException('Invalid batch id.');
     }
     return normalized;
   }

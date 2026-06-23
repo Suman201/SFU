@@ -110,10 +110,16 @@ export const appConfig = () => ({
   recording: {
     driver: process.env.RECORDING_STORAGE_DRIVER ?? 'local',
     localPath: process.env.RECORDING_LOCAL_PATH ?? './recordings',
+    retentionDays: Number(process.env.RECORDING_RETENTION_DAYS ?? 90),
     s3Endpoint: process.env.S3_ENDPOINT,
     s3Bucket: process.env.S3_BUCKET,
     s3AccessKeyId: process.env.S3_ACCESS_KEY_ID,
     s3SecretAccessKey: process.env.S3_SECRET_ACCESS_KEY
+  },
+  chatAttachments: {
+    storageProvider: 'local',
+    localPath: process.env.CHAT_ATTACHMENT_LOCAL_PATH ?? './chat-attachments',
+    maxFileSizeBytes: Number(process.env.CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES ?? 2 * 1024 * 1024)
   },
   events: {
     webhooks: {

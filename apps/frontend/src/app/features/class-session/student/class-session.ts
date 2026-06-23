@@ -1,6 +1,14 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal, type Signal, type WritableSignal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import type { Participant, Producer, RoomOwnerRedirect, ServerToClientEvents, StudentMediaModerationEvent } from '@native-sfu/contracts';
+import type {
+  ClassSessionRecordingEvent,
+  Participant,
+  Producer,
+  Recording,
+  RoomOwnerRedirect,
+  ServerToClientEvents,
+  StudentMediaModerationEvent
+} from '@native-sfu/contracts';
 import { buildRoomOwnerRedirectUrl } from '../../../core/services/app-environment';
 import { AuthService } from '../../../core/services/auth.service';
 import { RoomStore } from '../../../core/services/room.store';
@@ -16,6 +24,8 @@ interface StudentSessionParticipant {
   role: 'Teacher' | 'Student';
   initials: string;
   speaking: boolean;
+  handRaised: boolean;
+  allowedToSpeak: boolean;
   reconnecting: boolean;
 }
 
@@ -119,11 +129,13 @@ export class StudentClassSession implements OnInit, OnDestroy {
   protected readonly mediaError = signal('');
   protected readonly localMediaError = signal('');
   protected readonly deviceError = signal('');
+  protected readonly downloadingRecording = signal(false);
   protected readonly joiningMedia = signal(false);
   protected readonly publishingStudentMedia = signal(false);
   protected readonly refreshingDevices = signal(false);
   protected readonly switchingAudioDevice = signal(false);
   protected readonly switchingVideoDevice = signal(false);
+  protected readonly updatingHandRaise = signal(false);
   protected readonly localAudioEnabled = signal(false);
   protected readonly localVideoEnabled = signal(false);
   protected readonly chatDisplayName = computed(() => this.auth.user()?.name ?? 'Student');
@@ -141,6 +153,19 @@ export class StudentClassSession implements OnInit, OnDestroy {
     return stream && this.localVideoEnabled() && stream.getVideoTracks().some((track) => track.readyState === 'live') ? stream : null;
   });
   protected readonly sessionLive = computed(() => this.session()?.status === 'live');
+  protected readonly activeRecording = computed(() => this.session()?.activeRecording ?? null);
+  protected readonly latestRecording = computed(() => this.session()?.latestRecording ?? null);
+  protected readonly recordingActive = computed(() => this.isActiveRecording(this.activeRecording()));
+  protected readonly recordingStatusLabel = computed(() => {
+    const active = this.activeRecording();
+    if (active?.status === 'starting') return 'Recording starting';
+    if (active?.status === 'recording') return 'Recording';
+    if (active?.status === 'stopping') return 'Recording stopping';
+    const latest = this.latestRecording();
+    if (latest?.status === 'stopped') return 'Recording ready';
+    if (latest?.status === 'failed') return 'Recording failed';
+    return '';
+  });
   protected readonly audioInputs = computed(() => this.deviceWebRtc.devices().audioInputs);
   protected readonly videoInputs = computed(() => this.deviceWebRtc.devices().videoInputs);
   protected readonly selectedAudioDeviceId = computed(
@@ -197,6 +222,23 @@ export class StudentClassSession implements OnInit, OnDestroy {
     if (!this.localVideoEnabled()) return 'Camera off';
     return 'You are live';
   });
+  protected readonly localParticipantState = computed(() => {
+    const participantId = this.store.localParticipantId();
+    return participantId ? this.store.room()?.participants.find((participant) => participant.id === participantId) ?? null : null;
+  });
+  protected readonly handRaised = computed(() => Boolean(this.localParticipantState()?.handRaised));
+  protected readonly allowedToSpeak = computed(() => Boolean(this.localParticipantState()?.allowedToSpeak));
+  protected readonly handRaiseLabel = computed(() => {
+    if (this.updatingHandRaise()) return 'Updating';
+    if (this.allowedToSpeak()) return 'Allowed to speak';
+    return this.handRaised() ? 'Lower hand' : 'Raise hand';
+  });
+  protected readonly speakingPermissionLabel = computed(() => {
+    if (this.allowedToSpeak()) return 'Teacher allowed you to speak.';
+    if (this.teacherDisabledAudio()) return 'Teacher muted your microphone.';
+    if (this.handRaised()) return 'Waiting for teacher.';
+    return 'Raise your hand to request the mic.';
+  });
   protected readonly participants = computed<StudentSessionParticipant[]>(() => {
     const room = this.store.room();
     if (room && this.isCurrentRoom(room.id) && room.participants.length) {
@@ -209,6 +251,8 @@ export class StudentClassSession implements OnInit, OnDestroy {
         role: participant.role === 'teacher' ? 'Teacher' : 'Student',
         initials: this.initials(participant.displayName),
         speaking: participant.role === 'teacher',
+        handRaised: false,
+        allowedToSpeak: false,
         reconnecting: false
       })) ?? []
     );
@@ -303,6 +347,24 @@ export class StudentClassSession implements OnInit, OnDestroy {
 
   protected async toggleCamera(): Promise<void> {
     await this.setStudentMediaKindEnabled('video', !this.localVideoEnabled());
+  }
+
+  protected async toggleHandRaise(): Promise<void> {
+    const roomId = this.joinedRoomId;
+    const participantId = this.store.localParticipantId();
+    if (!roomId || !participantId || !this.sessionLive() || this.updatingHandRaise()) {
+      return;
+    }
+    this.updatingHandRaise.set(true);
+    this.mediaError.set('');
+    try {
+      const patch = await this.socket.emitAck('hand:raise', { roomId, raised: !this.handRaised() });
+      this.store.patchParticipant(participantId, patch as Partial<Participant>);
+    } catch (error) {
+      this.mediaError.set(error instanceof Error ? error.message : 'Unable to update hand raise.');
+    } finally {
+      this.updatingHandRaise.set(false);
+    }
   }
 
   protected async refreshMediaDevices(): Promise<void> {
@@ -426,7 +488,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
       this.resetTeacherModerationState();
     }
     this.session.set(payload);
-    this.watchSession(payload.sessionId);
+    this.watchSession(payload.sessionId, payload.batchId);
     if (payload.status !== 'live') {
       if (payload.status === 'scheduled') {
         this.startLifecyclePolling();
@@ -444,6 +506,74 @@ export class StudentClassSession implements OnInit, OnDestroy {
     if (allowMediaJoin && payload.status === 'live' && payload.canJoin && this.joinedRoomId) {
       void this.joinClassroomRoom(payload, forceMediaRejoin);
     }
+  }
+
+  protected downloadLatestRecording(): void {
+    const session = this.session();
+    const recording = this.latestRecording();
+    const recordingId = recording?.recordingId ?? recording?.id;
+    if (!session || !recordingId || this.downloadingRecording()) {
+      return;
+    }
+    this.downloadingRecording.set(true);
+    this.classSessions.downloadRecording(session.sessionId, recordingId, session.batchId).subscribe({
+      next: (blob) => {
+        this.saveBlob(blob, `class-session-${session.sessionNumber}-recording.json`);
+        this.downloadingRecording.set(false);
+      },
+      error: (error) => {
+        this.deviceError.set(this.classSessions.errorMessage(error));
+        this.downloadingRecording.set(false);
+      }
+    });
+  }
+
+  private applyRecording(recording: Recording): void {
+    this.session.update((session) => {
+      if (!session || recording.sessionId !== session.sessionId) {
+        return session;
+      }
+      return {
+        ...session,
+        activeRecording: this.isActiveRecording(recording) ? recording : undefined,
+        latestRecording: recording
+      };
+    });
+  }
+
+  private applyRecordingEvent(event: ClassSessionRecordingEvent): void {
+    const session = this.session();
+    if (!session || event.sessionId !== session.sessionId) {
+      return;
+    }
+    this.applyRecording(event.recording);
+    if (event.status === 'failed') {
+      this.deviceError.set(event.reason || event.recording.failureReason || 'Recording failed.');
+    }
+  }
+
+  private isActiveRecording(recording: Recording | null | undefined): boolean {
+    return recording?.status === 'starting' || recording?.status === 'recording' || recording?.status === 'stopping';
+  }
+
+  protected recordingExpired(recording: Recording | null | undefined): boolean {
+    const expiresAt = recording?.retentionExpiresAt;
+    if (!expiresAt) {
+      return false;
+    }
+    const timestamp = Date.parse(expiresAt);
+    return Number.isFinite(timestamp) && timestamp <= Date.now();
+  }
+
+  private saveBlob(blob: Blob, fileName: string): void {
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
   }
 
   private preparePrejoinDevices(): void {
@@ -506,6 +636,10 @@ export class StudentClassSession implements OnInit, OnDestroy {
     this.bindLifecycleSocketEvents();
     this.bindModerationSocketEvents();
     this.registerSocketHandler('student:media-moderated', (event) => this.handleStudentMediaModerated(event));
+    this.registerSocketHandler('recording:started', (event) => this.applyRecordingEvent(event));
+    this.registerSocketHandler('recording:updated', (event) => this.applyRecordingEvent(event));
+    this.registerSocketHandler('recording:stopped', (event) => this.applyRecordingEvent(event));
+    this.registerSocketHandler('recording:failed', (event) => this.applyRecordingEvent(event));
     this.registerSocketHandler('room:updated', (room) => {
       if (this.isCurrentRoom(room.id)) {
         this.store.setRoom(room);
@@ -593,7 +727,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
     this.registerRawSocketHandler('connect', () => {
       const session = this.session();
       if (session) {
-        this.watchSession(session.sessionId, true);
+        this.watchSession(session.sessionId, session.batchId, true);
       }
       if (!this.socketConnectedOnce) {
         this.socketConnectedOnce = true;
@@ -632,7 +766,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
     this.socketDisposers.push(() => socket.off(event, handler));
   }
 
-  private watchSession(sessionId: string, force = false): void {
+  private watchSession(sessionId: string, batchId?: string, force = false): void {
     if (!sessionId || (!force && this.watchedSessionId === sessionId)) {
       return;
     }
@@ -643,7 +777,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
     this.lifecycleWatchPending = true;
     this.lifecycleWatchSupported = false;
     void this.socket
-      .emitAck('session:watch', { sessionId })
+      .emitAck('session:watch', { sessionId, ...(batchId ? { batchId } : {}) })
       .then(() => {
         if (this.destroyed || this.watchedSessionId !== sessionId) {
           return;
@@ -978,18 +1112,26 @@ export class StudentClassSession implements OnInit, OnDestroy {
       this.showTeacherDisabledMessage(kind);
       return;
     }
-    this.setLocalMediaKindState(kind, enabled);
     this.localMediaError.set('');
-    this.setLocalTracksEnabled(kind, enabled);
 
     if (!enabled) {
-      this.patchLocalParticipantMedia(kind, false);
-      await this.closeStudentProducers(this.localProducerIdsForKind(kind));
-      this.stopLocalTrackKind(kind);
+      const wasEnabled = this.localMediaKindEnabled(kind);
+      this.setLocalTracksEnabled(kind, false);
+      try {
+        await this.setLocalProducerKindStatus(kind, false);
+        this.setLocalMediaKindState(kind, false);
+        this.patchLocalParticipantMedia(kind, false);
+      } catch (error) {
+        this.setLocalTracksEnabled(kind, wasEnabled);
+        this.setLocalMediaKindState(kind, wasEnabled);
+        this.patchLocalParticipantMedia(kind, wasEnabled);
+        this.localMediaError.set(this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to turn off your microphone.' : 'Unable to turn off your camera.'));
+      }
       return;
     }
 
     try {
+      this.setLocalMediaKindState(kind, true);
       await this.ensureLocalTrack(kind);
       this.setLocalTracksEnabled(kind, true);
       await this.publishOrResumeStudentMediaKind(kind);
@@ -1059,10 +1201,13 @@ export class StudentClassSession implements OnInit, OnDestroy {
   private async ensureLocalTrack(kind: ModeratedStudentMediaKind): Promise<MediaStream> {
     const current = this.localStream();
     const existingTrack = current?.getTracks().find((track) => track.kind === kind && track.readyState === 'live');
-    if (current && existingTrack) {
+    const selectedDeviceId = kind === 'audio' ? this.selectedAudioDeviceId() : this.selectedVideoDeviceId();
+    const activeDeviceId = kind === 'audio' ? this.webrtc.activeAudioDeviceId() : this.webrtc.activeVideoDeviceId();
+    const selectedDeviceChanged = Boolean(selectedDeviceId && selectedDeviceId !== activeDeviceId);
+    if (current && existingTrack && !selectedDeviceChanged) {
       return current;
     }
-    await this.startOrSwitchLocalTrack(kind, kind === 'audio' ? this.selectedAudioDeviceId() : this.selectedVideoDeviceId());
+    await this.startOrSwitchLocalTrack(kind, selectedDeviceId);
     const stream = this.localStream();
     const nextTrack = stream?.getTracks().find((track) => track.kind === kind && track.readyState === 'live');
     if (!stream || !nextTrack) {
@@ -1162,6 +1307,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
       );
     } catch (error) {
       this.localMediaError.set(this.deviceErrorMessage(error, live ? 'Unable to resume your media.' : 'Unable to pause your media.'));
+      throw error;
     }
   }
 
@@ -1205,6 +1351,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
     this.refreshingDevices.set(false);
     this.switchingAudioDevice.set(false);
     this.switchingVideoDevice.set(false);
+    this.updatingHandRaise.set(false);
     this.selectedAudioDeviceFallback.set('');
     this.selectedVideoDeviceFallback.set('');
     this.webrtc.resetRoomMedia();
@@ -1341,11 +1488,13 @@ export class StudentClassSession implements OnInit, OnDestroy {
     this.setLocalTracksEnabled(kind, false);
     this.patchLocalParticipantMedia(kind, false);
     if (options.syncProducer === false) {
-      this.stopLocalTrackKind(kind);
       return;
     }
-    await this.closeStudentProducers(this.localProducerIdsForKind(kind));
-    this.stopLocalTrackKind(kind);
+    try {
+      await this.setLocalProducerKindStatus(kind, false);
+    } catch (error) {
+      this.localMediaError.set(this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to mute your microphone.' : 'Unable to stop your camera.'));
+    }
   }
 
   private applyLocalParticipantMediaPatch(participantId: string, patch: unknown): void {
@@ -1386,15 +1535,20 @@ export class StudentClassSession implements OnInit, OnDestroy {
   }
 
   private applyLocalProducerStatusEvent(producer: Producer): void {
-    if ((producer.kind !== 'audio' && producer.kind !== 'video') || producer.status !== 'paused') {
+    if (producer.kind !== 'audio' && producer.kind !== 'video') {
       return;
     }
-    const localEnabled = producer.kind === 'audio' ? this.localAudioEnabled() : this.localVideoEnabled();
-    if (localEnabled) {
-      void this.applyTeacherMediaDisable(producer.kind, this.teacherDisabledActionMessage(producer.kind), { syncProducer: false });
+    if (producer.status === 'closed') {
+      this.forgetLocalProducer(producer.id);
+      this.setLocalMediaKindState(producer.kind, false);
+      this.setLocalTracksEnabled(producer.kind, false);
+      this.patchLocalParticipantMedia(producer.kind, false);
       return;
     }
-    this.setLocalTracksEnabled(producer.kind, false);
+    const enabled = producer.status === 'live' && !this.isTeacherDisabledKind(producer.kind);
+    this.setLocalMediaKindState(producer.kind, enabled);
+    this.setLocalTracksEnabled(producer.kind, enabled);
+    this.patchLocalParticipantMedia(producer.kind, enabled);
   }
 
   private patchLocalParticipantMedia(kind: ModeratedStudentMediaKind, enabled: boolean): void {
@@ -1622,6 +1776,8 @@ export class StudentClassSession implements OnInit, OnDestroy {
       role: isTeacher ? 'Teacher' : 'Student',
       initials: this.initials(participant.displayName),
       speaking: isTeacher && participant.connected !== false && (participant.audioEnabled || participant.videoEnabled || participant.screenSharing),
+      handRaised: participant.handRaised,
+      allowedToSpeak: Boolean(participant.allowedToSpeak),
       reconnecting: isTeacher && participant.connected === false
     };
   }

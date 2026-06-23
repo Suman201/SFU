@@ -18,7 +18,7 @@ export class UsersController {
   @Permissions('users:create')
   @ApiOperation({ summary: 'Create a user' })
   create(@Body() dto: CreateUserDto, @CurrentUser() actor: AuthenticatedUser): Promise<Record<string, unknown>> {
-    return this.users.create(dto, actor.sub);
+    return this.users.create(dto, actor);
   }
 
   @Get()
@@ -39,20 +39,20 @@ export class UsersController {
   @Permissions('users:update')
   @ApiOperation({ summary: 'Update a user' })
   update(@Param('id') id: string, @Body() dto: UpdateUserDto, @CurrentUser() actor: AuthenticatedUser): Promise<Record<string, unknown>> {
-    return this.users.update(id, dto, actor.sub);
+    return this.users.update(id, dto, actor);
   }
 
   @Patch(':id/status')
   @Permissions('users:update')
   @ApiOperation({ summary: 'Update user status' })
   updateStatus(@Param('id') id: string, @Body() dto: UpdateUserStatusDto, @CurrentUser() actor: AuthenticatedUser): Promise<Record<string, unknown>> {
-    return this.users.updateStatus(id, dto, actor.sub);
+    return this.users.updateStatus(id, dto, actor);
   }
 
   @Delete(':id')
   @Permissions('users:delete')
   @ApiOperation({ summary: 'Soft delete a user' })
   remove(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser): Promise<void> {
-    return this.users.remove(id, actor.sub);
+    return this.users.remove(id, actor);
   }
 }

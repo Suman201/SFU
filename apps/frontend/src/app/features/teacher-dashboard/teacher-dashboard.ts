@@ -145,21 +145,7 @@ export class TeacherDashboard {
       return;
     }
 
-    this.startSession(session);
-  }
-
-  private startSession(session: TeacherSession): void {
-    this.dashboard.startSession(session).subscribe({
-      next: async (payload) => {
-        await this.router.navigate(['/class-session/teacher'], {
-          queryParams: {
-            batchId: payload.batchId,
-            sessionId: payload.sessionId
-          }
-        });
-      },
-      error: () => undefined
-    });
+    await this.openSession(session);
   }
 
   private async openSession(session: TeacherSession): Promise<void> {

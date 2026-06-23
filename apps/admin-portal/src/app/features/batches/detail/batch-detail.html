@@ -1,0 +1,220 @@
+<a class="back-link" routerLink="/batches">Back to batches</a>
+
+@if (loading()) {
+  <section class="detail-state">Loading batch...</section>
+} @else if (error() && !batch()) {
+  <section class="detail-state error" role="alert">{{ error() }}</section>
+} @else if (batch(); as item) {
+  <section class="detail-head">
+    <div>
+      <p class="eyebrow">Batch</p>
+      <h1>{{ item.name }}</h1>
+      <p>{{ item.courseName || item.courseId || 'Unassigned course' }}</p>
+    </div>
+    <span class="data-pill {{ statusClass(item.status) }}">{{ item.status.toLowerCase() }}</span>
+  </section>
+
+  @if (error()) {
+    <p class="detail-state error" role="alert">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="detail-state success" role="status">{{ success() }}</p>
+  }
+
+  <section class="detail-grid">
+    <article>
+      <span>Teacher</span>
+      <strong>{{ item.teacherName || item.teacherId }}</strong>
+      <small>{{ item.teacherEmail || item.teacherId }}</small>
+    </article>
+    <article>
+      <span>Roster</span>
+      <strong>{{ item.enrolledCount }} / {{ item.maxCapacity }}</strong>
+    </article>
+    <article>
+      <span>Schedule</span>
+      <strong>{{ scheduleLabel(item) }}</strong>
+    </article>
+    <article>
+      <span>Next session</span>
+      <strong>{{ item.nextSessionAt ? (item.nextSessionAt | date: 'short') : 'None planned' }}</strong>
+    </article>
+  </section>
+
+  <section class="data-table-shell edit-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Batch settings</h2>
+        <p>Teacher, year, and schedule-sensitive changes are blocked after live or completed sessions.</p>
+      </div>
+    </div>
+    <form class="edit-form" [formGroup]="form" (ngSubmit)="save()">
+      <label>
+        <span>Batch name</span>
+        <input type="text" formControlName="name" />
+      </label>
+      <label>
+        <span>Course ID</span>
+        <input type="text" formControlName="courseId" />
+      </label>
+      <label>
+        <span>Course name</span>
+        <input type="text" formControlName="courseName" />
+      </label>
+      <label>
+        <span>Teacher ID</span>
+        <input type="text" formControlName="teacherId" />
+      </label>
+      <label>
+        <span>Year</span>
+        <input type="number" formControlName="year" />
+      </label>
+      <label>
+        <span>Capacity</span>
+        <input type="number" formControlName="maxCapacity" />
+      </label>
+      <label>
+        <span>Status</span>
+        <select formControlName="status">
+          <option value="ACTIVE">Active</option>
+          <option value="INACTIVE">Inactive</option>
+          <option value="COMPLETED">Completed</option>
+          <option value="CANCELLED">Cancelled</option>
+        </select>
+      </label>
+      <div class="schedule-editor" formArrayName="schedule">
+        <div class="schedule-editor-head">
+          <span>Schedule</span>
+          <button type="button" class="table-action" (click)="addScheduleRow()">Add day</button>
+        </div>
+        @for (row of scheduleRows.controls; track $index; let index = $index) {
+          <div class="schedule-row" [formGroupName]="index">
+            <select formControlName="dayOfWeek" [attr.aria-label]="'Weekday ' + (index + 1)">
+              @for (weekday of weekdays; track weekday) {
+                <option [value]="weekday">{{ weekday }}</option>
+              }
+            </select>
+            <input type="time" formControlName="startTime" [attr.aria-label]="'Start time ' + (index + 1)" />
+            <button type="button" class="table-action danger" [disabled]="scheduleRows.length <= 1" (click)="removeScheduleRow(index)">Remove</button>
+          </div>
+        }
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="table-action primary" [disabled]="saving()">{{ saving() ? 'Saving...' : 'Save changes' }}</button>
+      </div>
+    </form>
+    <div class="actions">
+      @if (item.status === 'ACTIVE') {
+        <button type="button" class="table-action accent" [disabled]="pendingAction()" (click)="transition('pause')">Pause</button>
+      } @else {
+        <button type="button" class="table-action primary" [disabled]="pendingAction()" (click)="transition('activate')">Activate</button>
+      }
+      @if (item.status !== 'COMPLETED') {
+        <button type="button" class="table-action" [disabled]="pendingAction()" (click)="transition('complete')">Complete</button>
+      }
+      @if (item.status !== 'CANCELLED') {
+        <button type="button" class="table-action danger" [disabled]="pendingAction()" (click)="transition('cancel')">Cancel</button>
+      }
+    </div>
+  </section>
+
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Roster</h2>
+        <p>{{ item.roster.length }} active students</p>
+      </div>
+      <a class="table-action" routerLink="/enrollments" [queryParams]="{ batchId: item.id }">Open enrollments</a>
+    </div>
+    <div class="data-table-wrap" style="--data-table-min-width: 760px">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Student</th>
+            <th>Status</th>
+            <th>Joined</th>
+            <th class="row-menu-cell">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of item.roster; track trackByRoster($index, row)) {
+            <tr>
+              <td>
+                <strong>{{ row.displayName }}</strong>
+                <small>{{ row.email || row.userId }}</small>
+              </td>
+              <td><span class="data-pill status-{{ row.status }}">{{ row.status }}</span></td>
+              <td>{{ row.joinedAt ? (row.joinedAt | date: 'mediumDate') : 'Unknown' }}</td>
+              <td class="row-menu-cell">
+                <a class="table-action" [routerLink]="['/users', row.userId]">User</a>
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="4" class="empty-state">No active students are enrolled.</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Sessions</h2>
+        <p>{{ item.sessions.length }} planned and persisted sessions</p>
+      </div>
+      <a class="table-action" routerLink="/class-sessions" [queryParams]="{ batchId: item.id }">Open reports</a>
+    </div>
+    <div class="data-table-wrap" style="--data-table-min-width: 920px">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Session</th>
+            <th>Status</th>
+            <th>Scheduled</th>
+            <th>Started</th>
+            <th>Completed</th>
+            <th class="row-menu-cell">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (session of item.sessions; track trackBySession($index, session)) {
+            <tr>
+              <td>
+                <strong>{{ session.title }}</strong>
+                <small>#{{ session.sessionNumber }} · {{ session.id }}</small>
+              </td>
+              <td><span class="data-pill status-{{ session.status }}">{{ session.status }}</span></td>
+              <td>{{ session.scheduledAt | date: 'short' }}</td>
+              <td>{{ session.startedAt ? (session.startedAt | date: 'short') : 'Not started' }}</td>
+              <td>{{ session.completedAt ? (session.completedAt | date: 'short') : 'Not completed' }}</td>
+              <td class="row-menu-cell">
+                @if (session.status === 'scheduled') {
+                  <span class="data-pill planned-pill">Planned</span>
+                } @else {
+                  <div class="table-row-menu">
+                    <a class="table-action" [routerLink]="['/class-sessions', session.id]">Report</a>
+                    <button
+                      type="button"
+                      class="table-action"
+                      [disabled]="pendingAttendanceSessionId() === session.id"
+                      (click)="downloadAttendance(session)"
+                    >
+                      {{ pendingAttendanceSessionId() === session.id ? 'Downloading...' : 'Attendance' }}
+                    </button>
+                  </div>
+                }
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="6" class="empty-state">No sessions are planned.</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+}

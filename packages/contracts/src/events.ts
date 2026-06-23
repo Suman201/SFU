@@ -240,6 +240,8 @@ export interface RoomOwnerChangedEventPayload {
 export interface RecordingLifecycleEventPayload {
   room: Pick<PlatformRoomReference, 'roomId' | 'name'>;
   recordingId: string;
+  sessionId?: string;
+  batchId?: string;
   participantId?: string;
   scope: RecordingScope;
   status: RecordingStatus;

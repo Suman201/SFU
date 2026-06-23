@@ -1,0 +1,134 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Reporting</p>
+    <h1>Class sessions</h1>
+    <p>Monitor live delivery, attendance, completion, and session-level outcomes.</p>
+  </div>
+</section>
+
+<section class="summary-grid" aria-label="Class session summary">
+  <article>
+    <span>Total sessions</span>
+    <strong>{{ summary()?.totalSessions ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Live now</span>
+    <strong>{{ summary()?.liveSessions ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Completed</span>
+    <strong>{{ summary()?.completedSessions ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Average attendance</span>
+    <strong>{{ ((summary()?.averageAttendancePercent ?? 0) / 100) | percent: '1.0-0' }}</strong>
+  </article>
+</section>
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Session report</h2>
+      <p>{{ total() }} sessions found</p>
+    </div>
+    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+      <select formControlName="status" aria-label="Status">
+        <option value="all">All statuses</option>
+        <option value="scheduled">Scheduled</option>
+        <option value="live">Live</option>
+        <option value="completed">Completed</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+      <input type="search" formControlName="teacherId" placeholder="Teacher ID" aria-label="Teacher ID" />
+      <input type="search" formControlName="batchId" placeholder="Batch ID" aria-label="Batch ID" />
+      <input type="search" formControlName="courseId" placeholder="Course ID" aria-label="Course ID" />
+      <input type="date" formControlName="dateFrom" aria-label="Date from" />
+      <input type="date" formControlName="dateTo" aria-label="Date to" />
+      <button type="submit" class="table-action primary">Apply</button>
+      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+    </form>
+  </div>
+
+  @if (error()) {
+    <p class="table-error" role="alert">{{ error() }}</p>
+  }
+
+  <div class="data-table-wrap" style="--data-table-min-width: 1120px">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Session</th>
+          <th>Batch</th>
+          <th>Teacher</th>
+          <th>Scheduled</th>
+          <th>Status</th>
+          <th>Attendance</th>
+          <th>Duration</th>
+          <th class="actions-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr>
+            <td colspan="8" class="empty-state">Loading class sessions...</td>
+          </tr>
+        } @else if (!rows().length) {
+          <tr>
+            <td colspan="8" class="empty-state">No class sessions match these filters.</td>
+          </tr>
+        } @else {
+          @for (row of rows(); track trackBySession($index, row)) {
+            <tr>
+              <td>
+                <div class="primary-cell">
+                  <span class="table-avatar">{{ row.sessionNumber }}</span>
+                  <div>
+                    <strong>{{ row.title }}</strong>
+                    <small>{{ row.sessionId }}</small>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <strong>{{ row.batchName }}</strong>
+                <small>{{ row.courseName || row.courseId || 'No course' }}</small>
+              </td>
+              <td>
+                <strong>{{ row.teacherName || row.teacherId }}</strong>
+                <small>{{ row.teacherEmail || row.teacherId }}</small>
+              </td>
+              <td>{{ row.scheduledAt | date: 'medium' }}</td>
+              <td><span class="data-pill {{ statusClass(row.status) }}">{{ row.status }}</span></td>
+              <td>
+                <strong>{{ row.attendance.present }}/{{ row.attendance.enrolled }}</strong>
+                <small>{{ attendancePercent(row) | percent: '1.0-0' }} present</small>
+              </td>
+              <td>
+                <strong>{{ row.attendance.averageDurationSeconds || 0 }}s avg</strong>
+                <small>{{ row.attendance.reconnects }} reconnects</small>
+              </td>
+              <td class="actions-cell">
+                <a class="table-action" [routerLink]="['/class-sessions', row.sessionId]">View</a>
+                <button
+                  type="button"
+                  class="table-action accent"
+                  [disabled]="!row.roomId || downloadingSessionId() === row.sessionId"
+                  (click)="downloadAttendance(row)"
+                >
+                  {{ downloadingSessionId() === row.sessionId ? 'Downloading' : 'Attendance' }}
+                </button>
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-footer">
+    <span>Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() <= 1" (click)="previousPage()">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+    </div>
+  </div>
+</section>

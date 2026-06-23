@@ -1,0 +1,69 @@
+<a class="back-link" routerLink="/class-sessions">Back to reports</a>
+
+@if (loading()) {
+  <section class="detail-state">Loading session report...</section>
+} @else if (error()) {
+  <section class="detail-state error" role="alert">{{ error() }}</section>
+} @else if (session(); as item) {
+  <section class="detail-head">
+    <div>
+      <p class="eyebrow">{{ item.status }}</p>
+      <h1>{{ item.title }}</h1>
+      <p>{{ item.batchName }} · Session {{ item.sessionNumber }}</p>
+    </div>
+    <button type="button" class="primary-action" [disabled]="!item.roomId || downloading()" (click)="downloadAttendance()">
+      {{ downloading() ? 'Downloading...' : 'Download attendance' }}
+    </button>
+  </section>
+
+  <section class="detail-grid">
+    <article>
+      <span>Scheduled</span>
+      <strong>{{ item.scheduledAt | date: 'medium' }}</strong>
+    </article>
+    <article>
+      <span>Started</span>
+      <strong>{{ item.startedAt ? (item.startedAt | date: 'medium') : 'Not started' }}</strong>
+    </article>
+    <article>
+      <span>Completed</span>
+      <strong>{{ item.completedAt ? (item.completedAt | date: 'medium') : 'Open' }}</strong>
+    </article>
+    <article>
+      <span>Room</span>
+      <strong>{{ item.roomId || 'Not created' }}</strong>
+    </article>
+  </section>
+
+  <section class="attendance-card">
+    <div>
+      <p class="eyebrow">Attendance</p>
+      <h2>{{ item.attendance.present }}/{{ item.attendance.enrolled }} students</h2>
+      <p>{{ attendancePercent(item) | percent: '1.0-0' }} attended this session.</p>
+    </div>
+    <div class="attendance-metrics">
+      <span><strong>{{ item.attendance.absent }}</strong> absent</span>
+      <span><strong>{{ item.attendance.reconnects }}</strong> reconnects</span>
+      <span><strong>{{ item.attendance.averageDurationSeconds }}s</strong> avg duration</span>
+    </div>
+  </section>
+
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Session metadata</h2>
+        <p>Source identifiers for reconciliation and support.</p>
+      </div>
+    </div>
+    <div class="metadata-grid">
+      <span>Session ID</span>
+      <code>{{ item.sessionId }}</code>
+      <span>Batch ID</span>
+      <code>{{ item.batchId }}</code>
+      <span>Course</span>
+      <code>{{ item.courseName || item.courseId || 'Not assigned' }}</code>
+      <span>Teacher</span>
+      <code>{{ item.teacherName || item.teacherEmail || item.teacherId }}</code>
+    </div>
+  </section>
+}

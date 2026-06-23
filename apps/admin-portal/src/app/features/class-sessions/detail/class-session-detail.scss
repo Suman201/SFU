@@ -1,0 +1,180 @@
+.back-link {
+  width: fit-content;
+  color: var(--product-green);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.detail-head h1,
+.detail-head p,
+.attendance-card h2,
+.attendance-card p,
+.data-table-toolbar h2,
+.data-table-toolbar p {
+  margin: 0;
+}
+
+.detail-head h1 {
+  color: var(--text);
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.detail-head p,
+.attendance-card p,
+.data-table-toolbar p {
+  color: var(--muted);
+}
+
+.eyebrow {
+  color: var(--product-coral);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.primary-action {
+  min-height: 40px;
+  border: 0;
+  border-radius: 11px;
+  padding: 0 14px;
+  color: white;
+  background: var(--product-rose);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.primary-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.detail-grid article,
+.attendance-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.detail-grid article {
+  display: grid;
+  gap: 8px;
+  padding: 15px;
+}
+
+.detail-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.detail-grid strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attendance-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+}
+
+.attendance-card h2 {
+  color: var(--text);
+  font-size: 26px;
+}
+
+.attendance-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.attendance-metrics span {
+  display: grid;
+  gap: 4px;
+  min-width: 120px;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--product-green) 9%, transparent);
+}
+
+.attendance-metrics strong {
+  color: var(--text);
+}
+
+.metadata-grid {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 10px 14px;
+  padding: 16px;
+}
+
+.metadata-grid span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.detail-state {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px;
+  color: var(--muted);
+  background: var(--panel-elevated);
+}
+
+.detail-state.error {
+  color: var(--product-rose);
+  background: color-mix(in srgb, var(--product-rose) 12%, transparent);
+}
+
+@media (max-width: 980px) {
+  .detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .detail-head,
+  .attendance-card {
+    flex-direction: column;
+  }
+
+  .detail-grid,
+  .metadata-grid {
+    grid-template-columns: 1fr;
+  }
+}

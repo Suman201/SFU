@@ -19,6 +19,7 @@ import { MediaApiModule } from './media/media-api.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { MetricsService } from './metrics/metrics.service';
 import { RedisModule } from './redis/redis.module';
+import { RecordingsModule } from './recordings/recordings.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { ClusterModule } from './cluster/cluster.module';
 import { PermissionsModule } from './permissions/permissions.module';
@@ -152,6 +153,7 @@ import { UsersModule } from './users/users.module';
     TeacherBatchesModule,
     ClassSessionsModule,
     SessionsModule,
+    RecordingsModule,
     RoomsModule,
     MediaApiModule,
     HealthModule

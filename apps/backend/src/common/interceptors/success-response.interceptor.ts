@@ -6,7 +6,15 @@ export class SuccessResponseInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const request = context.switchToHttp().getRequest<{ path?: string; originalUrl?: string }>();
     const path = request.originalUrl ?? request.path ?? '';
-    if (path.includes('/api/docs') || path === '/metrics' || path.startsWith('/health') || path.startsWith('/api/health')) {
+    const pathname = path.split('?')[0] ?? path;
+    if (
+      path.includes('/api/docs') ||
+      pathname.endsWith('.csv') ||
+      pathname.includes('/recordings/') && pathname.endsWith('/download') ||
+      path === '/metrics' ||
+      path.startsWith('/health') ||
+      path.startsWith('/api/health')
+    ) {
       return next.handle();
     }
     return next.handle().pipe(

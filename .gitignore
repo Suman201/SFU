@@ -6,7 +6,8 @@ coverage
 .env
 .env.*
 !.env.example
-recordings
+/recordings/
+/chat-attachments/
 *.log
 *.tsbuildinfo
 .DS_Store

@@ -39,6 +39,7 @@ export type EmailVerificationTokenMongoDocument = HydratedDocument<EmailVerifica
 export type AuditLogMongoDocument = HydratedDocument<AuditLogDocument>;
 export type ModerationMongoDocument = HydratedDocument<ModerationDocument>;
 export type ChatMessageMongoDocument = HydratedDocument<ChatMessageDocument>;
+export type ChatAttachmentFileMongoDocument = HydratedDocument<ChatAttachmentFileDocument>;
 export type ChatReadStateMongoDocument = HydratedDocument<ChatReadStateDocument>;
 export type RecordingMongoDocument = HydratedDocument<RecordingDocument>;
 
@@ -283,6 +284,12 @@ export class ClassSessionDocument {
   @Prop({ type: Date })
   cancelledAt?: Date;
 
+  @Prop({ type: Date })
+  teacherDisconnectedAt?: Date;
+
+  @Prop({ type: Date, index: true })
+  teacherReconnectDeadlineAt?: Date;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
@@ -291,6 +298,7 @@ export const ClassSessionSchema = SchemaFactory.createForClass(ClassSessionDocum
 ClassSessionSchema.index({ batchId: 1, scheduledAt: 1 });
 ClassSessionSchema.index({ batchId: 1, status: 1, scheduledAt: 1 });
 ClassSessionSchema.index({ teacherId: 1, status: 1, scheduledAt: 1 });
+ClassSessionSchema.index({ status: 1, teacherReconnectDeadlineAt: 1 });
 ClassSessionSchema.index(
   { batchId: 1, status: 1 },
   {
@@ -1289,6 +1297,18 @@ export class ParticipantDocument {
   @Prop({ default: false })
   handRaised!: boolean;
 
+  @Prop({ type: Date })
+  handRaisedAt?: Date;
+
+  @Prop({ default: false })
+  allowedToSpeak!: boolean;
+
+  @Prop({ type: Date })
+  allowedToSpeakAt?: Date;
+
+  @Prop({ index: true })
+  allowedToSpeakBy?: string;
+
   @Prop({ default: true, index: true })
   admitted!: boolean;
 
@@ -1311,6 +1331,7 @@ ParticipantSchema.index({ roomId: 1, nodeId: 1, leftAt: 1 });
 ParticipantSchema.index({ roomId: 1, socketId: 1 }, { unique: true, partialFilterExpression: { leftAt: { $exists: false } } });
 ParticipantSchema.index({ roomId: 1, role: 1 });
 ParticipantSchema.index({ roomId: 1, admitted: 1, leftAt: 1 });
+ParticipantSchema.index({ roomId: 1, handRaised: 1, handRaisedAt: 1 });
 
 @Schema({ collection: 'participant_permissions', timestamps: true })
 export class PermissionDocument {
@@ -1475,6 +1496,123 @@ export const ModerationSchema = SchemaFactory.createForClass(ModerationDocument)
 ModerationSchema.index({ roomId: 1, participantId: 1, action: 1, active: 1 });
 ModerationSchema.index({ roomId: 1, userId: 1, action: 1, active: 1 });
 
+@Schema({ _id: false })
+export class ChatAttachmentDocument {
+  @Prop({ required: true, default: randomUUID })
+  id!: string;
+
+  @Prop({ index: true })
+  attachmentId?: string;
+
+  @Prop({ required: true, enum: ['image', 'pdf', 'link'] })
+  type!: 'image' | 'pdf' | 'link';
+
+  @Prop({ trim: true, maxlength: 180 })
+  fileName?: string;
+
+  @Prop({ trim: true, maxlength: 180 })
+  title?: string;
+
+  @Prop({ trim: true, maxlength: 120 })
+  mimeType?: string;
+
+  @Prop({ min: 0 })
+  size?: number;
+
+  @Prop({ enum: ['local', 's3'] })
+  storageProvider?: 'local' | 's3';
+
+  @Prop({ trim: true, maxlength: 2048 })
+  downloadUrl?: string;
+
+  @Prop({ trim: true, maxlength: 2048 })
+  url?: string;
+
+  @Prop()
+  dataUrl?: string;
+
+  @Prop({ default: Date.now })
+  createdAt!: Date;
+}
+
+export const ChatAttachmentSchema = SchemaFactory.createForClass(ChatAttachmentDocument);
+
+@Schema({ collection: 'chat_attachments', timestamps: true })
+export class ChatAttachmentFileDocument {
+  @Prop({ required: true, default: randomUUID, unique: true, index: true })
+  attachmentId!: string;
+
+  @Prop({ required: true, index: true })
+  sessionId!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ required: true, index: true })
+  roomId!: string;
+
+  @Prop({ index: true })
+  channelId?: string;
+
+  @Prop({ index: true })
+  chatChannelId?: string;
+
+  @Prop({ required: true, index: true })
+  uploadedByUserId!: string;
+
+  @Prop({ required: true, index: true })
+  uploadedByParticipantId!: string;
+
+  @Prop({ required: true, enum: ['pending', 'private', 'broadcast'], default: 'pending', index: true })
+  scope!: 'pending' | 'private' | 'broadcast';
+
+  @Prop({ index: true })
+  recipientId?: string;
+
+  @Prop({ index: true })
+  threadKey?: string;
+
+  @Prop({ index: true })
+  messageId?: string;
+
+  @Prop({ required: true, enum: ['image', 'pdf'] })
+  type!: 'image' | 'pdf';
+
+  @Prop({ required: true, trim: true, maxlength: 180 })
+  fileName!: string;
+
+  @Prop({ trim: true, maxlength: 180 })
+  title?: string;
+
+  @Prop({ required: true, trim: true, maxlength: 120 })
+  mimeType!: string;
+
+  @Prop({ required: true, min: 0 })
+  size!: number;
+
+  @Prop({ required: true, enum: ['local', 's3'], default: 'local' })
+  storageProvider!: 'local' | 's3';
+
+  @Prop({ required: true, trim: true, maxlength: 1024 })
+  storageKey!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 2048 })
+  path!: string;
+
+  @Prop()
+  deletedAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const ChatAttachmentFileSchema = SchemaFactory.createForClass(ChatAttachmentFileDocument);
+ChatAttachmentFileSchema.index({ sessionId: 1, scope: 1, createdAt: -1 });
+ChatAttachmentFileSchema.index({ sessionId: 1, threadKey: 1, createdAt: -1 });
+ChatAttachmentFileSchema.index({ roomId: 1, uploadedByUserId: 1, createdAt: -1 });
+ChatAttachmentFileSchema.index({ roomId: 1, recipientId: 1, createdAt: -1 });
+ChatAttachmentFileSchema.index({ sessionId: 1, scope: 1, deletedAt: 1 });
+
 @Schema({ collection: 'chat', timestamps: true })
 export class ChatMessageDocument {
   @Prop({ index: true })
@@ -1510,8 +1648,11 @@ export class ChatMessageDocument {
   @Prop({ index: true })
   threadKey?: string;
 
-  @Prop({ required: true, trim: true, maxlength: 4000 })
+  @Prop({ trim: true, maxlength: 4000, default: '' })
   message!: string;
+
+  @Prop({ type: [ChatAttachmentSchema], default: [] })
+  attachments!: ChatAttachmentDocument[];
 
   @Prop({ default: false })
   shadowMuted!: boolean;
@@ -1580,6 +1721,15 @@ ChatReadStateSchema.index({ sessionId: 1, threadKey: 1, updatedAt: -1 });
 
 @Schema({ collection: 'recordings', timestamps: true })
 export class RecordingDocument {
+  @Prop({ required: true, default: randomUUID, unique: true, index: true })
+  recordingId!: string;
+
+  @Prop({ index: true })
+  sessionId?: string;
+
+  @Prop({ index: true })
+  batchId?: string;
+
   @Prop({ required: true, index: true })
   roomId!: string;
 
@@ -1589,17 +1739,59 @@ export class RecordingDocument {
   @Prop({ required: true, enum: ['room', 'participant', 'screen'] })
   scope!: 'room' | 'participant' | 'screen';
 
-  @Prop({ required: true, enum: ['starting', 'recording', 'stopped', 'failed'], default: 'starting' })
-  status!: 'starting' | 'recording' | 'stopped' | 'failed';
+  @Prop({ required: true, enum: ['starting', 'recording', 'stopping', 'stopped', 'failed'], default: 'starting' })
+  status!: 'starting' | 'recording' | 'stopping' | 'stopped' | 'failed';
 
   @Prop({ required: true, enum: ['local', 's3'], default: 'local' })
   storageDriver!: 'local' | 's3';
 
   @Prop()
+  storageKey?: string;
+
+  @Prop()
   path?: string;
 
   @Prop()
+  url?: string;
+
+  @Prop()
   downloadUrl?: string;
+
+  @Prop()
+  playbackUrl?: string;
+
+  @Prop()
+  mimeType?: string;
+
+  @Prop()
+  container?: string;
+
+  @Prop()
+  size?: number;
+
+  @Prop()
+  durationSeconds?: number;
+
+  @Prop({ index: true })
+  startedBy?: string;
+
+  @Prop()
+  stoppedBy?: string;
+
+  @Prop()
+  failureReason?: string;
+
+  @Prop({ index: true })
+  retentionExpiresAt?: Date;
+
+  @Prop()
+  consentVersion?: string;
+
+  @Prop({ default: true })
+  consentRequired?: boolean;
+
+  @Prop({ type: [Object], default: [] })
+  tracks?: Record<string, unknown>[];
 
   @Prop({ default: Date.now })
   startedAt!: Date;
@@ -1612,5 +1804,18 @@ export class RecordingDocument {
 }
 
 export const RecordingSchema = SchemaFactory.createForClass(RecordingDocument);
+RecordingSchema.index(
+  { sessionId: 1, roomId: 1, status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      sessionId: { $exists: true },
+      status: { $in: ['starting', 'recording', 'stopping'] }
+    }
+  }
+);
 RecordingSchema.index({ roomId: 1, status: 1 });
 RecordingSchema.index({ roomId: 1, participantId: 1, startedAt: -1 });
+RecordingSchema.index({ sessionId: 1, startedAt: -1 });
+RecordingSchema.index({ batchId: 1, sessionId: 1, startedAt: -1 });
+RecordingSchema.index({ sessionId: 1, status: 1 });

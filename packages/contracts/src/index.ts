@@ -6,6 +6,7 @@ export * from './producers.js';
 export * from './consumers.js';
 export * from './chat.js';
 export * from './recordings.js';
+export * from './admin.js';
 export * from './metrics.js';
 export * from './events.js';
 export * from './cluster.js';

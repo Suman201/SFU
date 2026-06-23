@@ -3,9 +3,11 @@
   --student-action: #F26076;
   --student-live: #FF9760;
   --student-attention: #FFD150;
+  --student-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --student-safe-top: env(safe-area-inset-top, 0px);
   --student-edge: 24px;
   --student-control-height: 64px;
-  --student-bottom-rail: calc(var(--student-edge) + var(--student-control-height) + 18px);
+  --student-bottom-rail: calc(var(--student-edge) + var(--student-safe-bottom) + var(--student-control-height) + 18px);
   --student-pip-width: clamp(180px, 22vw, 280px);
   --student-pip-bottom: var(--student-bottom-rail);
   --student-stage-pad: 14px;
@@ -16,6 +18,7 @@
   width: 100%;
   max-width: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--student-base) 18%, transparent), transparent 42%),
@@ -55,11 +58,35 @@
   color: var(--muted);
 }
 
+.recording-playback-card {
+  display: grid;
+  gap: 6px;
+  width: min(520px, 100%);
+  margin-top: 6px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--student-base) 34%, var(--line-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--student-base) 9%, var(--panel-elevated));
+  color: var(--text);
+  text-align: left;
+}
+
+.recording-playback-card.failed {
+  border-color: color-mix(in srgb, var(--student-action) 46%, var(--line-soft));
+  background: color-mix(in srgb, var(--student-action) 9%, var(--panel-elevated));
+}
+
+.recording-playback-card span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .video-stage {
   position: absolute;
   inset: 0;
   display: grid;
   min-width: 0;
+  min-height: 100dvh;
 }
 
 .video-frame {
@@ -91,7 +118,7 @@
 .teacher-reconnect-banner {
   position: absolute;
   left: 50%;
-  top: 24px;
+  top: calc(24px + var(--student-safe-top));
   z-index: 6;
   display: grid;
   justify-items: center;
@@ -117,6 +144,58 @@
   color: rgba(247, 250, 245, 0.72);
   font-size: 12px;
   font-weight: 700;
+}
+
+.student-recording-badge {
+  position: absolute;
+  right: 28px;
+  top: calc(84px + var(--student-safe-top));
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  max-width: min(260px, calc(100vw - 56px));
+  padding: 0 11px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(7, 13, 11, 0.72);
+  box-shadow: var(--shadow-sm);
+  color: rgba(247, 250, 245, 0.82);
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  backdrop-filter: blur(14px);
+}
+
+.student-recording-badge span {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--student-base);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--student-base) 18%, transparent);
+}
+
+.student-recording-badge.live {
+  border-color: color-mix(in srgb, var(--student-action) 58%, transparent);
+  color: #ffd8de;
+}
+
+.student-recording-badge.live span {
+  background: var(--student-action);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--student-action) 24%, transparent);
+}
+
+.student-recording-badge.compact {
+  position: static;
+  min-height: 30px;
+  max-width: 190px;
+  padding: 0 9px;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: none;
 }
 
 .stage-video {
@@ -240,6 +319,7 @@
   bottom: var(--student-pip-bottom);
   z-index: 5;
   width: var(--student-pip-width);
+  max-width: calc(100vw - (var(--student-edge) * 2));
   aspect-ratio: 16 / 10;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -307,17 +387,19 @@
   z-index: 30;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 24px max(16px, env(safe-area-inset-bottom, 0px));
   background: rgba(2, 7, 6, 0.58);
   backdrop-filter: blur(10px);
 }
 
 .student-prejoin-modal {
   display: grid;
+  grid-template-rows: auto minmax(0, auto) auto auto;
   gap: 14px;
   width: min(620px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - max(32px, env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px)));
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 18px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 8px;
@@ -333,6 +415,15 @@
   align-items: start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.prejoin-status-group {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: min(360px, 52%);
 }
 
 .student-prejoin-header p,
@@ -372,7 +463,8 @@
 .prejoin-preview {
   position: relative;
   display: grid;
-  min-height: 260px;
+  aspect-ratio: 16 / 9;
+  min-height: clamp(190px, 34dvh, 260px);
   place-items: center;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.13);
@@ -385,7 +477,7 @@
 .prejoin-preview video {
   width: 100%;
   height: 100%;
-  min-height: 260px;
+  min-height: clamp(190px, 34dvh, 260px);
   display: block;
   object-fit: cover;
 }
@@ -425,8 +517,16 @@
 }
 
 .student-prejoin-actions {
+  position: sticky;
+  bottom: -18px;
+  z-index: 2;
   display: flex;
   justify-content: flex-end;
+  margin: 0 -18px -18px;
+  padding: 10px 18px calc(12px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(9, 17, 15, 0.94);
+  backdrop-filter: blur(12px);
 }
 
 .prejoin-join-button {
@@ -443,17 +543,18 @@
 .student-media-controls {
   position: fixed;
   left: 50%;
-  bottom: var(--student-edge);
+  bottom: calc(var(--student-edge) + var(--student-safe-bottom));
   z-index: 22;
   display: inline-grid;
   grid-template-areas:
-    'audio mic camera video refresh status'
-    'problem problem problem problem problem problem';
-  grid-template-columns: minmax(132px, 176px) 42px 42px minmax(132px, 176px) 36px minmax(92px, auto);
+    'audio mic camera video refresh hand status'
+    'problem problem problem problem problem hand speak';
+  grid-template-columns: minmax(132px, 176px) 42px 42px minmax(132px, 176px) 36px minmax(112px, auto) minmax(120px, 220px);
   align-items: center;
   gap: 6px 8px;
-  max-width: min(840px, calc(100vw - 48px));
-  min-height: 52px;
+  max-width: min(1080px, calc(100vw - 48px));
+  max-height: calc(100dvh - 32px - var(--student-safe-top) - var(--student-safe-bottom));
+  min-height: 64px;
   padding: 5px 10px 5px 8px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 24px;
@@ -528,7 +629,8 @@
 
 .student-device-select select:focus-visible,
 .student-device-refresh:focus-visible,
-.student-media-toggle:focus-visible {
+.student-media-toggle:focus-visible,
+.student-hand-button:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--student-attention) 90%, transparent);
   outline-offset: 2px;
 }
@@ -700,6 +802,76 @@
   transform: rotate(-12deg);
 }
 
+.student-hand-button {
+  position: relative;
+  display: inline-flex;
+  grid-area: hand;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--student-attention) 42%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--student-attention) 14%, rgba(255, 255, 255, 0.08));
+  color: #f7faf5;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.student-hand-button.raised {
+  border-color: color-mix(in srgb, var(--student-attention) 70%, transparent);
+  background: color-mix(in srgb, var(--student-attention) 28%, rgba(255, 255, 255, 0.08));
+}
+
+.student-hand-button.allowed {
+  border-color: color-mix(in srgb, var(--student-base) 66%, transparent);
+  background: color-mix(in srgb, var(--student-base) 42%, rgba(255, 255, 255, 0.08));
+}
+
+.student-hand-button.pending .hand-icon {
+  animation: student-device-spin 780ms linear infinite;
+}
+
+.student-hand-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.hand-icon {
+  position: relative;
+  width: 15px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.hand-icon::before {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-radius: 6px 6px 7px 7px;
+  content: '';
+}
+
+.hand-icon::after {
+  position: absolute;
+  right: 1px;
+  bottom: 0;
+  width: 5px;
+  height: 10px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  border-radius: 0 0 5px;
+  content: '';
+  transform: rotate(-24deg);
+}
+
 .local-media-status {
   grid-area: status;
   min-width: 0;
@@ -710,6 +882,26 @@
   font-weight: 850;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.speaking-permission-status {
+  grid-area: speak;
+  min-width: 0;
+  max-width: 260px;
+  overflow: hidden;
+  color: rgba(247, 250, 245, 0.68);
+  font-size: 11px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.speaking-permission-status.waiting {
+  color: color-mix(in srgb, var(--student-attention) 50%, #ffffff);
+}
+
+.speaking-permission-status.allowed {
+  color: color-mix(in srgb, var(--student-base) 55%, #ffffff);
 }
 
 .student-media-controls.problem .local-media-status {
@@ -738,7 +930,7 @@
 
 .participants-button {
   position: fixed;
-  top: 24px;
+  top: calc(24px + var(--student-safe-top));
   right: 24px;
   z-index: 24;
   display: inline-flex;
@@ -806,7 +998,8 @@
   grid-template-rows: auto minmax(0, 1fr);
   width: min(380px, calc(100vw - 28px));
   height: 100vh;
-  padding: 20px;
+  height: 100dvh;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(20px + env(safe-area-inset-bottom, 0px));
   border-left: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(16, 24, 21, 0.94);
   box-shadow: -24px 0 70px rgba(0, 0, 0, 0.36);
@@ -903,6 +1096,11 @@
   background: var(--accent-soft);
 }
 
+.participant-row.hand-raised {
+  border-color: color-mix(in srgb, var(--student-attention) 46%, transparent);
+  background: color-mix(in srgb, var(--student-attention) 14%, transparent);
+}
+
 .participant-row.reconnecting {
   border-color: color-mix(in srgb, var(--student-attention) 42%, transparent);
   background: color-mix(in srgb, var(--student-attention) 14%, transparent);
@@ -931,22 +1129,31 @@
   box-shadow: 0 0 0 6px var(--accent-soft);
 }
 
+.hand-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--student-attention);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--student-attention) 18%, transparent);
+}
+
 sfu-session-chat {
+  --chat-reserved-bottom: calc(64px + 18px);
   left: 24px;
   right: auto;
-  bottom: calc(24px + 64px + 18px);
+  bottom: calc(24px + 64px + 18px + env(safe-area-inset-bottom, 0px));
   width: min(380px, calc(100vw - 48px));
 }
 
 @media (max-width: 720px) {
   .student-session-shell {
     --student-edge: 16px;
-    --student-control-height: 112px;
-    --student-bottom-rail: 146px;
-    --student-pip-width: min(44vw, 176px);
-    --student-pip-bottom: 210px;
+    --student-control-height: 148px;
+    --student-bottom-rail: calc(var(--student-edge) + var(--student-safe-bottom) + var(--student-control-height) + 12px);
+    --student-pip-width: clamp(132px, 38vw, 176px);
+    --student-pip-bottom: calc(var(--student-bottom-rail) + 30px);
     --student-stage-pad: 10px;
-    --student-screen-safe-bottom: 160px;
+    --student-screen-safe-bottom: calc(var(--student-bottom-rail) + 14px);
   }
 
   .speaker-badge {
@@ -969,45 +1176,82 @@ sfu-session-chat {
     right: 16px;
   }
 
+  .student-recording-badge {
+    top: calc(66px + var(--student-safe-top));
+    right: 16px;
+    max-width: min(230px, calc(100vw - 32px));
+  }
+
+  .student-recording-badge.compact {
+    max-width: 100%;
+  }
+
+  .teacher-reconnect-banner {
+    top: calc(72px + var(--student-safe-top));
+    width: min(360px, calc(100vw - 32px));
+    padding: 10px 12px;
+  }
+
+  .teacher-reconnect-banner strong {
+    font-size: 13px;
+  }
+
+  .teacher-reconnect-banner span {
+    font-size: 11px;
+  }
+
   .teacher-pip {
     right: 16px;
     bottom: var(--student-pip-bottom);
     width: var(--student-pip-width);
+    max-height: min(30dvh, 142px);
   }
 
   sfu-session-chat {
+    --chat-reserved-bottom: calc(148px + 16px);
     left: 16px;
     right: 16px;
-    bottom: 144px;
+    bottom: calc(16px + 148px + 16px + env(safe-area-inset-bottom, 0px));
     width: auto;
   }
 
   .student-media-controls {
     left: 16px;
     right: 16px;
-    bottom: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     grid-template-areas:
-      'mic camera refresh status'
+      'mic camera refresh hand'
       'audio audio video video'
+      'status status speak speak'
       'problem problem problem problem';
-    grid-template-columns: 42px 42px 36px minmax(0, 1fr);
+    grid-template-columns: 42px 42px 36px minmax(116px, 1fr);
     max-width: none;
+    max-height: min(46dvh, calc(100dvh - 96px - var(--student-safe-top) - var(--student-safe-bottom)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 5px 8px 6px;
+    border-radius: 16px;
     transform: none;
   }
 
   .student-prejoin-backdrop {
-    padding: 16px;
+    align-items: stretch;
+    padding: max(12px, env(safe-area-inset-top, 0px)) 16px max(12px, env(safe-area-inset-bottom, 0px));
   }
 
   .student-prejoin-modal {
     width: 100%;
-    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - max(24px, env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px)));
     padding: 14px;
   }
 
   .student-prejoin-header {
     display: grid;
+  }
+
+  .prejoin-status-group {
+    justify-content: flex-start;
+    max-width: 100%;
   }
 
   .prejoin-status {
@@ -1016,7 +1260,7 @@ sfu-session-chat {
 
   .prejoin-preview,
   .prejoin-preview video {
-    min-height: 210px;
+    min-height: clamp(170px, 32dvh, 210px);
   }
 
   .prejoin-media-controls.student-media-controls {
@@ -1028,14 +1272,27 @@ sfu-session-chat {
       'audio audio audio'
       'video video video'
       'problem problem problem';
-    grid-template-columns: 42px 42px 36px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px;
     justify-content: center;
     max-width: none;
+    max-height: none;
+    overflow: visible;
     padding: 8px;
   }
 
+  .prejoin-media-controls .mic-toggle {
+    justify-self: end;
+  }
+
+  .prejoin-media-controls .camera-toggle {
+    justify-self: center;
+  }
+
   .student-prejoin-actions {
+    bottom: -14px;
     justify-content: stretch;
+    margin: 0 -14px -14px;
+    padding: 10px 14px calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   .prejoin-join-button {
@@ -1046,7 +1303,138 @@ sfu-session-chat {
     max-width: none;
   }
 
+  .speaking-permission-status {
+    max-width: none;
+  }
+
   .device-problem-message {
     white-space: normal;
+  }
+}
+
+@media (max-width: 560px) {
+  .student-session-shell {
+    --student-control-height: 174px;
+    --student-pip-width: clamp(118px, 40vw, 148px);
+    --student-pip-bottom: calc(var(--student-bottom-rail) + 12px);
+  }
+
+  .speaker-badge {
+    right: 82px;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .speaker-badge strong {
+    font-size: 14px;
+  }
+
+  .speaker-badge span {
+    font-size: 11px;
+  }
+
+  .speaker-avatar {
+    width: 34px;
+    height: 34px;
+  }
+
+  .participants-button {
+    min-height: 40px;
+    padding: 0 10px;
+  }
+
+  .teacher-pip footer {
+    min-height: 24px;
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+
+  .teacher-pip footer span {
+    display: none;
+  }
+
+  .student-media-controls {
+    grid-template-areas:
+      'mic camera refresh hand'
+      'audio audio audio audio'
+      'video video video video'
+      'status status speak speak'
+      'problem problem problem problem';
+    grid-template-columns: 42px 42px 36px minmax(0, 1fr);
+  }
+
+  sfu-session-chat {
+    --chat-reserved-bottom: calc(174px + 12px);
+    bottom: calc(16px + 174px + 12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .participants-sidebar {
+    width: 100vw;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    border-left: 0;
+  }
+}
+
+@media (max-height: 620px) and (orientation: landscape) {
+  .student-session-shell {
+    --student-control-height: 92px;
+    --student-bottom-rail: calc(var(--student-edge) + var(--student-safe-bottom) + var(--student-control-height) + 10px);
+    --student-pip-width: clamp(126px, 20vw, 170px);
+    --student-pip-bottom: calc(var(--student-bottom-rail) + 8px);
+    --student-screen-safe-bottom: calc(var(--student-bottom-rail) + 8px);
+  }
+
+  .speaker-badge,
+  .participants-button {
+    top: calc(10px + var(--student-safe-top));
+  }
+
+  .student-media-controls {
+    grid-template-areas:
+      'mic camera refresh hand status speak'
+      'audio audio video video problem problem';
+    grid-template-columns: 42px 42px 36px minmax(100px, auto) minmax(120px, 1fr) minmax(120px, 1fr);
+    max-height: min(36dvh, calc(100dvh - 72px - var(--student-safe-top) - var(--student-safe-bottom)));
+  }
+
+  sfu-session-chat {
+    --chat-reserved-bottom: calc(92px + 12px);
+    bottom: calc(16px + 92px + 12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .student-prejoin-modal {
+    grid-template-columns: minmax(220px, 0.9fr) minmax(280px, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
+  .student-prejoin-header {
+    grid-column: 1 / -1;
+  }
+
+  .prejoin-preview,
+  .prejoin-preview video {
+    min-height: 160px;
+  }
+
+  .prejoin-media-controls.student-media-controls {
+    align-self: stretch;
+  }
+
+  .student-prejoin-actions {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-height: 620px) and (orientation: landscape) and (max-width: 699px) {
+  .student-prejoin-modal {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+  }
+
+  .student-prejoin-header,
+  .student-prejoin-actions {
+    grid-column: auto;
   }
 }

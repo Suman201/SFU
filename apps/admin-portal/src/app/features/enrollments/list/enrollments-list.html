@@ -1,0 +1,163 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Roster control</p>
+    <h1>Enrollments</h1>
+    <p>Manage the roster that controls student access to live class sessions.</p>
+  </div>
+  <button type="button" class="primary-action" (click)="toggleCreate()">
+    {{ showCreate() ? 'Close' : 'Add enrollment' }}
+  </button>
+</section>
+
+<section class="summary-grid" aria-label="Enrollment summary">
+  <article>
+    <span>Total enrollments</span>
+    <strong>{{ summary()?.totalEnrollments ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Active access</span>
+    <strong>{{ summary()?.activeEnrollments ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Suspended</span>
+    <strong>{{ summary()?.suspendedEnrollments ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Recent additions</span>
+    <strong>{{ summary()?.recentlyAdded ?? 0 }}</strong>
+  </article>
+</section>
+
+@if (showCreate()) {
+  <section class="create-panel" aria-labelledby="create-enrollment-title">
+    <div>
+      <p class="eyebrow">New enrollment</p>
+      <h2 id="create-enrollment-title">Add a student to a batch</h2>
+      <p>Use the student and batch IDs from the admin user and batch records.</p>
+    </div>
+    <form [formGroup]="createForm" (ngSubmit)="createEnrollment()">
+      <input type="search" formControlName="studentId" placeholder="Student ID" aria-label="Student ID" />
+      <input type="search" formControlName="batchId" placeholder="Batch ID" aria-label="Batch ID" />
+      <select formControlName="status" aria-label="Initial status">
+        <option value="active">Active</option>
+        <option value="pending">Pending</option>
+        <option value="suspended">Suspended</option>
+      </select>
+      <button type="submit" class="table-action primary" [disabled]="saving()">{{ saving() ? 'Adding...' : 'Add' }}</button>
+    </form>
+  </section>
+}
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Enrollment roster</h2>
+      <p>{{ total() }} records found</p>
+    </div>
+    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+      <select formControlName="status" aria-label="Status">
+        <option value="all">All statuses</option>
+        <option value="active">Active</option>
+        <option value="pending">Pending</option>
+        <option value="suspended">Suspended</option>
+        <option value="cancelled">Cancelled</option>
+        <option value="completed">Completed</option>
+      </select>
+      <input type="search" formControlName="search" placeholder="Search student, email, batch" aria-label="Search" />
+      <input type="search" formControlName="courseId" placeholder="Course ID" aria-label="Course ID" />
+      <input type="search" formControlName="batchId" placeholder="Batch ID" aria-label="Batch ID" />
+      <input type="search" formControlName="studentId" placeholder="Student ID" aria-label="Student ID" />
+      <button type="submit" class="table-action primary">Apply</button>
+      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+    </form>
+  </div>
+
+  @if (error()) {
+    <p class="table-error" role="alert">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="table-success" role="status">{{ success() }}</p>
+  }
+
+  <div class="data-table-wrap" style="--data-table-min-width: 1120px">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Student</th>
+          <th>Course</th>
+          <th>Batch</th>
+          <th>Status</th>
+          <th>Class access</th>
+          <th>Enrolled</th>
+          <th>Updated</th>
+          <th class="actions-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr>
+            <td colspan="8" class="empty-state">Loading enrollments...</td>
+          </tr>
+        } @else if (!rows().length) {
+          <tr>
+            <td colspan="8" class="empty-state">No enrollments match these filters.</td>
+          </tr>
+        } @else {
+          @for (row of rows(); track trackByEnrollment($index, row)) {
+            <tr>
+              <td>
+                <div class="primary-cell">
+                  <span class="table-avatar">{{ initials(row) || 'ST' }}</span>
+                  <div>
+                    <strong>{{ row.studentName }}</strong>
+                    <small>{{ row.studentEmail || row.studentId }}</small>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <strong>{{ row.courseId || 'No course' }}</strong>
+                <small>{{ row.teacherId || 'No teacher' }}</small>
+              </td>
+              <td>
+                <strong>{{ row.batchName }}</strong>
+                <small>{{ row.batchId }}</small>
+              </td>
+              <td><span class="data-pill {{ statusClass(row.status) }}">{{ row.status }}</span></td>
+              <td>
+                <strong>{{ row.access.canAccessClassSessions ? 'Allowed' : 'Blocked' }}</strong>
+                <small>{{ row.access.reason }}</small>
+              </td>
+              <td>{{ row.enrolledAt ? (row.enrolledAt | date: 'mediumDate') : 'Not active' }}</td>
+              <td>{{ row.updatedAt ? (row.updatedAt | date: 'mediumDate') : 'Not updated' }}</td>
+              <td class="actions-cell">
+                <a class="table-action" [routerLink]="['/enrollments', row.id]">View</a>
+                @if (row.status === 'active') {
+                  <button type="button" class="table-action accent" [disabled]="pendingEnrollmentId() === row.id" (click)="transition(row, 'suspend')">
+                    Suspend
+                  </button>
+                } @else {
+                  <button type="button" class="table-action primary" [disabled]="pendingEnrollmentId() === row.id" (click)="transition(row, 'reactivate')">
+                    Reactivate
+                  </button>
+                }
+                @if (row.status !== 'cancelled') {
+                  <button type="button" class="table-action danger" [disabled]="pendingEnrollmentId() === row.id" (click)="transition(row, 'cancel')">
+                    Cancel
+                  </button>
+                }
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-footer">
+    <span>Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() <= 1" (click)="previousPage()">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Native SFU Admin</title>
+    <base href="/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <script src="/env.js"></script>
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('native-sfu-theme');
+          if (theme === 'dark' || theme === 'light') {
+            document.documentElement.dataset.theme = theme;
+            document.documentElement.style.colorScheme = theme;
+          }
+        } catch (error) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <sfu-admin-root></sfu-admin-root>
+  </body>
+</html>

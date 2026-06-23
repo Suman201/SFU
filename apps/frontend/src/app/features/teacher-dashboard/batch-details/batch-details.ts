@@ -86,17 +86,10 @@ export class BatchDetails {
 
   protected async startSession(session: TeacherSession): Promise<void> {
     this.actionError.set('');
-    this.dashboard.startSession(session).subscribe({
-      next: async (payload) => {
-        await this.router.navigate(['/class-session/teacher'], {
-          queryParams: {
-            batchId: payload.batchId,
-            sessionId: payload.sessionId
-          }
-        });
-      },
-      error: () => {
-        this.actionError.set(this.dashboard.error());
+    await this.router.navigate(['/class-session/teacher'], {
+      queryParams: {
+        batchId: session.batchId,
+        sessionId: session.id
       }
     });
   }

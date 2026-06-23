@@ -1,0 +1,152 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Recording operations</p>
+    <h1>Recordings</h1>
+    <p>Inspect server-side class-session recording manifests, playback access, and retention.</p>
+  </div>
+</section>
+
+<section class="summary-grid" aria-label="Recording summary">
+  <article>
+    <span>Total</span>
+    <strong>{{ summary()?.totalRecordings ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Processing</span>
+    <strong>{{ summary()?.processingRecordings ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Ready</span>
+    <strong>{{ summary()?.readyRecordings ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Failed</span>
+    <strong>{{ summary()?.failedRecordings ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Expired</span>
+    <strong>{{ summary()?.expiredRecordings ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Expiring soon</span>
+    <strong>{{ summary()?.expiringSoonRecordings ?? 0 }}</strong>
+  </article>
+</section>
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Recording library</h2>
+      <p>{{ total() }} records found</p>
+    </div>
+    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+      <select formControlName="status" aria-label="Status">
+        <option value="all">All statuses</option>
+        <option value="starting">Starting</option>
+        <option value="recording">Recording</option>
+        <option value="stopping">Stopping</option>
+        <option value="stopped">Ready</option>
+        <option value="failed">Failed</option>
+        <option value="expired">Expired</option>
+      </select>
+      <input type="search" formControlName="sessionId" placeholder="Session ID" aria-label="Session ID" />
+      <input type="search" formControlName="batchId" placeholder="Batch ID" aria-label="Batch ID" />
+      <input type="search" formControlName="courseId" placeholder="Course ID" aria-label="Course ID" />
+      <input type="search" formControlName="teacherId" placeholder="Teacher ID" aria-label="Teacher ID" />
+      <input type="date" formControlName="dateFrom" aria-label="Date from" />
+      <input type="date" formControlName="dateTo" aria-label="Date to" />
+      <select formControlName="sort" aria-label="Sort recordings">
+        <option value="started_desc">Newest started</option>
+        <option value="started_asc">Oldest started</option>
+        <option value="retention_asc">Retention soonest</option>
+        <option value="retention_desc">Retention latest</option>
+        <option value="duration_desc">Longest duration</option>
+      </select>
+      <input type="search" formControlName="search" placeholder="Search recording, session, batch" aria-label="Search recordings" />
+      <button type="submit" class="table-action primary">Apply</button>
+      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+    </form>
+  </div>
+
+  @if (error()) {
+    <p class="table-error" role="alert">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="table-success" role="status">{{ success() }}</p>
+  }
+
+  <div class="data-table-wrap" style="--data-table-min-width: 1280px">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Recording</th>
+          <th>Course / batch</th>
+          <th>Teacher</th>
+          <th>Status</th>
+          <th>Started</th>
+          <th>Duration</th>
+          <th>Size</th>
+          <th>Retention</th>
+          <th class="row-menu-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr>
+            <td colspan="9" class="empty-state">Loading recordings...</td>
+          </tr>
+        } @else if (!rows().length) {
+          <tr>
+            <td colspan="9" class="empty-state">No recordings match these filters.</td>
+          </tr>
+        } @else {
+          @for (row of rows(); track trackByRecording($index, row)) {
+            <tr>
+              <td>
+                <div class="primary-cell">
+                  <span class="table-avatar">{{ initials(row) || 'RC' }}</span>
+                  <div>
+                    <strong>{{ row.sessionTitle || row.recordingId }}</strong>
+                    <small>{{ row.recordingId }}</small>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <strong>{{ row.courseName || row.courseId || 'Unassigned course' }}</strong>
+                <small>{{ row.batchName || row.batchId || row.roomId }}</small>
+              </td>
+              <td>{{ row.teacherId || 'Unknown' }}</td>
+              <td><span class="data-pill {{ statusClass(row.status) }}">{{ row.status }}</span></td>
+              <td>{{ row.startedAt | date: 'short' }}</td>
+              <td>{{ duration(row.durationSeconds) }}</td>
+              <td>{{ size(row.size) }}</td>
+              <td>{{ row.retentionExpiresAt ? (row.retentionExpiresAt | date: 'mediumDate') : 'No expiry' }}</td>
+              <td class="row-menu-cell">
+                <div class="table-row-menu">
+                  <a class="table-action" [routerLink]="['/recordings', row.recordingId]">View</a>
+                  @if (row.sessionId) {
+                    <a class="table-action" [routerLink]="['/class-sessions', row.sessionId]">Session</a>
+                  }
+                  <button type="button" class="table-action" [disabled]="!row.canPlayback || pendingRecordingId() === row.recordingId" (click)="openPlayback(row)">
+                    Play
+                  </button>
+                  <button type="button" class="table-action" [disabled]="!row.canDownload || pendingRecordingId() === row.recordingId" (click)="download(row)">
+                    Download
+                  </button>
+                </div>
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-footer">
+    <span>Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() <= 1" (click)="previousPage()">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+    </div>
+  </div>
+</section>

@@ -199,6 +199,116 @@ describe('StudentEnrollmentsService', () => {
       status: 'active'
     });
   });
+
+  it('lists admin enrollments with access impact and summary counts', async () => {
+    const { service, enrollments } = createService();
+    const suspended = enrollmentDoc({
+      id: 'enrollment-2',
+      _id: 'enrollment-2',
+      studentId: 'student-2',
+      studentName: 'Student Two',
+      studentEmail: 'student.two@example.test',
+      status: 'suspended',
+      suspendedAt: new Date('2026-01-04T00:00:00.000Z')
+    });
+    enrollments.find.mockReturnValueOnce(paginatedQueryResult([enrollmentDoc(), suspended]));
+    enrollments.countDocuments
+      .mockReturnValueOnce(queryResult(2))
+      .mockReturnValueOnce(queryResult(2))
+      .mockReturnValueOnce(queryResult(1))
+      .mockReturnValueOnce(queryResult(1))
+      .mockReturnValueOnce(queryResult(1));
+
+    const result = await service.listAdminEnrollments({ status: 'all', search: 'student', page: 1, limit: 25 }, authUser('admin-1', ['ADMIN']));
+
+    expect(result.total).toBe(2);
+    expect(result.summary).toEqual({
+      totalEnrollments: 2,
+      activeEnrollments: 1,
+      suspendedEnrollments: 1,
+      recentlyAdded: 1,
+      lowEnrollmentBatches: 0
+    });
+    expect(result.items[0]?.access.canAccessClassSessions).toBe(true);
+    expect(result.items[1]?.access.canAccessClassSessions).toBe(false);
+    const filter = enrollments.find.mock.calls[0]?.[0] as { deletedAt?: unknown; $or?: unknown[] };
+    expect(filter.deletedAt).toEqual({ $exists: false });
+    expect(Array.isArray(filter.$or)).toBe(true);
+  });
+
+  it('rejects admin enrollment listing for non-admin users', async () => {
+    const { service, enrollments } = createService();
+
+    let thrown: unknown;
+    try {
+      await service.listAdminEnrollments({}, authUser('teacher-1', ['TEACHER']));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(enrollments.find).not.toHaveBeenCalled();
+  });
+
+  it('creates admin enrollments through the existing enrollment path', async () => {
+    const { service, enrollments } = createService();
+    enrollments.exists.mockResolvedValueOnce(null);
+    enrollments.findOne.mockReturnValueOnce(queryResult(enrollmentDoc()));
+
+    const result = await service.createAdminEnrollment({ studentId: 'student-1', batchId: 'batch-1' }, authUser('admin-1', ['ADMIN']));
+
+    expect(result.id).toBe('enrollment-1');
+    expect(result.access.canAccessClassSessions).toBe(true);
+    const payload = enrollments.create.mock.calls[0]?.[0];
+    expect(payload.studentId).toBe('student-1');
+    expect(payload.batchId).toBe('batch-1');
+    expect(payload.status).toBe('active');
+    expect(payload.createdBy).toBe('admin-1');
+    expect(payload.updatedBy).toBe('admin-1');
+  });
+
+  it('rejects duplicate active admin enrollment creation', async () => {
+    const { service, enrollments } = createService();
+    enrollments.exists.mockResolvedValueOnce({ _id: 'existing-enrollment' });
+
+    let thrown: unknown;
+    try {
+      await service.createAdminEnrollment({ studentId: 'student-1', batchId: 'batch-1' }, authUser('admin-1', ['ADMIN']));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ConflictException);
+    expect(enrollments.create).not.toHaveBeenCalled();
+  });
+
+  it('suspends and reactivates admin enrollments, changing class-session access impact', async () => {
+    const { service, enrollments } = createService();
+    const active = enrollmentDoc();
+    const suspended = enrollmentDoc({ status: 'suspended', suspendedAt: new Date('2026-01-04T00:00:00.000Z') });
+    enrollments.findOne.mockReturnValueOnce(queryResult(active)).mockReturnValueOnce(queryResult(suspended));
+    enrollments.findOneAndUpdate.mockReturnValueOnce(queryResult(suspended));
+
+    const suspendedResult = await service.transitionAdminEnrollment('enrollment-1', 'suspended', authUser('admin-1', ['ADMIN']));
+
+    expect(suspendedResult.status).toBe('suspended');
+    expect(suspendedResult.access.canAccessClassSessions).toBe(false);
+    expect(enrollments.findOneAndUpdate.mock.calls[0]?.[1].$set.status).toBe('suspended');
+
+    enrollments.exists.mockResolvedValueOnce(null);
+    enrollments.findOne.mockReturnValueOnce(queryResult(suspended)).mockReturnValueOnce(queryResult(active));
+    enrollments.findOneAndUpdate.mockReturnValueOnce(queryResult(active));
+
+    const activeResult = await service.transitionAdminEnrollment('enrollment-1', 'active', authUser('admin-1', ['ADMIN']));
+
+    expect(activeResult.status).toBe('active');
+    expect(activeResult.access.canAccessClassSessions).toBe(true);
+    expect(enrollments.findOneAndUpdate.mock.calls[1]?.[1].$unset).toEqual({
+      cancelledAt: '',
+      suspendedAt: '',
+      completedAt: ''
+    });
+  });
 });
 
 function createService(): {
@@ -300,5 +410,16 @@ function queryResult<T>(value: T): { exec: jest.Mock<Promise<T>, []>; sort: jest
     exec: jest.fn(async () => value),
     sort: jest.fn(() => queryResult(value)),
     select: jest.fn(() => queryResult(value))
+  };
+}
+
+function paginatedQueryResult<T>(value: T): unknown {
+  return {
+    sort: jest.fn(() => ({
+      skip: jest.fn(() => ({
+        limit: jest.fn(() => ({ exec: jest.fn(async () => value) }))
+      })),
+      exec: jest.fn(async () => value)
+    }))
   };
 }

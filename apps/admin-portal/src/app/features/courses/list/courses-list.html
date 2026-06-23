@@ -1,0 +1,120 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Learning structure</p>
+    <h1>Courses</h1>
+    <p>Course groups are derived from the course IDs assigned to batches.</p>
+  </div>
+</section>
+
+<section class="summary-grid" aria-label="Course summary">
+  <article>
+    <span>Total courses</span>
+    <strong>{{ summary()?.totalCourses ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Active</span>
+    <strong>{{ summary()?.activeCourses ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Inactive</span>
+    <strong>{{ summary()?.inactiveCourses ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Archived</span>
+    <strong>{{ summary()?.archivedCourses ?? 0 }}</strong>
+  </article>
+</section>
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Course groups</h2>
+      <p>{{ total() }} records found</p>
+    </div>
+    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+      <select formControlName="status" aria-label="Status">
+        <option value="all">All statuses</option>
+        <option value="active">Active</option>
+        <option value="inactive">Inactive</option>
+        <option value="completed">Completed</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+      <select formControlName="sort" aria-label="Sort courses">
+        <option value="updated_desc">Newest updated</option>
+        <option value="updated_asc">Oldest updated</option>
+        <option value="name_asc">Name A-Z</option>
+        <option value="name_desc">Name Z-A</option>
+      </select>
+      <input type="search" formControlName="search" placeholder="Search course or batch" aria-label="Search courses" />
+      <button type="submit" class="table-action primary">Apply</button>
+      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+    </form>
+  </div>
+
+  @if (error()) {
+    <p class="table-error" role="alert">{{ error() }}</p>
+  }
+
+  <div class="data-table-wrap" style="--data-table-min-width: 920px">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Course</th>
+          <th>Status</th>
+          <th>Batches</th>
+          <th>Students</th>
+          <th>Teachers</th>
+          <th>Updated</th>
+          <th class="row-menu-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr>
+            <td colspan="7" class="empty-state">Loading courses...</td>
+          </tr>
+        } @else if (!rows().length) {
+          <tr>
+            <td colspan="7" class="empty-state">No courses match these filters.</td>
+          </tr>
+        } @else {
+          @for (row of rows(); track trackByCourse($index, row)) {
+            <tr>
+              <td>
+                <div class="primary-cell">
+                  <span class="table-avatar">{{ initials(row) || 'CO' }}</span>
+                  <div>
+                    <strong>{{ row.courseName }}</strong>
+                    <small>{{ row.courseId }}</small>
+                  </div>
+                </div>
+              </td>
+              <td><span class="data-pill {{ statusClass(row.status) }}">{{ row.status }}</span></td>
+              <td>
+                <strong>{{ row.batchCount }}</strong>
+                <small>{{ row.activeBatchCount }} active</small>
+              </td>
+              <td>{{ row.activeStudentCount }}</td>
+              <td>{{ row.teacherCount }}</td>
+              <td>{{ row.updatedAt ? (row.updatedAt | date: 'mediumDate') : 'Unknown' }}</td>
+              <td class="row-menu-cell">
+                <div class="table-row-menu">
+                  <a class="table-action" [routerLink]="['/courses', row.courseId]">View</a>
+                  <a class="table-action" [routerLink]="['/batches']" [queryParams]="{ courseId: row.courseId }">Batches</a>
+                </div>
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-footer">
+    <span>Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() <= 1" (click)="previousPage()">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+    </div>
+  </div>
+</section>

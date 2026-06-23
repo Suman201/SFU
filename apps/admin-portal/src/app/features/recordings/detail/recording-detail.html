@@ -1,0 +1,176 @@
+<a class="back-link" routerLink="/recordings">Back to recordings</a>
+
+@if (loading()) {
+  <section class="detail-state">Loading recording...</section>
+} @else if (error() && !recording()) {
+  <section class="detail-state error" role="alert">{{ error() }}</section>
+} @else if (recording(); as item) {
+  <section class="detail-head">
+    <div>
+      <p class="eyebrow">Recording</p>
+      <h1>{{ item.sessionTitle || item.recordingId }}</h1>
+      <p>{{ item.batchName || item.batchId || item.roomId }}</p>
+    </div>
+    <span class="data-pill {{ statusClass(item.status) }}">{{ item.status }}</span>
+  </section>
+
+  @if (error()) {
+    <p class="detail-state error" role="alert">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="detail-state success" role="status">{{ success() }}</p>
+  }
+
+  <section class="detail-grid">
+    <article>
+      <span>Started</span>
+      <strong>{{ item.startedAt | date: 'short' }}</strong>
+    </article>
+    <article>
+      <span>Stopped</span>
+      <strong>{{ item.stoppedAt ? (item.stoppedAt | date: 'short') : 'Not stopped' }}</strong>
+    </article>
+    <article>
+      <span>Duration</span>
+      <strong>{{ duration(item.durationSeconds) }}</strong>
+    </article>
+    <article>
+      <span>Storage</span>
+      <strong>{{ item.storageProvider }}</strong>
+      <small>{{ item.container || item.mimeType || 'metadata' }}</small>
+    </article>
+    <article>
+      <span>Size</span>
+      <strong>{{ size(item.size) }}</strong>
+    </article>
+    <article>
+      <span>Retention</span>
+      <strong>{{ item.retentionExpiresAt ? (item.retentionExpiresAt | date: 'mediumDate') : 'No expiry' }}</strong>
+    </article>
+  </section>
+
+  <section class="data-table-shell playback-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Playback</h2>
+        <p>{{ playback()?.message || 'Guarded backend access only.' }}</p>
+      </div>
+      <div class="toolbar-actions">
+        <button type="button" class="table-action" [disabled]="loadingPlayback()" (click)="loadPlayback()">
+          {{ loadingPlayback() ? 'Checking...' : 'Refresh playback' }}
+        </button>
+        <button type="button" class="table-action primary" [disabled]="!item.canDownload || downloading()" (click)="download()">
+          {{ downloading() ? 'Downloading...' : 'Download' }}
+        </button>
+      </div>
+    </div>
+
+    @if (playback(); as media) {
+      @if (media.playerMode === 'video' && media.playbackUrl) {
+        <video controls [src]="media.playbackUrl"></video>
+      } @else {
+        <div class="manifest-panel">
+          <strong>{{ media.status === 'stopped' ? 'Manifest ready' : media.status }}</strong>
+          <p>{{ media.message || 'This recording is available as a server-owned manifest.' }}</p>
+          @if (media.playbackUrl) {
+            <button type="button" class="table-action primary" [disabled]="downloading()" (click)="download()">Download manifest</button>
+          }
+        </div>
+      }
+    } @else {
+      <div class="manifest-panel">
+        <strong>{{ item.status }}</strong>
+        <p>{{ item.canPlayback ? 'Playback metadata has not been loaded yet.' : 'Recording is not currently playable.' }}</p>
+      </div>
+    }
+  </section>
+
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Retention</h2>
+        <p>Expiry changes update metadata only; physical cleanup is handled separately.</p>
+      </div>
+    </div>
+    <form class="retention-form" [formGroup]="retentionForm" (ngSubmit)="saveRetention()">
+      <label>
+        <span>Expires at</span>
+        <input type="datetime-local" formControlName="retentionExpiresAt" />
+      </label>
+      <button type="submit" class="table-action primary" [disabled]="saving()">{{ saving() ? 'Saving...' : 'Save retention' }}</button>
+      <button type="button" class="table-action danger" [disabled]="archiving()" (click)="archive()">
+        {{ archiving() ? 'Expiring...' : 'Expire now' }}
+      </button>
+    </form>
+  </section>
+
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Metadata</h2>
+        <p>No local file paths or raw storage keys are exposed.</p>
+      </div>
+    </div>
+    <div class="metadata-grid">
+      <article>
+        <span>Recording ID</span>
+        <strong>{{ item.recordingId }}</strong>
+      </article>
+      <article>
+        <span>Database ID</span>
+        <strong>{{ item.id }}</strong>
+      </article>
+      <article>
+        <span>Session</span>
+        @if (item.sessionId) {
+          <a [routerLink]="['/class-sessions', item.sessionId]">{{ item.sessionId }}</a>
+        } @else {
+          <strong>None</strong>
+        }
+      </article>
+      <article>
+        <span>Batch</span>
+        @if (item.batchId) {
+          <a [routerLink]="['/batches', item.batchId]">{{ item.batchName || item.batchId }}</a>
+        } @else {
+          <strong>None</strong>
+        }
+      </article>
+      <article>
+        <span>Course</span>
+        <strong>{{ item.courseName || item.courseId || 'Unassigned' }}</strong>
+      </article>
+      <article>
+        <span>Teacher</span>
+        @if (item.teacherId) {
+          <a [routerLink]="['/users', item.teacherId]">{{ item.teacherId }}</a>
+        } @else {
+          <strong>Unknown</strong>
+        }
+      </article>
+      <article>
+        <span>Room</span>
+        <strong>{{ item.roomId }}</strong>
+      </article>
+      <article>
+        <span>Scope</span>
+        <strong>{{ item.scope }}</strong>
+      </article>
+      <article>
+        <span>Tracks</span>
+        <strong>{{ item.trackCount }}</strong>
+      </article>
+      <article>
+        <span>Consent</span>
+        <strong>{{ item.consentRequired ? 'Required' : 'Not required' }}</strong>
+        <small>{{ item.consentVersion || 'No version' }}</small>
+      </article>
+      @if (item.failureReason) {
+        <article class="metadata-wide">
+          <span>Failure reason</span>
+          <strong>{{ item.failureReason }}</strong>
+        </article>
+      }
+    </div>
+  </section>
+}

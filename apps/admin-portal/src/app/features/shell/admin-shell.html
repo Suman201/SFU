@@ -1,0 +1,54 @@
+<div class="admin-shell">
+  <aside class="sidebar" aria-label="Admin navigation">
+    <a routerLink="/class-sessions" class="brand">
+      <span aria-hidden="true">NS</span>
+      <strong>Native SFU</strong>
+    </a>
+
+    <nav>
+      <a routerLink="/class-sessions" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
+        <span aria-hidden="true">●</span>
+        Class sessions
+      </a>
+      <a routerLink="/attendance" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
+        <span aria-hidden="true">●</span>
+        Attendance
+      </a>
+      <a routerLink="/recordings" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
+        <span aria-hidden="true">●</span>
+        Recordings
+      </a>
+      <a routerLink="/enrollments" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
+        <span aria-hidden="true">●</span>
+        Enrollments
+      </a>
+      <a routerLink="/users" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
+        <span aria-hidden="true">●</span>
+        Users
+      </a>
+      <a routerLink="/courses" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
+        <span aria-hidden="true">●</span>
+        Courses
+      </a>
+      <a routerLink="/batches" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
+        <span aria-hidden="true">●</span>
+        Batches
+      </a>
+    </nav>
+  </aside>
+
+  <main class="workspace">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Admin workspace</p>
+        <strong>{{ auth.user()?.name || 'Administrator' }}</strong>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" class="ghost-action" (click)="theme.toggle()">{{ theme.isDark() ? 'Light' : 'Dark' }}</button>
+        <button type="button" class="danger-action" (click)="logout()">Logout</button>
+      </div>
+    </header>
+
+    <router-outlet />
+  </main>
+</div>

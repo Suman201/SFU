@@ -1,5 +1,14 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import type {
+  AdminCreateEnrollmentRequest,
+  AdminEnrollmentDetail,
+  AdminEnrollmentListQuery,
+  AdminEnrollmentListResponse,
+  AdminEnrollmentListItem,
+  AdminEnrollmentSummary,
+  AdminUpdateEnrollmentRequest
+} from '@native-sfu/contracts';
 import { Model } from 'mongoose';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import {
@@ -54,6 +63,9 @@ const ACTIVE_ACCESS_FILTER = {
   deletedAt: { $exists: false }
 } as const;
 
+const ADMIN_ENROLLMENT_STATUSES = new Set<StudentEnrollmentStatus>(['active', 'pending', 'completed', 'cancelled', 'suspended']);
+const ADMIN_RECENT_ENROLLMENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class StudentEnrollmentsService {
   constructor(
@@ -62,6 +74,66 @@ export class StudentEnrollmentsService {
     @InjectModel(BatchScheduleDocument.name) private readonly schedules: Model<BatchScheduleMongoDocument>,
     @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>
   ) {}
+
+  async listAdminEnrollments(query: AdminEnrollmentListQuery, user: AuthenticatedUser): Promise<AdminEnrollmentListResponse> {
+    this.assertAdmin(user);
+    const page = this.clampPositiveInteger(query.page, 1, 10000);
+    const limit = this.clampPositiveInteger(query.limit, 25, 100);
+    const filter = this.adminEnrollmentFilter(query);
+    const skip = (page - 1) * limit;
+    const [docs, total, summary] = await Promise.all([
+      this.enrollments.find(filter).sort({ updatedAt: -1, createdAt: -1 }).skip(skip).limit(limit).exec(),
+      this.enrollments.countDocuments(filter).exec(),
+      this.adminEnrollmentSummary()
+    ]);
+    return {
+      items: docs.map((doc) => this.toAdminEnrollmentListItem(doc)),
+      summary,
+      page,
+      limit,
+      total
+    };
+  }
+
+  async getAdminEnrollment(enrollmentId: string, user: AuthenticatedUser): Promise<AdminEnrollmentDetail> {
+    this.assertAdmin(user);
+    const enrollment = await this.findEnrollment(enrollmentId);
+    return this.toAdminEnrollmentDetail(enrollment);
+  }
+
+  async createAdminEnrollment(request: AdminCreateEnrollmentRequest, user: AuthenticatedUser): Promise<AdminEnrollmentDetail> {
+    this.assertAdmin(user);
+    const created = await this.enrollStudent({
+      studentId: request.studentId,
+      batchId: request.batchId,
+      status: request.status,
+      actorUserId: user.sub
+    });
+    return this.getAdminEnrollment(String(created.id), user);
+  }
+
+  async updateAdminEnrollment(
+    enrollmentId: string,
+    request: AdminUpdateEnrollmentRequest,
+    user: AuthenticatedUser
+  ): Promise<AdminEnrollmentDetail> {
+    this.assertAdmin(user);
+    if (!request.status) {
+      return this.getAdminEnrollment(enrollmentId, user);
+    }
+    await this.updateEnrollmentStatus(enrollmentId, request.status, user.sub);
+    return this.getAdminEnrollment(enrollmentId, user);
+  }
+
+  async transitionAdminEnrollment(
+    enrollmentId: string,
+    status: StudentEnrollmentStatus,
+    user: AuthenticatedUser
+  ): Promise<AdminEnrollmentDetail> {
+    this.assertAdmin(user);
+    await this.updateEnrollmentStatus(enrollmentId, status, user.sub);
+    return this.getAdminEnrollment(enrollmentId, user);
+  }
 
   async enrollStudent(input: EnrollStudentInput): Promise<Record<string, unknown>> {
     const status = input.status ?? 'active';
@@ -311,6 +383,118 @@ export class StudentEnrollmentsService {
       throw new NotFoundException('Student enrollment not found.');
     }
     return this.serialize(updated);
+  }
+
+  private async findEnrollment(enrollmentId: string): Promise<StudentEnrollmentMongoDocument> {
+    const enrollment = await this.enrollments.findOne({ _id: enrollmentId, deletedAt: { $exists: false } }).exec();
+    if (!enrollment) {
+      throw new NotFoundException('Student enrollment not found.');
+    }
+    return enrollment;
+  }
+
+  private adminEnrollmentFilter(query: AdminEnrollmentListQuery): Record<string, unknown> {
+    const filter: Record<string, unknown> = {
+      deletedAt: { $exists: false }
+    };
+    if (query.courseId?.trim()) {
+      filter.courseId = query.courseId.trim();
+    }
+    if (query.batchId?.trim()) {
+      filter.batchId = query.batchId.trim();
+    }
+    if (query.studentId?.trim()) {
+      filter.studentId = query.studentId.trim();
+    }
+    if (query.status && query.status !== 'all') {
+      if (!ADMIN_ENROLLMENT_STATUSES.has(query.status)) {
+        throw new BadRequestException('Unsupported enrollment status.');
+      }
+      filter.status = query.status;
+    }
+    const search = query.search?.trim();
+    if (search) {
+      const regex = new RegExp(this.escapeRegex(search), 'i');
+      filter.$or = [{ studentName: regex }, { studentEmail: regex }, { batchName: regex }, { courseId: regex }];
+    }
+    return filter;
+  }
+
+  private async adminEnrollmentSummary(): Promise<AdminEnrollmentSummary> {
+    const recentSince = new Date(Date.now() - ADMIN_RECENT_ENROLLMENT_WINDOW_MS);
+    const [totalEnrollments, activeEnrollments, suspendedEnrollments, recentlyAdded] = await Promise.all([
+      this.enrollments.countDocuments({ deletedAt: { $exists: false } }).exec(),
+      this.enrollments.countDocuments({ ...ACTIVE_ACCESS_FILTER }).exec(),
+      this.enrollments.countDocuments({ status: 'suspended', deletedAt: { $exists: false } }).exec(),
+      this.enrollments.countDocuments({ deletedAt: { $exists: false }, createdAt: { $gte: recentSince } }).exec()
+    ]);
+    return {
+      totalEnrollments,
+      activeEnrollments,
+      suspendedEnrollments,
+      recentlyAdded,
+      lowEnrollmentBatches: 0
+    };
+  }
+
+  private toAdminEnrollmentListItem(doc: StudentEnrollmentMongoDocument): AdminEnrollmentListItem {
+    return {
+      id: doc.id,
+      studentId: doc.studentId,
+      studentName: doc.studentName?.trim() || doc.studentEmail?.split('@')[0] || 'Student',
+      studentEmail: doc.studentEmail ?? '',
+      ...(doc.courseId ? { courseId: doc.courseId } : {}),
+      batchId: doc.batchId,
+      batchName: doc.batchName ?? 'Unknown batch',
+      ...(doc.teacherId ? { teacherId: doc.teacherId } : {}),
+      status: doc.status,
+      access: this.enrollmentAccessImpact(doc.status),
+      ...(doc.enrolledAt ? { enrolledAt: doc.enrolledAt.toISOString() } : {}),
+      ...(doc.completedAt ? { completedAt: doc.completedAt.toISOString() } : {}),
+      ...(doc.cancelledAt ? { cancelledAt: doc.cancelledAt.toISOString() } : {}),
+      ...(doc.suspendedAt ? { suspendedAt: doc.suspendedAt.toISOString() } : {}),
+      ...(doc.createdAt ? { createdAt: doc.createdAt.toISOString() } : {}),
+      ...(doc.updatedAt ? { updatedAt: doc.updatedAt.toISOString() } : {})
+    };
+  }
+
+  private toAdminEnrollmentDetail(doc: StudentEnrollmentMongoDocument): AdminEnrollmentDetail {
+    return {
+      ...this.toAdminEnrollmentListItem(doc),
+      ...(doc.createdBy ? { createdBy: doc.createdBy } : {}),
+      ...(doc.updatedBy ? { updatedBy: doc.updatedBy } : {})
+    };
+  }
+
+  private enrollmentAccessImpact(status: StudentEnrollmentStatus): { canAccessClassSessions: boolean; reason: string } {
+    if (status === 'active') {
+      return {
+        canAccessClassSessions: true,
+        reason: 'Active enrollment grants class-session access.'
+      };
+    }
+    return {
+      canAccessClassSessions: false,
+      reason: `${this.titleCase(status)} enrollment does not grant class-session access.`
+    };
+  }
+
+  private clampPositiveInteger(value: unknown, fallback: number, max: number): number {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      return fallback;
+    }
+    return Math.min(Math.floor(parsed), max);
+  }
+
+  private assertAdmin(user: AuthenticatedUser): void {
+    if (!this.isAdmin(user)) {
+      throw new ForbiddenException('Admin access required.');
+    }
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   private async assertNoActiveEnrollment(studentId: string, batchId: string, excludeId?: string): Promise<void> {
