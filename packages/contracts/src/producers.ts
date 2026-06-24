@@ -2,6 +2,7 @@ import type { ProducerQualityState } from './metrics.js';
 import type { RoomAutopilotDecision } from './rooms.js';
 
 export type ProducerKind = 'audio' | 'video' | 'screen';
+export type ProducerSource = 'screen' | 'whiteboard';
 export type ProducerStatus = 'live' | 'paused' | 'closed';
 export type SimulcastLayerName = 'low' | 'medium' | 'high';
 
@@ -198,6 +199,7 @@ export interface Producer {
   participantId: string;
   roomId: string;
   kind: ProducerKind;
+  source?: ProducerSource;
   transportId: string;
   priority?: number;
   rtpParameters: RtpParameters;
@@ -214,6 +216,7 @@ export interface Producer {
 export interface CreateProducerRequest {
   roomId: string;
   kind: ProducerKind;
+  source?: ProducerSource;
   transportId: string;
   priority?: number;
   rtpParameters: RtpParameters;

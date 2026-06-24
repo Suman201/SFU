@@ -1,46 +1,240 @@
 <sfu-header />
 <main class="profile-shell">
-  <section class="profile-hero">
-    <div class="identity">
-      <span class="avatar">SL</span>
-      <div>
-        <p class="eyebrow">Student profile</p>
-        <h1>Student Learner</h1>
-        <span>Realtime classroom systems</span>
+  @if (loading()) {
+    <section class="profile-hero">
+      <div class="identity">
+        <span class="avatar">...</span>
+        <div>
+          <p class="eyebrow">Student profile</p>
+          <h1>Loading profile</h1>
+          <span>Fetching your saved details</span>
+        </div>
       </div>
-    </div>
-    <a routerLink="/student/dashboard">Student dashboard</a>
-  </section>
+    </section>
+  } @else if (profile(); as profile) {
+    <section class="profile-hero">
+      <div class="identity">
+        @if (profile.avatarUrl) {
+          <img class="avatar image-avatar" [src]="profileImage()" [alt]="profile.displayName + ' avatar'" />
+        } @else {
+          <span class="avatar">{{ initials(profile.displayName) }}</span>
+        }
+        <div>
+          <p class="eyebrow">Student profile</p>
+          <h1>{{ profile.displayName }}</h1>
+          <span>{{ profile.location || 'Location not set' }}</span>
+        </div>
+      </div>
+      <div class="hero-actions">
+        <button type="button" [disabled]="uploadingAvatar()" (click)="avatarInput.click()">
+          {{ uploadingAvatar() ? 'Uploading...' : 'Change avatar' }}
+        </button>
+        <button type="button" (click)="editing.set(!editing())">{{ editing() ? 'Close editor' : 'Edit profile' }}</button>
+        <a routerLink="/student/dashboard">Student dashboard</a>
+        <input #avatarInput type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden (change)="uploadAvatar($event)" />
+      </div>
+    </section>
 
-  <section class="metric-grid" aria-label="Student profile summary">
-    <article>
-      <span>{{ enrolledCount() }}</span>
-      <p>Enrolled batches</p>
-    </article>
-    <article>
-      <span>{{ activeTeachers() }}</span>
-      <p>Active teachers</p>
-    </article>
-    <article>
-      <span>{{ enrollment.availableBatches().length }}</span>
-      <p>Available batches</p>
-    </article>
-  </section>
+    @if (error()) {
+      <div class="form-alert">{{ error() }}</div>
+    }
+    @if (notice()) {
+      <div class="form-alert success">{{ notice() }}</div>
+    }
 
-  <section class="profile-panel">
-    <header>
-      <p class="eyebrow">Account</p>
-      <h2>Profile details</h2>
-    </header>
+    <section class="metric-grid" aria-label="Student profile summary">
+      <article>
+        <span>{{ enrolledCount() }}</span>
+        <p>Enrolled batches</p>
+      </article>
+      <article>
+        <span>{{ activeTeachers() }}</span>
+        <p>Active teachers</p>
+      </article>
+      <article>
+        <span>{{ profile.languages.length }}</span>
+        <p>Languages</p>
+      </article>
+    </section>
 
-    <div class="detail-grid">
-      @for (detail of details; track detail.label) {
+    @if (editing()) {
+      <section class="profile-panel edit-panel">
+        <header>
+          <p class="eyebrow">Profile editor</p>
+          <h2>Student-safe profile details</h2>
+        </header>
+        <div class="form-grid">
+          <label>
+            <span>Display name</span>
+            <input [value]="form().displayName" (input)="updateForm('displayName', inputValue($event))" />
+          </label>
+          <label>
+            <span>Phone</span>
+            <input [value]="form().phone" (input)="updateForm('phone', inputValue($event))" />
+          </label>
+          <label>
+            <span>Location</span>
+            <input [value]="form().location" (input)="updateForm('location', inputValue($event))" />
+          </label>
+          <label>
+            <span>Timezone</span>
+            <input [value]="form().timezone" (input)="updateForm('timezone', inputValue($event))" />
+          </label>
+          <label>
+            <span>Languages</span>
+            <textarea rows="3" [value]="form().languagesText" (input)="updateForm('languagesText', inputValue($event))"></textarea>
+          </label>
+          <label class="wide">
+            <span>Learning goals</span>
+            <textarea rows="3" [value]="form().learningGoalsText" (input)="updateForm('learningGoalsText', inputValue($event))"></textarea>
+          </label>
+          <label class="wide">
+            <span>Interests</span>
+            <textarea rows="3" [value]="form().interestsText" (input)="updateForm('interestsText', inputValue($event))"></textarea>
+          </label>
+        </div>
+        <footer class="editor-actions">
+          <button type="button" [disabled]="saving()" (click)="saveProfile()">{{ saving() ? 'Saving...' : 'Save profile' }}</button>
+        </footer>
+      </section>
+    }
+
+    <section class="profile-panel settings-panel">
+      <header>
+        <p class="eyebrow">Settings</p>
+        <h2>Learning workspace preferences</h2>
+      </header>
+      <div class="form-grid settings-grid">
+        <label>
+          <span>Theme</span>
+          <select [value]="settingsForm().theme" (change)="updateSettingsForm('theme', themeValue($event))">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <label>
+          <span>Locale</span>
+          <input [value]="settingsForm().locale" (input)="updateSettingsForm('locale', inputValue($event))" />
+        </label>
+
+        <div class="settings-group">
+          <strong>Notifications</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().notificationEmail" (change)="updateSettingsForm('notificationEmail', checkedValue($event))" />
+            <span>Email notifications</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().notificationClassReminders" (change)="updateSettingsForm('notificationClassReminders', checkedValue($event))" />
+            <span>Class reminders</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().notificationChatMessages" (change)="updateSettingsForm('notificationChatMessages', checkedValue($event))" />
+            <span>Chat messages</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().notificationAnnouncements" (change)="updateSettingsForm('notificationAnnouncements', checkedValue($event))" />
+            <span>Announcements</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().notificationRecordingReady" (change)="updateSettingsForm('notificationRecordingReady', checkedValue($event))" />
+            <span>Recording ready</span>
+          </label>
+        </div>
+
+        <div class="settings-group">
+          <strong>Privacy</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().privacyAllowTeacherMessages" (change)="updateSettingsForm('privacyAllowTeacherMessages', checkedValue($event))" />
+            <span>Allow direct class messages</span>
+          </label>
+        </div>
+      </div>
+      <footer class="editor-actions">
+        <button type="button" [disabled]="savingSettings()" (click)="saveSettings()">{{ savingSettings() ? 'Saving...' : 'Save settings' }}</button>
+      </footer>
+    </section>
+
+    <section class="profile-panel">
+      <header>
+        <p class="eyebrow">Account</p>
+        <h2>Profile details</h2>
+      </header>
+
+      <div class="detail-grid">
         <article>
-          <span>{{ detail.label }}</span>
-          <strong>{{ detail.value }}</strong>
+          <span>Display name</span>
+          <strong>{{ profile.displayName }}</strong>
         </article>
+        <article>
+          <span>Email</span>
+          <strong>{{ profile.email }}</strong>
+        </article>
+        <article>
+          <span>Phone</span>
+          <strong>{{ profile.phone || 'Not set' }}</strong>
+        </article>
+        <article>
+          <span>Timezone</span>
+          <strong>{{ profile.timezone || 'Not set' }}</strong>
+        </article>
+        <article>
+          <span>Location</span>
+          <strong>{{ profile.location || 'Not set' }}</strong>
+        </article>
+      </div>
+    </section>
+
+    <section class="profile-panel">
+      <header>
+        <p class="eyebrow">Learning profile</p>
+        <h2>Goals and interests</h2>
+      </header>
+      <div class="pill-list">
+        @for (goal of profile.learningGoals; track goal) {
+          <span>{{ goal }}</span>
+        } @empty {
+          <span>Add learning goals</span>
+        }
+      </div>
+      <div class="pill-list subtle">
+        @for (interest of profile.interests; track interest) {
+          <span>{{ interest }}</span>
+        } @empty {
+          <span>Add interests</span>
+        }
+      </div>
+    </section>
+
+    <section class="profile-panel">
+      <header>
+        <p class="eyebrow">Classes</p>
+        <h2>Enrolled batches</h2>
+      </header>
+      @if (profile.batches.length) {
+        <div class="batch-list">
+          @for (batch of profile.batches; track batch.id) {
+            <article class="batch-row">
+              <div>
+                <strong>{{ batch.title }}</strong>
+                <span>{{ batch.subject || 'General course' }}</span>
+              </div>
+              <div>
+                <span>{{ batch.teacherName || 'Teacher' }}</span>
+                <span>{{ batch.schedule || 'Schedule to be announced' }}</span>
+                <span>{{ formatStart(batch.startsAt) }}</span>
+              </div>
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="empty-state">
+          <h3>No enrolled batches</h3>
+          <p>Explore active batches to start learning.</p>
+          <a routerLink="/student/explore">Explore batches</a>
+        </div>
       }
-    </div>
-  </section>
+    </section>
+  }
 </main>
 <sfu-footer />

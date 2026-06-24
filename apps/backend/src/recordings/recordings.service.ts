@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
@@ -34,6 +34,7 @@ import {
   RoomMongoDocument
 } from '../database/schemas';
 import { PlatformEventsService } from '../events/platform-events.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { StudentEnrollmentsService } from '../student-enrollments/student-enrollments.service';
 
 type ClassSessionRecordingEventName = 'recording:started' | 'recording:updated' | 'recording:stopped' | 'recording:failed';
@@ -48,6 +49,7 @@ interface ClassSessionRecordingContext {
   session: ClassSessionMongoDocument;
   batch: BatchMongoDocument;
   actor: AuthenticatedUser;
+  retentionDays?: number;
 }
 
 export interface RecordingDownload {
@@ -76,7 +78,8 @@ export class RecordingsService {
     @InjectModel(RecordingDocument.name) private readonly recordings: Model<RecordingMongoDocument>,
     private readonly config: ConfigService,
     private readonly platformEvents: PlatformEventsService,
-    private readonly studentEnrollments: StudentEnrollmentsService
+    private readonly studentEnrollments: StudentEnrollmentsService,
+    @Optional() private readonly auditLogs?: AuditLogsService
   ) {}
 
   onClassSessionRecordingEvent(
@@ -192,7 +195,7 @@ export class RecordingsService {
     }
 
     const now = new Date();
-    const retentionDays = this.config.get<number>('recording.retentionDays', DEFAULT_RECORDING_RETENTION_DAYS);
+    const retentionDays = context.retentionDays ?? this.config.get<number>('recording.retentionDays', DEFAULT_RECORDING_RETENTION_DAYS);
     let recording: RecordingMongoDocument;
     try {
       recording = await this.recordings.create({
@@ -238,6 +241,15 @@ export class RecordingsService {
 
     await this.appendClassSessionRecordingPlatformEvent('recording.started', recording, batch, actor);
     this.emitClassSessionRecordingEvent('recording:started', recording);
+    await this.auditLogs?.record({
+      actor,
+      action: 'class_sessions.recording.start',
+      resourceType: 'recording',
+      resourceId: recording.recordingId,
+      resourceLabel: session.title,
+      metadata: { summary: `Started recording for ${session.title}`, sessionId: session.id, batchId: batch.id, roomId: session.roomId },
+      after: { status: recording.status, retentionExpiresAt: recording.retentionExpiresAt?.toISOString() }
+    });
     return this.toRecording(recording);
   }
 
@@ -378,7 +390,7 @@ export class RecordingsService {
       };
     }
     const playerMode = recording.mimeType?.startsWith('video/') ? 'video' : 'manifest';
-    return {
+    const response: AdminRecordingPlaybackResponse = {
       recordingId: recording.recordingId,
       status,
       playerMode,
@@ -390,6 +402,15 @@ export class RecordingsService {
         ? { message: 'This deployment stores class-session recording playback as a server-owned manifest.' }
         : {})
     };
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'admin.recordings.playback',
+      resourceType: 'recording',
+      resourceId: recording.recordingId,
+      resourceLabel: recording.sessionId,
+      metadata: { summary: `Accessed playback for recording ${recording.recordingId}`, sessionId: recording.sessionId, status }
+    });
+    return response;
   }
 
   async readAdminRecordingDownload(recordingId: string, user: AuthenticatedUser): Promise<RecordingDownload> {
@@ -398,7 +419,16 @@ export class RecordingsService {
     if (!recording.sessionId) {
       throw new NotFoundException('Recording download is not available for this recording.');
     }
-    return this.readClassSessionRecordingDownload(recording.sessionId, recording.recordingId, user);
+    const download = await this.readClassSessionRecordingDownload(recording.sessionId, recording.recordingId, user);
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'admin.recordings.download',
+      resourceType: 'recording',
+      resourceId: recording.recordingId,
+      resourceLabel: recording.sessionId,
+      metadata: { summary: `Downloaded recording ${recording.recordingId}`, sessionId: recording.sessionId, fileName: download.fileName }
+    });
+    return download;
   }
 
   async updateAdminRecordingRetention(recordingId: string, retentionExpiresAt: string, user: AuthenticatedUser): Promise<AdminRecordingDetail> {
@@ -411,7 +441,17 @@ export class RecordingsService {
     recording.retentionExpiresAt = expiresAt;
     await recording.save();
     const hydration = await this.hydrateAdminRecording(recording);
-    return this.toAdminRecordingDetail(recording, hydration);
+    const detail = this.toAdminRecordingDetail(recording, hydration);
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'admin.recordings.retention.update',
+      resourceType: 'recording',
+      resourceId: recording.recordingId,
+      resourceLabel: detail.sessionTitle ?? recording.sessionId,
+      metadata: { summary: `Updated retention for recording ${recording.recordingId}` },
+      after: { retentionExpiresAt: detail.retentionExpiresAt }
+    });
+    return detail;
   }
 
   async expireAdminRecording(recordingId: string, user: AuthenticatedUser): Promise<AdminRecordingDetail> {
@@ -420,7 +460,17 @@ export class RecordingsService {
     recording.retentionExpiresAt = new Date();
     await recording.save();
     const hydration = await this.hydrateAdminRecording(recording);
-    return this.toAdminRecordingDetail(recording, hydration);
+    const detail = this.toAdminRecordingDetail(recording, hydration);
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'admin.recordings.archive',
+      resourceType: 'recording',
+      resourceId: recording.recordingId,
+      resourceLabel: detail.sessionTitle ?? recording.sessionId,
+      metadata: { summary: `Archived recording ${recording.recordingId}` },
+      after: { retentionExpiresAt: detail.retentionExpiresAt }
+    });
+    return detail;
   }
 
   private async assertHost(
@@ -478,6 +528,15 @@ export class RecordingsService {
     await recording.save();
     await this.appendClassSessionRecordingPlatformEvent('recording.stopped', recording, batch, actor, reason);
     this.emitClassSessionRecordingEvent('recording:stopped', recording, reason);
+    await this.auditLogs?.record({
+      actor,
+      action: 'class_sessions.recording.stop',
+      resourceType: 'recording',
+      resourceId: recording.recordingId,
+      resourceLabel: session.title,
+      metadata: { summary: `Stopped recording for ${session.title}`, sessionId: session.id, batchId: batch.id, reason },
+      after: { status: recording.status, stoppedAt: recording.stoppedAt?.toISOString(), durationSeconds: recording.durationSeconds }
+    });
     return this.toRecording(recording);
   }
 
@@ -566,6 +625,7 @@ export class RecordingsService {
       producerId: producer.id,
       participantId: producer.participantId,
       kind: producer.kind,
+      ...(producer.source ? { source: producer.source } : {}),
       status: producer.status,
       startedAt: producer.createdAt?.toISOString(),
       closedAt: producer.closedAt?.toISOString()

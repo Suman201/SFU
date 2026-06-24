@@ -1,0 +1,309 @@
+:host {
+  display: block;
+  min-height: 0;
+}
+
+.materials-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(69, 139, 115, 0.18);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface, #ffffff) 92%, #458b73 8%);
+  color: var(--text, #17211d);
+  box-shadow: 0 14px 32px rgba(18, 30, 27, 0.08);
+}
+
+.materials-panel.compact {
+  max-height: min(42dvh, 340px);
+  overflow: hidden;
+}
+
+.materials-header,
+.material-tools,
+.material-actions,
+.material-main,
+.shared-card {
+  display: flex;
+  align-items: center;
+}
+
+.materials-header {
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.materials-header h3,
+.materials-header p {
+  margin: 0;
+}
+
+.materials-header h3 {
+  font-size: 0.96rem;
+  font-weight: 800;
+}
+
+.eyebrow {
+  color: #458b73;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+button,
+.upload-button {
+  border: 1px solid rgba(69, 139, 115, 0.2);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.82);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 800;
+  min-height: 2rem;
+  padding: 0.42rem 0.65rem;
+}
+
+button:disabled,
+.upload-button.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.icon-button {
+  min-width: 2rem;
+  padding-inline: 0.5rem;
+}
+
+.shared-card {
+  width: 100%;
+  gap: 0.7rem;
+  justify-content: flex-start;
+  text-align: left;
+  border-color: rgba(242, 96, 118, 0.32);
+  background: linear-gradient(135deg, rgba(242, 96, 118, 0.1), rgba(255, 209, 80, 0.12));
+}
+
+.shared-card strong,
+.shared-card small,
+.material-copy strong,
+.material-copy small,
+.empty-share strong,
+.empty-share span {
+  display: block;
+}
+
+.shared-card strong,
+.material-copy strong {
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.shared-card small,
+.material-copy small,
+.empty-share span {
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  font-size: 0.72rem;
+}
+
+.empty-share {
+  border: 1px dashed rgba(69, 139, 115, 0.3);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.empty-share strong {
+  font-size: 0.82rem;
+}
+
+.material-tools {
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.upload-button {
+  background: #f26076;
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.upload-button input {
+  display: none;
+}
+
+.secondary-button {
+  background: rgba(69, 139, 115, 0.12);
+}
+
+.link-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+}
+
+.link-form input {
+  width: 100%;
+  border: 1px solid rgba(69, 139, 115, 0.22);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.86);
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  min-height: 2.15rem;
+  padding: 0.45rem 0.6rem;
+}
+
+.link-form button,
+.material-actions .primary {
+  background: #f26076;
+  border-color: #f26076;
+  color: #ffffff;
+}
+
+.material-error {
+  margin: 0;
+  border-radius: 7px;
+  background: rgba(242, 96, 118, 0.12);
+  color: #a83245;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 0.55rem 0.65rem;
+}
+
+.materials-list {
+  display: grid;
+  gap: 0.45rem;
+  max-height: min(22rem, 34dvh);
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.material-state {
+  margin: 0;
+  color: color-mix(in srgb, currentColor 58%, transparent);
+  font-size: 0.78rem;
+  padding: 0.45rem 0;
+}
+
+.material-row {
+  display: grid;
+  gap: 0.55rem;
+  border: 1px solid rgba(69, 139, 115, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+  padding: 0.55rem;
+}
+
+.material-row.is-shared {
+  border-color: rgba(255, 151, 96, 0.4);
+}
+
+.material-main {
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.file-icon {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  background: rgba(69, 139, 115, 0.12);
+  color: #458b73;
+  font-size: 0.66rem;
+  font-weight: 900;
+}
+
+.file-icon.shared {
+  background: rgba(242, 96, 118, 0.14);
+  color: #f26076;
+}
+
+.material-copy {
+  min-width: 0;
+}
+
+.material-copy strong {
+  overflow-wrap: anywhere;
+}
+
+.material-actions {
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.material-actions button {
+  min-height: 1.85rem;
+  padding: 0.32rem 0.52rem;
+}
+
+.material-actions .danger {
+  border-color: rgba(242, 96, 118, 0.32);
+  color: #f26076;
+  min-width: 1.85rem;
+  padding-inline: 0.45rem;
+}
+
+.shared-pill {
+  border-radius: 999px;
+  background: rgba(255, 151, 96, 0.18);
+  color: #a95122;
+  font-size: 0.67rem;
+  font-weight: 900;
+  padding: 0.28rem 0.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .materials-panel {
+    background: color-mix(in srgb, #13211d 90%, #458b73 10%);
+    color: #eef7f2;
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.22);
+  }
+
+  button,
+  .material-row,
+  .shared-card,
+  .link-form input {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .material-error {
+    color: #ffbac4;
+  }
+}
+
+@media (max-width: 700px) {
+  .materials-panel {
+    border-radius: 12px 12px 0 0;
+    max-height: min(72dvh, 640px);
+    padding-bottom: calc(0.9rem + env(safe-area-inset-bottom));
+  }
+
+  .materials-panel.compact {
+    max-height: min(34dvh, 280px);
+  }
+
+  .materials-list {
+    max-height: min(48dvh, 420px);
+  }
+}
+
+@media (pointer: coarse) {
+  button,
+  .upload-button,
+  .material-actions button {
+    min-height: 2.5rem;
+  }
+
+  .icon-button,
+  .material-actions .danger {
+    min-width: 2.5rem;
+  }
+}

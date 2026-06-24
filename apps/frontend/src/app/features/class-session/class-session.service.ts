@@ -1,6 +1,17 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import type { ChatAttachment, ChatHistoryResponse, ChatMessage, ChatMessageScope, ChatReadState, ChatThreadSummaryResponse, Recording } from '@native-sfu/contracts';
+import type {
+  ChatAttachment,
+  ChatHistoryResponse,
+  ChatMessage,
+  ChatMessageScope,
+  ChatReadState,
+  ChatThreadSummaryResponse,
+  ClassSessionMaterial,
+  CreateClassSessionMaterialLinkRequest,
+  LiveClassSettings,
+  Recording
+} from '@native-sfu/contracts';
 import { Observable, map } from 'rxjs';
 import { API_BASE_URL } from '../../core/services/app-environment';
 
@@ -35,6 +46,7 @@ export interface ClassroomPayload {
   participants: ClassroomParticipant[];
   activeRecording?: Recording;
   latestRecording?: Recording;
+  resolvedLiveSettings: LiveClassSettings;
   startedAt?: string;
   completedAt?: string;
 }
@@ -158,6 +170,73 @@ export class ClassSessionService {
 
   downloadChatAttachment(sessionId: string, attachmentId: string, options: { batchId?: string } = {}): Observable<Blob> {
     const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/chat/attachments/${encodeURIComponent(attachmentId)}`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    return this.http.get(url.toString(), { responseType: 'blob' });
+  }
+
+  listMaterials(sessionId: string, options: { batchId?: string } = {}): Observable<ClassSessionMaterial[]> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/materials`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    return this.http
+      .get<ClassSessionMaterial[] | ApiEnvelope<ClassSessionMaterial[]>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  uploadMaterials(sessionId: string, files: File[], options: { batchId?: string } = {}): Observable<ClassSessionMaterial[]> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/materials/upload`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file, file.name);
+    }
+    return this.http
+      .post<ClassSessionMaterial[] | ApiEnvelope<ClassSessionMaterial[]>>(url.toString(), formData)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  attachMaterialLink(sessionId: string, request: CreateClassSessionMaterialLinkRequest): Observable<ClassSessionMaterial> {
+    return this.http
+      .post<ClassSessionMaterial | ApiEnvelope<ClassSessionMaterial>>(
+        `${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/materials/link`,
+        request
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  shareMaterial(sessionId: string, materialId: string, options: { batchId?: string } = {}): Observable<ClassSessionMaterial> {
+    return this.http
+      .post<ClassSessionMaterial | ApiEnvelope<ClassSessionMaterial>>(
+        `${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/materials/${encodeURIComponent(materialId)}/share`,
+        options
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  unshareMaterial(sessionId: string, materialId: string, options: { batchId?: string } = {}): Observable<ClassSessionMaterial> {
+    return this.http
+      .post<ClassSessionMaterial | ApiEnvelope<ClassSessionMaterial>>(
+        `${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/materials/${encodeURIComponent(materialId)}/unshare`,
+        options
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  deleteMaterial(sessionId: string, materialId: string, options: { batchId?: string } = {}): Observable<void> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/materials/${encodeURIComponent(materialId)}`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    return this.http.delete<void | ApiEnvelope<void>>(url.toString()).pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  downloadMaterial(sessionId: string, materialId: string, options: { batchId?: string } = {}): Observable<Blob> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/materials/${encodeURIComponent(materialId)}/download`);
     if (options.batchId) {
       url.searchParams.set('batchId', options.batchId);
     }

@@ -2,196 +2,776 @@
 <main class="profile-shell">
   <a class="back-link" routerLink="/teacher/dashboard">Back to dashboard</a>
 
-  <section class="profile-cover">
-    <img [src]="coverImage()" [alt]="profile.name + ' cover image'" />
-    <div class="cover-content">
-      <span>Teacher self profile</span>
-      <strong>{{ profile.specialization }}</strong>
-    </div>
-  </section>
+  @if (loading()) {
+    <section class="empty-state">
+      <h1>Loading profile</h1>
+      <p>Preparing your teacher profile workspace.</p>
+    </section>
+  } @else if (profile(); as profile) {
+    <section class="profile-cover">
+      <img [src]="coverImage()" [alt]="profile.displayName + ' cover image'" />
+      <div class="cover-content">
+        <span>Teacher self profile</span>
+        <strong>{{ profile.headline || 'Set your teaching headline' }}</strong>
+      </div>
+      <button class="cover-upload" type="button" [disabled]="uploadingField() === 'cover'" (click)="coverInput.click()">
+        {{ uploadingField() === 'cover' ? 'Uploading...' : 'Change cover' }}
+      </button>
+      <input #coverInput type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden (change)="uploadCover($event)" />
+    </section>
 
-  <section class="profile-identity-panel">
-    <img class="profile-image" [src]="profileImage()" [alt]="profile.name + ' profile image'" />
-    <div class="identity-copy">
-      <p class="eyebrow">Teacher profile</p>
-      <h1>{{ profile.name }}</h1>
-      <span>{{ profile.title }}</span>
-      <p>{{ profile.location }}</p>
-    </div>
-    <div class="identity-actions">
-      <a class="primary-link" [href]="'mailto:' + profile.email">Contact email</a>
-    </div>
-  </section>
+    <section class="profile-identity-panel">
+      <img class="profile-image" [src]="profileImage()" [alt]="profile.displayName + ' profile image'" />
+      <div class="identity-copy">
+        <p class="eyebrow">Teacher profile</p>
+        <h1>{{ profile.displayName }}</h1>
+        <span>{{ profile.headline || 'Add a headline for students' }}</span>
+        <p>{{ profile.location || 'Location not set' }}</p>
+      </div>
+      <div class="identity-actions">
+        @if (profile.publicProfileEnabled) {
+          <a class="primary-link" [routerLink]="publicProfileLink()">View public profile</a>
+        }
+        <button class="primary-link button-link" type="button" [disabled]="uploadingField() === 'avatar'" (click)="avatarInput.click()">
+          {{ uploadingField() === 'avatar' ? 'Uploading...' : 'Change avatar' }}
+        </button>
+        <button class="primary-link button-link" type="button" (click)="editing.set(!editing())">
+          {{ editing() ? 'Close editor' : 'Edit profile' }}
+        </button>
+        <input #avatarInput type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden (change)="uploadAvatar($event)" />
+      </div>
+    </section>
 
-  <section class="metric-grid" aria-label="Teacher profile summary">
-    @for (metric of metrics(); track metric.label) {
-      <article>
-        <span>{{ metric.value }}</span>
-        <p>{{ metric.label }}</p>
-      </article>
+    @if (error()) {
+      <div class="form-alert">{{ error() }}</div>
     }
-  </section>
+    @if (notice()) {
+      <div class="form-alert success">{{ notice() }}</div>
+    }
 
-  <section class="profile-grid">
-    <article class="profile-panel about-panel">
-      <p class="eyebrow">About</p>
-      <h2>{{ profile.specialization }}</h2>
-      <p>{{ profile.bio }}</p>
-    </article>
+    <section class="metric-grid" aria-label="Teacher profile summary">
+      @for (metric of metrics(); track metric.label) {
+        <article>
+          <span>{{ metric.value }}</span>
+          <p>{{ metric.label }}</p>
+        </article>
+      }
+    </section>
 
-    <article class="profile-panel">
-      <p class="eyebrow">Education</p>
-      <h2>Academic background</h2>
-      <div class="timeline-list">
-        @for (education of profile.education; track education.degree) {
+    @if (editing()) {
+      <section class="profile-panel edit-panel">
+        <header class="edit-header">
           <div>
-            <strong>{{ education.degree }}</strong>
-            <span>{{ education.institution }}</span>
-            <small>{{ education.year }}</small>
+            <p class="eyebrow">Profile editor</p>
+            <h2>Published teacher details</h2>
           </div>
-        }
-      </div>
-    </article>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="form().publicProfileEnabled" (change)="updateForm('publicProfileEnabled', checkedValue($event))" />
+            <span>Publish public profile</span>
+          </label>
+        </header>
 
-    <article class="profile-panel experience-panel">
-      <p class="eyebrow">Experience</p>
-      <h2>Professional journey</h2>
-      <div class="timeline-list">
-        @for (experience of profile.experiences; track experience.role) {
-          <div>
-            <strong>{{ experience.role }}</strong>
-            <span>{{ experience.organization }} - {{ experience.period }}</span>
-            <p>{{ experience.summary }}</p>
-          </div>
-        }
-      </div>
-    </article>
+        <div class="form-grid">
+          <label>
+            <span>Display name</span>
+            <input [value]="form().displayName" (input)="updateForm('displayName', inputValue($event))" />
+          </label>
+          <label>
+            <span>Phone</span>
+            <input [value]="form().phone" (input)="updateForm('phone', inputValue($event))" />
+          </label>
+          <label>
+            <span>Headline</span>
+            <input [value]="form().headline" (input)="updateForm('headline', inputValue($event))" />
+          </label>
+          <label>
+            <span>Location</span>
+            <input [value]="form().location" (input)="updateForm('location', inputValue($event))" />
+          </label>
+          <label>
+            <span>Timezone</span>
+            <input [value]="form().timezone" (input)="updateForm('timezone', inputValue($event))" />
+          </label>
+          <label class="wide">
+            <span>Bio</span>
+            <textarea rows="4" [value]="form().bio" (input)="updateForm('bio', inputValue($event))"></textarea>
+          </label>
+          <label class="wide">
+            <span>Availability</span>
+            <textarea rows="2" [value]="form().availability" (input)="updateForm('availability', inputValue($event))"></textarea>
+          </label>
+          <label>
+            <span>Languages</span>
+            <textarea rows="3" [value]="form().languagesText" (input)="updateForm('languagesText', inputValue($event))"></textarea>
+          </label>
+          <label>
+            <span>Skills/topics</span>
+            <textarea rows="3" [value]="form().skillsText" (input)="updateForm('skillsText', inputValue($event))"></textarea>
+          </label>
+          <label>
+            <span>Credentials</span>
+            <textarea rows="4" [value]="form().credentialsText" (input)="updateForm('credentialsText', inputValue($event))"></textarea>
+            <small>One per line: Title | Issuer | Year</small>
+          </label>
+          <label>
+            <span>Education</span>
+            <textarea rows="4" [value]="form().educationText" (input)="updateForm('educationText', inputValue($event))"></textarea>
+            <small>One per line: Degree | Institution | Year</small>
+          </label>
+          <label class="wide">
+            <span>Experience</span>
+            <textarea rows="4" [value]="form().experienceText" (input)="updateForm('experienceText', inputValue($event))"></textarea>
+            <small>One per line: Role | Organization | Period | Summary</small>
+          </label>
+          <label class="wide">
+            <span>Social links</span>
+            <textarea rows="3" [value]="form().socialLinksText" (input)="updateForm('socialLinksText', inputValue($event))"></textarea>
+            <small>One per line: Label | https://example.com</small>
+          </label>
+        </div>
 
-    <article class="profile-panel">
-      <p class="eyebrow">Availability</p>
-      <h2>Office hours</h2>
-      <div class="detail-list">
-        <span>Email</span>
-        <strong>{{ profile.email }}</strong>
-        <span>Office hours</span>
-        <strong>{{ profile.officeHours }}</strong>
-        <span>Years experience</span>
-        <strong>{{ profile.yearsExperience }}</strong>
-      </div>
-    </article>
-  </section>
-
-  <section class="profile-panel tab-panel">
-    <header class="tab-panel-header">
-      <div>
-        <p class="eyebrow">Profile details</p>
-        <h2>Manage your profile surface</h2>
-      </div>
-      <nav class="profile-tabs" aria-label="Teacher profile sections">
-        @for (tab of tabs; track tab.id) {
-          <button
-            type="button"
-            [class.is-active]="activeTab() === tab.id"
-            [attr.aria-selected]="activeTab() === tab.id"
-            (click)="selectTab(tab.id)"
-          >
-            <span>{{ tab.label }}</span>
-            <strong>{{ tabCount(tab.id) }}</strong>
+        <footer class="editor-actions">
+          <button class="primary-link button-link" type="button" [disabled]="saving()" (click)="saveProfile()">
+            {{ saving() ? 'Saving...' : 'Save profile' }}
           </button>
-        }
-      </nav>
-    </header>
+        </footer>
+      </section>
+    }
 
-    <div class="tab-content">
-      @switch (activeTab()) {
-        @case ('gallery') {
-          <div class="gallery-grid">
-            @for (item of profile.gallery; track item.id) {
-              <article class="gallery-card">
-                <div class="gallery-visual">
-                  <span>{{ $index + 1 }}</span>
-                </div>
-                <strong>{{ item.title }}</strong>
-                <p>{{ item.caption }}</p>
-              </article>
-            }
-          </div>
-        }
+    <section class="profile-panel settings-panel">
+      <header class="edit-header">
+        <div>
+          <p class="eyebrow">Settings</p>
+          <h2>Workspace preferences</h2>
+        </div>
+        <button class="primary-link button-link" type="button" [disabled]="savingSettings()" (click)="saveSettings()">
+          {{ savingSettings() ? 'Saving...' : 'Save settings' }}
+        </button>
+      </header>
 
-        @case ('demo') {
-          <div class="demo-list">
-            @for (demoClass of profile.demoClasses; track demoClass.id) {
-              <article class="demo-card">
-                <div>
-                  <span>{{ demoClass.level }}</span>
-                  <h3>{{ demoClass.title }}</h3>
-                  <p>{{ demoClass.summary }}</p>
-                </div>
-                <strong>{{ demoClass.duration }}</strong>
-              </article>
-            }
-          </div>
-        }
+      <div class="form-grid settings-grid">
+        <label>
+          <span>Theme</span>
+          <select [value]="settingsForm().theme" (change)="updateSettingsForm('theme', themeValue($event))">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <label>
+          <span>Locale</span>
+          <input [value]="settingsForm().locale" (input)="updateSettingsForm('locale', inputValue($event))" />
+        </label>
 
-        @case ('reviews') {
-          <div class="review-grid">
-            @for (review of profile.reviews; track review.id) {
-              <article class="review-card">
-                <header>
-                  <strong>{{ review.student }}</strong>
-                  <span>{{ review.rating }}</span>
-                </header>
-                <p>{{ review.comment }}</p>
-              </article>
-            }
-          </div>
-        }
+        <div class="settings-group">
+          <strong>Notifications</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().notificationEmail" (change)="updateSettingsForm('notificationEmail', checkedValue($event))" />
+            <span>Email notifications</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().notificationClassReminders" (change)="updateSettingsForm('notificationClassReminders', checkedValue($event))" />
+            <span>Class reminders</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().notificationChatMessages" (change)="updateSettingsForm('notificationChatMessages', checkedValue($event))" />
+            <span>Chat messages</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().notificationAnnouncements" (change)="updateSettingsForm('notificationAnnouncements', checkedValue($event))" />
+            <span>Announcements</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().notificationRecordingReady" (change)="updateSettingsForm('notificationRecordingReady', checkedValue($event))" />
+            <span>Recording ready</span>
+          </label>
+        </div>
 
-        @case ('awards') {
-          <div class="award-list">
-            @for (award of profile.awards; track award.id) {
-              <article>
-                <span>{{ award.year }}</span>
-                <div>
-                  <strong>{{ award.title }}</strong>
-                  <p>{{ award.issuer }}</p>
-                </div>
-              </article>
-            }
-          </div>
-        }
+        <div class="settings-group">
+          <strong>Privacy</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().privacyShowEmail" (change)="updateSettingsForm('privacyShowEmail', checkedValue($event))" />
+            <span>Allow email visibility on public profile</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="settingsForm().privacyAllowTeacherMessages" (change)="updateSettingsForm('privacyAllowTeacherMessages', checkedValue($event))" />
+            <span>Allow direct class messages</span>
+          </label>
+        </div>
+      </div>
+    </section>
 
-        @case ('batches') {
-          @if (batches().length) {
-            <div class="batch-list">
-              @for (batch of batches(); track batch.id) {
-                <article class="batch-row">
+    <section class="profile-panel settings-panel live-settings-panel">
+      <header class="edit-header">
+        <div>
+          <p class="eyebrow">Live class defaults</p>
+          <h2>Session policy for every batch</h2>
+        </div>
+        <button class="primary-link button-link" type="button" [disabled]="savingLiveSettings()" (click)="saveLiveSettings()">
+          {{ savingLiveSettings() ? 'Saving...' : 'Save live defaults' }}
+        </button>
+      </header>
+
+      <div class="form-grid settings-grid">
+        <div class="settings-group">
+          <strong>Student media</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().studentsJoinMuted" (change)="updateLiveSettingsForm('studentsJoinMuted', checkedValue($event))" />
+            <span>Students join muted</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().studentsJoinCameraOff" (change)="updateLiveSettingsForm('studentsJoinCameraOff', checkedValue($event))" />
+            <span>Students join camera off</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().requirePrejoinDeviceCheck" (change)="updateLiveSettingsForm('requirePrejoinDeviceCheck', checkedValue($event))" />
+            <span>Require prejoin check</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().allowStudentsToUnmuteSelf" (change)="updateLiveSettingsForm('allowStudentsToUnmuteSelf', checkedValue($event))" />
+            <span>Allow self unmute</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().allowStudentsToStartCameraSelf" (change)="updateLiveSettingsForm('allowStudentsToStartCameraSelf', checkedValue($event))" />
+            <span>Allow self camera</span>
+          </label>
+        </div>
+
+        <div class="settings-group">
+          <strong>Chat</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().privateTeacherStudentChatEnabled" (change)="updateLiveSettingsForm('privateTeacherStudentChatEnabled', checkedValue($event))" />
+            <span>Private teacher-student chat</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().teacherBroadcastEnabled" (change)="updateLiveSettingsForm('teacherBroadcastEnabled', checkedValue($event))" />
+            <span>Teacher broadcasts</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().chatAttachmentsEnabled" (change)="updateLiveSettingsForm('chatAttachmentsEnabled', checkedValue($event))" />
+            <span>Chat attachments</span>
+          </label>
+          <label class="number-row">
+            <span>Message limit</span>
+            <input type="number" min="100" max="5000" [value]="liveSettingsForm().messageLengthLimit" (input)="updateLiveSettingsForm('messageLengthLimit', numberValue($event, liveSettingsForm().messageLengthLimit))" />
+          </label>
+        </div>
+
+        <div class="settings-group">
+          <strong>Whiteboard and speaking</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().whiteboardSharingEnabled" (change)="updateLiveSettingsForm('whiteboardSharingEnabled', checkedValue($event))" />
+            <span>Whiteboard sharing</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().studentWhiteboardControlEnabled" (change)="updateLiveSettingsForm('studentWhiteboardControlEnabled', checkedValue($event))" />
+            <span>Student whiteboard control</span>
+          </label>
+          <label class="number-row">
+            <span>Max board controllers</span>
+            <input type="number" min="1" max="5" [value]="liveSettingsForm().maxActiveWhiteboardControllers" (input)="updateLiveSettingsForm('maxActiveWhiteboardControllers', numberValue($event, liveSettingsForm().maxActiveWhiteboardControllers))" />
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().handRaiseEnabled" (change)="updateLiveSettingsForm('handRaiseEnabled', checkedValue($event))" />
+            <span>Hand raise</span>
+          </label>
+          <label class="number-row">
+            <span>Max speakers</span>
+            <input type="number" min="0" max="12" [value]="liveSettingsForm().maxActiveSpeakers" (input)="updateLiveSettingsForm('maxActiveSpeakers', numberValue($event, liveSettingsForm().maxActiveSpeakers))" />
+          </label>
+        </div>
+
+        <div class="settings-group">
+          <strong>Recording and attendance</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().recordingEnabled" (change)="updateLiveSettingsForm('recordingEnabled', checkedValue($event))" />
+            <span>Recording enabled</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().autoRecordOnStart" (change)="updateLiveSettingsForm('autoRecordOnStart', checkedValue($event))" />
+            <span>Auto-record when started</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().teacherManualRecordingControlEnabled" (change)="updateLiveSettingsForm('teacherManualRecordingControlEnabled', checkedValue($event))" />
+            <span>Teacher recording control</span>
+          </label>
+          <label>
+            <span>Recording visibility</span>
+            <select [value]="liveSettingsForm().recordingVisibility" (change)="updateLiveSettingsForm('recordingVisibility', recordingVisibilityValue($event))">
+              <option value="teacher_only">Teacher only</option>
+              <option value="enrolled_students">Enrolled students</option>
+              <option value="hidden_until_published">Hidden until published</option>
+            </select>
+          </label>
+          <label class="number-row">
+            <span>Present minutes</span>
+            <input type="number" min="1" max="480" [value]="liveSettingsForm().presentThresholdMinutes" (input)="updateLiveSettingsForm('presentThresholdMinutes', numberValue($event, liveSettingsForm().presentThresholdMinutes))" />
+          </label>
+          <label class="number-row">
+            <span>Present percent</span>
+            <input type="number" min="1" max="100" [value]="liveSettingsForm().presentThresholdPercentage" (input)="updateLiveSettingsForm('presentThresholdPercentage', numberValue($event, liveSettingsForm().presentThresholdPercentage))" />
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().teacherAttendanceExportEnabled" (change)="updateLiveSettingsForm('teacherAttendanceExportEnabled', checkedValue($event))" />
+            <span>Teacher attendance export</span>
+          </label>
+        </div>
+
+        <div class="settings-group wide">
+          <strong>Access</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().waitingRoomEnabled" (change)="updateLiveSettingsForm('waitingRoomEnabled', checkedValue($event))" />
+            <span>Waiting room</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().lockClassAfterTeacherStarts" (change)="updateLiveSettingsForm('lockClassAfterTeacherStarts', checkedValue($event))" />
+            <span>Lock class after teacher starts</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().allowEnrolledStudentReconnectAfterLock" (change)="updateLiveSettingsForm('allowEnrolledStudentReconnectAfterLock', checkedValue($event))" />
+            <span>Allow enrolled student reconnect after lock</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().teacherReconnectGraceMessagingEnabled" (change)="updateLiveSettingsForm('teacherReconnectGraceMessagingEnabled', checkedValue($event))" />
+            <span>Teacher reconnect grace messaging</span>
+          </label>
+          <label class="number-row">
+            <span>Late join minutes</span>
+            <input type="number" min="0" max="240" [value]="liveSettingsForm().lateJoinThresholdMinutes" (input)="updateLiveSettingsForm('lateJoinThresholdMinutes', numberValue($event, liveSettingsForm().lateJoinThresholdMinutes))" />
+          </label>
+        </div>
+
+        <div class="settings-group">
+          <strong>Materials</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().materialsEnabled" (change)="updateLiveSettingsForm('materialsEnabled', checkedValue($event))" />
+            <span>Enable materials</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().teacherCanUploadMaterials" (change)="updateLiveSettingsForm('teacherCanUploadMaterials', checkedValue($event))" />
+            <span>Teacher uploads</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().studentsCanDownloadMaterials" (change)="updateLiveSettingsForm('studentsCanDownloadMaterials', checkedValue($event))" />
+            <span>Student downloads</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().publishMaterialsBeforeClass" (change)="updateLiveSettingsForm('publishMaterialsBeforeClass', checkedValue($event))" />
+            <span>Publish before class</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().publishMaterialsAfterClass" (change)="updateLiveSettingsForm('publishMaterialsAfterClass', checkedValue($event))" />
+            <span>Publish after class</span>
+          </label>
+          <label>
+            <span>Allowed types</span>
+            <input type="text" [value]="liveSettingsForm().allowedMaterialTypesText" (input)="updateLiveSettingsForm('allowedMaterialTypesText', inputValue($event))" />
+          </label>
+          <label class="number-row">
+            <span>Max file MB</span>
+            <input type="number" min="1" max="100" [value]="liveSettingsForm().maxMaterialFileSizeMb" (input)="updateLiveSettingsForm('maxMaterialFileSizeMb', numberValue($event, liveSettingsForm().maxMaterialFileSizeMb))" />
+          </label>
+        </div>
+
+        <div class="settings-group">
+          <strong>Notifications</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().classReminderEnabled" (change)="updateLiveSettingsForm('classReminderEnabled', checkedValue($event))" />
+            <span>Class reminders</span>
+          </label>
+          <label class="number-row">
+            <span>Reminder minutes</span>
+            <input type="number" min="0" max="1440" [value]="liveSettingsForm().classReminderMinutesBefore" (input)="updateLiveSettingsForm('classReminderMinutesBefore', numberValue($event, liveSettingsForm().classReminderMinutesBefore))" />
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().notifyWhenTeacherStarts" (change)="updateLiveSettingsForm('notifyWhenTeacherStarts', checkedValue($event))" />
+            <span>Teacher start notice</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().notifyRecordingAvailable" (change)="updateLiveSettingsForm('notifyRecordingAvailable', checkedValue($event))" />
+            <span>Recording available</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().notifyNewMaterialUploaded" (change)="updateLiveSettingsForm('notifyNewMaterialUploaded', checkedValue($event))" />
+            <span>New material uploaded</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().notifyMissedClass" (change)="updateLiveSettingsForm('notifyMissedClass', checkedValue($event))" />
+            <span>Missed class notice</span>
+          </label>
+        </div>
+
+        <div class="settings-group">
+          <strong>Questions</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().questionQueueEnabled" (change)="updateLiveSettingsForm('questionQueueEnabled', checkedValue($event))" />
+            <span>Question queue</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().allowAnonymousQuestions" (change)="updateLiveSettingsForm('allowAnonymousQuestions', checkedValue($event))" />
+            <span>Anonymous questions</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().allowStudentUpvotes" (change)="updateLiveSettingsForm('allowStudentUpvotes', checkedValue($event))" />
+            <span>Student upvotes</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().teacherCanMarkAnswered" (change)="updateLiveSettingsForm('teacherCanMarkAnswered', checkedValue($event))" />
+            <span>Teacher marks answered</span>
+          </label>
+          <label class="number-row">
+            <span>Open per student</span>
+            <input type="number" min="1" max="20" [value]="liveSettingsForm().maxOpenQuestionsPerStudent" (input)="updateLiveSettingsForm('maxOpenQuestionsPerStudent', numberValue($event, liveSettingsForm().maxOpenQuestionsPerStudent))" />
+          </label>
+        </div>
+
+        <div class="settings-group wide">
+          <strong>Recording retention and student share</strong>
+          <label class="number-row">
+            <span>Retention days</span>
+            <input type="number" min="1" max="3650" [value]="liveSettingsForm().recordingRetentionDays" (input)="updateLiveSettingsForm('recordingRetentionDays', numberValue($event, liveSettingsForm().recordingRetentionDays))" />
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().allowTeacherPublishRecording" (change)="updateLiveSettingsForm('allowTeacherPublishRecording', checkedValue($event))" />
+            <span>Teacher can publish recording</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().allowStudentsDownloadRecording" (change)="updateLiveSettingsForm('allowStudentsDownloadRecording', checkedValue($event))" />
+            <span>Students can download recordings</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().autoArchiveExpiredRecordings" (change)="updateLiveSettingsForm('autoArchiveExpiredRecordings', checkedValue($event))" />
+            <span>Archive expired recordings</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().studentScreenShareEnabled" (change)="updateLiveSettingsForm('studentScreenShareEnabled', checkedValue($event))" />
+            <span>Student screen share</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().studentScreenShareRequiresApproval" (change)="updateLiveSettingsForm('studentScreenShareRequiresApproval', checkedValue($event))" />
+            <span>Require share approval</span>
+          </label>
+          <label class="number-row">
+            <span>Active student shares</span>
+            <input type="number" min="1" max="4" [value]="liveSettingsForm().maxActiveStudentShares" (input)="updateLiveSettingsForm('maxActiveStudentShares', numberValue($event, liveSettingsForm().maxActiveStudentShares))" />
+          </label>
+        </div>
+
+        <div class="settings-group wide">
+          <strong>Analytics and inactivity</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().analyticsEnabled" (change)="updateLiveSettingsForm('analyticsEnabled', checkedValue($event))" />
+            <span>Advanced analytics</span>
+          </label>
+          <label>
+            <span>Analytics visibility</span>
+            <select [value]="liveSettingsForm().analyticsVisibility" (change)="updateLiveSettingsForm('analyticsVisibility', analyticsVisibilityValue($event))">
+              <option value="teacher_only">Teacher only</option>
+              <option value="admin_and_teacher">Admin and teacher</option>
+              <option value="admin_only">Admin only</option>
+            </select>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().trackEngagementEvents" (change)="updateLiveSettingsForm('trackEngagementEvents', checkedValue($event))" />
+            <span>Track engagement</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().trackMediaQuality" (change)="updateLiveSettingsForm('trackMediaQuality', checkedValue($event))" />
+            <span>Track media quality</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().trackChatParticipation" (change)="updateLiveSettingsForm('trackChatParticipation', checkedValue($event))" />
+            <span>Track chat participation</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().trackWhiteboardParticipation" (change)="updateLiveSettingsForm('trackWhiteboardParticipation', checkedValue($event))" />
+            <span>Track whiteboard participation</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().trackQuestionParticipation" (change)="updateLiveSettingsForm('trackQuestionParticipation', checkedValue($event))" />
+            <span>Track question participation</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().inactiveDetectionEnabled" (change)="updateLiveSettingsForm('inactiveDetectionEnabled', checkedValue($event))" />
+            <span>Inactive detection</span>
+          </label>
+          <label class="number-row">
+            <span>Inactive minutes</span>
+            <input type="number" min="1" max="240" [value]="liveSettingsForm().inactiveAfterMinutes" (input)="updateLiveSettingsForm('inactiveAfterMinutes', numberValue($event, liveSettingsForm().inactiveAfterMinutes))" />
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().countBackgroundTabAsInactive" (change)="updateLiveSettingsForm('countBackgroundTabAsInactive', checkedValue($event))" />
+            <span>Background tab counts inactive</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().countMutedNoCameraAsInactive" (change)="updateLiveSettingsForm('countMutedNoCameraAsInactive', checkedValue($event))" />
+            <span>Muted and camera off counts inactive</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().notifyTeacherOnInactiveStudents" (change)="updateLiveSettingsForm('notifyTeacherOnInactiveStudents', checkedValue($event))" />
+            <span>Notify teacher on inactive students</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().includeInactiveTimeInAttendance" (change)="updateLiveSettingsForm('includeInactiveTimeInAttendance', checkedValue($event))" />
+            <span>Include inactive time in attendance</span>
+          </label>
+        </div>
+
+        <div class="settings-group wide">
+          <strong>Network and exports</strong>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().adaptiveQualityEnabled" (change)="updateLiveSettingsForm('adaptiveQualityEnabled', checkedValue($event))" />
+            <span>Adaptive quality</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().lowBandwidthModeEnabled" (change)="updateLiveSettingsForm('lowBandwidthModeEnabled', checkedValue($event))" />
+            <span>Low bandwidth mode</span>
+          </label>
+          <label>
+            <span>Student video quality</span>
+            <select [value]="liveSettingsForm().maxStudentVideoQuality" (change)="updateLiveSettingsForm('maxStudentVideoQuality', studentVideoQualityValue($event))">
+              <option value="auto">Auto</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <label>
+            <span>Screen share quality</span>
+            <select [value]="liveSettingsForm().maxScreenShareQuality" (change)="updateLiveSettingsForm('maxScreenShareQuality', screenShareQualityValue($event))">
+              <option value="auto">Auto</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().disableStudentVideoOnPoorNetwork" (change)="updateLiveSettingsForm('disableStudentVideoOnPoorNetwork', checkedValue($event))" />
+            <span>Disable student video on poor network</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().preferAudioOnPoorNetwork" (change)="updateLiveSettingsForm('preferAudioOnPoorNetwork', checkedValue($event))" />
+            <span>Prefer audio on poor network</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().showNetworkWarnings" (change)="updateLiveSettingsForm('showNetworkWarnings', checkedValue($event))" />
+            <span>Show network warnings</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().exportControlsEnabled" (change)="updateLiveSettingsForm('exportControlsEnabled', checkedValue($event))" />
+            <span>Export controls</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().allowAttendanceExport" (change)="updateLiveSettingsForm('allowAttendanceExport', checkedValue($event))" />
+            <span>Attendance export</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().allowRecordingDownload" (change)="updateLiveSettingsForm('allowRecordingDownload', checkedValue($event))" />
+            <span>Recording download</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().allowChatExport" (change)="updateLiveSettingsForm('allowChatExport', checkedValue($event))" />
+            <span>Chat export</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().allowQuestionExport" (change)="updateLiveSettingsForm('allowQuestionExport', checkedValue($event))" />
+            <span>Question export</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().includePrivateChatInExports" (change)="updateLiveSettingsForm('includePrivateChatInExports', checkedValue($event))" />
+            <span>Include private chat in exports</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().anonymizeStudentExports" (change)="updateLiveSettingsForm('anonymizeStudentExports', checkedValue($event))" />
+            <span>Anonymize student exports</span>
+          </label>
+          <label class="number-row">
+            <span>Export retention days</span>
+            <input type="number" min="1" max="3650" [value]="liveSettingsForm().exportRetentionDays" (input)="updateLiveSettingsForm('exportRetentionDays', numberValue($event, liveSettingsForm().exportRetentionDays))" />
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="liveSettingsForm().requireExportAuditLog" (change)="updateLiveSettingsForm('requireExportAuditLog', checkedValue($event))" />
+            <span>Require export audit log</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="profile-grid">
+      <article class="profile-panel about-panel">
+        <p class="eyebrow">About</p>
+        <h2>{{ profile.headline || 'Teaching focus' }}</h2>
+        <p>{{ profile.bio || 'Add a bio so students can understand your teaching style and expertise.' }}</p>
+      </article>
+
+      <article class="profile-panel">
+        <p class="eyebrow">Expertise</p>
+        <h2>Skills and languages</h2>
+        <div class="pill-list">
+          @for (skill of profile.skills; track skill) {
+            <span>{{ skill }}</span>
+          } @empty {
+            <span>Add teaching topics</span>
+          }
+        </div>
+        <div class="pill-list subtle">
+          @for (language of profile.languages; track language) {
+            <span>{{ language }}</span>
+          } @empty {
+            <span>Add languages</span>
+          }
+        </div>
+      </article>
+
+      <article class="profile-panel experience-panel">
+        <p class="eyebrow">Experience</p>
+        <h2>Professional journey</h2>
+        <div class="timeline-list">
+          @for (experience of profile.experience; track experience.role) {
+            <div>
+              <strong>{{ experience.role }}</strong>
+              <span>{{ experience.organization || 'Organization' }}{{ experience.period ? ' - ' + experience.period : '' }}</span>
+              @if (experience.summary) {
+                <p>{{ experience.summary }}</p>
+              }
+            </div>
+          } @empty {
+            <div>
+              <strong>Add your experience</strong>
+              <span>Students will see this on your public profile.</span>
+            </div>
+          }
+        </div>
+      </article>
+
+      <article class="profile-panel">
+        <p class="eyebrow">Availability</p>
+        <h2>Student contact window</h2>
+        <div class="detail-list">
+          <span>Email</span>
+          <strong>{{ profile.email }}</strong>
+          <span>Phone</span>
+          <strong>{{ profile.phone || 'Not set' }}</strong>
+          <span>Availability</span>
+          <strong>{{ profile.availability || 'Not set' }}</strong>
+          <span>Timezone</span>
+          <strong>{{ profile.timezone || 'Not set' }}</strong>
+        </div>
+      </article>
+    </section>
+
+    <section class="profile-panel tab-panel">
+      <header class="tab-panel-header">
+        <div>
+          <p class="eyebrow">Profile details</p>
+          <h2>Backend-driven profile data</h2>
+        </div>
+        <nav class="profile-tabs" aria-label="Teacher profile sections">
+          @for (tab of tabs; track tab.id) {
+            <button type="button" [class.is-active]="activeTab() === tab.id" [attr.aria-selected]="activeTab() === tab.id" (click)="selectTab(tab.id)">
+              <span>{{ tab.label }}</span>
+              <strong>{{ tabCount(tab.id) }}</strong>
+            </button>
+          }
+        </nav>
+      </header>
+
+      <div class="tab-content">
+        @switch (activeTab()) {
+          @case ('credentials') {
+            <div class="award-list">
+              @for (credential of profile.credentials; track credential.title) {
+                <article>
+                  <span>{{ credential.year || 'Now' }}</span>
                   <div>
-                    <strong>{{ batch.name }}</strong>
-                    <span>{{ batch.courseName }}</span>
+                    <strong>{{ credential.title }}</strong>
+                    <p>{{ credentialLabel(credential) }}</p>
                   </div>
-                  <div class="batch-meta">
-                    <span>{{ batch.cohortCode }}</span>
-                    <span>{{ batchFillLabel(batch) }}</span>
-                    <span>{{ nextSessionLabel(batch) }}</span>
-                    <span>{{ attendanceLabel(batch) }}</span>
+                </article>
+              }
+              @for (education of profile.education; track education.title) {
+                <article>
+                  <span>{{ education.year || 'Edu' }}</span>
+                  <div>
+                    <strong>{{ education.title }}</strong>
+                    <p>{{ credentialLabel(education) }}</p>
                   </div>
-                  <footer>
-                    <a [routerLink]="['/teacher/dashboard/batches', batch.id]">Details</a>
-                  </footer>
                 </article>
               }
             </div>
-          } @else {
-            <div class="empty-state">
-              <h3>No batches created</h3>
-              <p>Create a batch from the teacher dashboard to show it here.</p>
-              <a class="primary-link" routerLink="/teacher/dashboard">Open dashboard</a>
+          }
+
+          @case ('experience') {
+            <div class="timeline-list">
+              @for (experience of profile.experience; track experience.role) {
+                <div>
+                  <strong>{{ experience.role }}</strong>
+                  <span>{{ experience.organization || 'Organization' }}{{ experience.period ? ' - ' + experience.period : '' }}</span>
+                  @if (experience.summary) {
+                    <p>{{ experience.summary }}</p>
+                  }
+                </div>
+              } @empty {
+                <div>
+                  <strong>No experience added</strong>
+                  <span>Use the editor to add public teaching experience.</span>
+                </div>
+              }
             </div>
           }
+
+          @case ('links') {
+            <div class="batch-list">
+              @for (link of profile.socialLinks; track link.url) {
+                <article class="batch-row link-row">
+                  <div>
+                    <strong>{{ link.label }}</strong>
+                    <span>{{ link.url }}</span>
+                  </div>
+                  <footer>
+                    <a [href]="link.url" target="_blank" rel="noopener">Open</a>
+                  </footer>
+                </article>
+              } @empty {
+                <div class="empty-state">
+                  <h3>No social links</h3>
+                  <p>Add safe public links from the editor.</p>
+                </div>
+              }
+            </div>
+          }
+
+          @case ('batches') {
+            @if (batches().length) {
+              <div class="batch-list">
+                @for (batch of batches(); track batch.id) {
+                  <article class="batch-row">
+                    <div>
+                      <strong>{{ batch.title }}</strong>
+                      <span>{{ batch.subject || 'General course' }}</span>
+                    </div>
+                    <div class="batch-meta">
+                      <span>{{ batch.status || 'ACTIVE' }}</span>
+                      <span>{{ batch.schedule || 'Schedule to be announced' }}</span>
+                      <span>{{ batchFillLabel(batch) }}</span>
+                      <span>{{ formatDate(batch.startsAt) }}</span>
+                    </div>
+                    <footer>
+                      <a [routerLink]="['/teacher/dashboard/batches', batch.id]">Details</a>
+                    </footer>
+                  </article>
+                }
+              </div>
+            } @else {
+              <div class="empty-state">
+                <h3>No batches created</h3>
+                <p>Create a batch from the teacher dashboard to show it here.</p>
+                <a class="primary-link" routerLink="/teacher/dashboard">Open dashboard</a>
+              </div>
+            }
+          }
         }
-      }
-    </div>
-  </section>
+      </div>
+    </section>
+  }
 </main>
 <sfu-footer />

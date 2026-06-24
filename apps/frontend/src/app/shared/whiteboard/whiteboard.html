@@ -59,22 +59,52 @@
             </svg>
             <span>Zoom Out</span>
           </button>
-          <button class="menu-item" type="button" (click)="toggleGrid(); menuOpen.set(false)">
-            <span class="menu-icon grid-menu-icon"></span>
-            <span>{{ showGrid() ? 'Hide' : 'Show' }} Grid</span>
-          </button>
-          <button class="menu-item" type="button" (click)="triggerFileImport(); menuOpen.set(false)">
-            <span class="menu-icon import-menu-icon"></span>
-            <span>Import Image/PDF</span>
+          <label class="menu-select-row">
+            <span>Angle snap</span>
+            <select [value]="angleSnapDegrees()" aria-label="Angle snap increment" (change)="setAngleSnapDegrees($event)">
+              @for (option of angleSnapOptions; track option) {
+              <option [value]="option">{{ option === 0 ? 'Off' : option + '°' }}</option>
+              }
+            </select>
+          </label>
+          <button class="menu-item" type="button" (click)="toggleMeasurements(); $event.stopPropagation()">
+            <span class="menu-icon measure-menu-icon"></span>
+            <span>{{ showMeasurements() ? 'Hide' : 'Show' }} measurements</span>
           </button>
           <hr class="menu-divider">
-          <button class="menu-item" type="button" (click)="exportPng(); menuOpen.set(false)">
-            <span class="menu-icon png-icon">PNG</span>
-            <span>Export PNG</span>
+          <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerFileImport(); menuOpen.set(false)">
+            <span class="menu-icon import-menu-icon"></span>
+            <span>Import image/PDF object</span>
           </button>
-          <button class="menu-item" type="button" (click)="exportPdf(); menuOpen.set(false)">
+          <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerBackgroundImport(); menuOpen.set(false)">
+            <span class="menu-icon background-menu-icon"></span>
+            <span>{{ activePage().background ? 'Replace' : 'Add' }} page background</span>
+          </button>
+          <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerPdfPageImport(); menuOpen.set(false)">
             <span class="menu-icon pdf-icon">PDF</span>
-            <span>Export PDF</span>
+            <span>{{ assetImporting() ? 'Importing PDF...' : 'Import PDF pages' }}</span>
+          </button>
+          <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="fitAssetToPage(); menuOpen.set(false)">
+            <span class="menu-icon fit-menu-icon"></span>
+            <span>Fit asset to page</span>
+          </button>
+          <button class="menu-item" type="button" [disabled]="!canImportAssets() || !activePage().background || assetImporting()"
+            (click)="resetPageBackground(); menuOpen.set(false)">
+            <span class="menu-icon reset-icon"></span>
+            <span>Reset page background</span>
+          </button>
+          <hr class="menu-divider">
+          <button class="menu-item" type="button" [disabled]="!canExportBoard()" (click)="exportPng(); menuOpen.set(false)">
+            <span class="menu-icon png-icon">PNG</span>
+            <span>Export page PNG</span>
+          </button>
+          <button class="menu-item" type="button" [disabled]="!canExportBoard()" (click)="exportPdf(); menuOpen.set(false)">
+            <span class="menu-icon pdf-icon">PDF</span>
+            <span>Export page PDF</span>
+          </button>
+          <button class="menu-item" type="button" [disabled]="!canExportBoard()" (click)="exportAllPagesPdf(); menuOpen.set(false)">
+            <span class="menu-icon pdf-icon">PDF</span>
+            <span>Export all pages</span>
           </button>
         </div>
         }
@@ -85,24 +115,39 @@
       @if (!readOnly()) {
       <button class="icon-button tool-button" [class.active]="activeTool() === 'select'" type="button"
         title="Select and move" aria-label="Select and move" [attr.aria-pressed]="activeTool() === 'select'"
+        [disabled]="!canUseTool('select')"
         (click)="selectTool('select')">
         <span class="tool-icon select-icon" aria-hidden="true"></span>
       </button>
       <button class="icon-button tool-button" [class.active]="activeTool() === 'pen'" type="button" title="Pen"
-        aria-label="Pen" [attr.aria-pressed]="activeTool() === 'pen'" (click)="selectTool('pen')">
+        aria-label="Pen" [attr.aria-pressed]="activeTool() === 'pen'" [disabled]="!canUseTool('pen')" (click)="selectTool('pen')">
         <span class="tool-icon pen-icon" aria-hidden="true"></span>
       </button>
       <button class="icon-button tool-button" [class.active]="activeTool() === 'eraser'" type="button"
         title="Erase element" aria-label="Erase element" [attr.aria-pressed]="activeTool() === 'eraser'"
+        [disabled]="!canUseTool('eraser')"
         (click)="selectTool('eraser')">
         <span class="tool-icon erase-icon" aria-hidden="true"></span>
       </button>
       <button class="icon-button tool-button" [class.active]="activeTool() === 'text'" type="button" title="Text"
-        aria-label="Text" [attr.aria-pressed]="activeTool() === 'text'" (click)="selectTool('text')">
+        aria-label="Text" [attr.aria-pressed]="activeTool() === 'text'" [disabled]="!canUseTool('text')" (click)="selectTool('text')">
         <span class="tool-icon text-icon" aria-hidden="true"></span>
+      </button>
+      <button class="icon-button tool-button" [class.active]="activeTool() === 'equation'" type="button"
+        title="Equation" aria-label="Equation" [attr.aria-pressed]="activeTool() === 'equation'"
+        [disabled]="!canUseTool('equation')"
+        (click)="selectTool('equation')">
+        <span class="tool-icon equation-icon" aria-hidden="true"></span>
+      </button>
+      <button class="icon-button tool-button" [class.active]="activeTool() === 'graph'" type="button"
+        title="Graph" aria-label="Graph" [attr.aria-pressed]="activeTool() === 'graph'"
+        [disabled]="!canUseTool('graph')"
+        (click)="selectTool('graph')">
+        <span class="tool-icon graph-icon" aria-hidden="true"></span>
       </button>
       <button class="icon-button tool-button" [class.active]="activeTool() === 'laser'" type="button"
         title="Laser pointer" aria-label="Laser pointer" [attr.aria-pressed]="activeTool() === 'laser'"
+        [disabled]="!canUseTool('laser')"
         (click)="selectTool('laser')">
         <span class="tool-icon laser-icon" aria-hidden="true"></span>
       </button>
@@ -111,7 +156,7 @@
 
       <div class="shape-group-container">
         <button class="icon-button tool-button main-shape-btn" [class.active]="isShapeTool(activeTool())" type="button"
-          [title]="activeShapeTool()" [attr.aria-label]="activeShapeTool()" (click)="selectTool(activeShapeTool())">
+          [title]="activeShapeTool()" [attr.aria-label]="activeShapeTool()" [disabled]="!canUseTool(activeShapeTool())" (click)="selectTool(activeShapeTool())">
           <span class="tool-icon" [class]="activeShapeTool() + '-icon'" aria-hidden="true"></span>
           <span class="chevron-icon" (click)="toggleShapeMenu($event)"></span>
         </button>
@@ -120,37 +165,77 @@
         <div class="shape-dropdown-overlay" (click)="shapeMenuOpen.set(false)"></div>
         <div class="shape-dropdown">
           <button class="icon-button tool-button" [class.active]="activeTool() === 'line'" type="button" title="Line"
-            aria-label="Line" (click)="selectShapeTool('line')">
+            aria-label="Line" [disabled]="!canUseTool('line')" (click)="selectShapeTool('line')">
             <span class="tool-icon line-icon" aria-hidden="true"></span>
           </button>
           <button class="icon-button tool-button" [class.active]="activeTool() === 'arrow'" type="button" title="Arrow"
-            aria-label="Arrow" (click)="selectShapeTool('arrow')">
+            aria-label="Arrow" [disabled]="!canUseTool('arrow')" (click)="selectShapeTool('arrow')">
             <span class="tool-icon arrow-icon" aria-hidden="true"></span>
           </button>
           <button class="icon-button tool-button" [class.active]="activeTool() === 'rectangle'" type="button"
-            title="Rectangle" aria-label="Rectangle" (click)="selectShapeTool('rectangle')">
+            title="Rectangle" aria-label="Rectangle" [disabled]="!canUseTool('rectangle')" (click)="selectShapeTool('rectangle')">
             <span class="tool-icon rectangle-icon" aria-hidden="true"></span>
           </button>
           <button class="icon-button tool-button" [class.active]="activeTool() === 'ellipse'" type="button"
-            title="Ellipse" aria-label="Ellipse" (click)="selectShapeTool('ellipse')">
+            title="Ellipse" aria-label="Ellipse" [disabled]="!canUseTool('ellipse')" (click)="selectShapeTool('ellipse')">
             <span class="tool-icon ellipse-icon" aria-hidden="true"></span>
           </button>
           <button class="icon-button tool-button" [class.active]="activeTool() === 'star'" type="button" title="Star"
-            aria-label="Star" (click)="selectShapeTool('star')">
+            aria-label="Star" [disabled]="!canUseTool('star')" (click)="selectShapeTool('star')">
             <span class="tool-icon star-icon" aria-hidden="true"></span>
           </button>
         </div>
         }
       </div>
 
+      <div class="shape-group-container geometry-group-container">
+        <button class="icon-button tool-button main-geometry-btn" [class.active]="isGeometryTool(activeTool())" type="button"
+          [title]="activeGeometryTool()" [attr.aria-label]="activeGeometryTool()" [disabled]="!canUseTool(activeGeometryTool())" (click)="selectTool(activeGeometryTool())">
+          <span class="tool-icon geometry-icon" aria-hidden="true"></span>
+          <span class="chevron-icon" (click)="toggleGeometryMenu($event)"></span>
+        </button>
+
+        @if (geometryMenuOpen()) {
+        <div class="shape-dropdown-overlay" (click)="geometryMenuOpen.set(false)"></div>
+        <div class="shape-dropdown geometry-dropdown">
+          @for (tool of geometryToolOptions; track tool.id) {
+          <button class="icon-button tool-button" [class.active]="activeTool() === tool.id" type="button"
+            [title]="tool.label" [attr.aria-label]="tool.label" [disabled]="!canUseTool(tool.id)" (click)="selectGeometryTool(tool.id)">
+            <span class="tool-icon" [class]="tool.id + '-icon'" aria-hidden="true"></span>
+          </button>
+          }
+        </div>
+        }
+      </div>
+
+      <div class="shape-group-container diagram-group-container">
+        <button class="icon-button tool-button main-diagram-btn" [class.active]="isDiagramTool(activeTool())" type="button"
+          [title]="activeDiagramTool()" [attr.aria-label]="activeDiagramTool()" [disabled]="!canUseTool(activeDiagramTool())" (click)="selectTool(activeDiagramTool())">
+          <span class="tool-icon diagram-icon" aria-hidden="true"></span>
+          <span class="chevron-icon" (click)="toggleDiagramMenu($event)"></span>
+        </button>
+
+        @if (diagramMenuOpen()) {
+        <div class="shape-dropdown-overlay" (click)="diagramMenuOpen.set(false)"></div>
+        <div class="shape-dropdown diagram-dropdown">
+          @for (tool of diagramToolOptions; track tool.id) {
+          <button class="icon-button tool-button" [class.active]="activeTool() === tool.id" type="button"
+            [title]="tool.label" [attr.aria-label]="tool.label" [disabled]="!canUseTool(tool.id)" (click)="selectDiagramTool(tool.id)">
+            <span class="tool-icon" [class]="tool.id + '-icon'" aria-hidden="true"></span>
+          </button>
+          }
+        </div>
+        }
+      </div>
+
       <button class="icon-button tool-button" [class.active]="fillEnabled()" type="button" title="Fill shape"
-        aria-label="Fill shape" [attr.aria-pressed]="fillEnabled()" (click)="toggleFill()">
+        aria-label="Fill shape" [attr.aria-pressed]="fillEnabled()" [disabled]="!canUseTool('select')" (click)="toggleFill()">
         <span class="tool-icon fill-icon" aria-hidden="true"></span>
       </button>
 
       <div class="fill-color-group-container">
         <button class="color-swatch fill-color-btn" [class.active]="fillEnabled()" [style.background]="fillColor()"
-          type="button" title="Fill color" aria-label="Fill color" (click)="toggleFillColorMenu($event)">
+          type="button" title="Fill color" aria-label="Fill color" [disabled]="!canUseTool('select')" (click)="toggleFillColorMenu($event)">
           <span class="chevron-icon"></span>
         </button>
 
@@ -172,13 +257,15 @@
         aria-label="Snap to grid" [attr.aria-pressed]="snapToGrid()" (click)="toggleSnapToGrid()">
         <span class="tool-icon snap-icon" aria-hidden="true"></span>
       </button>
-      <button class="icon-button tool-button" type="button" title="Import image or PDF" aria-label="Import image or PDF"
+      <button class="icon-button tool-button" type="button" title="Import image or PDF object" aria-label="Import image or PDF object"
+        [disabled]="!canImportAssets() || assetImporting()"
         (click)="triggerFileImport()">
         <span class="tool-icon import-icon" aria-hidden="true"></span>
       </button>
-      <input #fileInput class="file-input" type="file" accept="image/*,.pdf,application/pdf"
+      <input #fileInput class="file-input" type="file" [attr.accept]="assetInputAccept()"
         (change)="importFile($event)" />
       <button class="icon-button tool-button" type="button" title="Clear" aria-label="Clear whiteboard"
+        [disabled]="!canClearBoard()"
         (click)="clearWhiteboard()">
         <span class="tool-icon clear-icon" aria-hidden="true"></span>
       </button>
@@ -259,10 +346,35 @@
         <button type="button" [class.active]="page.id === activePageId()" (click)="selectPage(page.id)">{{ page.title
           }}</button>
         }
-        @if (!readOnly()) {
-        <button type="button" aria-label="Add board page" title="Add board page" (click)="addPage()">+</button>
-        <button type="button" aria-label="Remove current board page" title="Remove current board page"
+      </div>
+      <div class="page-tools">
+        @if (canManagePages()) {
+        <input class="page-title-input" type="text" [value]="activePage().title" aria-label="Rename current board page"
+          title="Rename current board page" (change)="renameActivePage($event)" />
+        <label class="template-select-label" title="Board template">
+          <span>Template</span>
+          <select class="template-select" [value]="activeTemplate()" aria-label="Board template"
+            (change)="selectTemplateFromEvent($event)">
+            @for (template of templateOptions; track template.id) {
+            <option [value]="template.id">{{ template.label }}</option>
+            }
+          </select>
+        </label>
+        <button class="page-tool-button" type="button" aria-label="Duplicate current board page"
+          title="Duplicate current board page" (click)="duplicateActivePage()">Copy</button>
+        <button class="page-tool-button compact" type="button" aria-label="Add board page" title="Add board page"
+          (click)="addPage()">+</button>
+        <button class="page-tool-button compact" type="button" aria-label="Remove current board page" title="Remove current board page"
           [disabled]="pages().length <= 1" (click)="removeActivePage()">-</button>
+        @if (activePage().background; as background) {
+        <span class="asset-chip" [title]="background.fileName">Bg: {{ background.fileName }}</span>
+        }
+        @if (assetImportStatus(); as status) {
+        <span class="asset-status" [class.success]="status.type === 'success'" [class.error]="status.type === 'error'"
+          [class.info]="status.type === 'info'">{{ status.message }}</span>
+        }
+        } @else {
+        <span class="template-chip">{{ activeTemplateLabel() }}</span>
         }
       </div>
       @if (showEndSession()) {
@@ -270,9 +382,10 @@
       }
     </div>
 
-    <div #whiteboardSurface class="whiteboard-surface" [class.grid-hidden]="!showGrid()"
-      [class.select-mode]="activeTool() === 'select'" [class.eraser-mode]="activeTool() === 'eraser'"
+    <div #whiteboardSurface class="whiteboard-surface" [class.select-mode]="activeTool() === 'select'" [class.eraser-mode]="activeTool() === 'eraser'"
       [class.pan-mode]="activeTool() === 'pan'" [class.text-mode]="activeTool() === 'text'"
+      [class.equation-mode]="activeTool() === 'equation'" [class.graph-mode]="activeTool() === 'graph'"
+      [class.geometry-mode]="isGeometryTool(activeTool())" [class.diagram-mode]="isDiagramTool(activeTool())"
       [class.laser-mode]="activeTool() === 'laser'" aria-label="Whiteboard drawing area" (click)="closeContextMenu()"
       (contextmenu)="openContextMenu($event)">
       <div class="board-stage" [style.transform]="boardTransform()">
@@ -281,9 +394,125 @@
           (pointercancel)="stopDrawing($event)" (pointerleave)="stopDrawing($event)"></canvas>
 
         @if (textDraft(); as draft) {
-        <input #textEditor class="text-editor" type="text" [value]="draft.value" [style.left.px]="draft.x"
-          [style.top.px]="draft.y" aria-label="Whiteboard text" (input)="updateTextDraft($event)"
-          (keydown.enter)="commitTextDraft()" (keydown.escape)="cancelTextDraft()" (blur)="commitTextDraft()" />
+        <div class="text-editor-shell" [class.equation-editor-shell]="draft.mode === 'equation'"
+          [style.left.px]="draft.x" [style.top.px]="draft.y">
+          <textarea #textEditor class="text-editor" [class.equation-editor]="draft.mode === 'equation'"
+            [value]="draft.value" [style.width.px]="draft.width ?? 240"
+            [style.minHeight.px]="draft.height ?? 56"
+            [attr.aria-label]="draft.mode === 'equation' ? 'Whiteboard equation' : 'Whiteboard text'"
+            (input)="updateTextDraft($event)" (keydown.escape)="cancelTextDraft()"
+            (keydown.meta.enter)="commitTextDraft()" (keydown.control.enter)="commitTextDraft()"></textarea>
+          @if (draft.mode === 'equation') {
+          <div class="math-snippet-row" aria-label="Equation snippets">
+            @for (snippet of mathSnippets; track snippet.label) {
+            <button type="button" (pointerdown)="$event.preventDefault()" (click)="insertMathSnippet(snippet.value)">
+              {{ snippet.label }}
+            </button>
+            }
+          </div>
+          }
+          <label class="font-size-control">
+            <span>Size</span>
+            <input type="range" min="14" max="64" [value]="fontSize()" aria-label="Text size"
+              (input)="setFontSizeFromEvent($event)" />
+            <strong>{{ fontSize() }}px</strong>
+          </label>
+          <div class="text-editor-actions">
+            <button type="button" (pointerdown)="$event.preventDefault()" (click)="cancelTextDraft()">Cancel</button>
+            <button class="primary" type="button" (pointerdown)="$event.preventDefault()" (click)="commitTextDraft()">Done</button>
+          </div>
+        </div>
+        }
+
+        @if (graphDraft(); as graph) {
+        <div class="graph-editor-shell" [style.left.px]="graph.x" [style.top.px]="graph.y">
+          <div class="graph-editor-header">
+            <strong>{{ graph.elementId ? 'Edit graph' : 'New graph' }}</strong>
+            @if (graph.error) {
+            <span>{{ graph.error }}</span>
+            }
+          </div>
+          <label class="graph-field full">
+            <span>Function</span>
+            <input type="text" [value]="graph.expression" aria-label="Function expression"
+              placeholder="x^2, sin(x), 2x + 1" (input)="updateGraphDraftField('expression', $event)" />
+          </label>
+          <label class="graph-field full">
+            <span>Title</span>
+            <input type="text" [value]="graph.title" aria-label="Graph title"
+              (input)="updateGraphDraftField('title', $event)" />
+          </label>
+          <div class="graph-grid-fields">
+            <label class="graph-field">
+              <span>x min</span>
+              <input type="number" [value]="graph.xMin" (input)="updateGraphDraftNumber('xMin', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>x max</span>
+              <input type="number" [value]="graph.xMax" (input)="updateGraphDraftNumber('xMax', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>y min</span>
+              <input type="number" [value]="graph.yMin" (input)="updateGraphDraftNumber('yMin', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>y max</span>
+              <input type="number" [value]="graph.yMax" (input)="updateGraphDraftNumber('yMax', $event)" />
+            </label>
+          </div>
+          <div class="graph-grid-fields">
+            <label class="graph-field">
+              <span>Width</span>
+              <input type="number" min="220" [value]="graph.width" (input)="updateGraphDraftNumber('width', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>Height</span>
+              <input type="number" min="180" [value]="graph.height" (input)="updateGraphDraftNumber('height', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>Line</span>
+              <input type="number" min="1" max="8" [value]="graph.lineWidth"
+                (input)="updateGraphDraftNumber('lineWidth', $event)" />
+            </label>
+            <label class="graph-field color">
+              <span>Color</span>
+              <input type="color" [value]="graph.curveColor" (input)="setGraphCurveColor($event)" />
+            </label>
+          </div>
+          <div class="graph-toggle-row">
+            <label><input type="checkbox" [checked]="graph.showGrid" (change)="updateGraphDraftBoolean('showGrid', $event)" /> Grid</label>
+            <label><input type="checkbox" [checked]="graph.showAxes" (change)="updateGraphDraftBoolean('showAxes', $event)" /> Axes</label>
+            <label><input type="checkbox" [checked]="graph.showTicks" (change)="updateGraphDraftBoolean('showTicks', $event)" /> Ticks</label>
+            <label><input type="checkbox" [checked]="graph.showIntercepts" (change)="updateGraphDraftBoolean('showIntercepts', $event)" /> Intercepts</label>
+          </div>
+          <div class="graph-grid-fields">
+            <label class="graph-field">
+              <span>Point x</span>
+              <input type="number" [value]="graph.pointX" (input)="updateGraphDraftField('pointX', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>Tangent x</span>
+              <input type="number" [value]="graph.tangentX" (input)="updateGraphDraftField('tangentX', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>Shade a</span>
+              <input type="number" [value]="graph.shadeFrom" (input)="updateGraphDraftField('shadeFrom', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>Shade b</span>
+              <input type="number" [value]="graph.shadeTo" (input)="updateGraphDraftField('shadeTo', $event)" />
+            </label>
+          </div>
+          <label class="graph-field full">
+            <span>Scatter points</span>
+            <textarea [value]="graph.scatterPoints" placeholder="1,2; 2,4; 3,5"
+              (input)="updateGraphDraftField('scatterPoints', $event)"></textarea>
+          </label>
+          <div class="text-editor-actions">
+            <button type="button" (pointerdown)="$event.preventDefault()" (click)="cancelGraphDraft()">Cancel</button>
+            <button class="primary" type="button" (pointerdown)="$event.preventDefault()" (click)="commitGraphDraft()">Done</button>
+          </div>
+        </div>
         }
 
         @if (laserPoint(); as point) {
@@ -301,6 +530,7 @@
       <div class="canvas-hud" aria-label="Whiteboard status">
         <span>{{ activeToolLabel() }}</span>
         <span>{{ zoomPercent() }}</span>
+        <span>{{ activeTemplateLabel() }}</span>
         <span>{{ elementCount() }} objects</span>
       </div>
 
@@ -308,6 +538,10 @@
       <div class="context-menu" [style.left.px]="menu.x" [style.top.px]="menu.y" role="menu"
         aria-label="Element actions">
         <button type="button" role="menuitem" (click)="activateTransform()">Transform</button>
+        <button type="button" role="menuitem" [disabled]="!canEditSelectedTextBlock()"
+          (click)="editSelectedTextBlock()">Edit text/equation</button>
+        <button type="button" role="menuitem" [disabled]="!canEditSelectedGraph()"
+          (click)="editSelectedGraph()">Edit graph</button>
         <button type="button" role="menuitem" (click)="groupSelected()">Group</button>
         <button type="button" role="menuitem" (click)="ungroupSelected()">Ungroup</button>
         <button type="button" role="menuitem" (click)="duplicateSelected()">Duplicate</button>

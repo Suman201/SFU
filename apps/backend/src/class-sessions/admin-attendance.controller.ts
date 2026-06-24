@@ -1,7 +1,8 @@
-import { Controller, Get, Header, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Header, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type {
   AdminAttendanceQuery,
+  AdminAttendanceSessionStudentsResponse,
   AdminAttendanceSessionsResponse,
   AdminAttendanceStudentsResponse,
   AdminAttendanceSummary,
@@ -43,6 +44,16 @@ export class AdminAttendanceController {
   @ApiOperation({ summary: 'List class-session attendance analytics by session' })
   listSessions(@Query() query: AdminAttendanceQueryParams, @CurrentUser() user: AuthenticatedUser): Promise<AdminAttendanceSessionsResponse> {
     return this.classSessions.listAdminAttendanceSessions(this.toAttendanceQuery(query), user);
+  }
+
+  @Get('sessions/:sessionId/students')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'List per-student attendance for one class session' })
+  listSessionStudents(
+    @Param('sessionId') sessionId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<AdminAttendanceSessionStudentsResponse> {
+    return this.classSessions.listAdminAttendanceSessionStudents(sessionId, user);
   }
 
   @Get('students')

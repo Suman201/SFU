@@ -60,6 +60,8 @@
     [cursors]="studentCursors()"
     [readOnly]="!sessionLive() || ending()"
     [showEndSession]="sessionLive() && !ending()"
+    (commandCommitted)="handleTeacherWhiteboardCommand($event)"
+    (cursorMoved)="handleTeacherWhiteboardCursor($event)"
     (endSession)="endSession()"
   />
 
@@ -98,6 +100,9 @@
             {{ recordingStatusLabel() }}
           </span>
         </div>
+        @if (networkWarning()) {
+          <p class="network-warning" role="status">{{ networkWarning() }}</p>
+        }
 
         <div class="device-switcher" aria-label="Teacher camera and microphone devices">
           <label class="device-field" [class.switching]="switchingAudioDevice()">
@@ -156,7 +161,7 @@
             type="button"
             [class.active]="screenSharing()"
             [disabled]="!roomJoined() || mediaBusy()"
-            [title]="screenSharing() ? 'Stop screen share' : 'Share screen'"
+            [title]="screenSharing() ? 'Stop screen share' : whiteboardSharing() ? 'Switch to screen share' : 'Share screen'"
             [attr.aria-pressed]="screenSharing()"
             (click)="toggleScreenShare()"
           >
@@ -172,11 +177,31 @@
             }
           </button>
           <button
+            class="share-button whiteboard-share-button"
+            type="button"
+            [class.active]="whiteboardSharing()"
+            [disabled]="!roomJoined() || mediaBusy() || (!whiteboardSharing() && !whiteboardSharingEnabled())"
+            [title]="!whiteboardSharingEnabled() ? 'Whiteboard sharing is disabled for this class' : whiteboardSharing() ? 'Stop whiteboard share' : screenSharing() ? 'Switch to whiteboard share' : 'Share whiteboard'"
+            [attr.aria-pressed]="whiteboardSharing()"
+            (click)="toggleWhiteboardShare()"
+          >
+            <span class="whiteboard-icon" aria-hidden="true"></span>
+            @if (publishingWhiteboard()) {
+              Starting
+            } @else if (stoppingScreen() && whiteboardSharing()) {
+              Stopping
+            } @else if (whiteboardSharing()) {
+              Stop Board
+            } @else {
+              Share Whiteboard
+            }
+          </button>
+          <button
             class="recording-button"
             type="button"
             [class.active]="recordingActive()"
-            [disabled]="!sessionLive() || recordingActionPending()"
-            [title]="recordingActive() ? 'Stop server-side recording' : 'Start server-side recording'"
+            [disabled]="!sessionLive() || recordingActionPending() || (!recordingActive() && !teacherRecordingControlEnabled())"
+            [title]="recordingControlTitle()"
             [attr.aria-pressed]="recordingActive()"
             (click)="toggleRecording()"
           >
@@ -247,11 +272,37 @@
         </div>
 
         @if (mediaError()) {
-          <p class="media-message error">{{ mediaError() }}</p>
+          <div class="media-message error" role="alert">
+            <span>{{ mediaError() }}</span>
+            @if (audioPlaybackBlocked() || mediaRecoveryError()?.actionLabel) {
+              <button class="media-recovery-button" type="button" [disabled]="mediaBusy()" (click)="runTeacherMediaRecovery()">
+                {{ audioPlaybackBlocked() ? 'Enable audio' : mediaRecoveryError()?.actionLabel }}
+              </button>
+            }
+          </div>
         } @else if (mediaNotice()) {
-          <p class="media-message">{{ mediaNotice() }}</p>
+          <div class="media-message" role="status">
+            <span>{{ mediaNotice() }}</span>
+            @if (mediaRecoveryError()?.kind === 'screen' && mediaRecoveryError()?.actionLabel) {
+              <button class="media-recovery-button" type="button" [disabled]="mediaBusy()" (click)="runTeacherMediaRecovery()">
+                {{ mediaRecoveryError()?.actionLabel }}
+              </button>
+            }
+          </div>
         }
       </div>
+
+      @if (session(); as activeSession) {
+        <sfu-session-materials
+          [sessionId]="activeSession.sessionId"
+          [batchId]="activeSession.batchId"
+          [role]="activeSession.role"
+          [live]="sessionLive()"
+          [joined]="roomJoined()"
+          [compact]="true"
+          [materialSettings]="liveSettings()?.materials ?? null"
+        />
+      }
 
       @if (raisedHandParticipants().length) {
         <section class="hand-raise-queue" aria-label="Raised hands">
@@ -292,6 +343,41 @@
         </section>
       }
 
+      @if (studentWhiteboardControlEnabled()) {
+        <section class="whiteboard-permission-panel" aria-label="Whiteboard permission level">
+          <div>
+            <p class="eyebrow">Student whiteboard</p>
+            <strong>{{ selectedWhiteboardPermissionLabel() }}</strong>
+            <span>Current page only</span>
+          </div>
+          <label>
+            <span>Mode</span>
+            <select [value]="selectedWhiteboardPermissionLevel()" (change)="setWhiteboardPermissionLevel($event)">
+              @for (option of whiteboardPermissionOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }} - {{ option.description }}</option>
+              }
+            </select>
+          </label>
+        </section>
+      }
+
+      @if (whiteboardControlActive()) {
+        <section class="whiteboard-control-banner" aria-label="Active whiteboard controller">
+          <div>
+            <p class="eyebrow">Whiteboard control</p>
+            <strong>{{ whiteboardControllerName() || 'Student' }}</strong>
+            <span>{{ whiteboardControllerPermissionLabel() }} · {{ whiteboardControllerPageId() ? 'current page' : 'all pages' }}</span>
+          </div>
+          <button
+            type="button"
+            [disabled]="isParticipantActionPending(whiteboardControllerParticipantId(), 'whiteboard')"
+            (click)="revokeWhiteboardControl()"
+          >
+            Revoke
+          </button>
+        </section>
+      }
+
       <div class="participant-list">
         @for (participant of participants(); track participant.id) {
           @let mediaState = participantMediaState(participant.id);
@@ -306,6 +392,7 @@
           @let visibilityPending = isParticipantActionPending(participant.id, 'visibility');
           @let speakPending = isParticipantActionPending(participant.id, 'speak');
           @let handPending = isParticipantActionPending(participant.id, 'hand');
+          @let boardPending = isParticipantActionPending(participant.id, 'whiteboard');
           <article
             class="participant-card"
             [class.student-card]="participant.canModerate"
@@ -315,6 +402,7 @@
             [class.screen-sharing]="participant.screenSharing"
             [class.hand-raised]="participant.handRaised"
             [class.allowed-to-speak]="participant.allowedToSpeak"
+            [class.inactive]="participant.inactive"
             [class.local-hidden]="localHidden"
             [class.pending-action]="hasPendingParticipantAction(participant.id)"
           >
@@ -378,7 +466,13 @@
                 @if (participant.allowedToSpeak) {
                   <span class="participant-live-state speaking">Allowed to speak</span>
                 }
-                @if (participant.canModerate && (mutePending || cameraPending || visibilityPending || speakPending || handPending)) {
+                @if (participant.inactive) {
+                  <span class="participant-live-state inactive">Inactive</span>
+                }
+                @if (hasWhiteboardControl(participant.id)) {
+                  <span class="participant-live-state whiteboard">Whiteboard control</span>
+                }
+                @if (participant.canModerate && (mutePending || cameraPending || visibilityPending || speakPending || handPending || boardPending)) {
                   <span class="participant-live-state pending">Updating</span>
                 }
               </div>
@@ -392,8 +486,8 @@
                     [class.allowed-state]="participant.allowedToSpeak"
                     [class.pending]="speakPending"
                     type="button"
-                    [disabled]="speakPending || !roomJoined()"
-                    [title]="speakPending ? 'Updating speak permission' : participant.allowedToSpeak ? 'Revoke speaking permission' : 'Allow student to speak'"
+                    [disabled]="speakPending || !roomJoined() || !handRaiseEnabled()"
+                    [title]="!handRaiseEnabled() ? 'Hand raise and speak requests are disabled for this class' : speakPending ? 'Updating speak permission' : participant.allowedToSpeak ? 'Revoke speaking permission' : 'Allow student to speak'"
                     [attr.aria-label]="speakPending ? 'Updating speaking permission for ' + participant.name : participant.allowedToSpeak ? 'Revoke speaking permission for ' + participant.name : 'Allow ' + participant.name + ' to speak'"
                     [attr.aria-pressed]="participant.allowedToSpeak"
                     (click)="participant.allowedToSpeak ? revokeStudentSpeaking(participant.id) : allowStudentToSpeak(participant.id)"
@@ -440,6 +534,19 @@
                 >
                   <span class="control-icon eye-icon" aria-hidden="true"></span>
                 </button>
+                <button
+                  class="control-button whiteboard-control"
+                  [class.allowed-state]="hasWhiteboardControl(participant.id)"
+                  [class.pending]="boardPending"
+                  type="button"
+                  [disabled]="boardPending || !roomJoined() || !studentWhiteboardControlEnabled()"
+                  [title]="!studentWhiteboardControlEnabled() ? 'Student whiteboard control is disabled for this class' : boardPending ? 'Updating whiteboard control' : hasWhiteboardControl(participant.id) ? 'Revoke whiteboard control' : 'Allow whiteboard control'"
+                  [attr.aria-label]="boardPending ? 'Updating whiteboard control for ' + participant.name : hasWhiteboardControl(participant.id) ? 'Revoke whiteboard control for ' + participant.name : 'Allow ' + participant.name + ' to control the whiteboard'"
+                  [attr.aria-pressed]="hasWhiteboardControl(participant.id)"
+                  (click)="hasWhiteboardControl(participant.id) ? revokeWhiteboardControl(participant.id) : grantWhiteboardControl(participant.id)"
+                >
+                  <span class="control-icon board-control-icon" aria-hidden="true"></span>
+                </button>
               </div>
             } @else {
               <div class="participant-staff-badge" [attr.aria-label]="participantRoleLabel(participant)">
@@ -452,7 +559,7 @@
 
       <div class="student-audio-streams" aria-hidden="true">
         @for (studentAudio of studentAudioStreams(); track studentAudio.producerId) {
-          <audio [sfuMediaStream]="studentAudio.stream" autoplay></audio>
+          <audio [sfuMediaStream]="studentAudio.stream" autoplay (playbackBlocked)="handleStudentAudioPlaybackBlocked($event)"></audio>
         }
       </div>
     </section>
@@ -480,6 +587,10 @@
         [live]="sessionLive()"
         [joined]="roomJoined()"
         [threadParticipants]="chatThreadParticipants()"
+        [privateChatEnabled]="liveSettings()?.chat?.privateTeacherStudentChatEnabled !== false"
+        [broadcastChatEnabled]="liveSettings()?.chat?.teacherBroadcastEnabled !== false"
+        [chatAttachmentsEnabled]="liveSettings()?.chat?.chatAttachmentsEnabled !== false"
+        [maxMessageLength]="liveSettings()?.chat?.messageLengthLimit ?? 2000"
         [currentUser]="chatDisplayName()"
         currentRole="Teacher"
         [collapsed]="chatCollapsed()"
@@ -603,7 +714,14 @@
           </div>
 
           @if (preflightError()) {
-            <p class="preflight-error" role="alert">{{ preflightError() }}</p>
+            <div class="preflight-error" role="alert">
+              <span>{{ preflightError() }}</span>
+              @if (mediaRecoveryError()?.actionLabel) {
+                <button type="button" [disabled]="preflightPreparing()" (click)="preparePreflightPreview()">
+                  {{ mediaRecoveryError()?.actionLabel }}
+                </button>
+              }
+            </div>
           } @else {
             <p class="preflight-hint">
               {{ preflightMode() === 'start' ? 'The class will go live only after you confirm.' : 'Your camera and mic publish only after you enter.' }}

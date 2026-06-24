@@ -1,0 +1,91 @@
+<section class="materials-panel" [class.compact]="compact()">
+  <header class="materials-header">
+    <div>
+      <p class="eyebrow">Materials</p>
+      <h3>Lesson assets</h3>
+    </div>
+    <button type="button" class="icon-button" title="Refresh materials" (click)="loadMaterials()" [disabled]="loading() || uploading()">Refresh</button>
+  </header>
+
+  @if (!materialsEnabled()) {
+    <div class="empty-share">
+      <strong>Materials disabled</strong>
+      <span>Lesson assets are not available for this class.</span>
+    </div>
+  } @else if (sharedMaterial(); as shared) {
+    <button type="button" class="shared-card" (click)="openMaterial(shared)">
+      <span class="file-icon shared">{{ iconFor(shared) }}</span>
+      <span>
+        <strong>{{ shared.title }}</strong>
+        <small>Shared now - {{ readableSize(shared) }}</small>
+      </span>
+    </button>
+  } @else {
+    <div class="empty-share">
+      <strong>No material shared</strong>
+      <span>{{ canManage() ? 'Share one when students need it.' : 'The teacher has not shared a material yet.' }}</span>
+    </div>
+  }
+
+  @if (canManage() && materialsEnabled()) {
+    <div class="material-tools">
+      <label class="upload-button" [class.disabled]="uploading() || !canUpload()">
+        <input type="file" multiple [attr.accept]="acceptTypes()" (change)="uploadFiles($event)" [disabled]="uploading() || !canUpload()" />
+        <span>{{ uploading() ? 'Uploading...' : 'Upload files' }}</span>
+      </label>
+      <button type="button" class="secondary-button" [disabled]="!canUpload()" (click)="linkOpen.set(!linkOpen())">Add link</button>
+      <small>Max {{ maxFileSizeMb() }} MB</small>
+    </div>
+
+    @if (linkOpen() && canUpload()) {
+      <div class="link-form">
+        <input type="text" placeholder="Title" [value]="linkTitle()" (input)="linkTitle.set(inputValue($event))" />
+        <input type="url" placeholder="https://example.com/resource" [value]="linkUrl()" (input)="linkUrl.set(inputValue($event))" />
+        <button type="button" (click)="attachLink()" [disabled]="uploading()">Attach</button>
+      </div>
+    }
+  }
+
+  @if (error()) {
+    <p class="material-error">{{ error() }}</p>
+  }
+
+  <div class="materials-list">
+    @if (loading()) {
+      <p class="material-state">Loading materials...</p>
+    } @else if (!materialsEnabled()) {
+      <p class="material-state">Materials are disabled.</p>
+    } @else if (!sortedMaterials().length) {
+      <p class="material-state">No lesson assets yet.</p>
+    } @else {
+      @for (material of sortedMaterials(); track material.materialId) {
+        <article class="material-row" [class.is-shared]="material.shared">
+          <button type="button" class="material-main" (click)="openMaterial(material)">
+            <span class="file-icon">{{ iconFor(material) }}</span>
+            <span class="material-copy">
+              <strong>{{ material.title }}</strong>
+              <small>{{ material.source === 'link' ? 'Link' : readableSize(material) }}</small>
+            </span>
+          </button>
+
+          <div class="material-actions">
+            @if (material.shared) {
+              <span class="shared-pill">Live</span>
+            }
+            @if (canManage()) {
+              @if (material.shared) {
+                <button type="button" (click)="unshare(material)" [disabled]="pendingMaterialId() === material.materialId || !live()">Unshare</button>
+              } @else {
+                <button type="button" class="primary" (click)="share(material)" [disabled]="pendingMaterialId() === material.materialId || !live()">Share</button>
+              }
+              <button type="button" class="danger" title="Archive material" (click)="archiveMaterial(material)" [disabled]="pendingMaterialId() === material.materialId">x</button>
+            }
+            <button type="button" (click)="download(material)" [disabled]="pendingMaterialId() === material.materialId || (!canDownload() && material.source !== 'link')">
+              {{ material.source === 'link' ? 'Open' : 'Save' }}
+            </button>
+          </div>
+        </article>
+      }
+    }
+  </div>
+</section>

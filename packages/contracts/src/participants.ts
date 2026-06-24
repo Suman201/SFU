@@ -22,6 +22,9 @@ export interface Participant {
   consumerLayers?: ConsumerLayerState[];
   joinedAt: string;
   lastSeenAt: string;
+  lastActiveAt?: string;
+  inactiveSince?: string;
+  inactive?: boolean;
 }
 
 export interface ParticipantPatch {
@@ -36,4 +39,8 @@ export interface ParticipantPatch {
   permissions?: Partial<Permissions>;
   role?: Role;
   connected?: boolean;
+  lastSeenAt?: string;
+  lastActiveAt?: string;
+  inactiveSince?: string | null;
+  inactive?: boolean;
 }

@@ -41,7 +41,10 @@ import type {
   StudentMediaModerationAction,
   StudentMediaModerationEvent,
   TransportOptions,
-  UpdateRoomMediaProfileRequest
+  UpdateRoomMediaProfileRequest,
+  WhiteboardCommandEvent,
+  WhiteboardControlEvent,
+  WhiteboardCursorEvent
 } from '@native-sfu/contracts';
 import type { Server, Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
@@ -153,6 +156,9 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
     });
     this.rooms.onClassSessionLifecycleEvent((event, payload) => {
+      void this.emitRoomEvent(this.classSessionLifecycleRoomId(payload.sessionId), event, payload);
+    });
+    this.rooms.onClassSessionMaterialEvent((event, payload) => {
       void this.emitRoomEvent(this.classSessionLifecycleRoomId(payload.sessionId), event, payload);
     });
     this.recordings.onClassSessionRecordingEvent((event, payload) => {
@@ -285,10 +291,21 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (response.admitted) {
         await socket.join(request.roomId);
         const participant = response.room.participants.find((item) => item.id === response.participantId);
-        if (participant) {
+        if (participant && !response.rejoined) {
           await this.emitRoomEvent(request.roomId, 'participant:joined', participant);
+        } else if (participant) {
+          await this.emitRoomEvent(request.roomId, 'participant:updated', participant.id, { connected: true, socketId: participant.socketId });
         }
         await this.emitRoomEvent(request.roomId, 'room:updated', response.room);
+        const whiteboardControl = await this.rooms.whiteboardControlForParticipant(request.roomId, response.participantId);
+        if (whiteboardControl) {
+          await this.emitTargetedRoomEvent(
+            request.roomId,
+            whiteboardControl.targets,
+            'whiteboard:control-granted',
+            whiteboardControl.event
+          );
+        }
       } else {
         await this.emitRoomEvent(request.roomId, 'waiting-room:pending', response.room.participants.find((item) => item.id === response.participantId)!);
       }
@@ -373,7 +390,11 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('producer:create')
   createProducer(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: CreateProducerRequest, @WsAck() ack: SocketAck<Producer>): Promise<void> {
     return socketAck(ack, async () => {
-      const producer = await this.rooms.createProducer(request, this.requireParticipant(socket));
+      const producerWithCleanup = await this.rooms.createProducer(request, this.requireParticipant(socket));
+      const { closedProducerIds = [], ...producer } = producerWithCleanup;
+      for (const producerId of closedProducerIds) {
+        await this.emitRoomEvent(producer.roomId, 'producer:closed', producerId);
+      }
       await this.emitRoomEvent(request.roomId, 'producer:created', producer);
       return producer;
     });
@@ -672,6 +693,72 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  @SubscribeMessage('whiteboard:grant-control')
+  grantWhiteboardControl(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['whiteboard:grant-control']>[0],
+    @WsAck() ack: SocketAck<WhiteboardControlEvent>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const delivery = await this.rooms.grantWhiteboardControl(
+        request.roomId,
+        this.requireParticipant(socket),
+        request.participantId,
+        request.permissionLevel,
+        request.pageId
+      );
+      if (delivery.revoked) {
+        await this.emitTargetedRoomEvent(
+          request.roomId,
+          delivery.revoked.targets,
+          'whiteboard:control-revoked',
+          delivery.revoked.event
+        );
+      }
+      await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:control-granted', delivery.event);
+      return delivery.event;
+    });
+  }
+
+  @SubscribeMessage('whiteboard:revoke-control')
+  revokeWhiteboardControl(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['whiteboard:revoke-control']>[0],
+    @WsAck() ack: SocketAck<WhiteboardControlEvent>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const delivery = await this.rooms.revokeWhiteboardControl(request.roomId, this.requireParticipant(socket), request.participantId);
+      await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:control-revoked', delivery.event);
+      return delivery.event;
+    });
+  }
+
+  @SubscribeMessage('whiteboard:command')
+  sendWhiteboardCommand(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['whiteboard:command']>[0],
+    @WsAck() ack: SocketAck<WhiteboardCommandEvent>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const delivery = await this.rooms.sendWhiteboardCommand(request.roomId, this.requireParticipant(socket), request.command);
+      await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:command', delivery.event);
+      return delivery.event;
+    });
+  }
+
+  @SubscribeMessage('whiteboard:cursor')
+  sendWhiteboardCursor(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['whiteboard:cursor']>[0],
+    @WsAck() ack: SocketAck<WhiteboardCursorEvent>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const delivery = await this.rooms.sendWhiteboardCursor(request.roomId, this.requireParticipant(socket), request.cursor);
+      await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:cursor', delivery.event);
+      return delivery.event;
+    });
+  }
+
   @SubscribeMessage('student:mute-mic')
   muteStudentMicrophone(
     @ConnectedSocket() socket: SfuSocket,
@@ -755,6 +842,20 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return socketAck(ack, async () => {
       const participantId = this.requireParticipant(socket);
       const patch = await this.rooms.raiseHand(request.roomId, participantId, request.raised);
+      await this.emitRoomEvent(request.roomId, 'participant:updated', participantId, patch);
+      return patch;
+    });
+  }
+
+  @SubscribeMessage('class:activity')
+  updateClassActivity(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['class:activity']>[0],
+    @WsAck() ack: SocketAck<ParticipantPatch>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const participantId = this.requireParticipant(socket);
+      const patch = await this.rooms.updateClassSessionParticipantActivity(request.roomId, participantId, socket.id, this.requireUser(socket), request);
       await this.emitRoomEvent(request.roomId, 'participant:updated', participantId, patch);
       return patch;
     });

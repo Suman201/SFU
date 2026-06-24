@@ -9,8 +9,10 @@ export class SuccessResponseInterceptor implements NestInterceptor {
     const pathname = path.split('?')[0] ?? path;
     if (
       path.includes('/api/docs') ||
+      pathname.includes('/profile/media/') ||
       pathname.endsWith('.csv') ||
       pathname.includes('/recordings/') && pathname.endsWith('/download') ||
+      pathname.includes('/materials/') && pathname.endsWith('/download') ||
       path === '/metrics' ||
       path.startsWith('/health') ||
       path.startsWith('/api/health')

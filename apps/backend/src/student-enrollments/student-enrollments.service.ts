@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type {
   AdminCreateEnrollmentRequest,
@@ -10,6 +10,7 @@ import type {
   AdminUpdateEnrollmentRequest
 } from '@native-sfu/contracts';
 import { Model } from 'mongoose';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import {
   BatchDocument,
@@ -72,7 +73,8 @@ export class StudentEnrollmentsService {
     @InjectModel(StudentEnrollmentDocument.name) private readonly enrollments: Model<StudentEnrollmentMongoDocument>,
     @InjectModel(BatchDocument.name) private readonly batches: Model<BatchMongoDocument>,
     @InjectModel(BatchScheduleDocument.name) private readonly schedules: Model<BatchScheduleMongoDocument>,
-    @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>
+    @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>,
+    @Optional() private readonly auditLogs?: AuditLogsService
   ) {}
 
   async listAdminEnrollments(query: AdminEnrollmentListQuery, user: AuthenticatedUser): Promise<AdminEnrollmentListResponse> {
@@ -109,7 +111,18 @@ export class StudentEnrollmentsService {
       status: request.status,
       actorUserId: user.sub
     });
-    return this.getAdminEnrollment(String(created.id), user);
+    const detail = await this.getAdminEnrollment(String(created.id), user);
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'admin.enrollments.create',
+      resourceType: 'enrollment',
+      resourceId: detail.id,
+      resourceLabel: detail.batchName,
+      targetUserId: detail.studentId,
+      metadata: { summary: `Created enrollment for ${detail.studentName}`, batchId: detail.batchId, status: detail.status },
+      after: { studentId: detail.studentId, batchId: detail.batchId, status: detail.status }
+    });
+    return detail;
   }
 
   async updateAdminEnrollment(
@@ -122,7 +135,18 @@ export class StudentEnrollmentsService {
       return this.getAdminEnrollment(enrollmentId, user);
     }
     await this.updateEnrollmentStatus(enrollmentId, request.status, user.sub);
-    return this.getAdminEnrollment(enrollmentId, user);
+    const detail = await this.getAdminEnrollment(enrollmentId, user);
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'admin.enrollments.update',
+      resourceType: 'enrollment',
+      resourceId: detail.id,
+      resourceLabel: detail.batchName,
+      targetUserId: detail.studentId,
+      metadata: { summary: `Updated enrollment for ${detail.studentName}`, batchId: detail.batchId, status: detail.status },
+      after: { status: detail.status }
+    });
+    return detail;
   }
 
   async transitionAdminEnrollment(
@@ -132,7 +156,18 @@ export class StudentEnrollmentsService {
   ): Promise<AdminEnrollmentDetail> {
     this.assertAdmin(user);
     await this.updateEnrollmentStatus(enrollmentId, status, user.sub);
-    return this.getAdminEnrollment(enrollmentId, user);
+    const detail = await this.getAdminEnrollment(enrollmentId, user);
+    await this.auditLogs?.record({
+      actor: user,
+      action: this.adminEnrollmentTransitionAction(status),
+      resourceType: 'enrollment',
+      resourceId: detail.id,
+      resourceLabel: detail.batchName,
+      targetUserId: detail.studentId,
+      metadata: { summary: `Set ${detail.studentName} enrollment to ${detail.status}`, batchId: detail.batchId },
+      after: { status: detail.status }
+    });
+    return detail;
   }
 
   async enrollStudent(input: EnrollStudentInput): Promise<Record<string, unknown>> {
@@ -631,6 +666,22 @@ export class StudentEnrollmentsService {
       createdAt: doc.createdAt?.toISOString(),
       updatedAt: doc.updatedAt?.toISOString()
     };
+  }
+
+  private adminEnrollmentTransitionAction(status: StudentEnrollmentStatus): string {
+    switch (status) {
+      case 'active':
+        return 'admin.enrollments.reactivate';
+      case 'cancelled':
+        return 'admin.enrollments.cancel';
+      case 'completed':
+        return 'admin.enrollments.complete';
+      case 'suspended':
+        return 'admin.enrollments.suspend';
+      case 'pending':
+      default:
+        return 'admin.enrollments.update';
+    }
   }
 
   private scheduleLabel(schedules: BatchScheduleMongoDocument[]): string {

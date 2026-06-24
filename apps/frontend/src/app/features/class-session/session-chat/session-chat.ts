@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, OnInit, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormField, FormRoot, form as signalForm } from '@angular/forms/signals';
 import type {
   ChatAttachment,
@@ -39,6 +39,7 @@ const CHAT_ATTACHMENT_MAX_COUNT = 3;
 const CHAT_ATTACHMENT_MAX_SIZE_BYTES = 2 * 1024 * 1024;
 const CHAT_ATTACHMENT_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 const CHAT_ATTACHMENT_FILE_MIME_TYPES = new Set([...CHAT_ATTACHMENT_IMAGE_MIME_TYPES, 'application/pdf']);
+const CHAT_ENDED_MESSAGE = 'Class ended. Chat is now read-only.';
 
 type PendingChatAttachment = ChatAttachment & { id: string };
 type ChatDeliveryState = PersistedChatDeliveryState | 'sending' | 'failed';
@@ -74,11 +75,14 @@ export class SessionChat {
   private readonly classSessions = inject(ClassSessionService);
   private readonly socket = inject(SocketService);
   private readonly store = inject(RoomStore);
+  private readonly hostElement = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly realtimeSocket = this.socket.connect();
   private readonly socketDisposers: Array<() => void> = [];
+  private readonly viewportDisposers: Array<() => void> = [];
   private loadedContextKey = '';
   private loadedSummaryContextKey = '';
   private lastMarkedReadKeys = new Set<string>();
+  private viewportFrame = 0;
 
   readonly currentUser = input('Teacher');
   readonly currentRole = input<'Teacher' | 'Student'>('Teacher');
@@ -90,6 +94,10 @@ export class SessionChat {
   readonly docked = input(false);
   readonly collapsed = input<boolean | null>(null);
   readonly threadParticipants = input<ChatThreadParticipant[]>([]);
+  readonly privateChatEnabled = input(true);
+  readonly broadcastChatEnabled = input(true);
+  readonly chatAttachmentsEnabled = input(true);
+  readonly maxMessageLength = input(2000);
   readonly collapsedChange = output<boolean>();
 
   protected readonly dragOffset = signal<ChatPosition>({ x: 0, y: 0 });
@@ -140,12 +148,27 @@ export class SessionChat {
   protected readonly totalUnreadCount = computed(() => (this.chatSummary()?.threads ?? []).reduce((total, thread) => total + thread.unreadCount, 0));
   protected readonly unreadCount = computed(() => (this.isCollapsed() ? this.totalUnreadCount() : 0));
   protected readonly composerHasContent = computed(() => Boolean(this.chatModel().message.trim() || this.pendingAttachments().length));
+  protected readonly activeChatScope = computed<ChatMessageScope>(() => (this.isTeacherChat() ? this.chatMode() : 'private'));
   protected readonly canSend = computed(() => {
     if (!this.live() || !this.joined() || !this.socketConnected() || this.sending() || this.uploadingAttachments() > 0 || !this.roomId()) {
       return false;
     }
+    const scope = this.activeChatScope();
+    if (scope === 'private' && !this.privateChatEnabled()) {
+      return false;
+    }
+    if (scope === 'broadcast' && !this.broadcastChatEnabled()) {
+      return false;
+    }
+    if (this.pendingAttachments().length && !this.chatAttachmentsEnabled()) {
+      return false;
+    }
+    if (this.chatModel().message.trim().length > this.maxMessageLength()) {
+      return false;
+    }
     return !this.isTeacherChat() || this.chatMode() === 'broadcast' || Boolean(this.activeRecipientId());
   });
+  protected readonly canAttachToComposer = computed(() => this.canSend() && this.chatAttachmentsEnabled());
   protected readonly composerPlaceholder = computed(() => {
     if (!this.isTeacherChat()) return 'Message teacher';
     if (this.chatMode() === 'broadcast') return 'Broadcast announcement';
@@ -167,6 +190,10 @@ export class SessionChat {
     if (!this.socketConnected()) return 'Reconnecting to chat.';
     if (this.uploadingAttachments() > 0) return 'Uploading attachment.';
     if (this.sending()) return 'Sending message.';
+    if (this.activeChatScope() === 'private' && !this.privateChatEnabled()) return 'Private teacher-student chat is disabled for this class.';
+    if (this.activeChatScope() === 'broadcast' && !this.broadcastChatEnabled()) return 'Teacher broadcast chat is disabled for this class.';
+    if (this.pendingAttachments().length && !this.chatAttachmentsEnabled()) return 'Chat attachments are disabled for this class.';
+    if (this.chatModel().message.trim().length > this.maxMessageLength()) return `Message limit is ${this.maxMessageLength()} characters.`;
     if (this.isTeacherChat() && this.chatMode() === 'private' && !this.activeRecipientId()) return 'Select a student thread.';
     return '';
   });
@@ -194,10 +221,16 @@ export class SessionChat {
       this.visibleMessages();
       this.markActiveViewRead();
     });
+    effect(() => {
+      if (!this.live()) {
+        this.handleTerminalChatState();
+      }
+    });
   }
 
   ngOnInit(): void {
     this.bindSocketEvents();
+    this.bindViewportEvents();
   }
 
   ngOnDestroy(): void {
@@ -206,6 +239,12 @@ export class SessionChat {
     }
     for (const url of this.attachmentBlobUrls.splice(0)) {
       URL.revokeObjectURL(url);
+    }
+    for (const dispose of this.viewportDisposers.splice(0)) {
+      dispose();
+    }
+    if (this.viewportFrame) {
+      window.cancelAnimationFrame(this.viewportFrame);
     }
   }
 
@@ -226,7 +265,7 @@ export class SessionChat {
   }
 
   protected startDrag(event: PointerEvent, chatElement: HTMLElement): void {
-    if (this.docked() || event.button !== 0) {
+    if (this.docked() || event.button !== 0 || this.isMobileTouchSheet(event)) {
       return;
     }
 
@@ -282,6 +321,10 @@ export class SessionChat {
   }
 
   protected selectPrivateThread(participantId: string): void {
+    if (!this.privateChatEnabled()) {
+      this.chatError.set('Private teacher-student chat is disabled for this class.');
+      return;
+    }
     this.chatMode.set('private');
     this.selectedThreadParticipantId.set(participantId);
     this.loadHistoryForCurrentContext(true);
@@ -289,6 +332,10 @@ export class SessionChat {
   }
 
   protected selectBroadcast(): void {
+    if (!this.broadcastChatEnabled()) {
+      this.chatError.set('Teacher broadcast chat is disabled for this class.');
+      return;
+    }
     this.chatMode.set('broadcast');
     this.loadHistoryForCurrentContext(true);
     queueMicrotask(() => this.markActiveViewRead(true));
@@ -302,6 +349,9 @@ export class SessionChat {
     const attachments = this.pendingAttachments().map((attachment) => this.pendingAttachmentToRequest(attachment));
 
     if ((!body && !attachments.length) || !this.canSend()) {
+      if (body.length > this.maxMessageLength()) {
+        this.chatError.set(`Message limit is ${this.maxMessageLength()} characters.`);
+      }
       return;
     }
 
@@ -323,6 +373,10 @@ export class SessionChat {
     const input = event.target as HTMLInputElement;
     const files = Array.from(input.files ?? []);
     input.value = '';
+    if (!this.chatAttachmentsEnabled()) {
+      this.chatError.set('Chat attachments are disabled for this class.');
+      return;
+    }
     const remainingSlots = CHAT_ATTACHMENT_MAX_COUNT - this.pendingAttachments().length - this.uploadingAttachments();
     if (remainingSlots <= 0) {
       this.chatError.set(`You can attach up to ${CHAT_ATTACHMENT_MAX_COUNT} items.`);
@@ -337,6 +391,10 @@ export class SessionChat {
   }
 
   protected addLinkAttachment(): void {
+    if (!this.chatAttachmentsEnabled()) {
+      this.chatError.set('Chat attachments are disabled for this class.');
+      return;
+    }
     const rawUrl = globalThis.prompt('Paste a link to attach');
     if (!rawUrl?.trim()) {
       return;
@@ -473,6 +531,27 @@ export class SessionChat {
       });
   }
 
+  private handleTerminalChatState(): void {
+    const hadPendingWork = this.sending() || this.uploadingAttachments() > 0 || this.pendingAttachments().length > 0;
+    this.sending.set(false);
+    this.uploadingAttachments.set(0);
+    this.pendingAttachments.set([]);
+    this.messages.update((messages) =>
+      messages.map((message) =>
+        message.deliveryState === 'sending'
+          ? {
+              ...message,
+              deliveryState: 'failed',
+              failedRequest: message.failedRequest
+            }
+          : message
+      )
+    );
+    if (hadPendingWork) {
+      this.chatError.set(CHAT_ENDED_MESSAGE);
+    }
+  }
+
   private async addFileAttachment(file: File): Promise<void> {
     if (!this.canAddAttachment()) {
       return;
@@ -497,6 +576,10 @@ export class SessionChat {
       if (!attachment) {
         throw new Error('No attachment returned');
       }
+      if (!this.live()) {
+        this.chatError.set(CHAT_ENDED_MESSAGE);
+        return;
+      }
       this.pendingAttachments.update((attachments) => [
         ...attachments,
         {
@@ -513,6 +596,10 @@ export class SessionChat {
   }
 
   private canAddAttachment(): boolean {
+    if (!this.chatAttachmentsEnabled()) {
+      this.chatError.set('Chat attachments are disabled for this class.');
+      return false;
+    }
     if (this.pendingAttachments().length + this.uploadingAttachments() >= CHAT_ATTACHMENT_MAX_COUNT) {
       this.chatError.set(`You can attach up to ${CHAT_ATTACHMENT_MAX_COUNT} items.`);
       return false;
@@ -1026,19 +1113,22 @@ export class SessionChat {
     const nextRight = rect.right + deltaX;
     const nextTop = rect.top + deltaY;
     const nextBottom = rect.bottom + deltaY;
-    const maxRight = window.innerWidth - margin;
-    const maxBottom = window.innerHeight - margin;
+    const viewport = window.visualViewport;
+    const minLeft = (viewport?.offsetLeft ?? 0) + margin;
+    const minTop = (viewport?.offsetTop ?? 0) + margin;
+    const maxRight = (viewport ? viewport.offsetLeft + viewport.width : window.innerWidth) - margin;
+    const maxBottom = (viewport ? viewport.offsetTop + viewport.height : window.innerHeight) - margin;
 
-    if (nextLeft < margin) {
-      x += margin - nextLeft;
+    if (nextLeft < minLeft) {
+      x += minLeft - nextLeft;
     }
 
     if (nextRight > maxRight) {
       x -= nextRight - maxRight;
     }
 
-    if (nextTop < margin) {
-      y += margin - nextTop;
+    if (nextTop < minTop) {
+      y += minTop - nextTop;
     }
 
     if (nextBottom > maxBottom) {
@@ -1049,5 +1139,54 @@ export class SessionChat {
       x: Math.round(x),
       y: Math.round(y)
     };
+  }
+
+  private bindViewportEvents(): void {
+    const schedule = () => this.scheduleViewportUpdate();
+    window.addEventListener('resize', schedule);
+    window.addEventListener('orientationchange', schedule);
+    this.viewportDisposers.push(() => window.removeEventListener('resize', schedule));
+    this.viewportDisposers.push(() => window.removeEventListener('orientationchange', schedule));
+    const viewport = window.visualViewport;
+    if (viewport) {
+      viewport.addEventListener('resize', schedule);
+      viewport.addEventListener('scroll', schedule);
+      this.viewportDisposers.push(() => viewport.removeEventListener('resize', schedule));
+      this.viewportDisposers.push(() => viewport.removeEventListener('scroll', schedule));
+    }
+    this.scheduleViewportUpdate();
+  }
+
+  private scheduleViewportUpdate(): void {
+    if (this.viewportFrame) {
+      window.cancelAnimationFrame(this.viewportFrame);
+    }
+    this.viewportFrame = window.requestAnimationFrame(() => {
+      this.viewportFrame = 0;
+      this.updateKeyboardOffset();
+      this.reclampFloatingChat();
+    });
+  }
+
+  private updateKeyboardOffset(): void {
+    const viewport = window.visualViewport;
+    const keyboardOffset = viewport ? Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop)) : 0;
+    this.hostElement.nativeElement.style.setProperty('--chat-keyboard-offset', `${keyboardOffset}px`);
+  }
+
+  private reclampFloatingChat(): void {
+    if (this.docked()) {
+      this.dragOffset.set({ x: 0, y: 0 });
+      return;
+    }
+    const chatElement = this.hostElement.nativeElement.querySelector<HTMLElement>('.session-chat');
+    if (!chatElement) {
+      return;
+    }
+    this.dragOffset.set(this.clampOffset(chatElement, this.dragOffset()));
+  }
+
+  private isMobileTouchSheet(event: PointerEvent): boolean {
+    return event.pointerType === 'touch' && window.matchMedia('(max-width: 720px)').matches;
   }
 }

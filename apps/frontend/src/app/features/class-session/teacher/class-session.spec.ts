@@ -22,6 +22,7 @@ describe('TeacherClassSession participant cards', () => {
   let webrtcMock: {
     networkScore: WritableSignal<number>;
     devices: WritableSignal<{ audioInputs: unknown[]; videoInputs: unknown[] }>;
+    lastMediaError: WritableSignal<null>;
     localStream: WritableSignal<MediaStream | null>;
     remoteStreams: WritableSignal<unknown[]>;
     screenStream: WritableSignal<MediaStream | null>;
@@ -34,6 +35,8 @@ describe('TeacherClassSession participant cards', () => {
     publish: jasmine.Spy;
     resetRoomMedia: jasmine.Spy;
     removeRemoteProducer: jasmine.Spy;
+    recordAutoplayBlocked: jasmine.Spy;
+    clearMediaIssue: jasmine.Spy;
   };
 
   const payload: ClassroomPayload = {
@@ -84,6 +87,7 @@ describe('TeacherClassSession participant cards', () => {
     webrtcMock = {
       networkScore: signal(5),
       devices: signal({ audioInputs: [], videoInputs: [] }),
+      lastMediaError: signal(null),
       localStream,
       remoteStreams: signal([]),
       screenStream: signal(null),
@@ -95,7 +99,17 @@ describe('TeacherClassSession participant cards', () => {
       preparePeer: jasmine.createSpy('preparePeer').and.returnValue(Promise.resolve({ id: 'transport-1' })),
       publish: jasmine.createSpy('publish').and.returnValue(Promise.resolve({ id: 'producer-1', kind: 'video' })),
       resetRoomMedia: jasmine.createSpy('resetRoomMedia'),
-      removeRemoteProducer: jasmine.createSpy('removeRemoteProducer')
+      removeRemoteProducer: jasmine.createSpy('removeRemoteProducer'),
+      recordAutoplayBlocked: jasmine.createSpy('recordAutoplayBlocked').and.returnValue({
+        code: 'autoplay_blocked',
+        severity: 'warning',
+        kind: 'audio',
+        operation: 'autoplay',
+        message: 'Browser blocked audio playback.',
+        recoverable: true,
+        actionLabel: 'Enable audio'
+      }),
+      clearMediaIssue: jasmine.createSpy('clearMediaIssue')
     };
 
     await TestBed.configureTestingModule({

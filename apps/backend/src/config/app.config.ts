@@ -121,6 +121,16 @@ export const appConfig = () => ({
     localPath: process.env.CHAT_ATTACHMENT_LOCAL_PATH ?? './chat-attachments',
     maxFileSizeBytes: Number(process.env.CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES ?? 2 * 1024 * 1024)
   },
+  classMaterials: {
+    storageProvider: 'local',
+    localPath: process.env.CLASS_MATERIAL_LOCAL_PATH ?? './class-materials',
+    maxFileSizeBytes: Number(process.env.CLASS_MATERIAL_MAX_FILE_SIZE_BYTES ?? 10 * 1024 * 1024)
+  },
+  profileMedia: {
+    storageProvider: 'local',
+    localPath: process.env.PROFILE_MEDIA_LOCAL_PATH ?? './profile-media',
+    maxFileSizeBytes: Number(process.env.PROFILE_MEDIA_MAX_FILE_SIZE_BYTES ?? 2 * 1024 * 1024)
+  },
   events: {
     webhooks: {
       enabled: parseBoolean(process.env.WEBHOOK_DELIVERY_ENABLED, true),

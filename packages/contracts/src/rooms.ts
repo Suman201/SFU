@@ -240,6 +240,7 @@ export interface JoinRoomResponse {
   room: Room;
   participantId: string;
   admitted: boolean;
+  rejoined?: boolean;
   admissionDecision?: RoomAutopilotDecision;
   redirect?: RoomOwnerRedirect;
 }

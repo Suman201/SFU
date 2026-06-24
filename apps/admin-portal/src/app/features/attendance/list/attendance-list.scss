@@ -209,6 +209,49 @@ td small {
   background: color-mix(in srgb, var(--product-rose) 12%, transparent);
 }
 
+.source-snapshot,
+.attendance-present {
+  color: var(--product-green);
+  background: color-mix(in srgb, var(--product-green) 13%, transparent);
+}
+
+.source-inferred {
+  color: var(--product-coral);
+  background: color-mix(in srgb, var(--product-coral) 14%, transparent);
+}
+
+.attendance-absent {
+  color: var(--product-rose);
+  background: color-mix(in srgb, var(--product-rose) 12%, transparent);
+}
+
+.detail-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--product-green) 5%, var(--panel));
+}
+
+.detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-head h3,
+.detail-head p {
+  margin: 0;
+}
+
+.detail-head h3 {
+  margin-bottom: 8px;
+  color: var(--text);
+  font-size: 18px;
+}
+
 .table-error,
 .empty-state {
   color: var(--muted);

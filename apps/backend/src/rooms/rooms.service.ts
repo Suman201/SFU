@@ -26,6 +26,8 @@ import {
   ChatThreadSummary,
   ChatThreadSummaryResponse,
   ChatHistoryResponse,
+  type ClassSessionActivityRequest,
+  type ClassSessionMaterialEvent,
   type ClassSessionLifecycleEvent,
   Consumer,
   ConsumerQualityState,
@@ -54,6 +56,7 @@ import {
   JoinRoomResponse,
   IncidentConsumerSummary,
   IncidentProducerSummary,
+  type LiveClassSettings,
   IncidentTransportSummary,
   Participant,
   ParticipantPatch,
@@ -90,6 +93,13 @@ import {
   SendChatAttachment,
   TransportOptions,
   UpdateRoomMediaProfileRequest,
+  WhiteboardCommand,
+  WhiteboardCommandEvent,
+  WhiteboardControlEvent,
+  WhiteboardCursor,
+  WhiteboardCursorEvent,
+  WhiteboardPermissionLevel,
+  WHITEBOARD_PERMISSION_LEVELS,
   VIEWER_PERMISSIONS
 } from '@native-sfu/contracts';
 import type { RoomOwnerLookupResponse } from '@native-sfu/contracts';
@@ -139,6 +149,7 @@ import { MetricsService } from '../metrics/metrics.service';
 import { RedisService, type RoomSocketPresence } from '../redis/redis.service';
 import { PlatformEventsService } from '../events/platform-events.service';
 import { RecordingsService } from '../recordings/recordings.service';
+import { SYSTEM_LIVE_CLASS_SETTINGS } from '../profiles/profiles.service';
 import { RoomSignalService, type RoomSignalEnvelope } from './room-signal.service';
 import { planClassSessions } from '../class-sessions/class-session-planner';
 import {
@@ -178,6 +189,44 @@ export interface SocketDeliveryTarget {
   userId?: string;
   nodeId?: string;
 }
+
+interface WhiteboardControlState {
+  roomId: string;
+  participantId: string;
+  userId: string;
+  displayName: string;
+  permissionLevel: WhiteboardPermissionLevel;
+  pageId?: string;
+  grantedByParticipantId: string;
+  grantedAt: Date;
+}
+
+export interface WhiteboardControlDelivery {
+  event: WhiteboardControlEvent;
+  targets: SocketDeliveryTarget[];
+  revoked?: {
+    event: WhiteboardControlEvent;
+    targets: SocketDeliveryTarget[];
+  };
+}
+
+export interface WhiteboardRealtimeDelivery<TEvent> {
+  event: TEvent;
+  targets: SocketDeliveryTarget[];
+}
+
+const DEFAULT_WHITEBOARD_PERMISSION_LEVEL: WhiteboardPermissionLevel = 'annotate';
+const MAX_STUDENT_WHITEBOARD_COMMAND_BYTES = 250_000;
+const DRAW_ONLY_WHITEBOARD_ELEMENT_TYPES = new Set(['stroke']);
+const ANNOTATION_WHITEBOARD_ELEMENT_TYPES = new Set([
+  'stroke',
+  'shape',
+  'text',
+  'equation',
+  'graph',
+  'geometry',
+  'diagram'
+]);
 
 interface ClassSessionChatContext {
   sessionId: string;
@@ -232,6 +281,7 @@ export interface EnsureClassSessionRoomRequest {
   batchId: string;
   title: string;
   teacherId: string;
+  liveSettings?: LiveClassSettings;
 }
 
 export interface CloseClassSessionRoomRequest {
@@ -245,6 +295,11 @@ export interface ClassSessionAttendanceExportRequest {
   batchId: string;
   roomId: string;
   completedAt?: Date;
+  sessionDurationMinutes?: number;
+  presentThresholdMinutes?: number;
+  presentThresholdPercentage?: number;
+  countReconnects?: boolean;
+  anonymizeStudentExports?: boolean;
 }
 
 export interface ClassSessionAttendanceSummary {
@@ -259,6 +314,8 @@ export interface ClassSessionAttendanceRow {
   studentId: string;
   displayName: string;
   email: string;
+  enrolledAt?: Date;
+  rosterSource?: 'roster' | 'participant';
   firstJoinAt?: Date;
   lastLeaveAt?: Date;
   totalDurationSeconds: number;
@@ -267,6 +324,7 @@ export interface ClassSessionAttendanceRow {
 }
 
 export type ClassSessionLifecycleEventName = 'session:started' | 'session:ended';
+export type ClassSessionMaterialEventName = 'material:shared' | 'material:unshared' | 'material:updated';
 
 export const CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS = 5 * 60 * 1000;
 const CLASS_SESSION_TEACHER_RECONNECT_SWEEP_MS = 60 * 1000;
@@ -431,8 +489,12 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   private readonly roomSnapshotGeneratedEventListeners = new Set<(summary: RoomSnapshotBundleSummary) => void>();
   private readonly roomClosedEventListeners = new Set<(roomId: string) => void>();
   private readonly chatReadReceiptEventListeners = new Set<(delivery: ChatReadDeliveryResult) => void>();
+  private readonly whiteboardControlByRoomId = new Map<string, WhiteboardControlState>();
   private readonly classSessionLifecycleEventListeners = new Set<
     (event: ClassSessionLifecycleEventName, payload: ClassSessionLifecycleEvent) => void
+  >();
+  private readonly classSessionMaterialEventListeners = new Set<
+    (event: ClassSessionMaterialEventName, payload: ClassSessionMaterialEvent) => void
   >();
   private readonly roomQualitySummaryStates = new Map<string, RoomQualitySummaryState>();
   private readonly distributedRoomQualityStates = new Map<string, RoomQualityState>();
@@ -576,6 +638,19 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  onClassSessionMaterialEvent(
+    listener: (event: ClassSessionMaterialEventName, payload: ClassSessionMaterialEvent) => void
+  ): () => void {
+    this.classSessionMaterialEventListeners.add(listener);
+    return () => this.classSessionMaterialEventListeners.delete(listener);
+  }
+
+  emitClassSessionMaterialEvent(event: ClassSessionMaterialEventName, payload: ClassSessionMaterialEvent): void {
+    for (const listener of this.classSessionMaterialEventListeners) {
+      listener(event, payload);
+    }
+  }
+
   private emitChatReadReceipt(delivery: ChatReadDeliveryResult): void {
     for (const listener of this.chatReadReceiptEventListeners) {
       listener(delivery);
@@ -664,23 +739,37 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (session?.roomId) {
       const existingRoom = await this.findRoomDocumentById(session.roomId);
       if (existingRoom && !existingRoom.closedAt) {
+        if (request.liveSettings) {
+          await this.rooms.updateOne(
+            { _id: existingRoom.id },
+            {
+              $set: {
+                'settings.waitingRoomEnabled': request.liveSettings.access.waitingRoomEnabled,
+                'settings.locked': request.liveSettings.access.lockClassAfterTeacherStarts,
+                'settings.recordingEnabled': request.liveSettings.recording.recordingEnabled,
+                'settings.chatEnabled': request.liveSettings.chat.privateTeacherStudentChatEnabled || request.liveSettings.chat.teacherBroadcastEnabled
+              }
+            }
+          );
+        }
         await this.nodeRegistry.claimRoom(existingRoom.id);
         return this.getRoom(existingRoom.id);
       }
     }
 
     await this.nodeRegistry.assertLocalCanOwnNewRoom();
+    const liveSettings = request.liveSettings ?? SYSTEM_LIVE_CLASS_SETTINGS;
     const roomDoc = await this.rooms.create({
       name: request.title,
       hostId: new Types.ObjectId().toHexString(),
       settings: {
-        locked: false,
-        waitingRoomEnabled: false,
+        locked: liveSettings.access.lockClassAfterTeacherStarts,
+        waitingRoomEnabled: liveSettings.access.waitingRoomEnabled,
         joinApprovalRequired: false,
         visibility: 'private',
         maxParticipants: 100,
-        recordingEnabled: false,
-        chatEnabled: true
+        recordingEnabled: liveSettings.recording.recordingEnabled,
+        chatEnabled: liveSettings.chat.privateTeacherStudentChatEnabled || liveSettings.chat.teacherBroadcastEnabled
       },
       mediaProfile: {
         id: 'classroom',
@@ -702,7 +791,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
 
   async joinRoom(user: SocketUser, socketId: string, request: JoinRoomRequest): Promise<JoinRoomResponse> {
     const startedAt = performance.now();
-    const classSession = await this.classSessions.findOne({ roomId: request.roomId });
+    const classSession: ClassSessionMongoDocument | null = await this.classSessions.findOne({ roomId: request.roomId });
     if (classSession) {
       this.assertClassSessionRoomIsLive(classSession);
       await this.assertSocketCanAccessClassSessionBatch(classSession.batchId, classSession.teacherId, user);
@@ -732,11 +821,12 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       return {
         room: await this.getRoom(room.id),
         participantId: existingParticipant.id,
-        admitted: existingParticipant.admitted
+        admitted: existingParticipant.admitted,
+        rejoined: true
       };
     }
     const activeCount = await this.participants.countDocuments({ roomId: room.id, admitted: true, leftAt: { $exists: false } });
-    if (room.settings.locked) {
+    if (room.settings.locked && !(classSession && (this.isClassSessionTeacherUser(classSession, user) || this.isAdminSocketUser(user)))) {
       this.metrics.roomAdmissionRejections.labels('room_locked').inc();
       throw new ForbiddenException('Room is locked');
     }
@@ -769,6 +859,13 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const role = classSessionEntitlements?.role ?? (request.asViewer ? Role.VIEWER : Role.PARTICIPANT);
     const basePermissions = classSessionEntitlements?.permissions ?? (role === Role.VIEWER ? VIEWER_PERMISSIONS : DEFAULT_PARTICIPANT_PERMISSIONS);
     const admitted = !(room.settings.waitingRoomEnabled || room.settings.joinApprovalRequired || joinDecision.action === 'soft-throttle');
+    if (classSession) {
+      const latestSession = await this.requireLiveClassSessionForRoom(classSession.roomId);
+      await this.assertClassSessionRoomJoinAllowed(latestSession.roomId, latestSession.teacherId, {
+        id: user.id,
+        roles: user.roles
+      });
+    }
     const participant = await this.createParticipant(room.id, user, socketId, role, basePermissions, admitted, request.displayName);
     if (classSessionEntitlements?.role === Role.HOST && room.hostId !== participant.id) {
       await this.rooms.updateOne({ _id: room.id }, { $set: { hostId: participant.id } });
@@ -816,6 +913,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       room: updatedRoom,
       participantId: participant.id,
       admitted,
+      rejoined: false,
       admissionDecision: joinDecision
     };
   }
@@ -828,11 +926,82 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     participant.socketId = socketId;
     participant.nodeId = this.nodeRegistry.localNodeId();
     participant.lastSeenAt = new Date();
+    participant.lastActiveAt = new Date();
+    participant.inactiveSince = undefined;
     await participant.save();
     await this.redis.markPresence(roomId, participant.id, socketId, {
       userId: participant.userId,
       nodeId: this.nodeRegistry.localNodeId()
     });
+  }
+
+  async updateClassSessionParticipantActivity(
+    roomId: string,
+    participantId: string,
+    socketId: string,
+    user: SocketUser,
+    request: ClassSessionActivityRequest
+  ): Promise<ParticipantPatch> {
+    const classSession = await this.classSessions.findOne({ roomId });
+    if (!classSession) {
+      throw new NotFoundException('Class session not found.');
+    }
+    this.assertClassSessionRoomIsLive(classSession);
+    await this.assertSocketCanAccessClassSessionBatch(classSession.batchId, classSession.teacherId, user);
+
+    const participant = await this.participants.findOne({ _id: participantId, roomId, leftAt: { $exists: false } });
+    if (!participant) {
+      throw new NotFoundException('Participant not found');
+    }
+    if (participant.socketId && participant.socketId !== socketId) {
+      throw new ForbiddenException('This socket is not active for the participant.');
+    }
+    if (participant.userId && participant.userId !== user.id && !this.isAdminSocketUser(user)) {
+      throw new ForbiddenException('You cannot update another participant activity state.');
+    }
+
+    const now = new Date();
+    const settings = this.classSessionLiveSettings(classSession).inactiveDetection;
+    const patch: ParticipantPatch = { lastSeenAt: now.toISOString() };
+    const update: Record<string, unknown> = { $set: { lastSeenAt: now }, $unset: {} };
+    const isStudentParticipant = participant.role === Role.PARTICIPANT;
+
+    if (!settings.inactiveDetectionEnabled || !isStudentParticipant) {
+      update.$set = { ...(update.$set as Record<string, unknown>), lastActiveAt: now };
+      update.$unset = { inactiveSince: '' };
+      patch.lastActiveAt = now.toISOString();
+      patch.inactiveSince = null;
+      patch.inactive = false;
+      await this.participants.updateOne({ _id: participant.id, roomId }, update);
+      return patch;
+    }
+
+    const previousActiveAt = participant.lastActiveAt ?? participant.lastSeenAt ?? participant.joinedAt ?? now;
+    const thresholdMs = Math.max(1, settings.inactiveAfterMinutes) * 60 * 1000;
+    const hiddenByPolicy = settings.countBackgroundTabAsInactive && request.visible === false;
+    const noMediaByPolicy = settings.countMutedNoCameraAsInactive && !participant.audioEnabled && !participant.videoEnabled;
+    const thresholdReached = request.active === false && now.getTime() - previousActiveAt.getTime() >= thresholdMs;
+    const inactive = hiddenByPolicy || noMediaByPolicy || thresholdReached;
+
+    if (!inactive && request.active !== false) {
+      update.$set = { ...(update.$set as Record<string, unknown>), lastActiveAt: now };
+      update.$unset = { inactiveSince: '' };
+      patch.lastActiveAt = now.toISOString();
+      patch.inactiveSince = null;
+      patch.inactive = false;
+      await this.participants.updateOne({ _id: participant.id, roomId }, update);
+      return patch;
+    }
+
+    if (inactive) {
+      const inactiveSince = participant.inactiveSince ?? (thresholdReached ? previousActiveAt : now);
+      update.$set = { ...(update.$set as Record<string, unknown>), inactiveSince };
+      patch.inactiveSince = inactiveSince.toISOString();
+      patch.inactive = true;
+    }
+
+    await this.participants.updateOne({ _id: participant.id, roomId }, update);
+    return patch;
   }
 
   async leaveRoomForSocket(roomId: string, participantId: string, socketId: string): Promise<LeaveRoomForSocketResult> {
@@ -877,7 +1046,11 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       return { closed: false };
     }
     const participantProducers = await this.producers.find({ roomId, participantId, status: { $ne: 'closed' } });
+    const participantProducerIds = participantProducers.map((producer) => producer.id);
     const participantConsumers = await this.consumers.find({ roomId, participantId, status: { $ne: 'closed' } });
+    const producerConsumers = participantProducerIds.length
+      ? await this.consumers.find({ roomId, producerId: { $in: participantProducerIds }, status: { $ne: 'closed' } })
+      : [];
     const producerHosting = new Map<string, boolean>();
     if (this.pipeCoordinator.isEnabled()) {
       for (const producer of participantProducers) {
@@ -886,7 +1059,17 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
     await this.participants.updateOne({ _id: participantId }, { leftAt: new Date(), lastSeenAt: new Date() });
     await this.producers.updateMany({ roomId, participantId, status: { $ne: 'closed' } }, { status: 'closed', closedAt: new Date() });
-    await this.consumers.updateMany({ roomId, participantId, status: { $ne: 'closed' } }, { status: 'closed', closedAt: new Date() });
+    await this.consumers.updateMany(
+      {
+        roomId,
+        status: { $ne: 'closed' },
+        $or: [
+          { participantId },
+          ...(participantProducerIds.length ? [{ producerId: { $in: participantProducerIds } }] : [])
+        ]
+      },
+      { status: 'closed', closedAt: new Date() }
+    );
     if (this.pipeCoordinator.isEnabled()) {
       const affectedProducerIds = new Set(participantConsumers.map((consumer) => consumer.producerId));
       for (const producerId of affectedProducerIds) {
@@ -896,7 +1079,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     await this.redis.removePresence(roomId, participantId);
     await this.media.closeParticipantTransports(participantId);
     if (this.pipeCoordinator.isEnabled()) {
-      for (const consumer of participantConsumers) {
+      for (const consumer of uniqueConsumerDocs([...participantConsumers, ...producerConsumers])) {
         await this.releaseRemoteConsumerFeedSafely(consumer.id, 'participant_left', 'participant_left_consumer');
       }
       for (const producer of participantProducers) {
@@ -1023,6 +1206,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
     const cleanup = normalizeMediaRoomCleanupSummary(await this.media.closeRoom(roomId));
     this.cleanupRoomAutopilotState(roomId);
+    this.whiteboardControlByRoomId.delete(roomId);
     this.metrics.roomProfileDistribution.labels(room.mediaProfile?.id ?? 'meeting').dec();
     this.clearDistributedRoomObservability(roomId);
     await this.nodeRegistry.releaseRoom(roomId);
@@ -1225,7 +1409,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return this.media.restartIce(transportId, participantId);
   }
 
-  async createProducer(request: CreateProducerRequest, participantId: string): Promise<Producer> {
+  async createProducer(request: CreateProducerRequest, participantId: string): Promise<Producer & { closedProducerIds?: string[] }> {
     const ownerLookup = await this.requireRoomOwnerLookup(request.roomId);
     if (!ownerLookup.local && !this.pipeCoordinator.isEnabled()) {
       await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
@@ -1240,6 +1424,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const publishDecision = request.kind === 'screen'
       ? policyContext.summary.protections.screenShare
       : policyContext.summary.protections.publish;
+    const source = request.kind === 'screen' && (request.source === 'whiteboard' || request.source === 'screen') ? request.source : undefined;
+    const classSession = request.kind === 'screen' ? await this.classSessions.findOne({ roomId: request.roomId }) : null;
     this.recordProtectionDecision(profile.id, publishDecision);
     if (request.kind === 'audio' && !permission.canPublishAudio) {
       this.metrics.roomAdmissionRejections.labels('publish_audio_denied').inc();
@@ -1255,6 +1441,22 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (request.kind === 'screen' && !permission.canShareScreen) {
       this.metrics.roomAdmissionRejections.labels('publish_screen_denied').inc();
       throw new ForbiddenException('Screen sharing denied');
+    }
+    if (classSession && request.kind === 'screen') {
+      await this.assertClassSessionStudentScreenShareAllowed(classSession, participant, permission, source);
+      if (classSession && !this.classSessionLiveSettings(classSession).whiteboard.whiteboardSharingEnabled) {
+        if (source === 'whiteboard') {
+          throw new ForbiddenException('Whiteboard sharing is disabled for this class.');
+        }
+      }
+    }
+    if (source === 'whiteboard') {
+      if (classSession && participant.role !== Role.HOST && participant.role !== Role.CO_HOST) {
+        throw new ForbiddenException('Only the teacher can share the class whiteboard.');
+      }
+      if (classSession && !this.classSessionLiveSettings(classSession).whiteboard.whiteboardSharingEnabled) {
+        throw new ForbiddenException('Whiteboard sharing is disabled for this class.');
+      }
     }
     if (request.kind === 'screen' && publishDecision.action === 'reject') {
       await this.recordRoomIncidentEvent({
@@ -1291,12 +1493,14 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       throw new RoomPolicyViolationError(publishDecision.message, publishDecision);
     }
     const status = publishDecision.action === 'soft-throttle' ? 'paused' : 'live';
+    const closedProducerIds = request.kind === 'screen' ? await this.closeExistingParticipantScreenProducers(request.roomId, participantId) : [];
     await this.media.bindProducer(request.transportId, participantId, rtpParameters);
     const priority = normalizeConsumerPriority(request.priority ?? defaultProducerPriority(profile, request.kind));
     const producerDoc = new this.producers({
       roomId: request.roomId,
       participantId,
       kind: request.kind,
+      source,
       transportId: request.transportId,
       nodeId: this.nodeRegistry.localNodeId(),
       priority,
@@ -1308,6 +1512,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       roomId: request.roomId,
       participantId,
       kind: request.kind,
+      ...(source ? { source } : {}),
       transportId: request.transportId,
       priority,
       rtpParameters,
@@ -1329,6 +1534,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         producerDoc.svcState = producer.svc as unknown as Record<string, unknown>;
       }
       await producerDoc.save();
+      if (request.kind === 'screen') {
+        closedProducerIds.push(...await this.closeExistingParticipantScreenProducers(request.roomId, participantId, producerDoc.id));
+      }
       if (publishDecision.action === 'soft-throttle') {
         await this.recordRoomIncidentEvent({
           roomId: request.roomId,
@@ -1363,7 +1571,10 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
           policyAction: publishDecision.action
         }
       });
-      return this.toProducer(producerDoc);
+      return {
+        ...this.toProducer(producerDoc),
+        ...(closedProducerIds.length ? { closedProducerIds } : {})
+      };
     } catch (error) {
       if (!ownerLookup.local && this.pipeCoordinator.isEnabled()) {
         await this.releaseRemoteProducerPublicationSafely(producer.id, 'error', 'create_producer_error');
@@ -1542,18 +1753,19 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const rows: string[][] = [
       ['Student Name', 'Email', 'Student ID', 'First Join Time', 'Last Leave Time', 'Total Duration', 'Reconnect Count', 'Status']
     ];
-    for (const row of attendanceRows) {
+    attendanceRows.forEach((row, index) => {
+      const studentLabel = `Student ${index + 1}`;
       rows.push([
-        row.displayName || 'Student',
-        row.email,
-        row.studentId,
+        request.anonymizeStudentExports ? studentLabel : row.displayName || 'Student',
+        request.anonymizeStudentExports ? '' : row.email,
+        request.anonymizeStudentExports ? `student-${index + 1}` : row.studentId,
         row.firstJoinAt ? row.firstJoinAt.toISOString() : '',
         row.lastLeaveAt ? row.lastLeaveAt.toISOString() : '',
         this.formatAttendanceDuration(row.totalDurationSeconds * 1000),
         String(row.reconnectCount),
         row.status
       ]);
-    }
+    });
 
     return `${rows.map((row) => row.map((value) => this.csvEscape(value)).join(',')).join('\n')}\n`;
   }
@@ -1591,14 +1803,38 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const fallbackLeaveAt = request.completedAt ?? new Date();
     for (const student of roster) {
       includedStudentIds.add(student.userId);
-      rows.push(this.classSessionAttendanceRow(student.userId, student.displayName, student.email, participantsByStudentId.get(student.userId) ?? [], fallbackLeaveAt));
+      rows.push(
+        this.classSessionAttendanceRow(
+          student.userId,
+          student.displayName,
+          student.email,
+          participantsByStudentId.get(student.userId) ?? [],
+          fallbackLeaveAt,
+          {
+            enrolledAt: student.joinedAt ? new Date(student.joinedAt) : undefined,
+            rosterSource: 'roster',
+            presentThresholdMinutes: request.presentThresholdMinutes,
+            presentThresholdPercentage: request.presentThresholdPercentage,
+            sessionDurationMinutes: request.sessionDurationMinutes,
+            countReconnects: request.countReconnects
+          }
+        )
+      );
     }
     for (const [studentId, participants] of participantsByStudentId) {
       if (includedStudentIds.has(studentId)) {
         continue;
       }
       const latest = participants[participants.length - 1];
-      rows.push(this.classSessionAttendanceRow(studentId, latest?.displayName ?? 'Student', '', participants, fallbackLeaveAt));
+      rows.push(
+        this.classSessionAttendanceRow(studentId, latest?.displayName ?? 'Student', '', participants, fallbackLeaveAt, {
+          rosterSource: 'participant',
+          presentThresholdMinutes: request.presentThresholdMinutes,
+          presentThresholdPercentage: request.presentThresholdPercentage,
+          sessionDurationMinutes: request.sessionDurationMinutes,
+          countReconnects: request.countReconnects
+        })
+      );
     }
     return rows;
   }
@@ -1624,6 +1860,22 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
     this.metrics.producerPriorityUpdates.labels(producer.kind).inc();
     return this.toProducer(producer);
+  }
+
+  private async closeExistingParticipantScreenProducers(roomId: string, participantId: string, exceptProducerId?: string): Promise<string[]> {
+    const existingScreens = await this.producers.find({
+      roomId,
+      participantId,
+      kind: 'screen',
+      status: { $ne: 'closed' },
+      ...(exceptProducerId ? { _id: { $ne: exceptProducerId } } : {})
+    });
+    const closedProducerIds: string[] = [];
+    for (const producer of existingScreens) {
+      const closed = await this.closeProducer(producer.id, participantId);
+      closedProducerIds.push(closed.id);
+    }
+    return closedProducerIds;
   }
 
   async closeProducer(producerId: string, participantId: string): Promise<Producer> {
@@ -1654,6 +1906,18 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
     if (!ownerLookup.local && this.pipeCoordinator.isEnabled() && producerHostedLocally) {
       await this.releaseRemoteProducerPublicationSafely(producerId, 'producer_closed', 'close_producer');
+    }
+    const dependentConsumers = await this.consumers.find({ roomId: producer.roomId, producerId, status: { $ne: 'closed' } });
+    if (dependentConsumers.length) {
+      await this.consumers.updateMany(
+        { roomId: producer.roomId, producerId, status: { $ne: 'closed' } },
+        { status: 'closed', closedAt: producer.closedAt ?? new Date() }
+      );
+      if (this.pipeCoordinator.isEnabled()) {
+        for (const consumer of dependentConsumers) {
+          await this.releaseRemoteConsumerFeedSafely(consumer.id, 'consumer_closed', 'close_producer_consumer');
+        }
+      }
     }
     if (producer.kind === 'screen') {
       const remainingScreens = await this.producers.countDocuments({
@@ -2686,18 +2950,40 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (requestedAttachments.length > CHAT_ATTACHMENT_MAX_COUNT) {
       throw new BadRequestException(`Chat messages can include up to ${CHAT_ATTACHMENT_MAX_COUNT} attachments.`);
     }
-    if (messageBody.length > CHAT_MESSAGE_MAX_LENGTH) {
-      throw new BadRequestException(`Chat message cannot exceed ${CHAT_MESSAGE_MAX_LENGTH} characters.`);
-    }
-
     const classSession = await this.classSessions.findOne({ roomId: request.roomId });
     if (classSession) {
       this.assertClassSessionRoomIsLive(classSession);
+      const liveSettings = this.classSessionLiveSettings(classSession);
+      if (!liveSettings.chat.privateTeacherStudentChatEnabled && !liveSettings.chat.teacherBroadcastEnabled) {
+        throw new ForbiddenException('Chat is disabled for this class.');
+      }
+      if (messageBody.length > liveSettings.chat.messageLengthLimit) {
+        throw new BadRequestException(`Chat message cannot exceed ${liveSettings.chat.messageLengthLimit} characters.`);
+      }
+      if (requestedAttachments.length && !liveSettings.chat.chatAttachmentsEnabled) {
+        throw new ForbiddenException('Chat attachments are disabled for this class.');
+      }
+      if (!this.isTeacherChatParticipant(sender)) {
+        if (request.scope === 'broadcast') {
+          throw new ForbiddenException('Students cannot send broadcast chat messages.');
+        }
+        if (!liveSettings.chat.privateTeacherStudentChatEnabled) {
+          throw new ForbiddenException('Private class chat is disabled for this class.');
+        }
+      }
+      if (request.scope === 'broadcast' && !liveSettings.chat.teacherBroadcastEnabled) {
+        throw new ForbiddenException('Teacher broadcast chat is disabled for this class.');
+      }
+      if ((request.scope === 'private' || !request.scope) && !liveSettings.chat.privateTeacherStudentChatEnabled) {
+        throw new ForbiddenException('Private class chat is disabled for this class.');
+      }
       await this.assertSocketCanAccessClassSessionBatch(classSession.batchId, classSession.teacherId, {
         id: sender.userId ?? sender.id,
         email: sender.displayName,
         roles: sender.role === Role.HOST ? ['TEACHER'] : sender.role === Role.CO_HOST ? ['ADMIN'] : ['STUDENT']
       });
+    } else if (messageBody.length > CHAT_MESSAGE_MAX_LENGTH) {
+      throw new BadRequestException(`Chat message cannot exceed ${CHAT_MESSAGE_MAX_LENGTH} characters.`);
     }
 
     const permissions = await this.getPermissions(request.roomId, senderId);
@@ -2716,13 +3002,22 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const preparedAttachments = classSession
       ? await this.prepareClassSessionChatAttachments(classSession, sender, delivery, requestedAttachments)
       : { attachments: this.normalizeChatAttachments(requestedAttachments), fileAttachments: [] };
+    let liveClassSession: ClassSessionMongoDocument | null = classSession;
+    if (classSession) {
+      try {
+        liveClassSession = await this.requireLiveClassSessionForRoom(request.roomId);
+      } catch (error) {
+        await this.releasePendingClassSessionChatAttachments(preparedAttachments.fileAttachments);
+        throw error;
+      }
+    }
     const doc = await this.chat.create({
-      ...(classSession
+      ...(liveClassSession
         ? {
-            sessionId: classSession.id,
-            batchId: classSession.batchId,
-            channelId: classSession.chatChannelId,
-            chatChannelId: classSession.chatChannelId
+            sessionId: liveClassSession.id,
+            batchId: liveClassSession.batchId,
+            channelId: liveClassSession.chatChannelId,
+            chatChannelId: liveClassSession.chatChannelId
           }
         : {}),
       roomId: request.roomId,
@@ -3376,6 +3671,23 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async releasePendingClassSessionChatAttachments(attachments: readonly ChatAttachmentFileMongoDocument[]): Promise<void> {
+    const attachmentIds = attachments.map((attachment) => attachment._id).filter(Boolean);
+    if (!attachmentIds.length) {
+      return;
+    }
+    await this.chatAttachments
+      .updateMany(
+        {
+          _id: { $in: attachmentIds },
+          scope: 'pending',
+          messageId: { $exists: false }
+        },
+        { $set: { deletedAt: new Date() } }
+      )
+      .catch(() => undefined);
+  }
+
   private normalizeChatAttachment(attachment: SendChatAttachment): ChatAttachment {
     if (!attachment || (attachment.type !== 'image' && attachment.type !== 'pdf' && attachment.type !== 'link')) {
       throw new BadRequestException('Unsupported chat attachment type.');
@@ -3755,7 +4067,15 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     displayName: string,
     email: string,
     participants: readonly ParticipantMongoDocument[],
-    fallbackLeaveAt: Date
+    fallbackLeaveAt: Date,
+    metadata: {
+      enrolledAt?: Date;
+      rosterSource?: 'roster' | 'participant';
+      presentThresholdMinutes?: number;
+      presentThresholdPercentage?: number;
+      sessionDurationMinutes?: number;
+      countReconnects?: boolean;
+    } = {}
   ): ClassSessionAttendanceRow {
     const sorted = [...participants].sort((left, right) => left.joinedAt.getTime() - right.joinedAt.getTime());
     const firstJoinAt = sorted[0]?.joinedAt;
@@ -3768,12 +4088,28 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       studentId,
       displayName: displayName || 'Student',
       email,
+      ...(metadata.enrolledAt ? { enrolledAt: metadata.enrolledAt } : {}),
+      rosterSource: metadata.rosterSource ?? 'roster',
       ...(firstJoinAt ? { firstJoinAt } : {}),
       ...(lastLeaveAt ? { lastLeaveAt } : {}),
       totalDurationSeconds: Math.round(totalMs / 1000),
-      reconnectCount: Math.max(0, sorted.length - 1),
-      status: sorted.length ? 'present' : 'absent'
+      reconnectCount: metadata.countReconnects === false ? 0 : Math.max(0, sorted.length - 1),
+      status: this.attendancePresent(totalMs, metadata) ? 'present' : 'absent'
     };
+  }
+
+  private attendancePresent(
+    totalMs: number,
+    metadata: { presentThresholdMinutes?: number; presentThresholdPercentage?: number; sessionDurationMinutes?: number }
+  ): boolean {
+    if (totalMs <= 0) {
+      return false;
+    }
+    const minuteThresholdMs = Math.max(0, metadata.presentThresholdMinutes ?? 0) * 60_000;
+    const percent = Math.max(0, Math.min(100, metadata.presentThresholdPercentage ?? 0));
+    const durationThresholdMs = Math.max(0, metadata.sessionDurationMinutes ?? 0) * 60_000 * (percent / 100);
+    const requiredMs = Math.max(minuteThresholdMs, durationThresholdMs);
+    return requiredMs <= 0 ? totalMs > 0 : totalMs >= requiredMs;
   }
 
   private formatAttendanceDuration(milliseconds: number): string {
@@ -3822,6 +4158,193 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async whiteboardControlTargets(roomId: string, student?: ParticipantMongoDocument): Promise<SocketDeliveryTarget[]> {
+    const participants = new Map<string, ParticipantMongoDocument>();
+    for (const moderator of await this.whiteboardActiveModerators(roomId)) {
+      participants.set(moderator.id, moderator);
+    }
+    if (student) {
+      participants.set(student.id, student);
+    }
+    return this.participantSocketTargets(roomId, [...participants.values()]);
+  }
+
+  private async whiteboardRevokeDelivery(
+    roomId: string,
+    state: WhiteboardControlState,
+    revokedByParticipantId?: string,
+    reason = 'Whiteboard control revoked.'
+  ): Promise<{ event: WhiteboardControlEvent; targets: SocketDeliveryTarget[] }> {
+    const participant = await this.activeParticipantForWhiteboardState(roomId, state);
+    const event: WhiteboardControlEvent = {
+      roomId,
+      participantId: participant?.id ?? state.participantId,
+      displayName: participant?.displayName ?? state.displayName,
+      granted: false,
+      permissionLevel: 'view_only',
+      ...(state.pageId ? { pageId: state.pageId } : {}),
+      ...(revokedByParticipantId ? { revokedByParticipantId } : {}),
+      reason,
+      message: reason
+    };
+    return {
+      event,
+      targets: await this.whiteboardControlTargets(roomId, participant ?? undefined)
+    };
+  }
+
+  private normalizeWhiteboardPermissionLevel(permissionLevel?: WhiteboardPermissionLevel): WhiteboardPermissionLevel {
+    if (!permissionLevel) {
+      return DEFAULT_WHITEBOARD_PERMISSION_LEVEL;
+    }
+    if (!WHITEBOARD_PERMISSION_LEVELS.includes(permissionLevel)) {
+      throw new BadRequestException('Whiteboard permission level is invalid.');
+    }
+    return permissionLevel;
+  }
+
+  private normalizeWhiteboardPageId(pageId: unknown): string | undefined {
+    if (pageId === undefined || pageId === null || pageId === '') {
+      return undefined;
+    }
+    if (typeof pageId !== 'string') {
+      throw new BadRequestException('Whiteboard page is invalid.');
+    }
+    const normalized = pageId.trim();
+    if (!normalized || normalized.length > 128) {
+      throw new BadRequestException('Whiteboard page is invalid.');
+    }
+    return normalized;
+  }
+
+  private assertStudentWhiteboardCommandAllowed(state: WhiteboardControlState, command?: WhiteboardCommand): void {
+    if (state.permissionLevel === 'view_only') {
+      throw new ForbiddenException('Teacher has not allowed editing on the whiteboard.');
+    }
+    if (!command) {
+      return;
+    }
+
+    let commandSize = 0;
+    try {
+      commandSize = Buffer.byteLength(JSON.stringify(command), 'utf8');
+    } catch {
+      throw new BadRequestException('Whiteboard command is invalid.');
+    }
+    if (commandSize > MAX_STUDENT_WHITEBOARD_COMMAND_BYTES) {
+      throw new BadRequestException('Whiteboard command is too large.');
+    }
+
+    const commandPageId = this.normalizeWhiteboardPageId(command.pageId);
+    if (state.pageId && commandPageId !== state.pageId) {
+      throw new ForbiddenException('Whiteboard control is limited to the current page.');
+    }
+
+    if (command.type === 'clear') {
+      throw new ForbiddenException('Students cannot clear the class whiteboard.');
+    }
+    if (command.type === 'delete') {
+      if (state.permissionLevel !== 'current_page_edit') {
+        throw new ForbiddenException('Teacher has not allowed deleting whiteboard objects.');
+      }
+      return;
+    }
+    if (command.type !== 'upsert') {
+      throw new BadRequestException('Whiteboard command type is invalid.');
+    }
+
+    const elementType = typeof command.element?.type === 'string' ? command.element.type : '';
+    if (!elementType || elementType === 'file' || elementType === 'asset' || elementType === 'document') {
+      throw new ForbiddenException('Students cannot import or attach whiteboard assets.');
+    }
+    if (state.permissionLevel === 'draw' && !DRAW_ONLY_WHITEBOARD_ELEMENT_TYPES.has(elementType)) {
+      throw new ForbiddenException('Teacher only allowed drawing strokes.');
+    }
+    if (state.permissionLevel !== 'draw' && !ANNOTATION_WHITEBOARD_ELEMENT_TYPES.has(elementType)) {
+      throw new ForbiddenException('Whiteboard object type is not allowed for student control.');
+    }
+  }
+
+  private async assertWhiteboardCommandParticipant(roomId: string, actorParticipantId: string, command?: WhiteboardCommand): Promise<ParticipantMongoDocument> {
+    const actor = await this.assertParticipant(roomId, actorParticipantId);
+    if (actor.role === Role.HOST || actor.role === Role.CO_HOST) {
+      return actor;
+    }
+    if (actor.role !== Role.PARTICIPANT) {
+      throw new ForbiddenException('Whiteboard control is not available for this participant.');
+    }
+    const state = this.whiteboardControlByRoomId.get(roomId);
+    if (!state || (state.participantId !== actor.id && state.userId !== actor.userId)) {
+      throw new ForbiddenException('Teacher has not allowed you to control the whiteboard.');
+    }
+    if (state.participantId !== actor.id) {
+      this.whiteboardControlByRoomId.set(roomId, { ...state, participantId: actor.id, displayName: actor.displayName });
+    }
+    this.assertStudentWhiteboardCommandAllowed(state, command);
+    return actor;
+  }
+
+  private async whiteboardRealtimeTargets(roomId: string, actor: ParticipantMongoDocument): Promise<SocketDeliveryTarget[]> {
+    const participants = new Map<string, ParticipantMongoDocument>();
+    for (const moderator of await this.whiteboardActiveModerators(roomId)) {
+      participants.set(moderator.id, moderator);
+    }
+    const state = this.whiteboardControlByRoomId.get(roomId);
+    if (state) {
+      const student = await this.activeParticipantForWhiteboardState(roomId, state);
+      if (student) {
+        participants.set(student.id, student);
+      }
+    }
+    participants.set(actor.id, actor);
+    return this.participantSocketTargets(roomId, [...participants.values()]);
+  }
+
+  private async whiteboardActiveModerators(roomId: string): Promise<ParticipantMongoDocument[]> {
+    return this.participants.find({
+      roomId,
+      role: { $in: [Role.HOST, Role.CO_HOST] },
+      admitted: true,
+      leftAt: { $exists: false }
+    }).exec();
+  }
+
+  private activeParticipantForWhiteboardState(
+    roomId: string,
+    state: WhiteboardControlState
+  ): Promise<ParticipantMongoDocument | null> {
+    return this.participants.findOne({
+      roomId,
+      userId: state.userId,
+      role: Role.PARTICIPANT,
+      admitted: true,
+      leftAt: { $exists: false }
+    }).exec();
+  }
+
+  private normalizeWhiteboardCommand(command: WhiteboardCommand): WhiteboardCommand {
+    if (!command || typeof command !== 'object') {
+      throw new BadRequestException('Whiteboard command is invalid.');
+    }
+    const pageId = this.normalizeWhiteboardPageId(command.pageId);
+    if (command.type === 'clear') {
+      return { type: 'clear', ...(pageId ? { pageId } : {}) };
+    }
+    if (command.type === 'delete') {
+      if (!command.elementId || typeof command.elementId !== 'string') {
+        throw new BadRequestException('Whiteboard delete command is invalid.');
+      }
+      return { type: 'delete', elementId: command.elementId, ...(pageId ? { pageId } : {}) };
+    }
+    if (command.type === 'upsert') {
+      if (!command.element || typeof command.element !== 'object' || typeof command.element.id !== 'string') {
+        throw new BadRequestException('Whiteboard upsert command is invalid.');
+      }
+      return { type: 'upsert', element: command.element, ...(pageId ? { pageId } : {}) };
+    }
+    throw new BadRequestException('Whiteboard command type is invalid.');
+  }
+
   private isTeacherChatParticipant(participant: ParticipantMongoDocument): boolean {
     return participant.role === Role.HOST || participant.role === Role.CO_HOST;
   }
@@ -3833,6 +4356,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('Class session room not found');
     }
     this.assertClassSessionRoomIsLive(classSession);
+    if (!this.classSessionLiveSettings(classSession).speaking.handRaiseEnabled) {
+      throw new ForbiddenException('Hand raise is disabled for this class.');
+    }
     const participant = await this.assertParticipant(roomId, participantId);
     if (participant.role !== Role.PARTICIPANT) {
       throw new ForbiddenException('Only students can raise their hand.');
@@ -3869,6 +4395,161 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       { $set: { handRaised: false }, $unset: { handRaisedAt: '' } }
     );
     return { handRaised: false, handRaisedAt: null };
+  }
+
+  async grantWhiteboardControl(
+    roomId: string,
+    actorParticipantId: string,
+    targetParticipantId: string,
+    permissionLevel?: WhiteboardPermissionLevel,
+    pageId?: string
+  ): Promise<WhiteboardControlDelivery> {
+    await this.nodeRegistry.assertLocalRoomOwner(roomId);
+    const classSession = await this.requireLiveClassSessionForRoom(roomId);
+    if (!this.classSessionLiveSettings(classSession).whiteboard.studentWhiteboardControlEnabled) {
+      throw new ForbiddenException('Student whiteboard control is disabled for this class.');
+    }
+    const actor = await this.assertModerator(roomId, actorParticipantId, false);
+    const target = await this.assertParticipant(roomId, targetParticipantId);
+    if (target.role !== Role.PARTICIPANT) {
+      throw new ForbiddenException('Only students can control the class whiteboard.');
+    }
+    if (!target.userId) {
+      throw new ForbiddenException('Student identity is required for whiteboard control.');
+    }
+
+    const normalizedPermissionLevel = this.normalizeWhiteboardPermissionLevel(permissionLevel);
+    const normalizedPageId = this.normalizeWhiteboardPageId(pageId);
+    const previous = this.whiteboardControlByRoomId.get(roomId);
+    const nextState: WhiteboardControlState = {
+      roomId,
+      participantId: target.id,
+      userId: target.userId,
+      displayName: target.displayName,
+      permissionLevel: normalizedPermissionLevel,
+      ...(normalizedPageId ? { pageId: normalizedPageId } : {}),
+      grantedByParticipantId: actor.id,
+      grantedAt: new Date()
+    };
+    this.whiteboardControlByRoomId.set(roomId, nextState);
+
+    const event: WhiteboardControlEvent = {
+      roomId,
+      participantId: target.id,
+      displayName: target.displayName,
+      granted: true,
+      permissionLevel: normalizedPermissionLevel,
+      ...(normalizedPageId ? { pageId: normalizedPageId } : {}),
+      grantedAt: nextState.grantedAt.toISOString(),
+      grantedByParticipantId: actor.id,
+      message: 'Teacher allowed you to use the whiteboard.'
+    };
+    const targets = await this.whiteboardControlTargets(roomId, target);
+    const revoked =
+      previous && previous.participantId !== target.id
+        ? await this.whiteboardRevokeDelivery(roomId, previous, actor.id, 'Teacher moved whiteboard control to another student.')
+        : undefined;
+    return {
+      event,
+      targets,
+      ...(revoked ? { revoked } : {})
+    };
+  }
+
+  async revokeWhiteboardControl(roomId: string, actorParticipantId: string, targetParticipantId?: string): Promise<WhiteboardControlDelivery> {
+    await this.nodeRegistry.assertLocalRoomOwner(roomId);
+    await this.requireLiveClassSessionForRoom(roomId);
+    const actor = await this.assertModerator(roomId, actorParticipantId, false);
+    const state = this.whiteboardControlByRoomId.get(roomId);
+    const participantId = targetParticipantId ?? state?.participantId;
+    if (!state || !participantId || (state.participantId !== participantId && state.userId !== (await this.participants.findById(participantId))?.userId)) {
+      throw new ConflictException('No matching student has whiteboard control.');
+    }
+    this.whiteboardControlByRoomId.delete(roomId);
+    const delivery = await this.whiteboardRevokeDelivery(roomId, state, actor.id, 'Teacher revoked whiteboard control.');
+    return {
+      event: delivery.event,
+      targets: delivery.targets
+    };
+  }
+
+  async sendWhiteboardCommand(roomId: string, actorParticipantId: string, command: WhiteboardCommand): Promise<WhiteboardRealtimeDelivery<WhiteboardCommandEvent>> {
+    await this.nodeRegistry.assertLocalRoomOwner(roomId);
+    await this.requireLiveClassSessionForRoom(roomId);
+    const normalizedCommand = this.normalizeWhiteboardCommand(command);
+    const actor = await this.assertWhiteboardCommandParticipant(roomId, actorParticipantId, normalizedCommand);
+    const event: WhiteboardCommandEvent = {
+      roomId,
+      participantId: actor.id,
+      displayName: actor.displayName,
+      command: normalizedCommand
+    };
+    return {
+      event,
+      targets: await this.whiteboardRealtimeTargets(roomId, actor)
+    };
+  }
+
+  async sendWhiteboardCursor(
+    roomId: string,
+    actorParticipantId: string,
+    cursor: Pick<WhiteboardCursor, 'position'> & Partial<Pick<WhiteboardCursor, 'color'>>
+  ): Promise<WhiteboardRealtimeDelivery<WhiteboardCursorEvent>> {
+    await this.nodeRegistry.assertLocalRoomOwner(roomId);
+    await this.requireLiveClassSessionForRoom(roomId);
+    const actor = await this.assertWhiteboardCommandParticipant(roomId, actorParticipantId);
+    const position = cursor.position;
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) {
+      throw new BadRequestException('Whiteboard cursor position is invalid.');
+    }
+    const color = typeof cursor.color === 'string' && cursor.color.trim().length <= 64 ? cursor.color.trim() : '#F26076';
+    const event: WhiteboardCursorEvent = {
+      roomId,
+      cursor: {
+        participantId: actor.id,
+        displayName: actor.displayName,
+        color,
+        position: { x: position.x, y: position.y }
+      }
+    };
+    return {
+      event,
+      targets: await this.whiteboardRealtimeTargets(roomId, actor)
+    };
+  }
+
+  async whiteboardControlForParticipant(roomId: string, participantId: string): Promise<WhiteboardControlDelivery | undefined> {
+    const state = this.whiteboardControlByRoomId.get(roomId);
+    if (!state) {
+      return undefined;
+    }
+    const participant = await this.participants.findOne({ _id: participantId, roomId, admitted: true, leftAt: { $exists: false } });
+    if (!participant || participant.role !== Role.PARTICIPANT || participant.userId !== state.userId) {
+      return undefined;
+    }
+    try {
+      await this.requireLiveClassSessionForRoom(roomId);
+    } catch {
+      this.whiteboardControlByRoomId.delete(roomId);
+      return undefined;
+    }
+    if (state.participantId !== participant.id) {
+      this.whiteboardControlByRoomId.set(roomId, { ...state, participantId: participant.id, displayName: participant.displayName });
+    }
+    return {
+      event: {
+        roomId,
+        participantId: participant.id,
+        displayName: participant.displayName,
+        granted: true,
+        permissionLevel: state.permissionLevel,
+        ...(state.pageId ? { pageId: state.pageId } : {}),
+        grantedAt: state.grantedAt.toISOString(),
+        grantedByParticipantId: state.grantedByParticipantId,
+        message: 'Whiteboard control restored.'
+      },
+      targets: await this.participantSocketTargets(roomId, [participant])
+    };
   }
 
   async setStudentSpeakingPermission(
@@ -5115,6 +5796,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       allowedToSpeak: false,
       admitted,
       joinedAt: new Date(),
+      lastActiveAt: new Date(),
       lastSeenAt: new Date(),
       leftAt: undefined
     });
@@ -5306,6 +5988,15 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     throw new ConflictException(this.classSessionJoinBlockedMessage(session.status));
   }
 
+  private async requireLiveClassSessionForRoom(roomId: string): Promise<ClassSessionMongoDocument> {
+    const session = await this.classSessions.findOne({ roomId });
+    if (!session) {
+      throw new NotFoundException('Class session not found.');
+    }
+    this.assertClassSessionRoomIsLive(session);
+    return session;
+  }
+
   private async resolveClassSessionAccessBySessionId(sessionId: string, batchId?: string): Promise<{ batchId: string; teacherId: string }> {
     const persisted = await this.classSessions.findById(sessionId);
     if (persisted) {
@@ -5372,7 +6063,89 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (this.isAdminSocketUser(user)) {
       return { role: Role.CO_HOST, permissions: DEFAULT_PARTICIPANT_PERMISSIONS };
     }
-    return { role: Role.PARTICIPANT, permissions: CLASS_SESSION_STUDENT_PERMISSIONS };
+    const liveSettings = this.classSessionLiveSettings(session);
+    return {
+      role: Role.PARTICIPANT,
+      permissions: {
+        ...CLASS_SESSION_STUDENT_PERMISSIONS,
+        canPublishAudio: liveSettings.media.allowStudentsToUnmuteSelf,
+        canPublishVideo: liveSettings.media.allowStudentsToStartCameraSelf,
+        canShareScreen:
+          liveSettings.studentScreenShare.studentScreenShareEnabled &&
+          !liveSettings.studentScreenShare.studentScreenShareRequiresApproval,
+        canChat: liveSettings.chat.privateTeacherStudentChatEnabled || liveSettings.chat.teacherBroadcastEnabled
+      }
+    };
+  }
+
+  private classSessionLiveSettings(session: Pick<ClassSessionMongoDocument, 'liveSettings'>): LiveClassSettings {
+    const settings = session.liveSettings;
+    return {
+      media: { ...SYSTEM_LIVE_CLASS_SETTINGS.media, ...settings?.media },
+      chat: { ...SYSTEM_LIVE_CLASS_SETTINGS.chat, ...settings?.chat },
+      whiteboard: { ...SYSTEM_LIVE_CLASS_SETTINGS.whiteboard, ...settings?.whiteboard },
+      speaking: { ...SYSTEM_LIVE_CLASS_SETTINGS.speaking, ...settings?.speaking },
+      recording: { ...SYSTEM_LIVE_CLASS_SETTINGS.recording, ...settings?.recording },
+      attendance: { ...SYSTEM_LIVE_CLASS_SETTINGS.attendance, ...settings?.attendance },
+      access: { ...SYSTEM_LIVE_CLASS_SETTINGS.access, ...settings?.access },
+      materials: { ...SYSTEM_LIVE_CLASS_SETTINGS.materials, ...settings?.materials },
+      notifications: { ...SYSTEM_LIVE_CLASS_SETTINGS.notifications, ...settings?.notifications },
+      questionQueue: { ...SYSTEM_LIVE_CLASS_SETTINGS.questionQueue, ...settings?.questionQueue },
+      recordingRetention: { ...SYSTEM_LIVE_CLASS_SETTINGS.recordingRetention, ...settings?.recordingRetention },
+      studentScreenShare: { ...SYSTEM_LIVE_CLASS_SETTINGS.studentScreenShare, ...settings?.studentScreenShare },
+      advancedAnalytics: { ...SYSTEM_LIVE_CLASS_SETTINGS.advancedAnalytics, ...settings?.advancedAnalytics },
+      inactiveDetection: { ...SYSTEM_LIVE_CLASS_SETTINGS.inactiveDetection, ...settings?.inactiveDetection },
+      bandwidthPolicy: { ...SYSTEM_LIVE_CLASS_SETTINGS.bandwidthPolicy, ...settings?.bandwidthPolicy },
+      exportControls: { ...SYSTEM_LIVE_CLASS_SETTINGS.exportControls, ...settings?.exportControls }
+    };
+  }
+
+  private async assertClassSessionStudentScreenShareAllowed(
+    session: ClassSessionMongoDocument,
+    participant: ParticipantMongoDocument,
+    permission: Permissions,
+    source: string | undefined
+  ): Promise<void> {
+    if (participant.role !== Role.PARTICIPANT) {
+      return;
+    }
+    const settings = this.classSessionLiveSettings(session).studentScreenShare;
+    if (source === 'whiteboard') {
+      throw new ForbiddenException('Only the teacher can share the class whiteboard.');
+    }
+    if (!settings.studentScreenShareEnabled) {
+      throw new ForbiddenException('Student screen sharing is disabled for this class.');
+    }
+    if (settings.studentScreenShareRequiresApproval && !permission.canShareScreen) {
+      throw new ForbiddenException('Screen sharing requires teacher approval.');
+    }
+    const activeStudentShares = await this.activeStudentScreenShareCount(session.roomId ?? participant.roomId, participant.id);
+    if (activeStudentShares >= settings.maxActiveStudentShares) {
+      throw new ConflictException('The active student screen share limit has been reached.');
+    }
+  }
+
+  private async activeStudentScreenShareCount(roomId: string, excludingParticipantId: string): Promise<number> {
+    const producers = await this.producers
+      .find({
+        roomId,
+        participantId: { $ne: excludingParticipantId },
+        kind: 'screen',
+        status: 'live',
+        source: { $ne: 'whiteboard' }
+      })
+      .select('participantId')
+      .lean()
+      .exec();
+    const participantIds = Array.from(new Set(producers.map((producer) => String(producer.participantId)).filter(Boolean)));
+    if (!participantIds.length) {
+      return 0;
+    }
+    return this.participants.countDocuments({
+      _id: { $in: participantIds },
+      roomId,
+      role: Role.PARTICIPANT
+    });
   }
 
   private async applyClassSessionEntitlements(
@@ -6177,7 +6950,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       permissions,
       consumerLayers,
       joinedAt: doc.joinedAt.toISOString(),
-      lastSeenAt: doc.lastSeenAt.toISOString()
+      lastSeenAt: doc.lastSeenAt.toISOString(),
+      ...(doc.lastActiveAt ? { lastActiveAt: doc.lastActiveAt.toISOString() } : {}),
+      ...(doc.inactiveSince ? { inactiveSince: doc.inactiveSince.toISOString(), inactive: true } : { inactive: false })
     };
   }
 
@@ -6199,6 +6974,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       roomId: doc.roomId,
       participantId: doc.participantId,
       kind: doc.kind,
+      ...(doc.source ? { source: doc.source } : {}),
       transportId: doc.transportId,
       priority: normalizeConsumerPriority(doc.priority),
       rtpParameters: doc.rtpParameters as unknown as Producer['rtpParameters'],
@@ -7126,6 +7902,18 @@ function averageNumber(values: number[]): number {
     return 0;
   }
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function uniqueConsumerDocs<T extends { id?: string; _id?: unknown }>(consumers: T[]): T[] {
+  const seen = new Set<string>();
+  return consumers.filter((consumer) => {
+    const key = consumer.id ?? String(consumer._id ?? '');
+    if (!key || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function maxNumber(values: number[]): number {

@@ -2,10 +2,14 @@ import { HttpClient, HttpErrorResponse, HttpParams } from '@angular/common/http'
 import { Injectable } from '@angular/core';
 import type {
   AdminAttendanceQuery,
+  AdminAttendanceSessionStudentsResponse,
   AdminAttendanceSessionsResponse,
   AdminAttendanceStudentsResponse,
   AdminAttendanceSummary,
   AdminAttendanceTrendsResponse,
+  AdminAuditLogDetail,
+  AdminAuditLogListResponse,
+  AdminAuditLogQuery,
   AdminClassSessionReportQuery,
   AdminClassSessionReportResponse,
   AdminClassSessionReportRow,
@@ -21,6 +25,7 @@ import type {
   AdminCourseListQuery,
   AdminCourseListResponse,
   AdminCourseUpdateRequest,
+  AdminDashboardSummary,
   AdminEnrollmentDetail,
   AdminEnrollmentListQuery,
   AdminEnrollmentListResponse,
@@ -49,6 +54,33 @@ interface ApiEnvelope<T> {
 export class AdminApiService {
   constructor(private readonly http: HttpClient) {}
 
+  getDashboardSummary(): Observable<AdminDashboardSummary> {
+    return this.http.get<AdminDashboardSummary | ApiEnvelope<AdminDashboardSummary>>(`${API_BASE_URL}/admin/dashboard/summary`).pipe(
+      map((response) => this.unwrapResponse(response)),
+      catchError((error) => throwError(() => this.toApiError(error)))
+    );
+  }
+
+  listAuditLogs(query: AdminAuditLogQuery): Observable<AdminAuditLogListResponse> {
+    return this.http
+      .get<AdminAuditLogListResponse | ApiEnvelope<AdminAuditLogListResponse>>(`${API_BASE_URL}/admin/audit-logs`, {
+        params: this.toParams(query)
+      })
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  getAuditLog(auditLogId: string): Observable<AdminAuditLogDetail> {
+    return this.http
+      .get<AdminAuditLogDetail | ApiEnvelope<AdminAuditLogDetail>>(`${API_BASE_URL}/admin/audit-logs/${encodeURIComponent(auditLogId)}`)
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
   getAttendanceSummary(query: AdminAttendanceQuery): Observable<AdminAttendanceSummary> {
     return this.http
       .get<AdminAttendanceSummary | ApiEnvelope<AdminAttendanceSummary>>(`${API_BASE_URL}/admin/attendance/summary`, {
@@ -76,6 +108,17 @@ export class AdminApiService {
       .get<AdminAttendanceStudentsResponse | ApiEnvelope<AdminAttendanceStudentsResponse>>(`${API_BASE_URL}/admin/attendance/students`, {
         params: this.toParams(query)
       })
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  getAttendanceSessionStudents(sessionId: string): Observable<AdminAttendanceSessionStudentsResponse> {
+    return this.http
+      .get<AdminAttendanceSessionStudentsResponse | ApiEnvelope<AdminAttendanceSessionStudentsResponse>>(
+        `${API_BASE_URL}/admin/attendance/sessions/${encodeURIComponent(sessionId)}/students`
+      )
       .pipe(
         map((response) => this.unwrapResponse(response)),
         catchError((error) => throwError(() => this.toApiError(error)))

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type {
   AdminBatchCreateRequest,
@@ -20,10 +20,13 @@ import type {
   AdminCourseSort,
   AdminCourseStatus,
   AdminCourseSummary,
-  AdminCourseUpdateRequest
+  AdminCourseUpdateRequest,
+  BatchLiveClassSettingsResponse,
+  LiveClassSettingsPatch
 } from '@native-sfu/contracts';
 import { Connection, ClientSession, FilterQuery, Model } from 'mongoose';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import {
   BatchDocument,
   BatchMongoDocument,
@@ -39,6 +42,7 @@ import {
 } from '../database/schemas';
 import { classSessionChannelIds, PlannedClassSession, planClassSessions } from '../class-sessions/class-session-planner';
 import { StudentEnrollmentRosterItem, StudentEnrollmentsService } from '../student-enrollments/student-enrollments.service';
+import { ProfilesService } from '../profiles/profiles.service';
 import { BatchScheduleDto, CreateTeacherBatchDto, UpdateTeacherBatchDto } from './dto/teacher-batch.dto';
 
 interface BatchWithSchedules {
@@ -54,7 +58,9 @@ export class TeacherBatchesService {
     @InjectModel(ClassSessionDocument.name) private readonly classSessions: Model<ClassSessionMongoDocument>,
     @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>,
     @InjectConnection() private readonly connection: Connection,
-    private readonly studentEnrollments: StudentEnrollmentsService
+    private readonly studentEnrollments: StudentEnrollmentsService,
+    private readonly profiles: ProfilesService,
+    @Optional() private readonly auditLogs?: AuditLogsService
   ) {}
 
   async create(teacherId: string, dto: CreateTeacherBatchDto): Promise<Record<string, unknown>> {
@@ -167,6 +173,26 @@ export class TeacherBatchesService {
     if (!batch) throw new NotFoundException('Batch not found');
   }
 
+  async getLiveSettings(teacherId: string, batchId: string): Promise<BatchLiveClassSettingsResponse> {
+    const batch = await this.findOwnedBatch(teacherId, batchId);
+    return this.profiles.resolveBatchLiveSettings(batch);
+  }
+
+  async updateLiveSettings(teacherId: string, batchId: string, patch: LiveClassSettingsPatch): Promise<BatchLiveClassSettingsResponse> {
+    const batch = await this.findOwnedBatch(teacherId, batchId);
+    const next = this.profiles.normalizeLiveSettingsPatch(patch);
+    batch.liveSettingsOverrides = next as BatchMongoDocument['liveSettingsOverrides'];
+    await batch.save();
+    return this.profiles.resolveBatchLiveSettings(batch);
+  }
+
+  async resetLiveSettings(teacherId: string, batchId: string): Promise<BatchLiveClassSettingsResponse> {
+    const batch = await this.findOwnedBatch(teacherId, batchId);
+    batch.liveSettingsOverrides = undefined;
+    await batch.save();
+    return this.profiles.resolveBatchLiveSettings(batch);
+  }
+
   async listAdminCourses(query: AdminCourseListQuery, user: AuthenticatedUser): Promise<AdminCourseListResponse> {
     this.assertAdmin(user);
     const page = this.clampPositiveInteger(query.page, 1, 10_000);
@@ -202,7 +228,17 @@ export class TeacherBatchesService {
     if (!result.matchedCount) {
       throw new NotFoundException('Course not found.');
     }
-    return this.adminCourseDetail(courseId);
+    const detail = await this.adminCourseDetail(courseId);
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'admin.courses.update',
+      resourceType: 'course',
+      resourceId: courseId,
+      resourceLabel: detail.courseName,
+      metadata: { summary: `Updated course ${detail.courseName}`, matchedBatches: result.matchedCount },
+      after: { courseName: detail.courseName }
+    });
+    return detail;
   }
 
   async listAdminBatches(query: AdminBatchListQuery, user: AuthenticatedUser): Promise<AdminBatchListResponse> {
@@ -231,7 +267,7 @@ export class TeacherBatchesService {
     const teacher = await this.findActiveTeacher(request.teacherId);
     await this.assertUniqueBatch(teacher.id, request.name, request.year);
     const dates = this.yearDates(request.year);
-    return this.withTransaction(async (session) => {
+    const detail = await this.withTransaction(async (session) => {
       const [batch] = await this.batches.create(
         [
           {
@@ -257,6 +293,16 @@ export class TeacherBatchesService {
       );
       return this.adminBatchDetail(batch.id, session);
     });
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'admin.batches.create',
+      resourceType: 'batch',
+      resourceId: detail.id,
+      resourceLabel: detail.name,
+      metadata: { summary: `Created batch ${detail.name}`, courseId: detail.courseId, teacherId: detail.teacherId },
+      after: { name: detail.name, courseId: detail.courseId, teacherId: detail.teacherId, status: detail.status }
+    });
+    return detail;
   }
 
   async updateAdminBatch(batchId: string, request: AdminBatchUpdateRequest, user: AuthenticatedUser): Promise<AdminBatchDetail> {
@@ -297,7 +343,7 @@ export class TeacherBatchesService {
     }
     if (request.maxCapacity !== undefined) update.maxCapacity = request.maxCapacity;
     if (request.status !== undefined) update.status = request.status;
-    return this.withTransaction(async (session) => {
+    const detail = await this.withTransaction(async (session) => {
       if (Object.keys(update).length) {
         await this.batches.updateOne({ _id: batchId, deletedAt: { $exists: false } }, { $set: update }, { session });
         if (update.teacherId !== undefined) {
@@ -313,6 +359,33 @@ export class TeacherBatchesService {
       }
       return this.adminBatchDetail(batchId, session);
     });
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'admin.batches.update',
+      resourceType: 'batch',
+      resourceId: detail.id,
+      resourceLabel: detail.name,
+      metadata: { summary: `Updated batch ${detail.name}`, changedFields: Object.keys(update), scheduleUpdated: Boolean(schedule) },
+      before: {
+        name: existing.name,
+        courseId: existing.courseId,
+        courseName: existing.courseName,
+        teacherId: existing.teacherId,
+        year: existing.year,
+        maxCapacity: existing.maxCapacity,
+        status: existing.status
+      },
+      after: {
+        name: detail.name,
+        courseId: detail.courseId,
+        courseName: detail.courseName,
+        teacherId: detail.teacherId,
+        year: detail.year,
+        maxCapacity: detail.maxCapacity,
+        status: detail.status
+      }
+    });
+    return detail;
   }
 
   async updateAdminBatchStatus(batchId: string, status: BatchStatus, user: AuthenticatedUser): Promise<AdminBatchDetail> {
@@ -321,7 +394,17 @@ export class TeacherBatchesService {
     if (!batch) {
       throw new NotFoundException('Batch not found.');
     }
-    return this.adminBatchDetail(batch.id);
+    const detail = await this.adminBatchDetail(batch.id);
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'admin.batches.status_update',
+      resourceType: 'batch',
+      resourceId: detail.id,
+      resourceLabel: detail.name,
+      metadata: { summary: `Set batch ${detail.name} to ${status}` },
+      after: { status: detail.status }
+    });
+    return detail;
   }
 
   async getAdminBatchRoster(batchId: string, user: AuthenticatedUser): Promise<AdminBatchRosterResponse> {

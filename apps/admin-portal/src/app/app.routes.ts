@@ -16,7 +16,19 @@ export const routes: Routes = [
     canActivate: [adminGuard],
     loadComponent: () => import('./features/shell/admin-shell').then((route) => route.AdminShell),
     children: [
-      { path: '', pathMatch: 'full', redirectTo: 'class-sessions' },
+      { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
+      {
+        path: 'dashboard',
+        loadComponent: () => import('./features/dashboard/dashboard').then((route) => route.AdminDashboard)
+      },
+      {
+        path: 'audit-logs',
+        loadComponent: () => import('./features/audit-logs/list/audit-logs-list').then((route) => route.AuditLogsList)
+      },
+      {
+        path: 'audit-logs/:auditLogId',
+        loadComponent: () => import('./features/audit-logs/detail/audit-log-detail').then((route) => route.AuditLogDetail)
+      },
       {
         path: 'class-sessions',
         loadComponent: () => import('./features/class-sessions/list/class-sessions-list').then((route) => route.ClassSessionsList)

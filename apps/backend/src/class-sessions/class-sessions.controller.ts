@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   Param,
@@ -14,16 +15,27 @@ import {
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { ChatAttachment, ChatHistoryResponse, ChatMessageScope, ChatReadState, ChatThreadSummaryResponse, Recording } from '@native-sfu/contracts';
+import type {
+  ChatAttachment,
+  ChatHistoryResponse,
+  ChatMessageScope,
+  ChatReadState,
+  ChatThreadSummaryResponse,
+  ClassSessionMaterial,
+  CreateClassSessionMaterialLinkRequest,
+  Recording
+} from '@native-sfu/contracts';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AuthenticatedUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import type { ClassSessionChatAttachmentUploadFile } from '../rooms/rooms.service';
-import { ClassroomPayload, ClassSessionsService } from './class-sessions.service';
+import { ClassroomPayload, ClassSessionMaterialUploadFile, ClassSessionsService } from './class-sessions.service';
 
 const CHAT_ATTACHMENT_MAX_COUNT = 3;
 const CHAT_ATTACHMENT_MAX_SIZE_BYTES = 2 * 1024 * 1024;
+const CLASS_MATERIAL_MAX_COUNT = 5;
+const CLASS_MATERIAL_MAX_SIZE_BYTES = 100 * 1024 * 1024;
 
 interface HeaderResponse {
   setHeader(name: string, value: string | number): void;
@@ -39,6 +51,10 @@ interface MarkChatReadBody {
   participantId?: string;
   scope?: ChatMessageScope;
   readAt?: string;
+}
+
+interface ClassSessionMaterialActionBody {
+  batchId?: string;
 }
 
 @ApiTags('class sessions')
@@ -118,6 +134,102 @@ export class ClassSessionsController {
     @Res({ passthrough: true }) response: HeaderResponse
   ): Promise<StreamableFile> {
     const download = await this.classSessions.downloadChatAttachment(sessionId, attachmentId, batchId, user);
+    response.setHeader('Content-Type', download.mimeType);
+    response.setHeader('Content-Length', download.size);
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('Content-Disposition', `inline; filename="${this.contentDispositionFileName(download.fileName)}"`);
+    return new StreamableFile(download.stream);
+  }
+
+  @Get(':sessionId/materials')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'List authorized class session materials' })
+  listMaterials(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionMaterial[]> {
+    return this.classSessions.listMaterials(sessionId, batchId, user);
+  }
+
+  @Post(':sessionId/materials/upload')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @UseInterceptors(
+    FilesInterceptor('files', CLASS_MATERIAL_MAX_COUNT, {
+      limits: {
+        files: CLASS_MATERIAL_MAX_COUNT,
+        fileSize: CLASS_MATERIAL_MAX_SIZE_BYTES
+      }
+    })
+  )
+  @ApiOperation({ summary: 'Upload server-stored class session materials' })
+  uploadMaterials(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @UploadedFiles() files: ClassSessionMaterialUploadFile[] | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionMaterial[]> {
+    return this.classSessions.uploadMaterials(sessionId, batchId, user, files ?? []);
+  }
+
+  @Post(':sessionId/materials/link')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Attach an external link as a class session material' })
+  attachMaterialLink(
+    @Param('sessionId') sessionId: string,
+    @Body() body: CreateClassSessionMaterialLinkRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionMaterial> {
+    return this.classSessions.attachMaterialLink(sessionId, body.batchId, user, body);
+  }
+
+  @Post(':sessionId/materials/:materialId/share')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Share a class session material live with students' })
+  shareMaterial(
+    @Param('sessionId') sessionId: string,
+    @Param('materialId') materialId: string,
+    @Body() body: ClassSessionMaterialActionBody,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionMaterial> {
+    return this.classSessions.shareMaterial(sessionId, materialId, body.batchId, user);
+  }
+
+  @Post(':sessionId/materials/:materialId/unshare')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Stop sharing a class session material live' })
+  unshareMaterial(
+    @Param('sessionId') sessionId: string,
+    @Param('materialId') materialId: string,
+    @Body() body: ClassSessionMaterialActionBody,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionMaterial> {
+    return this.classSessions.unshareMaterial(sessionId, materialId, body.batchId, user);
+  }
+
+  @Delete(':sessionId/materials/:materialId')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Archive a class session material' })
+  deleteMaterial(
+    @Param('sessionId') sessionId: string,
+    @Param('materialId') materialId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<void> {
+    return this.classSessions.deleteMaterial(sessionId, materialId, batchId, user);
+  }
+
+  @Get(':sessionId/materials/:materialId/download')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Download an authorized class session material' })
+  async downloadMaterial(
+    @Param('sessionId') sessionId: string,
+    @Param('materialId') materialId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) response: HeaderResponse
+  ): Promise<StreamableFile> {
+    const download = await this.classSessions.downloadMaterial(sessionId, materialId, batchId, user);
     response.setHeader('Content-Type', download.mimeType);
     response.setHeader('Content-Length', download.size);
     response.setHeader('Cache-Control', 'private, no-store');

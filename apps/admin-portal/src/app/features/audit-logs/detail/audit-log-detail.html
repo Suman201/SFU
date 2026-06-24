@@ -1,0 +1,78 @@
+<a class="back-link" routerLink="/audit-logs">Back to audit logs</a>
+
+@if (loading()) {
+  <section class="detail-state">Loading audit log...</section>
+} @else if (error() && !auditLog()) {
+  <section class="detail-state error" role="alert">{{ error() }}</section>
+} @else if (auditLog(); as item) {
+  <section class="detail-head">
+    <div>
+      <p class="eyebrow">Audit event</p>
+      <h1>{{ item.action }}</h1>
+      <p>{{ item.summary || item.resourceLabel || item.resourceId || item.id }}</p>
+    </div>
+    <span class="data-pill {{ statusClass(item.status) }}">{{ item.status }}</span>
+  </section>
+
+  <section class="detail-grid">
+    <article>
+      <span>Occurred</span>
+      <strong>{{ item.createdAt | date: 'medium' }}</strong>
+    </article>
+    <article>
+      <span>Actor</span>
+      <strong>{{ actor(item) }}</strong>
+      <small>{{ item.actorRoles.join(', ') || item.actorId || 'No role data' }}</small>
+    </article>
+    <article>
+      <span>Resource</span>
+      <strong>{{ item.resourceType || 'resource' }}</strong>
+      <small>{{ item.resourceLabel || item.resourceId || 'No target' }}</small>
+    </article>
+    <article>
+      <span>Target user</span>
+      <strong>{{ item.targetUserId || 'None' }}</strong>
+    </article>
+    <article>
+      <span>Request</span>
+      <strong>{{ item.requestId || 'No request id' }}</strong>
+      <small>{{ item.ipAddress || 'No IP' }}</small>
+    </article>
+    <article>
+      <span>User agent</span>
+      <strong>{{ item.userAgent || 'Not captured' }}</strong>
+    </article>
+  </section>
+
+  <section class="audit-panels">
+    <article class="data-table-shell">
+      <div class="data-table-toolbar">
+        <div>
+          <h2>Metadata</h2>
+          <p>Safe details captured with the event.</p>
+        </div>
+      </div>
+      <pre>{{ json(item.metadata) }}</pre>
+    </article>
+
+    <article class="data-table-shell">
+      <div class="data-table-toolbar">
+        <div>
+          <h2>Before</h2>
+          <p>Redacted source snapshot when available.</p>
+        </div>
+      </div>
+      <pre>{{ json(item.before) }}</pre>
+    </article>
+
+    <article class="data-table-shell">
+      <div class="data-table-toolbar">
+        <div>
+          <h2>After</h2>
+          <p>Redacted resulting snapshot when available.</p>
+        </div>
+      </div>
+      <pre>{{ json(item.after) }}</pre>
+    </article>
+  </section>
+}

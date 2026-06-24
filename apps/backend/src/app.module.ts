@@ -6,6 +6,8 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { NestSfuModule, type TurnServerOptions } from '@native-sfu/nest-sfu';
 import { LoggerModule } from 'nestjs-pino';
+import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
+import { AdminAuditLogsModule } from './audit-logs/admin-audit-logs.module';
 import { AuthModule } from './auth/auth.module';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
 import { ClassSessionsModule } from './class-sessions/class-sessions.module';
@@ -23,6 +25,7 @@ import { RecordingsModule } from './recordings/recordings.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { ClusterModule } from './cluster/cluster.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { ProfilesModule } from './profiles/profiles.module';
 import { RbacModule } from './rbac/rbac.module';
 import { RolesModule } from './roles/roles.module';
 import { SessionsModule } from './sessions/sessions.module';
@@ -144,16 +147,19 @@ import { UsersModule } from './users/users.module';
     }),
     ClusterModule,
     AuditLogsModule,
+    AdminAuditLogsModule,
     RbacModule,
     AuthModule,
     UsersModule,
     RolesModule,
     PermissionsModule,
+    AdminDashboardModule,
     StudentEnrollmentsModule,
     TeacherBatchesModule,
     ClassSessionsModule,
     SessionsModule,
     RecordingsModule,
+    ProfilesModule,
     RoomsModule,
     MediaApiModule,
     HealthModule

@@ -114,17 +114,18 @@
             <th>Attendance</th>
             <th>Duration</th>
             <th>Flags</th>
+            <th>Source</th>
             <th class="actions-cell">Actions</th>
           </tr>
         </thead>
         <tbody>
           @if (loading()) {
             <tr>
-              <td colspan="9" class="empty-state">Loading attendance sessions...</td>
+              <td colspan="10" class="empty-state">Loading attendance sessions...</td>
             </tr>
           } @else if (!sessionRows().length) {
             <tr>
-              <td colspan="9" class="empty-state">No session attendance matches these filters.</td>
+              <td colspan="10" class="empty-state">No session attendance matches these filters.</td>
             </tr>
           } @else {
             @for (row of sessionRows(); track trackBySession($index, row)) {
@@ -160,8 +161,10 @@
                   <strong>{{ row.lateJoins }} late · {{ row.earlyLeaves }} early</strong>
                   <small>{{ row.reconnects }} reconnects</small>
                 </td>
+                <td><span class="data-pill {{ sourceClass(row.attendanceSource) }}">{{ row.attendanceSource }}</span></td>
                 <td class="actions-cell">
                   <a class="table-action" [routerLink]="['/class-sessions', row.sessionId]">View</a>
+                  <button type="button" class="table-action" (click)="openSessionStudents(row)">Students</button>
                 </td>
               </tr>
             }
@@ -169,8 +172,81 @@
         </tbody>
       </table>
     </div>
+
+    @if (selectedSession()) {
+      <section class="detail-panel" aria-label="Session student attendance">
+        <div class="detail-head">
+          <div>
+            <p class="eyebrow">Session drilldown</p>
+            <h3>{{ selectedSession()?.title }}</h3>
+            <span class="data-pill {{ sourceClass(selectedSession()?.attendanceSource || 'inferred') }}">
+              {{ selectedSession()?.attendanceSource }}
+            </span>
+          </div>
+          <button type="button" class="table-action" (click)="closeSessionStudents()">Close</button>
+        </div>
+
+        @if (detailError()) {
+          <p class="table-error" role="alert">{{ detailError() }}</p>
+        }
+
+        <div class="data-table-wrap" style="--data-table-min-width: 980px">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Status</th>
+                <th>Source</th>
+                <th>First join</th>
+                <th>Last leave</th>
+                <th>Duration</th>
+                <th>Reconnects</th>
+                <th class="actions-cell">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              @if (detailLoading()) {
+                <tr>
+                  <td colspan="8" class="empty-state">Loading student attendance...</td>
+                </tr>
+              } @else if (!selectedSessionStudents().length) {
+                <tr>
+                  <td colspan="8" class="empty-state">No student attendance rows are available for this session.</td>
+                </tr>
+              } @else {
+                @for (row of selectedSessionStudents(); track trackBySessionStudent($index, row)) {
+                  <tr>
+                    <td>
+                      <div class="primary-cell">
+                        <span class="table-avatar">{{ initials(row.studentName) }}</span>
+                        <div>
+                          <strong>{{ row.studentName }}</strong>
+                          <small>{{ row.studentEmail || row.studentId }}</small>
+                        </div>
+                      </div>
+                    </td>
+                    <td><span class="data-pill {{ attendanceStatusClass(row.status) }}">{{ row.status }}</span></td>
+                    <td>
+                      <span class="data-pill {{ sourceClass(row.attendanceSource) }}">{{ row.attendanceSource }}</span>
+                      <small>{{ row.rosterSource === 'participant' ? 'participant only' : 'roster' }}</small>
+                    </td>
+                    <td>{{ row.firstJoinAt ? (row.firstJoinAt | date: 'medium') : 'Not joined' }}</td>
+                    <td>{{ row.lastLeaveAt ? (row.lastLeaveAt | date: 'medium') : 'Open/none' }}</td>
+                    <td>{{ duration(row.totalDurationSeconds) }}</td>
+                    <td>{{ row.reconnectCount }}</td>
+                    <td class="actions-cell">
+                      <a class="table-action" [routerLink]="['/users', row.studentId]">User</a>
+                    </td>
+                  </tr>
+                }
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+    }
   } @else {
-    <div class="data-table-wrap" style="--data-table-min-width: 1160px">
+    <div class="data-table-wrap" style="--data-table-min-width: 1220px">
       <table class="data-table">
         <thead>
           <tr>
@@ -181,6 +257,7 @@
             <th>Average duration</th>
             <th>Absences</th>
             <th>Reconnects</th>
+            <th>Source</th>
             <th>Last attended</th>
             <th class="actions-cell">Actions</th>
           </tr>
@@ -188,11 +265,11 @@
         <tbody>
           @if (loading()) {
             <tr>
-              <td colspan="9" class="empty-state">Loading attendance students...</td>
+              <td colspan="10" class="empty-state">Loading attendance students...</td>
             </tr>
           } @else if (!studentRows().length) {
             <tr>
-              <td colspan="9" class="empty-state">No student attendance matches these filters.</td>
+              <td colspan="10" class="empty-state">No student attendance matches these filters.</td>
             </tr>
           } @else {
             @for (row of studentRows(); track trackByStudent($index, row)) {
@@ -221,6 +298,10 @@
                 <td>{{ duration(row.averageDurationSeconds) }}</td>
                 <td>{{ row.absentCount }}</td>
                 <td>{{ row.reconnects }}</td>
+                <td>
+                  <strong>{{ row.snapshottedSessions }} snapshotted</strong>
+                  <small>{{ row.inferredSessions }} inferred</small>
+                </td>
                 <td>{{ row.lastAttendedAt ? (row.lastAttendedAt | date: 'medium') : 'Never' }}</td>
                 <td class="actions-cell">
                   <a class="table-action" [routerLink]="['/users', row.studentId]">User</a>

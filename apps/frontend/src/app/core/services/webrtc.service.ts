@@ -9,6 +9,7 @@ import type {
   ProducerDynacastEvent,
   ProducerKind,
   ProducerQualityState,
+  ProducerSource,
   RoomQualityState,
   RtpLayerSelection,
   RtpParameters,
@@ -42,10 +43,37 @@ type TurnStatus =
   | { state: 'ready'; supportedUriCount: number; expiresAt: number }
   | { state: 'degraded'; supportedUriCount: number; reason: 'credentials_fetch_failed' | 'no_supported_uris' };
 
+export type MediaErrorCode =
+  | 'permission_denied'
+  | 'device_unavailable'
+  | 'device_busy'
+  | 'operation_interrupted'
+  | 'track_ended'
+  | 'publish_failed'
+  | 'consume_failed'
+  | 'transport_failed'
+  | 'autoplay_blocked'
+  | 'unknown';
+export type MediaErrorSeverity = 'info' | 'warning' | 'error';
+export type MediaErrorKind = 'audio' | 'video' | 'screen' | 'transport' | 'consumer' | 'producer';
+export type MediaErrorOperation = 'permission' | 'acquire' | 'publish' | 'consume' | 'switch' | 'stop' | 'autoplay' | 'track-ended' | 'refresh';
+
+export interface MediaRecoveryError {
+  code: MediaErrorCode;
+  severity: MediaErrorSeverity;
+  kind: MediaErrorKind;
+  operation: MediaErrorOperation;
+  message: string;
+  recoverable: boolean;
+  actionLabel?: string;
+  originalName?: string;
+}
+
 export interface PublishOptions {
   svc?: boolean;
   scalabilityMode?: string;
   codec?: 'VP8' | 'VP9' | 'H264';
+  source?: ProducerSource;
 }
 
 export interface RemoteMediaStream {
@@ -71,12 +99,14 @@ export class WebRtcService {
   readonly mediaDeviceLoading = signal(false);
   readonly deviceSwitching = signal<{ audio: boolean; video: boolean }>({ audio: false, video: false });
   readonly mediaDeviceError = signal<string | null>(null);
+  readonly lastMediaError = signal<MediaRecoveryError | null>(null);
   readonly networkScore = signal(5);
   readonly turnStatus = signal<TurnStatus>({ state: 'idle', supportedUriCount: 0 });
   private readonly peers = new Map<string, RTCPeerConnection>();
   private readonly transportPublishCounts = new Map<string, number>();
   private readonly publishedProducers = new Map<string, { kind: ProducerKind; svc: boolean; senders: PublishedSender[] }>();
   private readonly remoteConsumers = new Map<string, { consumer: Consumer; peer: RTCPeerConnection; transport: TransportOptions }>();
+  private readonly pendingRemoteProducerIds = new Set<string>();
   private mediaDeviceLoadingCount = 0;
   private cachedIceServers?: { expiresAt: number; servers: RTCIceServer[] };
 
@@ -84,6 +114,14 @@ export class WebRtcService {
     private readonly socket: SocketService,
     private readonly http: HttpClient
   ) {}
+
+  clearMediaIssue(kind?: MediaErrorKind): void {
+    this.clearMediaError(kind);
+  }
+
+  recordAutoplayBlocked(error: unknown): MediaRecoveryError {
+    return this.recordMediaError('audio', 'autoplay', error, 'Browser blocked audio playback.');
+  }
 
   async refreshDevices(): Promise<void> {
     this.setMediaDeviceLoading(true);
@@ -96,7 +134,8 @@ export class WebRtcService {
       this.reconcileSelectedDevice('video', videoInputs);
       this.mediaDeviceError.set(null);
     } catch (error) {
-      this.mediaDeviceError.set(errorMessage(error, 'Unable to refresh media devices.'));
+      const mediaError = this.recordMediaError('transport', 'refresh', error, 'Unable to refresh media devices.');
+      this.mediaDeviceError.set(mediaError.message);
       throw error;
     } finally {
       this.setMediaDeviceLoading(false);
@@ -121,12 +160,17 @@ export class WebRtcService {
         audio: audioConstraints(requestedAudioDeviceId),
         video: videoConstraints(requestedVideoDeviceId)
       });
+      stream.getAudioTracks().forEach((track) => this.monitorTrackEnded(track, 'audio'));
+      stream.getVideoTracks().forEach((track) => this.monitorTrackEnded(track, 'video'));
       this.localStream.set(stream);
       this.syncDeviceStateFromStream(stream, requestedAudioDeviceId, requestedVideoDeviceId);
       await this.refreshDevices();
+      this.clearMediaError('audio');
+      this.clearMediaError('video');
       return stream;
     } catch (error) {
-      this.mediaDeviceError.set(errorMessage(error, 'Unable to start camera and microphone.'));
+      const mediaError = this.recordMediaError('video', 'acquire', error, 'Unable to start camera and microphone.');
+      this.mediaDeviceError.set(mediaError.message);
       throw error;
     } finally {
       this.setMediaDeviceLoading(false);
@@ -149,9 +193,16 @@ export class WebRtcService {
   }
 
   async startScreen(): Promise<MediaStream> {
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    this.screenStream.set(stream);
-    return stream;
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      stream.getTracks().forEach((track) => this.monitorTrackEnded(track, 'screen'));
+      this.screenStream.set(stream);
+      this.clearMediaError('screen');
+      return stream;
+    } catch (error) {
+      this.recordMediaError('screen', 'acquire', error, 'Unable to start screen sharing.');
+      throw error;
+    }
   }
 
   stopScreen(): void {
@@ -167,32 +218,36 @@ export class WebRtcService {
 
   async publish(roomId: string, transport: TransportOptions, kind: ProducerKind, stream: MediaStream, options: PublishOptions = {}): Promise<Producer> {
     let activeTransport = transport;
-    if (this.transportPublishCounts.get(transport.id)) {
-      activeTransport = await this.preparePeer(roomId);
-    }
-    let peer = this.peers.get(activeTransport.id);
-    if (!peer) {
-      activeTransport = await this.preparePeer(roomId);
-      peer = this.peers.get(activeTransport.id);
-    }
-    if (!peer) {
-      throw new Error('Unable to prepare media transport');
-    }
-    const senders: PublishedSender[] = [];
-    for (const track of stream.getTracks()) {
-      if ((kind === 'audio' && track.kind !== 'audio') || (kind !== 'audio' && track.kind !== 'video')) {
-        continue;
+    let producer: Producer | undefined;
+    try {
+      if (this.transportPublishCounts.get(transport.id)) {
+        activeTransport = await this.preparePeer(roomId);
       }
-      const sender = addSenderForTrack(peer, track, stream, kind, options);
-      if (sender?.sender) {
-        senders.push(sender);
+      let peer = this.peers.get(activeTransport.id);
+      if (!peer) {
+        activeTransport = await this.preparePeer(roomId);
+        peer = this.peers.get(activeTransport.id);
       }
-    }
-    if (!senders.length) {
-      throw new Error(`No ${kind === 'audio' ? 'audio' : 'video'} track is available to publish`);
-    }
+      if (!peer) {
+        throw new Error('Unable to prepare media transport');
+      }
+      const senders: PublishedSender[] = [];
+      for (const track of stream.getTracks()) {
+        if ((kind === 'audio' && track.kind !== 'audio') || (kind !== 'audio' && track.kind !== 'video')) {
+          continue;
+        }
+        const sender = addSenderForTrack(peer, track, stream, kind, options);
+        if (sender?.sender) {
+          senders.push(sender);
+        }
+      }
+      if (!senders.length) {
+        throw new Error(`No ${kind === 'audio' ? 'audio' : 'video'} track is available to publish`);
+      }
 
-    if (peer.signalingState === 'stable') {
+      if (peer.signalingState !== 'stable') {
+        throw new Error('Media negotiation is already in progress');
+      }
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       const localSdp = peer.localDescription?.sdp ?? '';
@@ -206,7 +261,13 @@ export class WebRtcService {
       }
       const rtpParameters = parseRtpParameters(kind, localSdp) ?? createRtpParameters(kind, options);
       const event = kind === 'screen' ? 'screen:start' : 'producer:create';
-      const producer = await this.socket.emitAck(event, { roomId, kind, transportId: activeTransport.id, rtpParameters });
+      producer = await this.socket.emitAck(event, {
+        roomId,
+        kind,
+        ...(options.source ? { source: options.source } : {}),
+        transportId: activeTransport.id,
+        rtpParameters
+      });
       const answer = buildUnifiedPlanAnswer({
         transport: activeTransport,
         offer: localSdp,
@@ -217,55 +278,82 @@ export class WebRtcService {
       await peer.setRemoteDescription({ type: 'answer', sdp: answer });
       this.transportPublishCounts.set(activeTransport.id, (this.transportPublishCounts.get(activeTransport.id) ?? 0) + 1);
       this.publishedProducers.set(producer.id, { kind, svc: Boolean(options.svc && kind !== 'audio'), senders });
+      this.clearMediaError(kind === 'audio' ? 'audio' : kind === 'screen' ? 'screen' : 'video');
       return producer;
+    } catch (error) {
+      if (producer) {
+        await this.socket.emitAck(kind === 'screen' ? 'screen:stop' : 'producer:close', { producerId: producer.id }).catch(() => undefined);
+      }
+      this.recordMediaError(kind === 'audio' ? 'audio' : kind === 'screen' ? 'screen' : 'video', 'publish', error, `Unable to publish ${kind === 'audio' ? 'microphone' : kind === 'screen' ? 'screen share' : 'camera'}.`);
+      throw error;
     }
-
-    throw new Error('Media negotiation is already in progress');
   }
 
   async consumeProducer(roomId: string, producer: Producer): Promise<Consumer | undefined> {
-    if (producer.status !== 'live' || this.remoteConsumers.has(producer.id) || this.publishedProducers.has(producer.id)) {
+    if (
+      producer.status !== 'live' ||
+      this.remoteConsumers.has(producer.id) ||
+      this.pendingRemoteProducerIds.has(producer.id) ||
+      this.publishedProducers.has(producer.id)
+    ) {
       return undefined;
     }
-    const mediaKind = producer.kind === 'audio' ? 'audio' : 'video';
-    const transport = await this.preparePeer(roomId);
-    const peer = this.peers.get(transport.id);
-    if (!peer) {
-      throw new Error('Unable to prepare receive transport');
-    }
-    peer.addTransceiver(mediaKind, { direction: 'recvonly' });
-    peer.ontrack = (event) => {
-      const stream = event.streams[0] ?? new MediaStream([event.track]);
-      this.upsertRemoteStream({
-        producerId: producer.id,
-        participantId: producer.participantId,
-        kind: producer.kind,
-        consumerId: this.remoteConsumers.get(producer.id)?.consumer.id,
-        stream
+    this.pendingRemoteProducerIds.add(producer.id);
+    let transport: TransportOptions | undefined;
+    let peer: RTCPeerConnection | undefined;
+    try {
+      const mediaKind = producer.kind === 'audio' ? 'audio' : 'video';
+      transport = await this.preparePeer(roomId);
+      peer = this.peers.get(transport.id);
+      if (!peer) {
+        throw new Error('Unable to prepare receive transport');
+      }
+      peer.addTransceiver(mediaKind, { direction: 'recvonly' });
+      peer.ontrack = (event) => {
+        const stream = event.streams[0] ?? new MediaStream([event.track]);
+        this.upsertRemoteStream({
+          producerId: producer.id,
+          participantId: producer.participantId,
+          kind: producer.kind,
+          consumerId: this.remoteConsumers.get(producer.id)?.consumer.id,
+          stream
+        });
+      };
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      const localSdp = peer.localDescription?.sdp ?? '';
+      const iceParameters = parseIceParameters(localSdp);
+      if (iceParameters) {
+        await this.socket.emitAck('transport:ice-parameters', { transportId: transport.id, iceParameters });
+      }
+      const dtlsParameters = parseDtlsParameters(localSdp);
+      if (dtlsParameters) {
+        await this.socket.emitAck('transport:dtls-parameters', { transportId: transport.id, dtlsParameters });
+      }
+      const consumer = await this.socket.emitAck('consumer:create', { roomId, producerId: producer.id, transportId: transport.id });
+      const answer = buildUnifiedPlanAnswer({
+        transport,
+        offer: localSdp,
+        direction: 'sendonly',
+        mediaKind,
+        rtpParameters: consumer.rtpParameters
       });
-    };
-    const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    const localSdp = peer.localDescription?.sdp ?? '';
-    const iceParameters = parseIceParameters(localSdp);
-    if (iceParameters) {
-      await this.socket.emitAck('transport:ice-parameters', { transportId: transport.id, iceParameters });
+      await peer.setRemoteDescription({ type: 'answer', sdp: answer });
+      this.remoteConsumers.set(producer.id, { consumer, peer, transport });
+      this.clearMediaError('consumer');
+      return consumer;
+    } catch (error) {
+      peer?.close();
+      if (transport) {
+        this.peers.delete(transport.id);
+      }
+      this.remoteConsumers.delete(producer.id);
+      this.remoteStreams.update((streams) => streams.filter((stream) => stream.producerId !== producer.id));
+      this.recordMediaError('consumer', 'consume', error, `Unable to receive ${producer.kind === 'audio' ? 'audio' : producer.kind === 'screen' ? 'screen share' : 'video'}.`);
+      throw error;
+    } finally {
+      this.pendingRemoteProducerIds.delete(producer.id);
     }
-    const dtlsParameters = parseDtlsParameters(localSdp);
-    if (dtlsParameters) {
-      await this.socket.emitAck('transport:dtls-parameters', { transportId: transport.id, dtlsParameters });
-    }
-    const consumer = await this.socket.emitAck('consumer:create', { roomId, producerId: producer.id, transportId: transport.id });
-    const answer = buildUnifiedPlanAnswer({
-      transport,
-      offer: localSdp,
-      direction: 'sendonly',
-      mediaKind,
-      rtpParameters: consumer.rtpParameters
-    });
-    await peer.setRemoteDescription({ type: 'answer', sdp: answer });
-    this.remoteConsumers.set(producer.id, { consumer, peer, transport });
-    return consumer;
   }
 
   async closeProducer(producerId: string): Promise<void> {
@@ -301,6 +389,7 @@ export class WebRtcService {
     this.transportPublishCounts.clear();
     this.publishedProducers.clear();
     this.remoteConsumers.clear();
+    this.pendingRemoteProducerIds.clear();
     this.remoteStreams.set([]);
   }
 
@@ -381,6 +470,7 @@ export class WebRtcService {
       if (!replacementTrack) {
         throw new Error(`No ${deviceName} track is available from the selected device.`);
       }
+      this.monitorTrackEnded(replacementTrack, kind);
 
       const previousTracks = this.localStream()?.getTracks().filter((track) => track.kind === kind) ?? [];
       const previousPublishedTracks = this.publishedTracksForKind(kind);
@@ -392,10 +482,12 @@ export class WebRtcService {
       this.setActiveDeviceId(kind, deviceIdFromTrack(replacementTrack) ?? normalizedDeviceId);
       await this.refreshDevices().catch(() => undefined);
       new Set([...previousTracks, ...previousPublishedTracks]).forEach((track) => track.stop());
+      this.clearMediaError(kind);
       return nextStream;
     } catch (error) {
       replacementTrack?.stop();
-      this.mediaDeviceError.set(errorMessage(error, `Unable to switch ${deviceName}.`));
+      const mediaError = this.recordMediaError(kind, 'switch', error, `Unable to switch ${deviceName}.`);
+      this.mediaDeviceError.set(mediaError.message);
       throw error;
     } finally {
       this.setMediaDeviceLoading(false);
@@ -555,6 +647,38 @@ export class WebRtcService {
   private upsertRemoteStream(remote: RemoteMediaStream): void {
     this.remoteStreams.update((streams) => [...streams.filter((stream) => stream.producerId !== remote.producerId), remote]);
   }
+
+  private monitorTrackEnded(track: MediaStreamTrack, kind: MediaErrorKind): void {
+    track.addEventListener(
+      'ended',
+      () => {
+        this.lastMediaError.set({
+          code: 'track_ended',
+          severity: kind === 'screen' ? 'info' : 'warning',
+          kind,
+          operation: 'track-ended',
+          message: kind === 'screen' ? 'Screen sharing stopped.' : `${kind === 'audio' ? 'Microphone' : 'Camera'} disconnected or stopped.`,
+          recoverable: true,
+          actionLabel: kind === 'screen' ? 'Share again' : 'Retry media'
+        });
+      },
+      { once: true }
+    );
+  }
+
+  private clearMediaError(kind?: MediaErrorKind): void {
+    const current = this.lastMediaError();
+    if (!current || (kind && current.kind !== kind)) {
+      return;
+    }
+    this.lastMediaError.set(null);
+  }
+
+  private recordMediaError(kind: MediaErrorKind, operation: MediaErrorOperation, error: unknown, fallback: string): MediaRecoveryError {
+    const mediaError = mediaRecoveryError(kind, operation, error, fallback);
+    this.lastMediaError.set(mediaError);
+    return mediaError;
+  }
 }
 
 function normalizeDeviceId(deviceId: string | null | undefined): string | null {
@@ -584,6 +708,95 @@ function deviceIdFromTrack(track: MediaStreamTrack | undefined): string | null {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function mediaRecoveryError(kind: MediaErrorKind, operation: MediaErrorOperation, error: unknown, fallback: string): MediaRecoveryError {
+  const name = error instanceof DOMException || error instanceof Error ? error.name : undefined;
+  const code = mediaErrorCode(name, operation);
+  return {
+    code,
+    severity: code === 'autoplay_blocked' || code === 'track_ended' ? 'warning' : 'error',
+    kind,
+    operation,
+    message: mediaErrorMessage(code, kind, error, fallback),
+    recoverable: code !== 'unknown' || operation !== 'publish',
+    actionLabel: mediaActionLabel(code, kind, operation),
+    ...(name ? { originalName: name } : {})
+  };
+}
+
+function mediaErrorCode(name: string | undefined, operation: MediaErrorOperation): MediaErrorCode {
+  if (operation === 'autoplay') {
+    return 'autoplay_blocked';
+  }
+  switch (name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return 'permission_denied';
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+    case 'OverconstrainedError':
+      return 'device_unavailable';
+    case 'NotReadableError':
+    case 'TrackStartError':
+      return 'device_busy';
+    case 'AbortError':
+      return 'operation_interrupted';
+    default:
+      if (operation === 'publish') return 'publish_failed';
+      if (operation === 'consume') return 'consume_failed';
+      return 'unknown';
+  }
+}
+
+function mediaErrorMessage(code: MediaErrorCode, kind: MediaErrorKind, error: unknown, fallback: string): string {
+  const deviceName = kind === 'audio' ? 'microphone' : kind === 'video' ? 'camera' : kind === 'screen' ? 'screen share' : 'media';
+  const combinedCameraAndMic = /camera and microphone|microphone and camera/i.test(fallback);
+  switch (code) {
+    case 'permission_denied':
+      if (combinedCameraAndMic) {
+        return 'Camera or microphone permission was blocked. Allow access in your browser, then retry.';
+      }
+      return `${capitalize(deviceName)} permission was blocked. Allow access in your browser, then retry.`;
+    case 'device_unavailable':
+      if (combinedCameraAndMic) {
+        return 'The selected camera or microphone is unavailable. Refresh devices or choose another one.';
+      }
+      return `The selected ${deviceName} is unavailable. Refresh devices or choose another one.`;
+    case 'device_busy':
+      if (combinedCameraAndMic) {
+        return 'The selected camera or microphone is busy in another app. Close the other app, then retry.';
+      }
+      return `The selected ${deviceName} is busy in another app. Close the other app, then retry.`;
+    case 'operation_interrupted':
+      return `${capitalize(deviceName)} setup was interrupted. Please retry.`;
+    case 'autoplay_blocked':
+      return 'Browser blocked audio playback. Tap Enable audio to hear the class.';
+    case 'track_ended':
+      return `${capitalize(deviceName)} stopped unexpectedly.`;
+    case 'publish_failed':
+      return `Could not publish ${deviceName}. Retry without leaving the class.`;
+    case 'consume_failed':
+      return `Could not receive remote ${deviceName}. Waiting for recovery or retry.`;
+    case 'transport_failed':
+    case 'unknown':
+    default:
+      return errorMessage(error, fallback);
+  }
+}
+
+function mediaActionLabel(code: MediaErrorCode, kind: MediaErrorKind, operation: MediaErrorOperation): string | undefined {
+  if (code === 'autoplay_blocked') return 'Enable audio';
+  if (operation === 'refresh' || code === 'device_unavailable') return 'Refresh devices';
+  if (kind === 'screen') return 'Retry screen share';
+  if (kind === 'audio') return 'Retry microphone';
+  if (kind === 'video') return 'Retry camera';
+  if (kind === 'consumer') return 'Retry receiving media';
+  return undefined;
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function isSupportedTurnUri(uri: string): boolean {

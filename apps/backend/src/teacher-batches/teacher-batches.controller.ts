@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { BatchLiveClassSettingsResponse, LiveClassSettingsPatch } from '@native-sfu/contracts';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -31,6 +32,28 @@ export class TeacherBatchesController {
   @ApiOperation({ summary: "Get one of the logged-in teacher's batches" })
   findOne(@Param('id') id: string, @CurrentUser() teacher: AuthenticatedUser): Promise<Record<string, unknown>> {
     return this.batches.findOne(teacher.sub, id);
+  }
+
+  @Get(':id/live-settings')
+  @ApiOperation({ summary: "Get one of the logged-in teacher's batch live settings" })
+  getLiveSettings(@Param('id') id: string, @CurrentUser() teacher: AuthenticatedUser): Promise<BatchLiveClassSettingsResponse> {
+    return this.batches.getLiveSettings(teacher.sub, id);
+  }
+
+  @Patch(':id/live-settings')
+  @ApiOperation({ summary: "Update one of the logged-in teacher's batch live settings overrides" })
+  updateLiveSettings(
+    @Param('id') id: string,
+    @Body() body: LiveClassSettingsPatch,
+    @CurrentUser() teacher: AuthenticatedUser
+  ): Promise<BatchLiveClassSettingsResponse> {
+    return this.batches.updateLiveSettings(teacher.sub, id, body);
+  }
+
+  @Post(':id/live-settings/reset')
+  @ApiOperation({ summary: "Reset one of the logged-in teacher's batch live settings to inherited defaults" })
+  resetLiveSettings(@Param('id') id: string, @CurrentUser() teacher: AuthenticatedUser): Promise<BatchLiveClassSettingsResponse> {
+    return this.batches.resetLiveSettings(teacher.sub, id);
   }
 
   @Patch(':id')

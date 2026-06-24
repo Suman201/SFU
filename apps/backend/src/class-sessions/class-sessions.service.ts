@@ -1,9 +1,17 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
+import { randomUUID } from 'node:crypto';
+import { createReadStream, type ReadStream } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type {
   AdminAttendanceQuery,
+  AdminAttendanceSessionStudentRow,
   AdminAttendanceSessionRow,
+  AdminAttendanceSessionStudentsResponse,
   AdminAttendanceSessionsResponse,
+  AdminAttendanceSource,
   AdminAttendanceStudentRow,
   AdminAttendanceStudentsResponse,
   AdminAttendanceSummary,
@@ -18,10 +26,16 @@ import type {
   ChatMessageScope,
   ChatReadState,
   ChatThreadSummaryResponse,
+  ClassSessionMaterial,
+  ClassSessionMaterialEvent,
+  ClassSessionMaterialKind,
+  CreateClassSessionMaterialLinkRequest,
   ClassSessionLifecycleEvent,
+  LiveClassSettings,
   Recording
 } from '@native-sfu/contracts';
-import { Model } from 'mongoose';
+import { Model, type AnyBulkWriteOperation } from 'mongoose';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import {
   BatchDocument,
@@ -29,6 +43,10 @@ import {
   BatchScheduleDocument,
   BatchScheduleMongoDocument,
   ClassSessionDocument,
+  ClassSessionAttendanceSnapshotDocument,
+  ClassSessionAttendanceSnapshotMongoDocument,
+  ClassSessionMaterialDocument,
+  ClassSessionMaterialMongoDocument,
   ClassSessionMongoDocument,
   ClassSessionStatus,
   UserDocument,
@@ -37,11 +55,13 @@ import {
 import { RecordingsService, type RecordingDownload } from '../recordings/recordings.service';
 import {
   RoomsService,
+  type ClassSessionAttendanceExportRequest,
   type ClassSessionAttendanceRow,
   type ClassSessionChatAttachmentDownload,
   type ClassSessionChatAttachmentUploadFile
 } from '../rooms/rooms.service';
 import { StudentEnrollmentsService } from '../student-enrollments/student-enrollments.service';
+import { ProfilesService, SYSTEM_LIVE_CLASS_SETTINGS } from '../profiles/profiles.service';
 import { classSessionChannelIds, PlannedClassSession, planClassSessions } from './class-session-planner';
 
 const ADMIN_CLASS_SESSION_STATUSES = new Set<ClassSessionStatus>(['scheduled', 'live', 'completed', 'cancelled']);
@@ -49,6 +69,19 @@ const ADMIN_ATTENDANCE_DEFAULT_RANGE_DAYS = 90;
 const ADMIN_ATTENDANCE_MAX_RANGE_DAYS = 370;
 const ADMIN_ATTENDANCE_LATE_JOIN_MS = 10 * 60 * 1000;
 const ADMIN_ATTENDANCE_EARLY_LEAVE_MS = 10 * 60 * 1000;
+const CLASS_MATERIAL_MAX_COUNT = 5;
+const CLASS_MATERIAL_ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain'
+]);
 
 export interface ClassroomParticipantPayload {
   id: string;
@@ -80,6 +113,7 @@ export interface ClassroomPayload {
   latestRecording?: Recording;
   startedAt?: string;
   completedAt?: string;
+  resolvedLiveSettings: LiveClassSettings;
 }
 
 interface SessionResolution {
@@ -89,16 +123,42 @@ interface SessionResolution {
   persisted?: ClassSessionMongoDocument;
 }
 
+interface AttendanceRowsWithSource {
+  rows: ClassSessionAttendanceRow[];
+  source: AdminAttendanceSource;
+}
+
+export interface ClassSessionMaterialUploadFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
+export interface ClassSessionMaterialDownload {
+  stream: ReadStream;
+  fileName: string;
+  mimeType: string;
+  size: number;
+}
+
 @Injectable()
 export class ClassSessionsService {
   constructor(
     @InjectModel(BatchDocument.name) private readonly batches: Model<BatchMongoDocument>,
     @InjectModel(BatchScheduleDocument.name) private readonly schedules: Model<BatchScheduleMongoDocument>,
     @InjectModel(ClassSessionDocument.name) private readonly classSessions: Model<ClassSessionMongoDocument>,
+    @InjectModel(ClassSessionAttendanceSnapshotDocument.name)
+    private readonly attendanceSnapshots: Model<ClassSessionAttendanceSnapshotMongoDocument>,
+    @InjectModel(ClassSessionMaterialDocument.name)
+    private readonly materials: Model<ClassSessionMaterialMongoDocument>,
     private readonly studentEnrollments: StudentEnrollmentsService,
     private readonly rooms: RoomsService,
     private readonly recordings: RecordingsService,
-    @Optional() @InjectModel(UserDocument.name) private readonly users?: Model<UserMongoDocument>
+    private readonly profiles: ProfilesService,
+    private readonly config: ConfigService,
+    @Optional() @InjectModel(UserDocument.name) private readonly users?: Model<UserMongoDocument>,
+    @Optional() private readonly auditLogs?: AuditLogsService
   ) {}
 
   async listAdminClassSessionReports(
@@ -222,7 +282,8 @@ export class ClassSessionsService {
         'Average Duration Seconds',
         'Reconnects',
         'Late Joins',
-        'Early Leaves'
+        'Early Leaves',
+        'Attendance Source'
       ],
       ...rows.map((row) => [
         row.title,
@@ -241,10 +302,40 @@ export class ClassSessionsService {
         String(row.averageDurationSeconds),
         String(row.reconnects),
         String(row.lateJoins),
-        String(row.earlyLeaves)
+        String(row.earlyLeaves),
+        row.attendanceSource
       ])
     ];
-    return `${csvRows.map((row) => row.map((value) => this.csvEscape(value)).join(',')).join('\n')}\n`;
+    const csv = `${csvRows.map((row) => row.map((value) => this.csvEscape(value)).join(',')).join('\n')}\n`;
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'admin.attendance.export',
+      resourceType: 'attendance',
+      metadata: { summary: 'Exported attendance analytics CSV', filters: query, rowCount: rows.length }
+    });
+    return csv;
+  }
+
+  async listAdminAttendanceSessionStudents(sessionId: string, user: AuthenticatedUser): Promise<AdminAttendanceSessionStudentsResponse> {
+    this.assertAdmin(user);
+    const session = await this.classSessions.findById(sessionId);
+    if (!session) {
+      throw new NotFoundException('Class session not found.');
+    }
+    const [sessionRow] = await this.toAdminAttendanceSessionRows([session]);
+    if (!sessionRow) {
+      throw new NotFoundException('Class session not found.');
+    }
+    const attendance = await this.adminAttendanceRowsForSession(session);
+    const items = attendance.rows
+      .map((row) => this.toAdminAttendanceSessionStudentRow(session, row, attendance.source))
+      .sort((left, right) => left.studentName.localeCompare(right.studentName));
+    return {
+      session: sessionRow,
+      items,
+      source: attendance.source,
+      total: items.length
+    };
   }
 
   async startSession(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<ClassroomPayload> {
@@ -257,16 +348,18 @@ export class ClassSessionsService {
     }
 
     if (resolution.persisted?.status === 'live') {
+      const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
       const room = await this.rooms.ensureClassSessionRoom({
         sessionId,
         batchId: resolution.batch.id,
         title: resolution.planned.title,
-        teacherId: resolution.batch.teacherId
+        teacherId: resolution.batch.teacherId,
+        liveSettings
       });
       if (resolution.persisted.roomId === room.id) {
         return this.toPayload(resolution, user);
       }
-      const persisted = await this.classSessions.findByIdAndUpdate(sessionId, { $set: { roomId: room.id } }, { new: true });
+      const persisted = await this.classSessions.findByIdAndUpdate(sessionId, { $set: { roomId: room.id, liveSettings } }, { new: true });
       return this.toPayload({ ...resolution, persisted: persisted ?? resolution.persisted }, user);
     }
 
@@ -281,11 +374,13 @@ export class ClassSessionsService {
 
     const now = new Date();
     const channelIds = classSessionChannelIds(sessionId);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
     const room = await this.rooms.ensureClassSessionRoom({
       sessionId,
       batchId: resolution.batch.id,
       title: resolution.planned.title,
-      teacherId: resolution.batch.teacherId
+      teacherId: resolution.batch.teacherId,
+      liveSettings
     });
     let persisted: ClassSessionMongoDocument | null;
     try {
@@ -306,6 +401,7 @@ export class ClassSessionsService {
             roomId: room.id,
             chatChannelId: resolution.persisted?.chatChannelId ?? channelIds.chatChannelId,
             whiteboardChannelId: resolution.persisted?.whiteboardChannelId ?? channelIds.whiteboardChannelId,
+            liveSettings,
             startedAt: resolution.persisted?.startedAt ?? now
           },
           $unset: {
@@ -336,8 +432,18 @@ export class ClassSessionsService {
       throw new ConflictException('Unable to start this class session. Please refresh and try again.');
     }
 
+    await this.startAutoRecordingIfEnabled(persisted, resolution.batch, user, liveSettings);
     const payload = await this.toPayload({ ...resolution, persisted }, user);
     this.rooms.emitClassSessionLifecycleEvent('session:started', this.toLifecyclePayload(payload));
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'class_sessions.start',
+      resourceType: 'class_session',
+      resourceId: payload.sessionId,
+      resourceLabel: payload.title,
+      metadata: { summary: `Started class session ${payload.title}`, batchId: payload.batchId, roomId: payload.roomId },
+      after: { status: payload.status, startedAt: payload.startedAt }
+    });
     return payload;
   }
 
@@ -350,6 +456,7 @@ export class ClassSessionsService {
     this.assertCanManageBatch(resolution.batch, user);
 
     if (persisted.status === 'completed') {
+      await this.closeCompletedSessionRoom(persisted, user);
       return this.toPayload({ ...resolution, persisted }, user);
     }
 
@@ -381,7 +488,11 @@ export class ClassSessionsService {
     }
 
     const payload = await this.toPayload({ ...resolution, persisted: updated }, user);
-    let closeError: unknown;
+    try {
+      await this.persistAttendanceSnapshot(updated, 'session_end');
+    } catch {
+      // Session completion is authoritative once persisted. Analytics can fall back to inferred rows.
+    }
     await this.recordings
       .stopActiveClassSessionRecording({
         sessionId,
@@ -390,22 +501,50 @@ export class ClassSessionsService {
         reason: 'session_ended'
       })
       .catch(() => undefined);
-    if (updated.roomId) {
-      try {
-        await this.rooms.closeClassSessionRoom({
-          roomId: updated.roomId,
-          actorUserId: user.sub,
-          actorLabel: user.email
-        });
-      } catch (error) {
-        closeError = error;
-      }
-    }
+    await this.closeCompletedSessionRoom(updated, user);
     this.rooms.emitClassSessionLifecycleEvent('session:ended', this.toLifecyclePayload(payload));
-    if (closeError) {
-      throw closeError;
-    }
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'class_sessions.end',
+      resourceType: 'class_session',
+      resourceId: payload.sessionId,
+      resourceLabel: payload.title,
+      metadata: { summary: `Ended class session ${payload.title}`, batchId: payload.batchId, roomId: payload.roomId },
+      after: { status: payload.status, completedAt: payload.completedAt }
+    });
     return payload;
+  }
+
+  private async closeCompletedSessionRoom(session: ClassSessionMongoDocument, user: AuthenticatedUser): Promise<void> {
+    if (!session.roomId) {
+      return;
+    }
+    await this.rooms
+      .closeClassSessionRoom({
+        roomId: session.roomId,
+        actorUserId: user.sub,
+        actorLabel: user.email
+      })
+      .catch(() => undefined);
+  }
+
+  private async startAutoRecordingIfEnabled(
+    session: ClassSessionMongoDocument,
+    batch: BatchMongoDocument,
+    user: AuthenticatedUser,
+    liveSettings: LiveClassSettings
+  ): Promise<void> {
+    if (!liveSettings.recording.recordingEnabled || !liveSettings.recording.autoRecordOnStart) {
+      return;
+    }
+    await this.recordings
+      .startClassSessionRecording({
+        session,
+        batch,
+        actor: user,
+        retentionDays: liveSettings.recordingRetention.recordingRetentionDays
+      })
+      .catch(() => undefined);
   }
 
   async startRecording(sessionId: string, user: AuthenticatedUser): Promise<Recording> {
@@ -418,10 +557,18 @@ export class ClassSessionsService {
     if (persisted.status !== 'live') {
       throw new BadRequestException('Recording can only start after the class is live.');
     }
+    const liveSettings = await this.resolvedLiveSettingsForResolution({ ...resolution, persisted });
+    if (!liveSettings.recording.recordingEnabled) {
+      throw new ForbiddenException('Recording is disabled for this class.');
+    }
+    if (!liveSettings.recording.teacherManualRecordingControlEnabled) {
+      throw new ForbiddenException('Manual recording control is disabled for this class.');
+    }
     return this.recordings.startClassSessionRecording({
       session: persisted,
       batch: resolution.batch,
-      actor: user
+      actor: user,
+      retentionDays: liveSettings.recordingRetention.recordingRetentionDays
     });
   }
 
@@ -432,6 +579,10 @@ export class ClassSessionsService {
   async listRecordings(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<Recording[]> {
     const resolution = await this.resolveSession(sessionId, batchId);
     await this.assertCanReadClassSession(resolution.batch, user);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    if (!this.canViewRecordingContent(liveSettings, resolution.batch, user)) {
+      return [];
+    }
     return this.recordings.listClassSessionRecordings(resolution.planned.id, user);
   }
 
@@ -443,6 +594,11 @@ export class ClassSessionsService {
   ): Promise<RecordingDownload> {
     const resolution = await this.resolveSession(sessionId, batchId);
     await this.assertCanReadClassSession(resolution.batch, user);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    if (!this.canViewRecordingContent(liveSettings, resolution.batch, user)) {
+      throw new ForbiddenException('Recording playback is not available for this class.');
+    }
+    this.assertExportWithinRetention(liveSettings, resolution.persisted?.completedAt);
     return this.recordings.readClassSessionRecordingDownload(resolution.planned.id, recordingId, user);
   }
 
@@ -499,6 +655,10 @@ export class ClassSessionsService {
     if (resolution.persisted?.status !== 'live' || !resolution.persisted.roomId) {
       throw new ConflictException('Chat attachments can only be uploaded while the class is live.');
     }
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    if (!liveSettings.chat.chatAttachmentsEnabled) {
+      throw new ForbiddenException('Chat attachments are disabled for this class.');
+    }
     return this.rooms.createClassSessionChatAttachments({
       sessionId: resolution.planned.id,
       batchId: resolution.batch.id,
@@ -531,6 +691,253 @@ export class ClassSessionsService {
       requesterRole: this.payloadRole(user, resolution.batch),
       attachmentId
     });
+  }
+
+  async listMaterials(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<ClassSessionMaterial[]> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    await this.assertCanReadClassSession(resolution.batch, user);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    this.assertMaterialsEnabled(liveSettings);
+    const role = this.payloadRole(user, resolution.batch);
+    const materials = await this.materials
+      .find({
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        deletedAt: { $exists: false }
+      })
+      .sort({ shared: -1, createdAt: -1 })
+      .exec();
+    return materials
+      .filter((material) => this.canAccessMaterial(material, resolution, role, liveSettings))
+      .map((material) => this.toMaterialPayload(material));
+  }
+
+  async uploadMaterials(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    files: ClassSessionMaterialUploadFile[]
+  ): Promise<ClassSessionMaterial[]> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCanManageBatch(resolution.batch, user);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    this.assertCanManageMaterials(liveSettings);
+    if (!files.length) {
+      throw new BadRequestException('At least one material file is required.');
+    }
+    if (files.length > CLASS_MATERIAL_MAX_COUNT) {
+      throw new BadRequestException(`You can upload up to ${CLASS_MATERIAL_MAX_COUNT} materials at once.`);
+    }
+
+    const roomId = resolution.persisted?.roomId ?? classSessionChannelIds(resolution.planned.id).roomId;
+    const directory = join(this.classMaterialStorageRoot(), 'class-sessions', this.safeStorageSegment(resolution.planned.id));
+    await mkdir(directory, { recursive: true });
+
+    const created: ClassSessionMaterialMongoDocument[] = [];
+    for (const file of files) {
+      const mimeType = this.normalizeMaterialMimeType(file.mimetype);
+      const kind = this.materialKindForMimeType(mimeType);
+      this.assertMaterialKindAllowed(kind, liveSettings);
+      const maxFileSizeBytes = this.classMaterialMaxFileSizeBytes(liveSettings);
+      if (file.size > maxFileSizeBytes) {
+        throw new BadRequestException(`Class materials cannot exceed ${liveSettings.materials.maxMaterialFileSizeMb} MB.`);
+      }
+      if (!file.buffer?.length) {
+        throw new BadRequestException('Material upload is empty.');
+      }
+      const materialId = randomUUID();
+      const fileName = this.safeMaterialFileName(file.originalname, kind);
+      const storageKey = `class-sessions/${this.safeStorageSegment(resolution.planned.id)}/${materialId}/${fileName}`;
+      const storagePath = join(directory, `${materialId}-${fileName}`);
+      await writeFile(storagePath, file.buffer);
+      const doc = await this.materials.create({
+        materialId,
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        roomId,
+        title: this.titleFromFileName(fileName),
+        kind,
+        source: 'upload',
+        fileName,
+        mimeType,
+        size: file.size,
+        storageProvider: 'local',
+        storageKey,
+        path: storagePath,
+        uploadedByUserId: user.sub,
+        shared: false
+      });
+      created.push(doc);
+    }
+    return created.map((material) => this.toMaterialPayload(material));
+  }
+
+  async attachMaterialLink(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    request: CreateClassSessionMaterialLinkRequest
+  ): Promise<ClassSessionMaterial> {
+    const resolution = await this.resolveSession(sessionId, batchId ?? request.batchId);
+    this.assertCanManageBatch(resolution.batch, user);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    this.assertCanManageMaterials(liveSettings);
+    const url = this.normalizeMaterialUrl(request.url);
+    const title = this.cleanMaterialText(request.title, 180);
+    if (!title) {
+      throw new BadRequestException('Material title is required.');
+    }
+    const kind = request.kind && ['document', 'slides', 'file', 'link'].includes(request.kind) ? request.kind : 'link';
+    this.assertMaterialKindAllowed(kind, liveSettings);
+    const roomId = resolution.persisted?.roomId ?? classSessionChannelIds(resolution.planned.id).roomId;
+    const doc = await this.materials.create({
+      materialId: randomUUID(),
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId,
+      title,
+      ...(request.description ? { description: this.cleanMaterialText(request.description, 1000) } : {}),
+      kind,
+      source: 'link',
+      url,
+      uploadedByUserId: user.sub,
+      shared: false
+    });
+    return this.toMaterialPayload(doc);
+  }
+
+  async deleteMaterial(sessionId: string, materialId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<void> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCanManageBatch(resolution.batch, user);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    this.assertMaterialsEnabled(liveSettings);
+    const updated = await this.materials.findOneAndUpdate(
+      {
+        materialId,
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        deletedAt: { $exists: false }
+      },
+      {
+        $set: {
+          shared: false,
+          deletedAt: new Date()
+        },
+        $unset: {
+          sharedAt: '',
+          sharedByUserId: ''
+        }
+      },
+      { new: true }
+    );
+    if (!updated) {
+      throw new NotFoundException('Class material not found.');
+    }
+    await this.emitMaterialEvent('material:updated', resolution, updated, user, false);
+  }
+
+  async downloadMaterial(
+    sessionId: string,
+    materialId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<ClassSessionMaterialDownload> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    await this.assertCanReadClassSession(resolution.batch, user);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    this.assertMaterialsEnabled(liveSettings);
+    const role = this.payloadRole(user, resolution.batch);
+    if (role === 'student' && !liveSettings.materials.studentsCanDownloadMaterials) {
+      throw new ForbiddenException('Material downloads are disabled for this class.');
+    }
+    const material = await this.materials.findOne({
+      materialId,
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      deletedAt: { $exists: false }
+    });
+    if (!material || material.source !== 'upload' || !material.path || !material.fileName || !material.mimeType || !material.size) {
+      throw new NotFoundException('Class material not found.');
+    }
+    if (!this.canAccessMaterial(material, resolution, role, liveSettings)) {
+      throw new NotFoundException('Class material not found.');
+    }
+    return {
+      stream: createReadStream(material.path),
+      fileName: material.fileName,
+      mimeType: material.mimeType,
+      size: material.size
+    };
+  }
+
+  async shareMaterial(sessionId: string, materialId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<ClassSessionMaterial> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCanManageBatch(resolution.batch, user);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    this.assertMaterialsEnabled(liveSettings);
+    const live = this.requireLivePersistedSession(resolution);
+    await this.materials.updateMany(
+      {
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        shared: true,
+        deletedAt: { $exists: false },
+        materialId: { $ne: materialId }
+      },
+      {
+        $set: { shared: false },
+        $unset: { sharedAt: '', sharedByUserId: '' }
+      }
+    );
+    const sharedAt = new Date();
+    const material = await this.materials.findOneAndUpdate(
+      {
+        materialId,
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        deletedAt: { $exists: false }
+      },
+      {
+        $set: {
+          roomId: live.roomId,
+          shared: true,
+          sharedAt,
+          sharedByUserId: user.sub
+        }
+      },
+      { new: true }
+    );
+    if (!material) {
+      throw new NotFoundException('Class material not found.');
+    }
+    await this.emitMaterialEvent('material:shared', resolution, material, user, true);
+    return this.toMaterialPayload(material);
+  }
+
+  async unshareMaterial(sessionId: string, materialId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<ClassSessionMaterial> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCanManageBatch(resolution.batch, user);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    this.assertMaterialsEnabled(liveSettings);
+    this.requireLivePersistedSession(resolution);
+    const material = await this.materials.findOneAndUpdate(
+      {
+        materialId,
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        deletedAt: { $exists: false }
+      },
+      {
+        $set: { shared: false },
+        $unset: { sharedAt: '', sharedByUserId: '' }
+      },
+      { new: true }
+    );
+    if (!material) {
+      throw new NotFoundException('Class material not found.');
+    }
+    await this.emitMaterialEvent('material:unshared', resolution, material, user, false);
+    return this.toMaterialPayload(material);
   }
 
   async getChatSummary(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<ChatThreadSummaryResponse> {
@@ -583,12 +990,31 @@ export class ClassSessionsService {
     if (!resolution.persisted?.roomId) {
       throw new BadRequestException('Attendance is available after a session has started.');
     }
-    return this.rooms.exportClassSessionAttendanceCsv({
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    if (!liveSettings.attendance.teacherAttendanceExportEnabled) {
+      throw new ForbiddenException('Attendance export is disabled for this class.');
+    }
+    if (liveSettings.exportControls.exportControlsEnabled && !liveSettings.exportControls.allowAttendanceExport) {
+      throw new ForbiddenException('Attendance export is disabled by class export controls.');
+    }
+    this.assertExportWithinRetention(liveSettings, resolution.persisted.completedAt);
+    const csv = await this.rooms.exportClassSessionAttendanceCsv({
       sessionId: resolution.planned.id,
       batchId: resolution.batch.id,
       roomId: resolution.persisted.roomId,
-      ...(resolution.persisted.completedAt ? { completedAt: resolution.persisted.completedAt } : {})
+      ...(resolution.persisted.completedAt ? { completedAt: resolution.persisted.completedAt } : {}),
+      ...this.attendancePolicy(liveSettings, resolution.planned.durationMinutes),
+      anonymizeStudentExports: liveSettings.exportControls.exportControlsEnabled && liveSettings.exportControls.anonymizeStudentExports
     });
+    await this.auditLogs?.record({
+      actor: user,
+      action: 'class_sessions.attendance.export',
+      resourceType: 'class_session',
+      resourceId: resolution.planned.id,
+      resourceLabel: resolution.planned.title,
+      metadata: { summary: `Exported attendance for ${resolution.planned.title}`, batchId: resolution.batch.id, roomId: resolution.persisted.roomId }
+    });
+    return csv;
   }
 
   async getSession(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<ClassroomPayload> {
@@ -760,12 +1186,14 @@ export class ClassSessionsService {
       sessions.map(async (session) => {
         const batch = batchMap.get(session.batchId);
         const teacher = teacherMap.get(session.teacherId);
-        const attendanceRows = await this.adminAttendanceRowsForSession(session);
+        const attendance = await this.adminAttendanceRowsForSession(session);
+        const attendanceRows = attendance.rows;
         const presentRows = attendanceRows.filter((row) => row.status === 'present');
         const enrolled = attendanceRows.length;
         const present = presentRows.length;
+        const lateJoinThresholdMs = this.lateJoinThresholdMs(session);
         const lateJoins = presentRows.filter(
-          (row) => row.firstJoinAt && row.firstJoinAt.getTime() > session.scheduledAt.getTime() + ADMIN_ATTENDANCE_LATE_JOIN_MS
+          (row) => row.firstJoinAt && row.firstJoinAt.getTime() > session.scheduledAt.getTime() + lateJoinThresholdMs
         ).length;
         const earlyLeaves =
           session.completedAt || session.status === 'completed'
@@ -797,7 +1225,8 @@ export class ClassSessionsService {
           averageDurationSeconds: present ? Math.round(totalDurationSeconds / present) : 0,
           reconnects: presentRows.reduce((total, row) => total + row.reconnectCount, 0),
           lateJoins,
-          earlyLeaves
+          earlyLeaves,
+          attendanceSource: attendance.source
         };
       })
     );
@@ -817,13 +1246,14 @@ export class ClassSessionsService {
     >();
     for (const session of sessions) {
       const batch = batchMap.get(session.batchId);
-      const attendanceRows = await this.adminAttendanceRowsForSession(session);
-      for (const attendance of attendanceRows) {
-        const key = `${session.batchId}:${attendance.studentId}`;
+      const attendance = await this.adminAttendanceRowsForSession(session);
+      const attendanceRows = attendance.rows;
+      for (const row of attendanceRows) {
+        const key = `${session.batchId}:${row.studentId}`;
         const existing = rows.get(key) ?? {
-          studentId: attendance.studentId,
-          studentName: attendance.displayName,
-          ...(attendance.email ? { studentEmail: attendance.email } : {}),
+          studentId: row.studentId,
+          studentName: row.displayName,
+          ...(row.email ? { studentEmail: row.email } : {}),
           batchId: session.batchId,
           batchName: batch?.name ?? 'Unknown batch',
           ...(batch?.courseId ? { courseId: batch.courseId } : {}),
@@ -834,17 +1264,24 @@ export class ClassSessionsService {
           attendanceRate: 0,
           averageDurationSeconds: 0,
           reconnects: 0,
+          snapshottedSessions: 0,
+          inferredSessions: 0,
           totalDurationSeconds: 0,
           attendedDurationRows: 0
         };
         existing.sessionsEnrolled += 1;
-        if (attendance.status === 'present') {
+        if (attendance.source === 'snapshot') {
+          existing.snapshottedSessions += 1;
+        } else {
+          existing.inferredSessions += 1;
+        }
+        if (row.status === 'present') {
           existing.sessionsAttended += 1;
-          existing.totalDurationSeconds += attendance.totalDurationSeconds;
+          existing.totalDurationSeconds += row.totalDurationSeconds;
           existing.attendedDurationRows += 1;
-          existing.reconnects += attendance.reconnectCount;
-          if (attendance.firstJoinAt && (!existing.lastAttendedAt || attendance.firstJoinAt.toISOString() > existing.lastAttendedAt)) {
-            existing.lastAttendedAt = attendance.firstJoinAt.toISOString();
+          existing.reconnects += row.reconnectCount;
+          if (row.firstJoinAt && (!existing.lastAttendedAt || row.firstJoinAt.toISOString() > existing.lastAttendedAt)) {
+            existing.lastAttendedAt = row.firstJoinAt.toISOString();
           }
         } else {
           existing.absentCount += 1;
@@ -861,24 +1298,133 @@ export class ClassSessionsService {
       .sort((left, right) => left.studentName.localeCompare(right.studentName));
   }
 
-  private async adminAttendanceRowsForSession(session: ClassSessionMongoDocument): Promise<ClassSessionAttendanceRow[]> {
+  private async adminAttendanceRowsForSession(session: ClassSessionMongoDocument): Promise<AttendanceRowsWithSource> {
+    const snapshots = await this.attendanceSnapshots.find({ sessionId: session.id }).sort({ studentName: 1 }).exec();
+    if (snapshots.length) {
+      return {
+        rows: snapshots.map((snapshot) => this.attendanceSnapshotToRow(snapshot)),
+        source: 'snapshot'
+      };
+    }
     if (session.roomId) {
-      return this.rooms.classSessionAttendanceRows({
-        sessionId: session.id,
-        batchId: session.batchId,
-        roomId: session.roomId,
-        ...(session.completedAt ? { completedAt: session.completedAt } : {})
-      });
+      return {
+        rows: await this.rooms.classSessionAttendanceRows({
+          sessionId: session.id,
+          batchId: session.batchId,
+          roomId: session.roomId,
+          ...(session.completedAt ? { completedAt: session.completedAt } : {}),
+          ...this.attendancePolicy(this.persistedLiveSettings(session), session.durationMinutes)
+        }),
+        source: 'inferred'
+      };
     }
     const roster = await this.studentEnrollments.listBatchRoster(session.batchId, { includeInactive: true });
-    return roster.map((student) => ({
-      studentId: student.userId,
-      displayName: student.displayName,
-      email: student.email,
-      totalDurationSeconds: 0,
-      reconnectCount: 0,
-      status: 'absent'
+    return {
+      rows: roster.map((student) => ({
+        studentId: student.userId,
+        displayName: student.displayName,
+        email: student.email,
+        enrolledAt: student.joinedAt ? new Date(student.joinedAt) : undefined,
+        rosterSource: 'roster',
+        totalDurationSeconds: 0,
+        reconnectCount: 0,
+        status: 'absent'
+      })),
+      source: 'inferred'
+    };
+  }
+
+  private attendanceSnapshotToRow(snapshot: ClassSessionAttendanceSnapshotMongoDocument): ClassSessionAttendanceRow {
+    return {
+      studentId: snapshot.studentId,
+      displayName: snapshot.studentName,
+      email: snapshot.studentEmail ?? '',
+      ...(snapshot.enrolledAt ? { enrolledAt: snapshot.enrolledAt } : {}),
+      rosterSource: snapshot.rosterSource,
+      ...(snapshot.firstJoinAt ? { firstJoinAt: snapshot.firstJoinAt } : {}),
+      ...(snapshot.lastLeaveAt ? { lastLeaveAt: snapshot.lastLeaveAt } : {}),
+      totalDurationSeconds: snapshot.totalDurationSeconds,
+      reconnectCount: snapshot.reconnectCount,
+      status: snapshot.status
+    };
+  }
+
+  private toAdminAttendanceSessionStudentRow(
+    session: ClassSessionMongoDocument,
+    row: ClassSessionAttendanceRow,
+    source: AdminAttendanceSource
+  ): AdminAttendanceSessionStudentRow {
+    return {
+      sessionId: session.id,
+      batchId: session.batchId,
+      ...(session.roomId ? { roomId: session.roomId } : {}),
+      studentId: row.studentId,
+      studentName: row.displayName,
+      ...(row.email ? { studentEmail: row.email } : {}),
+      ...(row.enrolledAt ? { enrolledAt: row.enrolledAt.toISOString() } : {}),
+      rosterSource: row.rosterSource ?? 'roster',
+      ...(row.firstJoinAt ? { firstJoinAt: row.firstJoinAt.toISOString() } : {}),
+      ...(row.lastLeaveAt ? { lastLeaveAt: row.lastLeaveAt.toISOString() } : {}),
+      totalDurationSeconds: row.totalDurationSeconds,
+      reconnectCount: row.reconnectCount,
+      status: row.status,
+      attendanceSource: source
+    };
+  }
+
+  private async persistAttendanceSnapshot(
+    session: ClassSessionMongoDocument,
+    snapshotSource: 'session_end' | 'backfill'
+  ): Promise<void> {
+    if (!session.roomId) {
+      return;
+    }
+    const existing = await this.attendanceSnapshots.exists({ sessionId: session.id });
+    if (existing) {
+      return;
+    }
+    const rows = await this.rooms.classSessionAttendanceRows({
+      sessionId: session.id,
+      batchId: session.batchId,
+      roomId: session.roomId,
+      ...(session.completedAt ? { completedAt: session.completedAt } : {}),
+      ...this.attendancePolicy(this.persistedLiveSettings(session), session.durationMinutes)
+    });
+    if (!rows.length) {
+      return;
+    }
+    const now = new Date();
+    const operations: AnyBulkWriteOperation<ClassSessionAttendanceSnapshotDocument>[] = rows.map((row) => ({
+      updateOne: {
+        filter: {
+          sessionId: session.id,
+          studentId: row.studentId
+        },
+        update: {
+          $setOnInsert: {
+            _id: `${session.id}:attendance:${row.studentId}`,
+            sessionId: session.id,
+            batchId: session.batchId,
+            roomId: session.roomId,
+            studentId: row.studentId,
+            studentName: row.displayName,
+            ...(row.email ? { studentEmail: row.email } : {}),
+            ...(row.enrolledAt ? { enrolledAt: row.enrolledAt } : {}),
+            rosterSource: row.rosterSource ?? 'roster',
+            ...(row.firstJoinAt ? { firstJoinAt: row.firstJoinAt } : {}),
+            ...(row.lastLeaveAt ? { lastLeaveAt: row.lastLeaveAt } : {}),
+            totalDurationSeconds: row.totalDurationSeconds,
+            reconnectCount: row.reconnectCount,
+            status: row.status,
+            snapshotSource,
+            createdAt: now,
+            updatedAt: now
+          }
+        },
+        upsert: true
+      }
     }));
+    await this.attendanceSnapshots.bulkWrite(operations, { ordered: false });
   }
 
   private adminAttendanceSummary(rows: AdminAttendanceSessionRow[]): AdminAttendanceSummary {
@@ -923,7 +1469,8 @@ export class ClassSessionsService {
               sessionId: session.id,
               batchId: session.batchId,
               roomId: session.roomId,
-              ...(session.completedAt ? { completedAt: session.completedAt } : {})
+              ...(session.completedAt ? { completedAt: session.completedAt } : {}),
+              ...this.attendancePolicy(this.persistedLiveSettings(session), session.durationMinutes)
             })
           : await this.adminAttendanceFallback(session.batchId);
 
@@ -1068,6 +1615,54 @@ export class ClassSessionsService {
     return user.roles.includes('ADMIN') || user.roles.includes('SUPER_ADMIN');
   }
 
+  private async resolvedLiveSettingsForResolution(resolution: SessionResolution): Promise<LiveClassSettings> {
+    if (resolution.persisted?.liveSettings) {
+      return this.completeLiveSettings(this.profiles.resolveLiveSettings(resolution.persisted.liveSettings, undefined));
+    }
+    return this.completeLiveSettings((await this.profiles.resolveBatchLiveSettings(resolution.batch)).resolved);
+  }
+
+  private persistedLiveSettings(session: Pick<ClassSessionMongoDocument, 'liveSettings'>): LiveClassSettings | undefined {
+    return session.liveSettings ? this.completeLiveSettings(this.profiles.resolveLiveSettings(session.liveSettings, undefined)) : undefined;
+  }
+
+  private completeLiveSettings(settings: LiveClassSettings): LiveClassSettings {
+    return {
+      media: { ...SYSTEM_LIVE_CLASS_SETTINGS.media, ...settings.media },
+      chat: { ...SYSTEM_LIVE_CLASS_SETTINGS.chat, ...settings.chat },
+      whiteboard: { ...SYSTEM_LIVE_CLASS_SETTINGS.whiteboard, ...settings.whiteboard },
+      speaking: { ...SYSTEM_LIVE_CLASS_SETTINGS.speaking, ...settings.speaking },
+      recording: { ...SYSTEM_LIVE_CLASS_SETTINGS.recording, ...settings.recording },
+      attendance: { ...SYSTEM_LIVE_CLASS_SETTINGS.attendance, ...settings.attendance },
+      access: { ...SYSTEM_LIVE_CLASS_SETTINGS.access, ...settings.access },
+      materials: { ...SYSTEM_LIVE_CLASS_SETTINGS.materials, ...settings.materials },
+      notifications: { ...SYSTEM_LIVE_CLASS_SETTINGS.notifications, ...settings.notifications },
+      questionQueue: { ...SYSTEM_LIVE_CLASS_SETTINGS.questionQueue, ...settings.questionQueue },
+      recordingRetention: { ...SYSTEM_LIVE_CLASS_SETTINGS.recordingRetention, ...settings.recordingRetention },
+      studentScreenShare: { ...SYSTEM_LIVE_CLASS_SETTINGS.studentScreenShare, ...settings.studentScreenShare },
+      advancedAnalytics: { ...SYSTEM_LIVE_CLASS_SETTINGS.advancedAnalytics, ...settings.advancedAnalytics },
+      inactiveDetection: { ...SYSTEM_LIVE_CLASS_SETTINGS.inactiveDetection, ...settings.inactiveDetection },
+      bandwidthPolicy: { ...SYSTEM_LIVE_CLASS_SETTINGS.bandwidthPolicy, ...settings.bandwidthPolicy },
+      exportControls: { ...SYSTEM_LIVE_CLASS_SETTINGS.exportControls, ...settings.exportControls }
+    };
+  }
+
+  private attendancePolicy(settings: LiveClassSettings | undefined, sessionDurationMinutes: number): Partial<ClassSessionAttendanceExportRequest> {
+    if (!settings) {
+      return {};
+    }
+    return {
+      sessionDurationMinutes,
+      presentThresholdMinutes: settings.attendance.presentThresholdMinutes,
+      presentThresholdPercentage: settings.attendance.presentThresholdPercentage,
+      countReconnects: settings.attendance.countReconnects
+    };
+  }
+
+  private lateJoinThresholdMs(session: Pick<ClassSessionMongoDocument, 'liveSettings'>): number {
+    return (this.persistedLiveSettings(session)?.attendance.lateJoinThresholdMinutes ?? ADMIN_ATTENDANCE_LATE_JOIN_MS / 60_000) * 60_000;
+  }
+
   private async toPayload(resolution: SessionResolution, user: AuthenticatedUser): Promise<ClassroomPayload> {
     const channelIds = classSessionChannelIds(resolution.planned.id);
     const persisted = resolution.persisted;
@@ -1077,7 +1672,11 @@ export class ClassSessionsService {
     const whiteboardChannelId = persisted?.whiteboardChannelId ?? channelIds.whiteboardChannelId;
     const role = this.payloadRole(user, resolution.batch);
 
-    const recordingSummary = persisted ? await this.recordings.getClassSessionRecordingSummary(resolution.planned.id) : {};
+    const resolvedLiveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    const recordingSummary = persisted && resolvedLiveSettings.recording.recordingEnabled
+      ? await this.recordings.getClassSessionRecordingSummary(resolution.planned.id)
+      : {};
+    const canViewRecordingContent = this.canViewRecordingContent(resolvedLiveSettings, resolution.batch, user);
 
     return {
       sessionId: resolution.planned.id,
@@ -1097,12 +1696,42 @@ export class ClassSessionsService {
       },
       role,
       canJoin: status === 'live',
+      resolvedLiveSettings,
       participants: await this.payloadParticipants(resolution.batch, user, role),
       ...(recordingSummary.active ? { activeRecording: recordingSummary.active } : {}),
-      ...(recordingSummary.latest ? { latestRecording: recordingSummary.latest } : {}),
+      ...(canViewRecordingContent && recordingSummary.latest ? { latestRecording: recordingSummary.latest } : {}),
       ...(persisted?.startedAt ? { startedAt: persisted.startedAt.toISOString() } : {}),
       ...(persisted?.completedAt ? { completedAt: persisted.completedAt.toISOString() } : {})
     };
+  }
+
+  private canViewRecordingContent(settings: LiveClassSettings, batch: BatchMongoDocument, user: AuthenticatedUser): boolean {
+    if (!settings.recording.recordingEnabled) {
+      return false;
+    }
+    if (this.isAdmin(user)) {
+      return true;
+    }
+    if (settings.exportControls.exportControlsEnabled && !settings.exportControls.allowRecordingDownload) {
+      return false;
+    }
+    if (user.roles.includes('TEACHER') && batch.teacherId === user.sub) {
+      return true;
+    }
+    if (!settings.recordingRetention.allowStudentsDownloadRecording) {
+      return false;
+    }
+    return settings.recording.visibility === 'enrolled_students';
+  }
+
+  private assertExportWithinRetention(settings: LiveClassSettings, completedAt: Date | undefined): void {
+    if (!settings.exportControls.exportControlsEnabled || !completedAt) {
+      return;
+    }
+    const expiresAt = completedAt.getTime() + settings.exportControls.exportRetentionDays * 24 * 60 * 60 * 1000;
+    if (expiresAt <= Date.now()) {
+      throw new ForbiddenException('This class export is outside the configured retention window.');
+    }
   }
 
   private async payloadParticipants(
@@ -1171,6 +1800,188 @@ export class ClassSessionsService {
       return 'This class session was cancelled.';
     }
     return 'The teacher has not started this class session yet.';
+  }
+
+  private requireLivePersistedSession(resolution: SessionResolution): ClassSessionMongoDocument {
+    if (resolution.persisted?.status === 'live' && resolution.persisted.roomId) {
+      return resolution.persisted;
+    }
+    throw new ConflictException('Materials can only be shared while the class is live.');
+  }
+
+  private assertMaterialsEnabled(settings: LiveClassSettings): void {
+    if (!settings.materials.materialsEnabled) {
+      throw new ForbiddenException('Class materials are disabled for this class.');
+    }
+  }
+
+  private assertCanManageMaterials(settings: LiveClassSettings): void {
+    this.assertMaterialsEnabled(settings);
+    if (!settings.materials.teacherCanUploadMaterials) {
+      throw new ForbiddenException('Material uploads are disabled for this class.');
+    }
+  }
+
+  private assertMaterialKindAllowed(kind: ClassSessionMaterialKind, settings: LiveClassSettings): void {
+    if (!settings.materials.allowedMaterialTypes.includes(kind)) {
+      throw new BadRequestException('This material type is disabled for this class.');
+    }
+  }
+
+  private canAccessMaterial(
+    material: ClassSessionMaterialMongoDocument,
+    resolution: SessionResolution,
+    role: 'teacher' | 'student' | 'admin',
+    settings: LiveClassSettings
+  ): boolean {
+    if (role === 'teacher' || role === 'admin') {
+      return true;
+    }
+    const status = resolution.persisted?.status ?? 'scheduled';
+    if (status === 'live') {
+      return Boolean(material.shared || settings.materials.publishMaterialsBeforeClass);
+    }
+    if (status === 'completed' || status === 'cancelled') {
+      return settings.materials.publishMaterialsAfterClass;
+    }
+    return settings.materials.publishMaterialsBeforeClass;
+  }
+
+  private async emitMaterialEvent(
+    event: 'material:shared' | 'material:unshared' | 'material:updated',
+    resolution: SessionResolution,
+    material: ClassSessionMaterialMongoDocument,
+    user: AuthenticatedUser,
+    shared: boolean
+  ): Promise<void> {
+    const roomId = resolution.persisted?.roomId ?? material.roomId;
+    if (!roomId) {
+      return;
+    }
+    const payload: ClassSessionMaterialEvent = {
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId,
+      materialId: material.materialId,
+      material: this.toMaterialPayload(material),
+      shared,
+      actorUserId: user.sub,
+      createdAt: new Date().toISOString()
+    };
+    this.rooms.emitClassSessionMaterialEvent(event, payload);
+  }
+
+  private toMaterialPayload(material: ClassSessionMaterialMongoDocument): ClassSessionMaterial {
+    return {
+      id: material.materialId,
+      materialId: material.materialId,
+      sessionId: material.sessionId,
+      batchId: material.batchId,
+      ...(material.roomId ? { roomId: material.roomId } : {}),
+      title: material.title,
+      ...(material.description ? { description: material.description } : {}),
+      kind: material.kind,
+      source: material.source,
+      ...(material.fileName ? { fileName: material.fileName } : {}),
+      ...(material.mimeType ? { mimeType: material.mimeType } : {}),
+      ...(typeof material.size === 'number' ? { size: material.size } : {}),
+      ...(material.storageProvider ? { storageProvider: material.storageProvider } : {}),
+      ...(material.source === 'upload' ? { downloadUrl: this.classSessionMaterialDownloadUrl(material.sessionId, material.materialId) } : {}),
+      ...(material.url ? { url: material.url } : {}),
+      shared: Boolean(material.shared),
+      ...(material.sharedAt ? { sharedAt: this.dateToIso(material.sharedAt) } : {}),
+      ...(material.sharedByUserId ? { sharedByUserId: material.sharedByUserId } : {}),
+      uploadedByUserId: material.uploadedByUserId,
+      createdAt: this.dateToIso(material.createdAt),
+      updatedAt: this.dateToIso(material.updatedAt),
+      ...(material.deletedAt ? { deletedAt: this.dateToIso(material.deletedAt) } : {})
+    };
+  }
+
+  private normalizeMaterialMimeType(value: string | undefined): string {
+    const mimeType = (value ?? '').split(';')[0]?.trim().toLowerCase();
+    if (!mimeType || !CLASS_MATERIAL_ALLOWED_MIME_TYPES.has(mimeType)) {
+      throw new BadRequestException('Unsupported class material file type.');
+    }
+    return mimeType;
+  }
+
+  private materialKindForMimeType(mimeType: string): Exclude<ClassSessionMaterialKind, 'link'> {
+    if (mimeType === 'application/pdf') {
+      return 'pdf';
+    }
+    if (mimeType.startsWith('image/')) {
+      return 'image';
+    }
+    if (mimeType.includes('word')) {
+      return 'document';
+    }
+    if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) {
+      return 'slides';
+    }
+    return 'file';
+  }
+
+  private safeMaterialFileName(value: string | undefined, kind: ClassSessionMaterialKind): string {
+    const fallback = kind === 'pdf' ? 'material.pdf' : 'material';
+    const cleaned = this.cleanMaterialText(value ?? fallback, 180)
+      .replace(/[\\/]/g, '_')
+      .replace(/\.{2,}/g, '.')
+      .replace(/^\.+/, '')
+      .trim();
+    return cleaned || fallback;
+  }
+
+  private titleFromFileName(fileName: string): string {
+    const withoutExtension = fileName.replace(/\.[a-z0-9]{1,8}$/i, '');
+    return this.cleanMaterialText(withoutExtension.replace(/[_-]+/g, ' '), 180) || fileName;
+  }
+
+  private normalizeMaterialUrl(value: string | undefined): string {
+    const raw = value?.trim();
+    if (!raw) {
+      throw new BadRequestException('Material URL is required.');
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      throw new BadRequestException('Material URL is invalid.');
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new BadRequestException('Material URL must use http or https.');
+    }
+    return parsed.toString();
+  }
+
+  private cleanMaterialText(value: string | undefined, maxLength: number): string {
+    return (value ?? '')
+      .replace(/[\u0000-\u001F\u007F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, maxLength);
+  }
+
+  private safeStorageSegment(value: string): string {
+    return value.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 160) || 'class-session';
+  }
+
+  private classMaterialStorageRoot(): string {
+    return this.config.get<string>('classMaterials.localPath', './class-materials');
+  }
+
+  private classMaterialMaxFileSizeBytes(settings?: LiveClassSettings): number {
+    const configured = this.config.get<number>('classMaterials.maxFileSizeBytes', 10 * 1024 * 1024);
+    const policy = settings ? settings.materials.maxMaterialFileSizeMb * 1024 * 1024 : configured;
+    return Math.min(100 * 1024 * 1024, policy);
+  }
+
+  private classSessionMaterialDownloadUrl(sessionId: string, materialId: string): string {
+    return `/api/v1/class-sessions/${encodeURIComponent(sessionId)}/materials/${encodeURIComponent(materialId)}/download`;
+  }
+
+  private dateToIso(value: Date | string): string {
+    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
   }
 
   private isDuplicateKeyError(error: unknown): boolean {

@@ -1599,7 +1599,7 @@ describe('RoomsService', () => {
       ...payload
     }));
 
-    const result = await service.sendChat({ roomId: 'room-1', message: '  Hello class  ', scope: 'broadcast', recipientId: 'student-two' }, 'student-participant');
+    const result = await service.sendChat({ roomId: 'room-1', message: '  Hello class  ' }, 'student-participant');
 
     expect(chat.create.mock.calls[0]?.[0]).toEqual({
       sessionId: 'session-1',
@@ -1633,6 +1633,42 @@ describe('RoomsService', () => {
     expect(result.deliveryState).toBe('delivered');
     expect(message.deliveredAt).toBeDefined();
     expect(message.createdAt).toBe(createdAt.toISOString());
+  });
+
+  it('rejects student attempts to spoof class-session broadcast chat', async () => {
+    const { service, classSessions, participants, chat } = createService();
+    participants.findOne.mockImplementation(async (filter: Record<string, unknown>) => {
+      if (filter['_id'] === 'student-participant') {
+        return {
+          id: 'student-participant',
+          userId: 'student-1',
+          socketId: 'student-socket',
+          roomId: 'room-1',
+          role: Role.PARTICIPANT,
+          displayName: 'Student One',
+          admitted: true
+        };
+      }
+      return null;
+    });
+    classSessions.findOne.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      teacherId: 'teacher-1',
+      roomId: 'room-1',
+      status: 'live',
+      chatChannelId: 'classroom:session-1:chat'
+    });
+
+    let thrown: unknown;
+    try {
+      await service.sendChat({ roomId: 'room-1', message: '  Hello class  ', scope: 'broadcast', recipientId: 'student-two' }, 'student-participant');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(chat.create).not.toHaveBeenCalled();
   });
 
   it('allows attachment-only private class-session chat with uploaded PDF metadata', async () => {
@@ -2292,6 +2328,48 @@ describe('RoomsService', () => {
     let thrown: unknown;
     try {
       await service.sendChat({ roomId: 'room-1', message: 'After class' }, 'student-participant');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ConflictException);
+    expect(chat.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects class-session chat sends when the session ends before persistence', async () => {
+    const { service, classSessions, participants, chat } = createService();
+    participants.findOne.mockImplementation(async (filter: Record<string, unknown>) => {
+      if (filter['_id'] === 'student-participant') {
+        return {
+          id: 'student-participant',
+          userId: 'student-1',
+          socketId: 'student-socket',
+          roomId: 'room-1',
+          role: Role.PARTICIPANT,
+          displayName: 'Student One',
+          admitted: true
+        };
+      }
+      if (filter['userId'] === 'teacher-1') {
+        return {
+          id: 'teacher-participant',
+          userId: 'teacher-1',
+          socketId: 'teacher-socket',
+          roomId: 'room-1',
+          role: Role.HOST,
+          displayName: 'Teacher One',
+          admitted: true
+        };
+      }
+      return null;
+    });
+    classSessions.findOne
+      .mockResolvedValueOnce(fakeClassSessionDoc({ status: 'live' }))
+      .mockResolvedValueOnce(fakeClassSessionDoc({ status: 'completed', completedAt: new Date('2026-06-22T11:00:00.000Z') }));
+
+    let thrown: unknown;
+    try {
+      await service.sendChat({ roomId: 'room-1', message: 'Race message' }, 'student-participant');
     } catch (error) {
       thrown = error;
     }
@@ -4391,7 +4469,7 @@ function createService(): {
   producers: { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   consumers: { findById: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   moderation: { create: jest.Mock; exists: jest.Mock; updateMany: jest.Mock };
-  chatAttachments: { create: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock };
+  chatAttachments: { create: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   chat: { create: jest.Mock; find: jest.Mock; countDocuments: jest.Mock };
   chatReadStates: { find: jest.Mock; findOneAndUpdate: jest.Mock };
   redis: { markPresence: jest.Mock; removePresence: jest.Mock; participantPresence: jest.Mock; participantsPresence: jest.Mock };
@@ -4561,7 +4639,8 @@ function createService(): {
       createdAt: new Date('2026-06-22T10:00:00.000Z')
     })),
     findOne: jest.fn(async () => null),
-    updateOne: jest.fn(async () => ({ modifiedCount: 1 }))
+    updateOne: jest.fn(async () => ({ modifiedCount: 1 })),
+    updateMany: jest.fn(async () => ({ modifiedCount: 0 }))
   };
   const chat = {
     create: jest.fn(),

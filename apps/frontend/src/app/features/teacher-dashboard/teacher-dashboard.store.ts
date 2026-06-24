@@ -1,6 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Observable, catchError, finalize, map, tap, throwError } from 'rxjs';
+import { Observable, catchError, finalize, forkJoin, map, of, tap, throwError } from 'rxjs';
+import type { BatchLiveClassSettingsResponse, ChatThreadSummaryResponse, LiveClassSettingsPatch, Recording } from '@native-sfu/contracts';
 import { API_BASE_URL } from '../../core/services/app-environment';
 import { ClassSessionService, type ClassroomPayload, type ClassSessionStatus } from '../class-session/class-session.service';
 
@@ -72,6 +73,30 @@ export interface TeacherBatch {
   sessions: TeacherSession[];
 }
 
+export interface TeacherSessionActionState {
+  canStart: boolean;
+  canEnter: boolean;
+  canEnd: boolean;
+  completed: boolean;
+  cancelled: boolean;
+  waitingForTeacher: boolean;
+}
+
+export interface TeacherRecordingItem extends Recording {
+  sessionTitle: string;
+  batchName: string;
+}
+
+export interface TeacherMessageIndicator {
+  sessionId: string;
+  batchId: string;
+  sessionTitle: string;
+  batchName: string;
+  unreadCount: number;
+  lastMessagePreview?: string;
+  lastMessageAt?: string;
+}
+
 interface BackendTeacherBatch {
   id: string;
   name: string;
@@ -141,11 +166,15 @@ export class TeacherDashboardStore {
   private readonly loadingSignal = signal(false);
   private readonly savingSignal = signal(false);
   private readonly sessionActionLoadingIdSignal = signal<string | null>(null);
+  private readonly recentRecordingsSignal = signal<TeacherRecordingItem[]>([]);
+  private readonly messageIndicatorsSignal = signal<TeacherMessageIndicator[]>([]);
   private readonly errorSignal = signal('');
 
   readonly loading = this.loadingSignal.asReadonly();
   readonly saving = this.savingSignal.asReadonly();
   readonly sessionActionLoadingId = this.sessionActionLoadingIdSignal.asReadonly();
+  readonly recentRecordings = this.recentRecordingsSignal.asReadonly();
+  readonly messageIndicators = this.messageIndicatorsSignal.asReadonly();
   readonly error = this.errorSignal.asReadonly();
   readonly batches = computed(() =>
     [...this.batchesSignal()].sort((left, right) => this.nextSessionTime(left) - this.nextSessionTime(right))
@@ -156,7 +185,24 @@ export class TeacherDashboardStore {
       .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime())
   );
   readonly liveSession = computed(() => this.sessions().find((session) => session.status === 'live') ?? null);
+  readonly liveSessions = computed(() => this.sessions().filter((session) => session.status === 'live'));
   readonly upcomingSessions = computed(() => this.sessions().filter((session) => session.status === 'scheduled').slice(0, 6));
+  readonly todaySessions = computed(() =>
+    this.sessions()
+      .filter((session) => this.isToday(session.scheduledAt))
+      .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime())
+  );
+  readonly completedToday = computed(() => this.todaySessions().filter((session) => session.status === 'completed'));
+  readonly totalStudents = computed(() => this.batches().reduce((total, batch) => total + Math.max(batch.enrolledCount, batch.students.length), 0));
+  readonly attendanceWarnings = computed(() =>
+    this.batches().filter((batch) => {
+      const averageAttendance = this.averageAttendance(batch);
+      return averageAttendance !== null && averageAttendance < 75;
+    })
+  );
+  readonly rosterWarnings = computed(() => this.batches().filter((batch) => batch.enrolledCount === 0 || batch.enrolledCount >= batch.capacity));
+  readonly recordingsReadyCount = computed(() => this.recentRecordings().filter((recording) => recording.status === 'stopped').length);
+  readonly unreadMessageCount = computed(() => this.messageIndicators().reduce((total, item) => total + item.unreadCount, 0));
 
   loadBatches(): void {
     this.loadingSignal.set(true);
@@ -168,7 +214,10 @@ export class TeacherDashboardStore {
         return throwError(() => error);
       })
     ).subscribe({
-      next: (batches) => this.batchesSignal.set(batches),
+      next: (batches) => {
+        this.batchesSignal.set(batches);
+        this.loadRecentOperations(batches);
+      },
       error: () => this.loadingSignal.set(false),
       complete: () => this.loadingSignal.set(false)
     });
@@ -186,6 +235,32 @@ export class TeacherDashboardStore {
       }),
       finalize(() => this.savingSignal.set(false))
     );
+  }
+
+  getBatchLiveSettings(batchId: string): Observable<BatchLiveClassSettingsResponse> {
+    return this.http
+      .get<BatchLiveClassSettingsResponse | ApiEnvelope<BatchLiveClassSettingsResponse>>(
+        `${API_BASE_URL}/teacher/batches/${encodeURIComponent(batchId)}/live-settings`
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  updateBatchLiveSettings(batchId: string, request: LiveClassSettingsPatch): Observable<BatchLiveClassSettingsResponse> {
+    return this.http
+      .patch<BatchLiveClassSettingsResponse | ApiEnvelope<BatchLiveClassSettingsResponse>>(
+        `${API_BASE_URL}/teacher/batches/${encodeURIComponent(batchId)}/live-settings`,
+        request
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  resetBatchLiveSettings(batchId: string): Observable<BatchLiveClassSettingsResponse> {
+    return this.http
+      .post<BatchLiveClassSettingsResponse | ApiEnvelope<BatchLiveClassSettingsResponse>>(
+        `${API_BASE_URL}/teacher/batches/${encodeURIComponent(batchId)}/live-settings/reset`,
+        {}
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
   }
 
   deleteBatch(batchId: string): void {
@@ -258,12 +333,94 @@ export class TeacherDashboardStore {
     );
   }
 
+  sessionActionState(session: TeacherSession): TeacherSessionActionState {
+    return {
+      canStart: session.status === 'scheduled',
+      canEnter: session.status === 'live',
+      canEnd: session.status === 'live',
+      completed: session.status === 'completed',
+      cancelled: session.status === 'cancelled',
+      waitingForTeacher: session.status === 'scheduled'
+    };
+  }
+
   averageAttendance(batch: TeacherBatch): number | null {
     if (!batch.students.length) {
       return null;
     }
     const total = batch.students.reduce((sum, student) => sum + student.attendanceRate, 0);
     return Math.round(total / batch.students.length);
+  }
+
+  batchForSession(session: TeacherSession): TeacherBatch | null {
+    return this.batches().find((batch) => batch.id === session.batchId) ?? null;
+  }
+
+  refreshOperations(): void {
+    this.loadBatches();
+  }
+
+  private loadRecentOperations(batches: TeacherBatch[]): void {
+    const sessions = batches
+      .flatMap((batch) => batch.sessions.map((session) => ({ batch, session })))
+      .filter(({ session }) => session.status === 'live' || session.status === 'completed')
+      .sort((left, right) => new Date(right.session.startedAt ?? right.session.scheduledAt).getTime() - new Date(left.session.startedAt ?? left.session.scheduledAt).getTime())
+      .slice(0, 8);
+
+    if (!sessions.length) {
+      this.recentRecordingsSignal.set([]);
+      this.messageIndicatorsSignal.set([]);
+      return;
+    }
+
+    forkJoin(
+      sessions.map(({ batch, session }) =>
+        this.classSessions.listRecordings(session.id, batch.id).pipe(
+          map((recordings) => recordings.map((recording) => ({ ...recording, sessionTitle: session.title, batchName: batch.name }))),
+          catchError(() => of([] as TeacherRecordingItem[]))
+        )
+      )
+    ).subscribe((groups) => {
+      this.recentRecordingsSignal.set(
+        groups
+          .flat()
+          .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime())
+          .slice(0, 6)
+      );
+    });
+
+    forkJoin(
+      sessions.map(({ batch, session }) =>
+        this.classSessions.getChatSummary(session.id, { batchId: batch.id }).pipe(
+          map((summary) => this.messageIndicator(batch, session, summary)),
+          catchError(() => of(null))
+        )
+      )
+    ).subscribe((items) => {
+      this.messageIndicatorsSignal.set(
+        items
+          .filter((item): item is TeacherMessageIndicator => Boolean(item && item.unreadCount > 0))
+          .sort((left, right) => new Date(right.lastMessageAt ?? 0).getTime() - new Date(left.lastMessageAt ?? 0).getTime())
+          .slice(0, 6)
+      );
+    });
+  }
+
+  private messageIndicator(batch: TeacherBatch, session: TeacherSession, summary: ChatThreadSummaryResponse): TeacherMessageIndicator {
+    const threadSummaries = [...summary.threads, ...(summary.broadcast ? [summary.broadcast] : [])];
+    const unreadCount = threadSummaries.reduce((total, thread) => total + thread.unreadCount, 0);
+    const latest = threadSummaries
+      .filter((thread) => thread.lastMessageAt)
+      .sort((left, right) => new Date(right.lastMessageAt ?? 0).getTime() - new Date(left.lastMessageAt ?? 0).getTime())[0];
+    return {
+      sessionId: session.id,
+      batchId: batch.id,
+      sessionTitle: session.title,
+      batchName: batch.name,
+      unreadCount,
+      ...(latest?.lastMessagePreview ? { lastMessagePreview: latest.lastMessagePreview } : {}),
+      ...(latest?.lastMessageAt ? { lastMessageAt: latest.lastMessageAt } : {})
+    };
   }
 
   private normalizeBatch(batch: BackendTeacherBatch): TeacherBatch {
@@ -412,6 +569,12 @@ export class TeacherDashboardStore {
 
   private nextSessionTime(batch: TeacherBatch): number {
     return new Date(this.nextSession(batch)?.scheduledAt ?? batch.createdAt).getTime();
+  }
+
+  private isToday(value: string): boolean {
+    const date = new Date(value);
+    const now = new Date();
+    return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
   }
 
   private dayLabel(day: BatchDayOfWeek): string {

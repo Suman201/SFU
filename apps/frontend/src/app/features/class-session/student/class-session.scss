@@ -11,20 +11,29 @@
   --student-pip-width: clamp(180px, 22vw, 280px);
   --student-pip-bottom: var(--student-bottom-rail);
   --student-stage-pad: 14px;
+  --student-stage-pip-reserve: var(--student-stage-pad);
   --student-screen-safe-bottom: calc(var(--student-bottom-rail) + 24px);
+  --student-action-top: calc(24px + var(--student-safe-top));
   position: relative;
   box-sizing: border-box;
   display: grid;
   width: 100%;
   max-width: 100%;
   min-height: 100vh;
+  min-height: 100svh;
   min-height: 100dvh;
   overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--student-base) 18%, transparent), transparent 42%),
     linear-gradient(220deg, color-mix(in srgb, var(--student-action) 14%, transparent), transparent 46%),
     #06110f;
   color: var(--video-text);
+}
+
+.student-session-shell.has-pip {
+  --student-stage-pip-reserve: calc(var(--student-pip-width) + var(--student-edge) + 20px);
 }
 
 .student-session-state {
@@ -86,6 +95,8 @@
   inset: 0;
   display: grid;
   min-width: 0;
+  min-height: 100vh;
+  min-height: 100svh;
   min-height: 100dvh;
 }
 
@@ -94,6 +105,7 @@
   display: grid;
   place-items: center;
   overflow: hidden;
+  touch-action: manipulation;
   background:
     linear-gradient(145deg, rgba(8, 30, 25, 0.96), color-mix(in srgb, var(--student-base) 38%, #06110f) 46%, rgba(5, 12, 10, 0.98)),
     var(--video-bg);
@@ -209,7 +221,7 @@
 }
 
 .video-frame.screen-mode .stage-video {
-  inset: var(--student-stage-pad) var(--student-stage-pad) var(--student-screen-safe-bottom);
+  inset: var(--student-stage-pad) var(--student-stage-pip-reserve) var(--student-screen-safe-bottom) var(--student-stage-pad);
   width: auto;
   height: auto;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -504,7 +516,7 @@
   display: grid;
   grid-template-areas:
     'audio mic camera video refresh'
-    'problem problem problem problem problem';
+    'problem problem problem recovery recovery';
   grid-template-columns: minmax(0, 1fr) 42px 42px minmax(0, 1fr) 36px;
   width: 100%;
   max-width: none;
@@ -521,12 +533,21 @@
   bottom: -18px;
   z-index: 2;
   display: flex;
+  align-items: center;
+  gap: 12px;
   justify-content: flex-end;
   margin: 0 -18px -18px;
   padding: 10px 18px calc(12px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(9, 17, 15, 0.94);
   backdrop-filter: blur(12px);
+}
+
+.prejoin-policy-hint {
+  margin-right: auto;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.78rem;
+  font-weight: 750;
 }
 
 .prejoin-join-button {
@@ -548,7 +569,7 @@
   display: inline-grid;
   grid-template-areas:
     'audio mic camera video refresh hand status'
-    'problem problem problem problem problem hand speak';
+    'problem problem problem warning warning recovery speak';
   grid-template-columns: minmax(132px, 176px) 42px 42px minmax(132px, 176px) 36px minmax(112px, auto) minmax(120px, 220px);
   align-items: center;
   gap: 6px 8px;
@@ -904,6 +925,20 @@
   color: color-mix(in srgb, var(--student-base) 55%, #ffffff);
 }
 
+.student-network-warning {
+  grid-area: warning;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px 1px;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--student-attention) 55%, #ffffff);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .student-media-controls.problem .local-media-status {
   color: color-mix(in srgb, var(--student-action) 42%, #ffffff);
 }
@@ -922,15 +957,99 @@
   white-space: nowrap;
 }
 
+.student-media-recovery-button {
+  display: inline-flex;
+  grid-area: recovery;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--student-action) 48%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--student-action) 20%, rgba(255, 255, 255, 0.08));
+  color: color-mix(in srgb, var(--student-action) 38%, #ffffff);
+  font-size: 11px;
+  font-weight: 950;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.student-media-recovery-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 @keyframes student-device-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
+.student-whiteboard-button {
+  position: fixed;
+  top: var(--student-action-top);
+  right: 224px;
+  z-index: 24;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 13px;
+  border-color: color-mix(in srgb, #458B73 58%, rgba(255, 255, 255, 0.18));
+  background: color-mix(in srgb, #458B73 28%, rgba(10, 16, 14, 0.76));
+  color: var(--video-text);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(14px);
+}
+
+.student-materials-button {
+  position: fixed;
+  top: var(--student-action-top);
+  right: 112px;
+  z-index: 24;
+  display: inline-flex;
+  align-items: center;
+  min-height: 46px;
+  padding: 0 13px;
+  border-color: color-mix(in srgb, #FFD150 54%, rgba(255, 255, 255, 0.18));
+  background: color-mix(in srgb, #FFD150 20%, rgba(10, 16, 14, 0.76));
+  color: var(--video-text);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(14px);
+}
+
+.student-whiteboard-button .board-icon {
+  position: relative;
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+}
+
+.student-whiteboard-button .board-icon::before {
+  position: absolute;
+  inset: 3px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+  content: '';
+}
+
+.student-whiteboard-button .board-icon::after {
+  position: absolute;
+  right: 1px;
+  bottom: 2px;
+  width: 7px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  transform: rotate(-35deg);
+  content: '';
+}
+
 .participants-button {
   position: fixed;
-  top: calc(24px + var(--student-safe-top));
+  top: var(--student-action-top);
   right: 24px;
   z-index: 24;
   display: inline-flex;
@@ -987,6 +1106,154 @@
 .participants-backdrop:hover {
   box-shadow: none;
   transform: none;
+}
+
+.student-whiteboard-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: rgba(0, 0, 0, 0.28);
+  box-shadow: none;
+}
+
+.student-materials-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: rgba(0, 0, 0, 0.28);
+  box-shadow: none;
+}
+
+.student-whiteboard-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 27;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: min(680px, calc(100vw - 32px));
+  height: 100vh;
+  height: 100dvh;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(16, 24, 21, 0.96);
+  box-shadow: -24px 0 70px rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(18px);
+}
+
+.student-whiteboard-drawer header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.student-whiteboard-drawer header p,
+.student-whiteboard-drawer header h1,
+.student-whiteboard-notice {
+  margin: 0;
+}
+
+.student-whiteboard-drawer header p {
+  color: color-mix(in srgb, #458B73 76%, #ffffff);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.student-whiteboard-drawer header h1 {
+  color: var(--video-text);
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.student-whiteboard-drawer header span {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 5px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, #FFD150 42%, rgba(255, 255, 255, 0.12));
+  border-radius: 999px;
+  background: color-mix(in srgb, #FFD150 16%, rgba(255, 255, 255, 0.06));
+  color: color-mix(in srgb, #ffffff 86%, #FFD150);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.student-whiteboard-notice {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #458B73 42%, rgba(255, 255, 255, 0.14));
+  border-radius: 8px;
+  background: color-mix(in srgb, #458B73 18%, rgba(255, 255, 255, 0.06));
+  color: color-mix(in srgb, #ffffff 82%, #458B73);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.student-whiteboard-drawer sfu-whiteboard {
+  min-height: 0;
+}
+
+.student-materials-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 27;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  width: min(430px, calc(100vw - 28px));
+  height: 100vh;
+  height: 100dvh;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(16, 24, 21, 0.94);
+  box-shadow: -24px 0 70px rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(18px);
+}
+
+.student-materials-drawer header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.student-materials-drawer p,
+.student-materials-drawer h1 {
+  margin: 0;
+}
+
+.student-materials-drawer p {
+  color: color-mix(in srgb, #FFD150 70%, #ffffff);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.student-materials-drawer h1 {
+  color: var(--video-text);
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.student-materials-drawer sfu-session-materials {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .participants-sidebar {
@@ -1141,25 +1408,52 @@ sfu-session-chat {
   --chat-reserved-bottom: calc(64px + 18px);
   left: 24px;
   right: auto;
-  bottom: calc(24px + 64px + 18px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(24px + 64px + 18px + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-offset, 0px));
   width: min(380px, calc(100vw - 48px));
+}
+
+@media (max-width: 900px) {
+  .student-materials-drawer,
+  .student-whiteboard-drawer {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    max-width: 100vw;
+    height: min(78dvh, 760px);
+    padding: 16px 16px calc(16px + var(--student-safe-bottom));
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    border-left: 0;
+    border-radius: 18px 18px 0 0;
+  }
+
+  .student-whiteboard-drawer sfu-whiteboard,
+  .student-materials-drawer sfu-session-materials {
+    min-height: 0;
+  }
 }
 
 @media (max-width: 720px) {
   .student-session-shell {
     --student-edge: 16px;
-    --student-control-height: 148px;
+    --student-control-height: 164px;
     --student-bottom-rail: calc(var(--student-edge) + var(--student-safe-bottom) + var(--student-control-height) + 12px);
     --student-pip-width: clamp(132px, 38vw, 176px);
-    --student-pip-bottom: calc(var(--student-bottom-rail) + 30px);
+    --student-pip-bottom: calc(var(--student-bottom-rail) + 18px);
     --student-stage-pad: 10px;
-    --student-screen-safe-bottom: calc(var(--student-bottom-rail) + 14px);
+    --student-stage-pip-reserve: var(--student-stage-pad);
+    --student-screen-safe-bottom: calc(var(--student-bottom-rail) + 18px);
+    --student-action-top: calc(16px + var(--student-safe-top));
+  }
+
+  .student-session-shell.has-pip {
+    --student-stage-pip-reserve: var(--student-stage-pad);
   }
 
   .speaker-badge {
     left: 16px;
     right: 92px;
-    top: 16px;
+    top: var(--student-action-top);
     max-width: none;
     grid-template-columns: 40px minmax(0, 1fr);
     gap: 10px;
@@ -1172,14 +1466,53 @@ sfu-session-chat {
   }
 
   .participants-button {
-    top: 16px;
+    top: var(--student-action-top);
     right: 16px;
+  }
+
+  .student-materials-button {
+    top: calc(68px + var(--student-safe-top));
+    right: 16px;
+    min-height: 40px;
+    padding: 0 11px;
+  }
+
+  .student-whiteboard-button {
+    top: calc(120px + var(--student-safe-top));
+    right: 16px;
+    min-height: 40px;
+    padding: 0 11px;
+  }
+
+  .student-materials-drawer {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: min(72dvh, 640px);
+    padding: 14px 14px calc(14px + var(--student-safe-bottom));
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    border-left: 0;
+    border-radius: 18px 18px 0 0;
+  }
+
+  .student-whiteboard-drawer {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: min(76dvh, 720px);
+    padding: 14px 14px calc(14px + var(--student-safe-bottom));
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    border-left: 0;
+    border-radius: 18px 18px 0 0;
   }
 
   .student-recording-badge {
     top: calc(66px + var(--student-safe-top));
-    right: 16px;
-    max-width: min(230px, calc(100vw - 32px));
+    right: auto;
+    left: 16px;
+    max-width: min(230px, calc(100vw - 108px));
   }
 
   .student-recording-badge.compact {
@@ -1188,7 +1521,10 @@ sfu-session-chat {
 
   .teacher-reconnect-banner {
     top: calc(72px + var(--student-safe-top));
-    width: min(360px, calc(100vw - 32px));
+    right: 76px;
+    left: 16px;
+    width: auto;
+    transform: none;
     padding: 10px 12px;
   }
 
@@ -1204,14 +1540,14 @@ sfu-session-chat {
     right: 16px;
     bottom: var(--student-pip-bottom);
     width: var(--student-pip-width);
-    max-height: min(30dvh, 142px);
+    max-height: min(26dvh, 138px);
   }
 
   sfu-session-chat {
-    --chat-reserved-bottom: calc(148px + 16px);
+    --chat-reserved-bottom: calc(164px + 16px);
     left: 16px;
     right: 16px;
-    bottom: calc(16px + 148px + 16px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(16px + 164px + 16px + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-offset, 0px));
     width: auto;
   }
 
@@ -1223,7 +1559,8 @@ sfu-session-chat {
       'mic camera refresh hand'
       'audio audio video video'
       'status status speak speak'
-      'problem problem problem problem';
+      'warning warning warning warning'
+      'problem problem recovery recovery';
     grid-template-columns: 42px 42px 36px minmax(116px, 1fr);
     max-width: none;
     max-height: min(46dvh, calc(100dvh - 96px - var(--student-safe-top) - var(--student-safe-bottom)));
@@ -1271,7 +1608,7 @@ sfu-session-chat {
       'mic camera refresh'
       'audio audio audio'
       'video video video'
-      'problem problem problem';
+      'problem problem recovery';
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px;
     justify-content: center;
     max-width: none;
@@ -1310,11 +1647,15 @@ sfu-session-chat {
   .device-problem-message {
     white-space: normal;
   }
+
+  .student-media-recovery-button {
+    width: 100%;
+  }
 }
 
 @media (max-width: 560px) {
   .student-session-shell {
-    --student-control-height: 174px;
+    --student-control-height: 190px;
     --student-pip-width: clamp(118px, 40vw, 148px);
     --student-pip-bottom: calc(var(--student-bottom-rail) + 12px);
   }
@@ -1344,6 +1685,11 @@ sfu-session-chat {
     padding: 0 10px;
   }
 
+  .student-materials-button {
+    min-height: 40px;
+    padding: 0 10px;
+  }
+
   .teacher-pip footer {
     min-height: 24px;
     padding: 4px 6px;
@@ -1360,13 +1706,13 @@ sfu-session-chat {
       'audio audio audio audio'
       'video video video video'
       'status status speak speak'
-      'problem problem problem problem';
+      'problem problem recovery recovery';
     grid-template-columns: 42px 42px 36px minmax(0, 1fr);
   }
 
   sfu-session-chat {
-    --chat-reserved-bottom: calc(174px + 12px);
-    bottom: calc(16px + 174px + 12px + env(safe-area-inset-bottom, 0px));
+    --chat-reserved-bottom: calc(190px + 12px);
+    bottom: calc(16px + 190px + 12px + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-offset, 0px));
   }
 
   .participants-sidebar {
@@ -1374,33 +1720,132 @@ sfu-session-chat {
     padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
     border-left: 0;
   }
+
+  .student-materials-drawer {
+    width: 100vw;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    border-left: 0;
+  }
+}
+
+@media (max-width: 430px) {
+  .student-session-shell {
+    --student-edge: 12px;
+    --student-control-height: 176px;
+    --student-pip-width: clamp(104px, 34vw, 132px);
+    --student-pip-bottom: calc(var(--student-bottom-rail) + 10px);
+    --student-stage-pad: 8px;
+  }
+
+  .student-session-shell.has-pip {
+    --student-stage-pip-reserve: var(--student-stage-pad);
+  }
+
+  .speaker-badge {
+    left: 12px;
+    right: 72px;
+    top: var(--student-action-top);
+    min-height: 42px;
+  }
+
+  .participants-button,
+  .student-materials-button,
+  .student-whiteboard-button {
+    right: 12px;
+    min-height: 38px;
+    padding: 0 9px;
+  }
+
+  .student-materials-button {
+    top: calc(58px + var(--student-safe-top));
+  }
+
+  .student-whiteboard-button {
+    top: calc(100px + var(--student-safe-top));
+  }
+
+  .teacher-pip {
+    right: 12px;
+  }
+
+  .student-recording-badge {
+    left: 12px;
+    max-width: min(210px, calc(100vw - 92px));
+  }
+
+  .teacher-reconnect-banner {
+    left: 12px;
+    right: 68px;
+  }
+
+  .student-media-controls {
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    grid-template-columns: 40px 40px 34px minmax(0, 1fr);
+    max-height: min(42dvh, calc(100dvh - 88px - var(--student-safe-top) - var(--student-safe-bottom)));
+    padding-inline: 7px;
+  }
+
+  sfu-session-chat {
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + 176px + 10px + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-offset, 0px));
+  }
 }
 
 @media (max-height: 620px) and (orientation: landscape) {
   .student-session-shell {
-    --student-control-height: 92px;
+    --student-edge: 10px;
+    --student-control-height: 86px;
     --student-bottom-rail: calc(var(--student-edge) + var(--student-safe-bottom) + var(--student-control-height) + 10px);
-    --student-pip-width: clamp(126px, 20vw, 170px);
+    --student-pip-width: clamp(112px, 18vw, 148px);
     --student-pip-bottom: calc(var(--student-bottom-rail) + 8px);
     --student-screen-safe-bottom: calc(var(--student-bottom-rail) + 8px);
+    --student-action-top: calc(10px + var(--student-safe-top));
+  }
+
+  .student-session-shell.has-pip {
+    --student-stage-pip-reserve: var(--student-stage-pad);
   }
 
   .speaker-badge,
-  .participants-button {
+  .participants-button,
+  .student-materials-button,
+  .student-whiteboard-button {
     top: calc(10px + var(--student-safe-top));
+  }
+
+  .student-materials-button {
+    right: 112px;
+  }
+
+  .student-whiteboard-button {
+    right: 224px;
   }
 
   .student-media-controls {
     grid-template-areas:
       'mic camera refresh hand status speak'
-      'audio audio video video problem problem';
-    grid-template-columns: 42px 42px 36px minmax(100px, auto) minmax(120px, 1fr) minmax(120px, 1fr);
-    max-height: min(36dvh, calc(100dvh - 72px - var(--student-safe-top) - var(--student-safe-bottom)));
+      'audio audio video video warning recovery'
+      'problem problem problem problem problem recovery';
+    grid-template-columns: 40px 40px 34px minmax(92px, auto) minmax(96px, 1fr) minmax(96px, 1fr);
+    max-height: min(38dvh, calc(100dvh - 52px - var(--student-safe-top) - var(--student-safe-bottom)));
+    padding: 4px 7px;
   }
 
   sfu-session-chat {
-    --chat-reserved-bottom: calc(92px + 12px);
-    bottom: calc(16px + 92px + 12px + env(safe-area-inset-bottom, 0px));
+    --chat-reserved-bottom: calc(86px + 8px);
+    bottom: calc(10px + 86px + 8px + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-offset, 0px));
+  }
+
+  .teacher-pip {
+    bottom: calc(var(--student-bottom-rail) + 4px);
+    max-height: min(24dvh, 96px);
+  }
+
+  .teacher-pip footer {
+    display: none;
   }
 
   .student-prejoin-modal {
@@ -1424,6 +1869,29 @@ sfu-session-chat {
 
   .student-prejoin-actions {
     grid-column: 1 / -1;
+  }
+}
+
+@media (max-height: 430px) and (orientation: landscape) {
+  .speaker-badge {
+    max-width: min(260px, calc(100vw - 320px));
+    padding-block: 7px;
+  }
+
+  .student-materials-button,
+  .student-whiteboard-button,
+  .participants-button {
+    min-height: 38px;
+    padding-inline: 10px;
+  }
+
+  .video-frame.screen-mode .stage-video {
+    inset: 8px 8px calc(var(--student-screen-safe-bottom) + 2px) 8px;
+  }
+
+  .teacher-reconnect-banner,
+  .student-recording-badge {
+    display: none;
   }
 }
 

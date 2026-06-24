@@ -52,6 +52,8 @@
             type="button"
             class="mode-button"
             [class.active]="chatMode() === 'private'"
+            [disabled]="!privateChatEnabled()"
+            [title]="privateChatEnabled() ? 'Private student chat' : 'Private chat is disabled for this class'"
             (click)="chatMode.set('private')"
           >
             Private
@@ -60,6 +62,8 @@
             type="button"
             class="mode-button broadcast"
             [class.active]="chatMode() === 'broadcast'"
+            [disabled]="!broadcastChatEnabled()"
+            [title]="broadcastChatEnabled() ? 'Broadcast to all students' : 'Broadcast chat is disabled for this class'"
             (click)="selectBroadcast()"
           >
             Broadcast
@@ -79,6 +83,7 @@
                   type="button"
                   class="thread-button"
                   [class.active]="selectedThreadParticipantId() === participant.id"
+                  [disabled]="!privateChatEnabled()"
                   (click)="selectPrivateThread(participant.id)"
                 >
                   <span>{{ participant.initials || participant.name.slice(0, 2) }}</span>
@@ -197,7 +202,7 @@
             class="attach-button"
             title="Attach PDF or image"
             aria-label="Attach PDF or image"
-            [disabled]="!canSend()"
+            [disabled]="!canAttachToComposer()"
             (click)="attachmentInput.click()"
           >
             <span class="attach-icon" aria-hidden="true"></span>
@@ -207,7 +212,7 @@
             class="link-button"
             title="Attach link"
             aria-label="Attach link"
-            [disabled]="!canSend()"
+            [disabled]="!canAttachToComposer()"
             (click)="addLinkAttachment()"
           >
             <span class="link-icon" aria-hidden="true"></span>

@@ -1,0 +1,127 @@
+.back-link {
+  color: var(--product-green);
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.detail-head h1,
+.detail-head p,
+.data-table-toolbar h2,
+.data-table-toolbar p {
+  margin: 0;
+}
+
+.detail-head h1 {
+  color: var(--text);
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.detail-head p,
+.data-table-toolbar p,
+.detail-grid small {
+  color: var(--muted);
+}
+
+.eyebrow {
+  color: var(--product-green);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.detail-grid article {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.detail-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.detail-grid strong,
+.detail-grid small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-panels {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+pre {
+  max-height: 420px;
+  margin: 0;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--field);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.status-success {
+  color: var(--product-green);
+  background: color-mix(in srgb, var(--product-green) 13%, transparent);
+}
+
+.status-failure {
+  color: var(--product-rose);
+  background: color-mix(in srgb, var(--product-rose) 13%, transparent);
+}
+
+.detail-state {
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  background: var(--panel);
+}
+
+.detail-state.error {
+  color: var(--product-rose);
+}
+
+@media (max-width: 1180px) {
+  .detail-grid,
+  .audit-panels {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .detail-head {
+    flex-direction: column;
+  }
+}

@@ -3,12 +3,214 @@
   <section class="dashboard-hero">
     <div>
       <p class="eyebrow">Teacher workspace</p>
-      <h1>Batch dashboard</h1>
+      <h1>Operations dashboard</h1>
     </div>
 
     <div class="hero-actions">
+      <a class="button" routerLink="/teacher/profile">Profile</a>
+      <button class="button" type="button" (click)="refreshDashboard()">Refresh</button>
       <button class="primary" type="button" (click)="openCreateDrawer()">Add new batch</button>
     </div>
+  </section>
+
+  <section class="metric-grid" aria-label="Teacher operations summary">
+    @for (metric of metrics(); track metric.label) {
+      <article
+        class="metric-card"
+        [class.green]="metric.tone === 'green'"
+        [class.rose]="metric.tone === 'rose'"
+        [class.coral]="metric.tone === 'coral'"
+        [class.amber]="metric.tone === 'amber'"
+      >
+        <span>{{ metric.value }}</span>
+        <p>{{ metric.label }}</p>
+      </article>
+    }
+  </section>
+
+  <section class="ops-grid">
+    <article class="panel today-panel">
+      <header>
+        <div>
+          <p class="eyebrow">Today</p>
+          <h2>Teaching schedule</h2>
+        </div>
+        <span class="panel-count">{{ todaySessions().length }} sessions</span>
+      </header>
+
+      @if (todaySessions().length) {
+        <div class="session-timeline">
+          @for (session of todaySessions(); track session.id) {
+            <article class="session-card">
+              <div class="session-time">
+                <strong>{{ formatDateTime(session.scheduledAt) }}</strong>
+                <span>{{ session.durationMinutes }} min</span>
+              </div>
+              <div class="session-copy">
+                <span
+                  class="data-pill"
+                  [class.status-live]="session.status === 'live'"
+                  [class.status-scheduled]="session.status === 'scheduled'"
+                  [class.status-completed]="session.status === 'completed'"
+                  [class.status-cancelled]="session.status === 'cancelled'"
+                >
+                  {{ sessionStatusLabel(session) }}
+                </span>
+                <h3>{{ session.title }}</h3>
+                <p>{{ sessionBatchName(session) }}</p>
+              </div>
+              <div class="session-actions">
+                @if (actionState(session).canStart) {
+                  <button class="table-action primary" type="button" [disabled]="sessionActionDisabled(session)" (click)="startSession(session)">
+                    {{ sessionActionDisabled(session) ? 'Starting...' : 'Start' }}
+                  </button>
+                }
+                @if (actionState(session).canEnter) {
+                  <button class="table-action primary" type="button" [disabled]="sessionActionDisabled(session)" (click)="enterSession(session)">Enter</button>
+                }
+                @if (actionState(session).canEnd) {
+                  <button class="table-action danger" type="button" [disabled]="sessionActionDisabled(session)" (click)="endSession(session)">
+                    {{ sessionActionDisabled(session) ? 'Ending...' : 'End' }}
+                  </button>
+                }
+                @if (actionState(session).completed) {
+                  <a class="table-action" [routerLink]="['/class-session/teacher']" [queryParams]="{ batchId: session.batchId, sessionId: session.id }">Review</a>
+                }
+              </div>
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="empty-state compact">
+          <h3>No classes today</h3>
+          <p>Your next scheduled sessions appear below.</p>
+        </div>
+      }
+    </article>
+
+    <article class="panel upcoming-panel">
+      <header>
+        <div>
+          <p class="eyebrow">Live and upcoming</p>
+          <h2>Next actions</h2>
+        </div>
+      </header>
+
+      <div class="action-list">
+        @for (session of liveSessions(); track session.id) {
+          <article class="action-row live">
+            <div>
+              <span>Live now</span>
+              <strong>{{ session.title }}</strong>
+              <p>{{ sessionBatchName(session) }}</p>
+            </div>
+            <button class="table-action primary" type="button" (click)="enterSession(session)">Enter</button>
+          </article>
+        }
+        @for (session of upcomingSessions().slice(0, 4); track session.id) {
+          <article class="action-row">
+            <div>
+              <span>{{ formatDateTime(session.scheduledAt) }}</span>
+              <strong>{{ session.title }}</strong>
+              <p>{{ sessionBatchName(session) }}</p>
+            </div>
+            <button class="table-action primary" type="button" [disabled]="sessionActionDisabled(session)" (click)="startSession(session)">
+              {{ sessionActionDisabled(session) ? 'Starting...' : 'Start' }}
+            </button>
+          </article>
+        }
+        @if (!liveSessions().length && !upcomingSessions().length) {
+          <div class="empty-state compact">
+            <h3>No upcoming sessions</h3>
+            <p>Create a batch schedule to generate class sessions.</p>
+          </div>
+        }
+      </div>
+    </article>
+  </section>
+
+  <section class="ops-grid secondary">
+    <article class="panel">
+      <header>
+        <div>
+          <p class="eyebrow">Roster health</p>
+          <h2>Batch signals</h2>
+        </div>
+        <span class="panel-count">{{ batchHealth().length }} tracked</span>
+      </header>
+
+      @if (batchHealth().length) {
+        <div class="batch-health-list">
+          @for (item of batchHealth(); track item.batch.id) {
+            <article class="health-row" [class.has-warning]="item.warning">
+              <div>
+                <strong>{{ item.batch.name }}</strong>
+                <span>{{ item.batch.enrolledCount }}/{{ item.batch.capacity }} students</span>
+              </div>
+              <div class="health-meta">
+                <span>{{ item.fillPercent }}% filled</span>
+                <span>{{ item.averageAttendance === null ? 'Attendance N/A' : item.averageAttendance + '% attendance' }}</span>
+                <span>{{ item.nextSession ? formatDateTime(item.nextSession.scheduledAt) : 'No next class' }}</span>
+                @if (item.warning) {
+                  <span class="warning">{{ item.warning }}</span>
+                }
+              </div>
+              <a class="table-action" [routerLink]="['/teacher/dashboard/batches', item.batch.id]">Details</a>
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="empty-state compact">
+          <h3>No batch health yet</h3>
+          <p>Create a batch to begin tracking roster health.</p>
+        </div>
+      }
+    </article>
+
+    <article class="panel">
+      <header>
+        <div>
+          <p class="eyebrow">Recordings and messages</p>
+          <h2>Recent operations</h2>
+        </div>
+      </header>
+
+      <div class="signal-stack">
+        <section>
+          <h3>Recordings</h3>
+          @for (recording of recentRecordings(); track recording.id) {
+            <article class="signal-row">
+              <div>
+                <strong>{{ recording.sessionTitle }}</strong>
+                <span>{{ recording.batchName }} - {{ recording.status }}</span>
+              </div>
+              @if (recording.playbackUrl) {
+                <a class="table-action" [href]="recording.playbackUrl" target="_blank" rel="noopener">Playback</a>
+              } @else {
+                <span class="data-pill">{{ recording.status }}</span>
+              }
+            </article>
+          } @empty {
+            <p class="muted">No recent recordings found for live or completed sessions.</p>
+          }
+        </section>
+
+        <section>
+          <h3>Private chat</h3>
+          @for (message of messageIndicators(); track message.sessionId) {
+            <article class="signal-row">
+              <div>
+                <strong>{{ message.unreadCount }} unread</strong>
+                <span>{{ message.batchName }} - {{ message.lastMessagePreview || message.sessionTitle }}</span>
+              </div>
+              <button class="table-action" type="button" (click)="openMessageIndicator(message)">Open</button>
+            </article>
+          } @empty {
+            <p class="muted">No unread private class messages.</p>
+          }
+        </section>
+      </div>
+    </article>
   </section>
 
   <section class="panel table-panel">

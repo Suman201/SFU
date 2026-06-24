@@ -190,6 +190,53 @@ describe('ClassSessionsService', () => {
     expect(classSessions.findOneAndUpdate.mock.calls[0]?.[2]).toEqual({ new: true });
   });
 
+  it('snapshots attendance rows when a live session is manually ended', async () => {
+    const { service, classSessions, attendanceSnapshots, rooms } = createService();
+    const startedAt = new Date('2026-06-22T10:01:00.000Z');
+    const completedAt = new Date('2026-06-22T11:01:00.000Z');
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'live',
+        roomId: 'room-1',
+        startedAt
+      })
+    );
+    classSessions.findOneAndUpdate.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        startedAt,
+        completedAt
+      })
+    );
+    rooms.classSessionAttendanceRows.mockResolvedValue(attendanceRows());
+
+    await service.endSession(sessionId, teacher);
+
+    expect(attendanceSnapshots.exists).toHaveBeenCalledWith({ sessionId });
+    expect(rooms.classSessionAttendanceRows).toHaveBeenCalledWith({
+      sessionId,
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      completedAt
+    });
+    const operations = attendanceSnapshots.bulkWrite.mock.calls[0]?.[0];
+    expect(operations?.length).toBe(3);
+    expect(operations[0]?.updateOne?.filter).toEqual({ sessionId, studentId: 'student-1' });
+    const firstSnapshot = operations[0]?.updateOne?.update?.$setOnInsert;
+    expect(firstSnapshot?.sessionId).toBe(sessionId);
+    expect(firstSnapshot?.batchId).toBe('batch-1');
+    expect(firstSnapshot?.roomId).toBe('room-1');
+    expect(firstSnapshot?.studentId).toBe('student-1');
+    expect(firstSnapshot?.studentName).toBe('Ava Present');
+    expect(firstSnapshot?.studentEmail).toBe('ava@example.test');
+    expect(firstSnapshot?.rosterSource).toBe('roster');
+    expect(firstSnapshot?.totalDurationSeconds).toBe(1800);
+    expect(firstSnapshot?.reconnectCount).toBe(1);
+    expect(firstSnapshot?.status).toBe('present');
+    expect(firstSnapshot?.snapshotSource).toBe('session_end');
+  });
+
   it('does not close the room when the DB completion update fails', async () => {
     const { service, classSessions, rooms } = createService();
     const live = persistedSession({
@@ -212,7 +259,7 @@ describe('ClassSessionsService', () => {
     expect(rooms.emitClassSessionLifecycleEvent).not.toHaveBeenCalled();
   });
 
-  it('keeps the session completed and emits ended when media room close fails after DB completion', async () => {
+  it('returns completed and emits ended when media room close fails after DB completion', async () => {
     const { service, classSessions, rooms } = createService();
     const startedAt = new Date('2026-06-22T10:01:00.000Z');
     const completedAt = new Date('2026-06-22T11:01:00.000Z');
@@ -233,15 +280,9 @@ describe('ClassSessionsService', () => {
     );
     rooms.closeClassSessionRoom.mockRejectedValue(new Error('media close failed'));
 
-    let thrown: unknown;
-    try {
-      await service.endSession(sessionId, teacher);
-    } catch (error) {
-      thrown = error;
-    }
+    const payload = await service.endSession(sessionId, teacher);
 
-    expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as Error).message).toBe('media close failed');
+    expect(payload.status).toBe('completed');
     expect(classSessions.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: sessionId, status: 'live' },
       {
@@ -277,8 +318,8 @@ describe('ClassSessionsService', () => {
     expect(updateOrder as number).toBeLessThan(emitOrder as number);
   });
 
-  it('returns completed payload idempotently when ending an already completed session', async () => {
-    const { service, classSessions, rooms } = createService();
+  it('returns completed payload and retries room closure idempotently when ending an already completed session', async () => {
+    const { service, classSessions, attendanceSnapshots, rooms } = createService();
     const startedAt = new Date('2026-06-22T10:01:00.000Z');
     const completedAt = new Date('2026-06-22T11:01:00.000Z');
     classSessions.findById.mockResolvedValue(
@@ -295,7 +336,12 @@ describe('ClassSessionsService', () => {
     expect(payload.status).toBe('completed');
     expect(payload.completedAt).toBe(completedAt.toISOString());
     expect(classSessions.findOneAndUpdate).not.toHaveBeenCalled();
-    expect(rooms.closeClassSessionRoom).not.toHaveBeenCalled();
+    expect(attendanceSnapshots.bulkWrite).not.toHaveBeenCalled();
+    expect(rooms.closeClassSessionRoom).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      actorUserId: 'teacher-1',
+      actorLabel: 'teacher@example.test'
+    });
     expect(rooms.emitClassSessionLifecycleEvent).not.toHaveBeenCalled();
   });
 
@@ -619,6 +665,130 @@ describe('ClassSessionsService', () => {
     expect(rooms.markClassSessionChatRead).not.toHaveBeenCalled();
   });
 
+  it('attaches link materials for the batch teacher', async () => {
+    const { service, classSessions, materials } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'scheduled',
+        roomId: `classroom:${sessionId}`
+      })
+    );
+
+    const material = await service.attachMaterialLink(sessionId, undefined, teacher, {
+      title: 'Lesson deck',
+      url: 'https://example.test/deck',
+      description: 'Intro slides'
+    });
+
+    expect(material.title).toBe('Lesson deck');
+    expect(material.source).toBe('link');
+    expect(material.url).toBe('https://example.test/deck');
+    expect(material.shared).toBe(false);
+    const createPayload = materials.create.mock.calls[0]?.[0];
+    expect(createPayload).toEqual({
+      materialId: createPayload.materialId,
+      sessionId,
+      batchId: 'batch-1',
+      roomId: `classroom:${sessionId}`,
+      title: 'Lesson deck',
+      description: 'Intro slides',
+      kind: 'link',
+      source: 'link',
+      url: 'https://example.test/deck',
+      uploadedByUserId: 'teacher-1',
+      shared: false
+    });
+  });
+
+  it('blocks non-enrolled students from listing materials', async () => {
+    const { service, classSessions, studentEnrollments, materials } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        startedAt: new Date('2026-06-22T10:00:00.000Z'),
+        completedAt: new Date('2026-06-22T11:00:00.000Z')
+      })
+    );
+    studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(false);
+
+    let thrown: unknown;
+    try {
+      await service.listMaterials(sessionId, undefined, student());
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(materials.find).not.toHaveBeenCalled();
+  });
+
+  it('shares one live material and emits a targeted session material event', async () => {
+    const { service, classSessions, materials, rooms } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'live',
+        roomId: 'room-1',
+        startedAt: new Date('2026-06-22T10:00:00.000Z')
+      })
+    );
+    materials.findOneAndUpdate.mockResolvedValue(
+      materialDoc({
+        materialId: 'material-1',
+        roomId: 'room-1',
+        shared: true,
+        sharedAt: new Date('2026-06-22T10:30:00.000Z'),
+        sharedByUserId: 'teacher-1'
+      })
+    );
+
+    const material = await service.shareMaterial(sessionId, 'material-1', undefined, teacher);
+
+    expect(material.shared).toBe(true);
+    expect(materials.updateMany).toHaveBeenCalledWith(
+      {
+        sessionId,
+        batchId: 'batch-1',
+        shared: true,
+        deletedAt: { $exists: false },
+        materialId: { $ne: 'material-1' }
+      },
+      {
+        $set: { shared: false },
+        $unset: { sharedAt: '', sharedByUserId: '' }
+      }
+    );
+    const [eventName, eventPayload] = rooms.emitClassSessionMaterialEvent.mock.calls[0] ?? [];
+    expect(eventName).toBe('material:shared');
+    expect(eventPayload.sessionId).toBe(sessionId);
+    expect(eventPayload.batchId).toBe('batch-1');
+    expect(eventPayload.roomId).toBe('room-1');
+    expect(eventPayload.materialId).toBe('material-1');
+    expect(eventPayload.shared).toBe(true);
+    expect(eventPayload.actorUserId).toBe('teacher-1');
+  });
+
+  it('rejects material sharing before the class is live', async () => {
+    const { service, classSessions, materials, rooms } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'scheduled',
+        roomId: `classroom:${sessionId}`
+      })
+    );
+
+    let thrown: unknown;
+    try {
+      await service.shareMaterial(sessionId, 'material-1', undefined, teacher);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ConflictException);
+    expect(materials.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(rooms.emitClassSessionMaterialEvent).not.toHaveBeenCalled();
+  });
+
   it('exports attendance for the batch teacher only through the class-session context', async () => {
     const { service, classSessions, rooms } = createService();
     const completedAt = new Date('2026-06-22T11:00:00.000Z');
@@ -639,7 +809,12 @@ describe('ClassSessionsService', () => {
       sessionId,
       batchId: 'batch-1',
       roomId: 'room-1',
-      completedAt
+      completedAt,
+      sessionDurationMinutes: 60,
+      presentThresholdMinutes: 10,
+      presentThresholdPercentage: 50,
+      countReconnects: true,
+      anonymizeStudentExports: false
     });
   });
 
@@ -765,6 +940,66 @@ describe('ClassSessionsService', () => {
     });
   });
 
+  it('prefers persisted attendance snapshots over inferred room attendance for completed analytics', async () => {
+    const { service, classSessions, attendanceSnapshots, rooms } = createService();
+    const completed = persistedSession({
+      status: 'completed',
+      roomId: 'room-1',
+      startedAt: new Date('2026-06-22T10:00:00.000Z'),
+      completedAt: new Date('2026-06-22T11:00:00.000Z')
+    });
+    classSessions.find.mockReturnValueOnce(sessionFindResult([completed]));
+    attendanceSnapshots.find.mockReturnValueOnce({
+      sort: jest.fn(() => execResult(attendanceSnapshotDocs()))
+    });
+    rooms.classSessionAttendanceRows.mockResolvedValue([
+      ...attendanceRows(),
+      {
+        studentId: 'late-enrollment',
+        displayName: 'Late Enrollment',
+        email: 'late@example.test',
+        totalDurationSeconds: 0,
+        reconnectCount: 0,
+        status: 'absent'
+      }
+    ]);
+
+    const summary = await service.getAdminAttendanceSummary({ dateFrom: '2026-06-01', dateTo: '2026-06-30' }, admin());
+
+    expect(summary.totalEnrolledStudents).toBe(2);
+    expect(summary.averageAttendanceRate).toBe(50);
+    expect(rooms.classSessionAttendanceRows).not.toHaveBeenCalled();
+  });
+
+  it('returns per-session student attendance rows with source metadata', async () => {
+    const { service, classSessions, attendanceSnapshots } = createService();
+    const completed = persistedSession({
+      status: 'completed',
+      roomId: 'room-1',
+      startedAt: new Date('2026-06-22T10:00:00.000Z'),
+      completedAt: new Date('2026-06-22T11:00:00.000Z')
+    });
+    classSessions.findById.mockResolvedValue(completed);
+    classSessions.find.mockReturnValueOnce(sessionFindResult([completed]));
+    attendanceSnapshots.find
+      .mockReturnValueOnce({
+        sort: jest.fn(() => execResult(attendanceSnapshotDocs()))
+      })
+      .mockReturnValueOnce({
+        sort: jest.fn(() => execResult(attendanceSnapshotDocs()))
+      });
+
+    const response = await service.listAdminAttendanceSessionStudents(sessionId, admin());
+
+    expect(response.source).toBe('snapshot');
+    expect(response.total).toBe(2);
+    expect(response.session.attendanceSource).toBe('snapshot');
+    expect(response.items[0]?.studentId).toBe('student-1');
+    expect(response.items[0]?.attendanceSource).toBe('snapshot');
+    expect(response.items[0]?.rosterSource).toBe('roster');
+    expect(response.items[0]?.firstJoinAt).toBe('2026-06-22T10:12:00.000Z');
+  });
+
   it('lists admin student attendance rows with per-student rates', async () => {
     const { service, classSessions, rooms } = createService();
     const completedAt = new Date('2026-06-22T11:00:00.000Z');
@@ -853,6 +1088,18 @@ describe('ClassSessionsService', () => {
       find: jest.Mock;
       countDocuments: jest.Mock;
     };
+    attendanceSnapshots: {
+      exists: jest.Mock;
+      find: jest.Mock;
+      bulkWrite: jest.Mock;
+    };
+    materials: {
+      find: jest.Mock;
+      create: jest.Mock;
+      findOne: jest.Mock;
+      findOneAndUpdate: jest.Mock;
+      updateMany: jest.Mock;
+    };
     studentEnrollments: {
       isStudentEnrolledInBatch: jest.Mock;
       listBatchRoster: jest.Mock;
@@ -862,6 +1109,7 @@ describe('ClassSessionsService', () => {
       closeClassSessionRoom: jest.Mock;
       assertClassSessionRoomJoinAllowed: jest.Mock;
       emitClassSessionLifecycleEvent: jest.Mock;
+      emitClassSessionMaterialEvent: jest.Mock;
       getClassSessionChatHistory: jest.Mock;
       getClassSessionChatSummary: jest.Mock;
       markClassSessionChatRead: jest.Mock;
@@ -902,6 +1150,27 @@ describe('ClassSessionsService', () => {
       })),
       countDocuments: jest.fn(() => execResult(0))
     };
+    const attendanceSnapshots = {
+      exists: jest.fn(async () => null),
+      find: jest.fn(() => ({
+        sort: jest.fn(() => execResult([]))
+      })),
+      bulkWrite: jest.fn(async () => ({ insertedCount: 0 }))
+    };
+    const materials = {
+      find: jest.fn(() => ({
+        sort: jest.fn(() => execResult([]))
+      })),
+      create: jest.fn(async (payload: Record<string, unknown>) => ({
+        id: payload.materialId,
+        ...payload,
+        createdAt: new Date('2026-06-22T10:00:00.000Z'),
+        updatedAt: new Date('2026-06-22T10:00:00.000Z')
+      })),
+      findOne: jest.fn(async () => null),
+      findOneAndUpdate: jest.fn(async () => null),
+      updateMany: jest.fn(async () => ({ modifiedCount: 0 }))
+    };
     const studentEnrollments = {
       isStudentEnrolledInBatch: jest.fn(async () => true),
       listBatchRoster: jest.fn(async () => [])
@@ -911,6 +1180,7 @@ describe('ClassSessionsService', () => {
       closeClassSessionRoom: jest.fn(async () => true),
       assertClassSessionRoomJoinAllowed: jest.fn(async () => undefined),
       emitClassSessionLifecycleEvent: jest.fn(),
+      emitClassSessionMaterialEvent: jest.fn(),
       getClassSessionChatHistory: jest.fn(),
       getClassSessionChatSummary: jest.fn(),
       markClassSessionChatRead: jest.fn(),
@@ -932,6 +1202,61 @@ describe('ClassSessionsService', () => {
       listClassSessionRecordings: jest.fn(async () => []),
       readClassSessionRecordingDownload: jest.fn()
     };
+    const liveSettings = {
+      media: {
+        studentsJoinMuted: true,
+        studentsJoinCameraOff: true,
+        requirePrejoinDeviceCheck: true,
+        allowStudentsToUnmuteSelf: true,
+        allowStudentsToStartCameraSelf: true
+      },
+      chat: {
+        privateTeacherStudentChatEnabled: true,
+        teacherBroadcastEnabled: true,
+        chatAttachmentsEnabled: true,
+        messageLengthLimit: 2000
+      },
+      whiteboard: {
+        whiteboardSharingEnabled: true,
+        studentWhiteboardControlEnabled: true,
+        maxActiveWhiteboardControllers: 1
+      },
+      speaking: {
+        handRaiseEnabled: true,
+        maxActiveSpeakers: 3,
+        autoLowerHandAfterSpeakPermissionEnds: true
+      },
+      recording: {
+        recordingEnabled: true,
+        autoRecordOnStart: false,
+        teacherManualRecordingControlEnabled: true,
+        visibility: 'enrolled_students'
+      },
+      attendance: {
+        presentThresholdMinutes: 10,
+        presentThresholdPercentage: 50,
+        lateJoinThresholdMinutes: 10,
+        countReconnects: true,
+        teacherAttendanceExportEnabled: true
+      },
+      access: {
+        waitingRoomEnabled: false,
+        lockClassAfterTeacherStarts: false,
+        allowEnrolledStudentReconnectAfterLock: true,
+        teacherReconnectGraceMessagingEnabled: true
+      }
+    };
+    const profiles = {
+      resolveBatchLiveSettings: jest.fn(async () => ({
+        batchId: 'batch-1',
+        teacherId: 'teacher-1',
+        systemDefaults: liveSettings,
+        teacherDefaults: liveSettings,
+        overrides: {},
+        resolved: liveSettings
+      })),
+      resolveLiveSettings: jest.fn((settings) => settings ?? liveSettings)
+    };
     const users = {
       find: jest.fn(() =>
         execResult([
@@ -943,18 +1268,27 @@ describe('ClassSessionsService', () => {
         ])
       )
     };
+    const config = {
+      get: jest.fn((key: string, fallback?: unknown) => fallback)
+    };
 
     return {
       service: new ClassSessionsService(
         batches as never,
         batchSchedules as never,
         classSessions as never,
+        attendanceSnapshots as never,
+        materials as never,
         studentEnrollments as never,
         rooms as never,
         recordings as never,
+        profiles as never,
+        config as never,
         users as never
       ),
       classSessions,
+      attendanceSnapshots,
+      materials,
       studentEnrollments,
       rooms,
       recordings
@@ -978,6 +1312,25 @@ describe('ClassSessionsService', () => {
       durationMinutes: 60,
       chatChannelId: `classroom:${sessionId}:chat`,
       whiteboardChannelId: `classroom:${sessionId}:whiteboard`,
+      ...overrides
+    };
+  }
+
+  function materialDoc(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+    return {
+      id: 'material-1',
+      materialId: 'material-1',
+      sessionId,
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      title: 'Lesson deck',
+      kind: 'link',
+      source: 'link',
+      url: 'https://example.test/deck',
+      uploadedByUserId: 'teacher-1',
+      shared: false,
+      createdAt: new Date('2026-06-22T10:00:00.000Z'),
+      updatedAt: new Date('2026-06-22T10:00:00.000Z'),
       ...overrides
     };
   }
@@ -1017,6 +1370,44 @@ describe('ClassSessionsService', () => {
         studentId: 'student-3',
         displayName: 'Cora Absent',
         email: 'cora@example.test',
+        totalDurationSeconds: 0,
+        reconnectCount: 0,
+        status: 'absent'
+      }
+    ];
+  }
+
+  function attendanceSnapshotDocs(): Array<{
+    studentId: string;
+    studentName: string;
+    studentEmail?: string;
+    enrolledAt?: Date;
+    rosterSource: 'roster' | 'participant';
+    firstJoinAt?: Date;
+    lastLeaveAt?: Date;
+    totalDurationSeconds: number;
+    reconnectCount: number;
+    status: 'present' | 'absent';
+  }> {
+    return [
+      {
+        studentId: 'student-1',
+        studentName: 'Ava Present',
+        studentEmail: 'ava@example.test',
+        enrolledAt: new Date('2026-06-20T10:00:00.000Z'),
+        rosterSource: 'roster',
+        firstJoinAt: new Date('2026-06-22T10:12:00.000Z'),
+        lastLeaveAt: new Date('2026-06-22T10:45:00.000Z'),
+        totalDurationSeconds: 1800,
+        reconnectCount: 1,
+        status: 'present'
+      },
+      {
+        studentId: 'student-2',
+        studentName: 'Ben Absent',
+        studentEmail: 'ben@example.test',
+        enrolledAt: new Date('2026-06-20T10:00:00.000Z'),
+        rosterSource: 'roster',
         totalDurationSeconds: 0,
         reconnectCount: 0,
         status: 'absent'

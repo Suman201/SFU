@@ -39,6 +39,12 @@ export const routes: Routes = [
     loadComponent: () => import('./features/profile/teacher-profile/teacher-profile').then((route) => route.TeacherProfile)
   },
   {
+    path: 'teacher/live-settings',
+    canActivate: [roleGuard],
+    data: { role: 'teacher' },
+    loadComponent: () => import('./features/profile/teacher-profile/teacher-profile').then((route) => route.TeacherProfile)
+  },
+  {
     path: 'teachers/:teacherId',
     loadComponent: () =>
       import('./features/profile/public-teacher-profile/public-teacher-profile').then((route) => route.PublicTeacherProfile)

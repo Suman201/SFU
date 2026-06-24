@@ -6,6 +6,7 @@ export interface RecordingTrackManifestEntry {
   producerId: string;
   participantId: string;
   kind: string;
+  source?: string;
   status: string;
   startedAt?: string;
   closedAt?: string;

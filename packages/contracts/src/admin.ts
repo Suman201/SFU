@@ -445,6 +445,8 @@ export interface AdminAttendanceQuery {
   limit?: number;
 }
 
+export type AdminAttendanceSource = 'snapshot' | 'inferred';
+
 export interface AdminAttendanceSummary {
   totalSessions: number;
   completedSessions: number;
@@ -455,6 +457,11 @@ export interface AdminAttendanceSummary {
   lateJoinCount: number;
   earlyLeaveCount: number;
   reconnectCount: number;
+}
+
+export interface AdminAttendanceSourceSummary {
+  snapshotSessions: number;
+  inferredSessions: number;
 }
 
 export interface AdminAttendanceSessionRow {
@@ -478,6 +485,7 @@ export interface AdminAttendanceSessionRow {
   reconnects: number;
   lateJoins: number;
   earlyLeaves: number;
+  attendanceSource: AdminAttendanceSource;
 }
 
 export interface AdminAttendanceStudentRow {
@@ -495,6 +503,32 @@ export interface AdminAttendanceStudentRow {
   averageDurationSeconds: number;
   reconnects: number;
   lastAttendedAt?: string;
+  snapshottedSessions: number;
+  inferredSessions: number;
+}
+
+export interface AdminAttendanceSessionStudentRow {
+  sessionId: string;
+  batchId: string;
+  roomId?: string;
+  studentId: string;
+  studentName: string;
+  studentEmail?: string;
+  enrolledAt?: string;
+  rosterSource: 'roster' | 'participant';
+  firstJoinAt?: string;
+  lastLeaveAt?: string;
+  totalDurationSeconds: number;
+  reconnectCount: number;
+  status: 'present' | 'absent';
+  attendanceSource: AdminAttendanceSource;
+}
+
+export interface AdminAttendanceSessionStudentsResponse {
+  session: AdminAttendanceSessionRow;
+  items: AdminAttendanceSessionStudentRow[];
+  source: AdminAttendanceSource;
+  total: number;
 }
 
 export interface AdminAttendanceTrendPoint {
@@ -525,4 +559,94 @@ export interface AdminAttendanceStudentsResponse {
 export interface AdminAttendanceTrendsResponse {
   items: AdminAttendanceTrendPoint[];
   summary: AdminAttendanceSummary;
+}
+
+export type AdminAuditLogStatus = 'success' | 'failure';
+
+export interface AdminAuditLogQuery {
+  actorId?: string;
+  action?: string;
+  resourceType?: string;
+  resourceId?: string;
+  status?: AdminAuditLogStatus | 'all';
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface AdminAuditLogListItem {
+  id: string;
+  createdAt: string;
+  actorId?: string;
+  actorEmail?: string;
+  actorName?: string;
+  actorRoles: string[];
+  action: string;
+  resourceType?: string;
+  resourceId?: string;
+  resourceLabel?: string;
+  targetUserId?: string;
+  status: AdminAuditLogStatus;
+  ipAddress?: string;
+  userAgent?: string;
+  requestId?: string;
+  summary?: string;
+}
+
+export interface AdminAuditLogDetail extends AdminAuditLogListItem {
+  metadata?: Record<string, unknown>;
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+}
+
+export interface AdminAuditLogListResponse {
+  items: AdminAuditLogListItem[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+export type AdminDashboardIssueSeverity = 'critical' | 'warning' | 'info';
+
+export interface AdminDashboardIssue {
+  severity: AdminDashboardIssueSeverity;
+  label: string;
+  count: number;
+  link: string;
+}
+
+export interface AdminDashboardLiveSession {
+  sessionId: string;
+  title: string;
+  batchId: string;
+  batchName?: string;
+  teacherId: string;
+  teacherName?: string;
+  startedAt?: string;
+  roomId?: string;
+}
+
+export interface AdminDashboardSummary {
+  generatedAt: string;
+  todayStart: string;
+  todayEnd: string;
+  liveSessions: number;
+  scheduledToday: number;
+  completedToday: number;
+  todayAttendanceRate: number;
+  activeRecordings: number;
+  failedRecordings: number;
+  newEnrollmentsToday: number;
+  pendingEnrollments: number;
+  activeEnrollments: number;
+  activeUsers: number;
+  teachers: number;
+  students: number;
+  admins: number;
+  activeCourses: number;
+  activeBatches: number;
+  issues: AdminDashboardIssue[];
+  liveSessionItems: AdminDashboardLiveSession[];
 }

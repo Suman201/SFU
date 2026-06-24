@@ -263,3 +263,38 @@
     flex-wrap: wrap;
   }
 }
+
+@media (max-width: 430px) {
+  .student-dashboard-shell {
+    padding: 18px 12px calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .dashboard-heading h1 {
+    font-size: 29px;
+  }
+
+  .enrolled-panel {
+    padding: 14px;
+  }
+
+  .batch-main {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .batch-main > span {
+    width: 42px;
+    height: 42px;
+  }
+
+  .batch-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .batch-actions .button,
+  .batch-actions button,
+  .dashboard-heading a,
+  .empty-state a {
+    width: 100%;
+  }
+}

@@ -75,6 +75,579 @@
       </div>
     </section>
 
+    <section class="panel live-settings-panel">
+      <header>
+        <div>
+          <p class="eyebrow">Live settings</p>
+          <h2>Batch overrides</h2>
+        </div>
+        <div class="live-settings-actions">
+          <a class="button" routerLink="/teacher/live-settings">Global defaults</a>
+          @if (hasLiveSettingsOverrides()) {
+            <span class="progress-label">Custom overrides active</span>
+          } @else {
+            <span class="progress-label">Inheriting teacher defaults</span>
+          }
+          <button class="button" type="button" [disabled]="liveSettingsResetting() || liveSettingsLoading()" (click)="resetBatchLiveSettings()">
+            {{ liveSettingsResetting() ? 'Resetting...' : 'Reset' }}
+          </button>
+          <button class="button primary" type="button" [disabled]="liveSettingsSaving() || liveSettingsLoading()" (click)="saveBatchLiveSettings()">
+            {{ liveSettingsSaving() ? 'Saving...' : 'Save overrides' }}
+          </button>
+        </div>
+      </header>
+
+      @if (liveSettingsLoading()) {
+        <div class="empty-state compact">
+          <h3>Loading live settings</h3>
+          <p>Resolving teacher defaults and batch overrides.</p>
+        </div>
+      } @else {
+        <div class="live-settings-grid">
+          <div class="settings-group">
+            <strong>Student media</strong>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().studentsJoinMuted" (change)="updateLiveSettingsForm('studentsJoinMuted', checkedValue($event))" />
+              <span>Students join muted</span>
+              <small [class.override]="liveSettingOverridden('studentsJoinMuted')">{{ liveSettingInheritanceLabel('studentsJoinMuted') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('studentsJoinMuted')" (click)="resetLiveSettingField('studentsJoinMuted', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().studentsJoinCameraOff" (change)="updateLiveSettingsForm('studentsJoinCameraOff', checkedValue($event))" />
+              <span>Students join camera off</span>
+              <small [class.override]="liveSettingOverridden('studentsJoinCameraOff')">{{ liveSettingInheritanceLabel('studentsJoinCameraOff') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('studentsJoinCameraOff')" (click)="resetLiveSettingField('studentsJoinCameraOff', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().requirePrejoinDeviceCheck" (change)="updateLiveSettingsForm('requirePrejoinDeviceCheck', checkedValue($event))" />
+              <span>Require prejoin check</span>
+              <small [class.override]="liveSettingOverridden('requirePrejoinDeviceCheck')">{{ liveSettingInheritanceLabel('requirePrejoinDeviceCheck') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('requirePrejoinDeviceCheck')" (click)="resetLiveSettingField('requirePrejoinDeviceCheck', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().allowStudentsToUnmuteSelf" (change)="updateLiveSettingsForm('allowStudentsToUnmuteSelf', checkedValue($event))" />
+              <span>Allow self unmute</span>
+              <small [class.override]="liveSettingOverridden('allowStudentsToUnmuteSelf')">{{ liveSettingInheritanceLabel('allowStudentsToUnmuteSelf') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowStudentsToUnmuteSelf')" (click)="resetLiveSettingField('allowStudentsToUnmuteSelf', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().allowStudentsToStartCameraSelf" (change)="updateLiveSettingsForm('allowStudentsToStartCameraSelf', checkedValue($event))" />
+              <span>Allow self camera</span>
+              <small [class.override]="liveSettingOverridden('allowStudentsToStartCameraSelf')">{{ liveSettingInheritanceLabel('allowStudentsToStartCameraSelf') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowStudentsToStartCameraSelf')" (click)="resetLiveSettingField('allowStudentsToStartCameraSelf', $event)">Inherit</button>
+            </label>
+          </div>
+
+          <div class="settings-group">
+            <strong>Chat</strong>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().privateTeacherStudentChatEnabled" (change)="updateLiveSettingsForm('privateTeacherStudentChatEnabled', checkedValue($event))" />
+              <span>Private chat</span>
+              <small [class.override]="liveSettingOverridden('privateTeacherStudentChatEnabled')">{{ liveSettingInheritanceLabel('privateTeacherStudentChatEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('privateTeacherStudentChatEnabled')" (click)="resetLiveSettingField('privateTeacherStudentChatEnabled', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().teacherBroadcastEnabled" (change)="updateLiveSettingsForm('teacherBroadcastEnabled', checkedValue($event))" />
+              <span>Teacher broadcast</span>
+              <small [class.override]="liveSettingOverridden('teacherBroadcastEnabled')">{{ liveSettingInheritanceLabel('teacherBroadcastEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('teacherBroadcastEnabled')" (click)="resetLiveSettingField('teacherBroadcastEnabled', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().chatAttachmentsEnabled" (change)="updateLiveSettingsForm('chatAttachmentsEnabled', checkedValue($event))" />
+              <span>Attachments</span>
+              <small [class.override]="liveSettingOverridden('chatAttachmentsEnabled')">{{ liveSettingInheritanceLabel('chatAttachmentsEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('chatAttachmentsEnabled')" (click)="resetLiveSettingField('chatAttachmentsEnabled', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Message limit</span>
+              <input type="number" min="100" max="5000" [value]="liveSettingsForm().messageLengthLimit" (input)="updateLiveSettingsForm('messageLengthLimit', numberValue($event, liveSettingsForm().messageLengthLimit))" />
+              <small [class.override]="liveSettingOverridden('messageLengthLimit')">{{ liveSettingInheritanceLabel('messageLengthLimit') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('messageLengthLimit')" (click)="resetLiveSettingField('messageLengthLimit', $event)">Inherit</button>
+            </label>
+          </div>
+
+          <div class="settings-group">
+            <strong>Whiteboard and speaking</strong>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().whiteboardSharingEnabled" (change)="updateLiveSettingsForm('whiteboardSharingEnabled', checkedValue($event))" />
+              <span>Whiteboard sharing</span>
+              <small [class.override]="liveSettingOverridden('whiteboardSharingEnabled')">{{ liveSettingInheritanceLabel('whiteboardSharingEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('whiteboardSharingEnabled')" (click)="resetLiveSettingField('whiteboardSharingEnabled', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().studentWhiteboardControlEnabled" (change)="updateLiveSettingsForm('studentWhiteboardControlEnabled', checkedValue($event))" />
+              <span>Student control</span>
+              <small [class.override]="liveSettingOverridden('studentWhiteboardControlEnabled')">{{ liveSettingInheritanceLabel('studentWhiteboardControlEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('studentWhiteboardControlEnabled')" (click)="resetLiveSettingField('studentWhiteboardControlEnabled', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Max board controllers</span>
+              <input type="number" min="1" max="5" [value]="liveSettingsForm().maxActiveWhiteboardControllers" (input)="updateLiveSettingsForm('maxActiveWhiteboardControllers', numberValue($event, liveSettingsForm().maxActiveWhiteboardControllers))" />
+              <small [class.override]="liveSettingOverridden('maxActiveWhiteboardControllers')">{{ liveSettingInheritanceLabel('maxActiveWhiteboardControllers') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('maxActiveWhiteboardControllers')" (click)="resetLiveSettingField('maxActiveWhiteboardControllers', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().handRaiseEnabled" (change)="updateLiveSettingsForm('handRaiseEnabled', checkedValue($event))" />
+              <span>Hand raise</span>
+              <small [class.override]="liveSettingOverridden('handRaiseEnabled')">{{ liveSettingInheritanceLabel('handRaiseEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('handRaiseEnabled')" (click)="resetLiveSettingField('handRaiseEnabled', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Max speakers</span>
+              <input type="number" min="0" max="12" [value]="liveSettingsForm().maxActiveSpeakers" (input)="updateLiveSettingsForm('maxActiveSpeakers', numberValue($event, liveSettingsForm().maxActiveSpeakers))" />
+              <small [class.override]="liveSettingOverridden('maxActiveSpeakers')">{{ liveSettingInheritanceLabel('maxActiveSpeakers') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('maxActiveSpeakers')" (click)="resetLiveSettingField('maxActiveSpeakers', $event)">Inherit</button>
+            </label>
+          </div>
+
+          <div class="settings-group">
+            <strong>Recording and attendance</strong>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().recordingEnabled" (change)="updateLiveSettingsForm('recordingEnabled', checkedValue($event))" />
+              <span>Recording enabled</span>
+              <small [class.override]="liveSettingOverridden('recordingEnabled')">{{ liveSettingInheritanceLabel('recordingEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('recordingEnabled')" (click)="resetLiveSettingField('recordingEnabled', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().autoRecordOnStart" (change)="updateLiveSettingsForm('autoRecordOnStart', checkedValue($event))" />
+              <span>Auto-record</span>
+              <small [class.override]="liveSettingOverridden('autoRecordOnStart')">{{ liveSettingInheritanceLabel('autoRecordOnStart') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('autoRecordOnStart')" (click)="resetLiveSettingField('autoRecordOnStart', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().teacherManualRecordingControlEnabled" (change)="updateLiveSettingsForm('teacherManualRecordingControlEnabled', checkedValue($event))" />
+              <span>Manual recording control</span>
+              <small [class.override]="liveSettingOverridden('teacherManualRecordingControlEnabled')">{{ liveSettingInheritanceLabel('teacherManualRecordingControlEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('teacherManualRecordingControlEnabled')" (click)="resetLiveSettingField('teacherManualRecordingControlEnabled', $event)">Inherit</button>
+            </label>
+            <label>
+              <span>Recording visibility</span>
+              <select [value]="liveSettingsForm().recordingVisibility" (change)="updateLiveSettingsForm('recordingVisibility', recordingVisibilityValue($event))">
+                <option value="teacher_only">Teacher only</option>
+                <option value="enrolled_students">Enrolled students</option>
+                <option value="hidden_until_published">Hidden until published</option>
+              </select>
+              <small [class.override]="liveSettingOverridden('recordingVisibility')">{{ liveSettingInheritanceLabel('recordingVisibility') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('recordingVisibility')" (click)="resetLiveSettingField('recordingVisibility', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Present minutes</span>
+              <input type="number" min="1" max="480" [value]="liveSettingsForm().presentThresholdMinutes" (input)="updateLiveSettingsForm('presentThresholdMinutes', numberValue($event, liveSettingsForm().presentThresholdMinutes))" />
+              <small [class.override]="liveSettingOverridden('presentThresholdMinutes')">{{ liveSettingInheritanceLabel('presentThresholdMinutes') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('presentThresholdMinutes')" (click)="resetLiveSettingField('presentThresholdMinutes', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Present percent</span>
+              <input type="number" min="1" max="100" [value]="liveSettingsForm().presentThresholdPercentage" (input)="updateLiveSettingsForm('presentThresholdPercentage', numberValue($event, liveSettingsForm().presentThresholdPercentage))" />
+              <small [class.override]="liveSettingOverridden('presentThresholdPercentage')">{{ liveSettingInheritanceLabel('presentThresholdPercentage') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('presentThresholdPercentage')" (click)="resetLiveSettingField('presentThresholdPercentage', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().teacherAttendanceExportEnabled" (change)="updateLiveSettingsForm('teacherAttendanceExportEnabled', checkedValue($event))" />
+              <span>Attendance export</span>
+              <small [class.override]="liveSettingOverridden('teacherAttendanceExportEnabled')">{{ liveSettingInheritanceLabel('teacherAttendanceExportEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('teacherAttendanceExportEnabled')" (click)="resetLiveSettingField('teacherAttendanceExportEnabled', $event)">Inherit</button>
+            </label>
+          </div>
+
+          <div class="settings-group wide">
+            <strong>Access</strong>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().waitingRoomEnabled" (change)="updateLiveSettingsForm('waitingRoomEnabled', checkedValue($event))" />
+              <span>Waiting room</span>
+              <small [class.override]="liveSettingOverridden('waitingRoomEnabled')">{{ liveSettingInheritanceLabel('waitingRoomEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('waitingRoomEnabled')" (click)="resetLiveSettingField('waitingRoomEnabled', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().lockClassAfterTeacherStarts" (change)="updateLiveSettingsForm('lockClassAfterTeacherStarts', checkedValue($event))" />
+              <span>Lock after teacher starts</span>
+              <small [class.override]="liveSettingOverridden('lockClassAfterTeacherStarts')">{{ liveSettingInheritanceLabel('lockClassAfterTeacherStarts') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('lockClassAfterTeacherStarts')" (click)="resetLiveSettingField('lockClassAfterTeacherStarts', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().allowEnrolledStudentReconnectAfterLock" (change)="updateLiveSettingsForm('allowEnrolledStudentReconnectAfterLock', checkedValue($event))" />
+              <span>Allow enrolled reconnect after lock</span>
+              <small [class.override]="liveSettingOverridden('allowEnrolledStudentReconnectAfterLock')">{{ liveSettingInheritanceLabel('allowEnrolledStudentReconnectAfterLock') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowEnrolledStudentReconnectAfterLock')" (click)="resetLiveSettingField('allowEnrolledStudentReconnectAfterLock', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().teacherReconnectGraceMessagingEnabled" (change)="updateLiveSettingsForm('teacherReconnectGraceMessagingEnabled', checkedValue($event))" />
+              <span>Reconnect grace messaging</span>
+              <small [class.override]="liveSettingOverridden('teacherReconnectGraceMessagingEnabled')">{{ liveSettingInheritanceLabel('teacherReconnectGraceMessagingEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('teacherReconnectGraceMessagingEnabled')" (click)="resetLiveSettingField('teacherReconnectGraceMessagingEnabled', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Late join minutes</span>
+              <input type="number" min="0" max="240" [value]="liveSettingsForm().lateJoinThresholdMinutes" (input)="updateLiveSettingsForm('lateJoinThresholdMinutes', numberValue($event, liveSettingsForm().lateJoinThresholdMinutes))" />
+              <small [class.override]="liveSettingOverridden('lateJoinThresholdMinutes')">{{ liveSettingInheritanceLabel('lateJoinThresholdMinutes') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('lateJoinThresholdMinutes')" (click)="resetLiveSettingField('lateJoinThresholdMinutes', $event)">Inherit</button>
+            </label>
+          </div>
+
+          <div class="settings-group">
+            <strong>Materials</strong>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().materialsEnabled" (change)="updateLiveSettingsForm('materialsEnabled', checkedValue($event))" />
+              <span>Enable materials</span>
+              <small [class.override]="liveSettingOverridden('materialsEnabled')">{{ liveSettingInheritanceLabel('materialsEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('materialsEnabled')" (click)="resetLiveSettingField('materialsEnabled', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().teacherCanUploadMaterials" (change)="updateLiveSettingsForm('teacherCanUploadMaterials', checkedValue($event))" />
+              <span>Teacher uploads</span>
+              <small [class.override]="liveSettingOverridden('teacherCanUploadMaterials')">{{ liveSettingInheritanceLabel('teacherCanUploadMaterials') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('teacherCanUploadMaterials')" (click)="resetLiveSettingField('teacherCanUploadMaterials', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().studentsCanDownloadMaterials" (change)="updateLiveSettingsForm('studentsCanDownloadMaterials', checkedValue($event))" />
+              <span>Student downloads</span>
+              <small [class.override]="liveSettingOverridden('studentsCanDownloadMaterials')">{{ liveSettingInheritanceLabel('studentsCanDownloadMaterials') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('studentsCanDownloadMaterials')" (click)="resetLiveSettingField('studentsCanDownloadMaterials', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().publishMaterialsBeforeClass" (change)="updateLiveSettingsForm('publishMaterialsBeforeClass', checkedValue($event))" />
+              <span>Publish before class</span>
+              <small [class.override]="liveSettingOverridden('publishMaterialsBeforeClass')">{{ liveSettingInheritanceLabel('publishMaterialsBeforeClass') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('publishMaterialsBeforeClass')" (click)="resetLiveSettingField('publishMaterialsBeforeClass', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().publishMaterialsAfterClass" (change)="updateLiveSettingsForm('publishMaterialsAfterClass', checkedValue($event))" />
+              <span>Publish after class</span>
+              <small [class.override]="liveSettingOverridden('publishMaterialsAfterClass')">{{ liveSettingInheritanceLabel('publishMaterialsAfterClass') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('publishMaterialsAfterClass')" (click)="resetLiveSettingField('publishMaterialsAfterClass', $event)">Inherit</button>
+            </label>
+            <label>
+              <span>Allowed types</span>
+              <input type="text" [value]="liveSettingsForm().allowedMaterialTypesText" (input)="updateLiveSettingsForm('allowedMaterialTypesText', inputValue($event))" />
+              <small [class.override]="liveSettingOverridden('allowedMaterialTypesText')">{{ liveSettingInheritanceLabel('allowedMaterialTypesText') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowedMaterialTypesText')" (click)="resetLiveSettingField('allowedMaterialTypesText', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Max file MB</span>
+              <input type="number" min="1" max="100" [value]="liveSettingsForm().maxMaterialFileSizeMb" (input)="updateLiveSettingsForm('maxMaterialFileSizeMb', numberValue($event, liveSettingsForm().maxMaterialFileSizeMb))" />
+              <small [class.override]="liveSettingOverridden('maxMaterialFileSizeMb')">{{ liveSettingInheritanceLabel('maxMaterialFileSizeMb') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('maxMaterialFileSizeMb')" (click)="resetLiveSettingField('maxMaterialFileSizeMb', $event)">Inherit</button>
+            </label>
+          </div>
+
+          <div class="settings-group">
+            <strong>Notifications</strong>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().classReminderEnabled" (change)="updateLiveSettingsForm('classReminderEnabled', checkedValue($event))" />
+              <span>Class reminders</span>
+              <small [class.override]="liveSettingOverridden('classReminderEnabled')">{{ liveSettingInheritanceLabel('classReminderEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('classReminderEnabled')" (click)="resetLiveSettingField('classReminderEnabled', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Reminder minutes</span>
+              <input type="number" min="0" max="1440" [value]="liveSettingsForm().classReminderMinutesBefore" (input)="updateLiveSettingsForm('classReminderMinutesBefore', numberValue($event, liveSettingsForm().classReminderMinutesBefore))" />
+              <small [class.override]="liveSettingOverridden('classReminderMinutesBefore')">{{ liveSettingInheritanceLabel('classReminderMinutesBefore') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('classReminderMinutesBefore')" (click)="resetLiveSettingField('classReminderMinutesBefore', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().notifyWhenTeacherStarts" (change)="updateLiveSettingsForm('notifyWhenTeacherStarts', checkedValue($event))" />
+              <span>Teacher start notice</span>
+              <small [class.override]="liveSettingOverridden('notifyWhenTeacherStarts')">{{ liveSettingInheritanceLabel('notifyWhenTeacherStarts') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('notifyWhenTeacherStarts')" (click)="resetLiveSettingField('notifyWhenTeacherStarts', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().notifyRecordingAvailable" (change)="updateLiveSettingsForm('notifyRecordingAvailable', checkedValue($event))" />
+              <span>Recording available</span>
+              <small [class.override]="liveSettingOverridden('notifyRecordingAvailable')">{{ liveSettingInheritanceLabel('notifyRecordingAvailable') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('notifyRecordingAvailable')" (click)="resetLiveSettingField('notifyRecordingAvailable', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().notifyNewMaterialUploaded" (change)="updateLiveSettingsForm('notifyNewMaterialUploaded', checkedValue($event))" />
+              <span>New material uploaded</span>
+              <small [class.override]="liveSettingOverridden('notifyNewMaterialUploaded')">{{ liveSettingInheritanceLabel('notifyNewMaterialUploaded') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('notifyNewMaterialUploaded')" (click)="resetLiveSettingField('notifyNewMaterialUploaded', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().notifyMissedClass" (change)="updateLiveSettingsForm('notifyMissedClass', checkedValue($event))" />
+              <span>Missed class notice</span>
+              <small [class.override]="liveSettingOverridden('notifyMissedClass')">{{ liveSettingInheritanceLabel('notifyMissedClass') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('notifyMissedClass')" (click)="resetLiveSettingField('notifyMissedClass', $event)">Inherit</button>
+            </label>
+          </div>
+
+          <div class="settings-group">
+            <strong>Questions</strong>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().questionQueueEnabled" (change)="updateLiveSettingsForm('questionQueueEnabled', checkedValue($event))" />
+              <span>Question queue</span>
+              <small [class.override]="liveSettingOverridden('questionQueueEnabled')">{{ liveSettingInheritanceLabel('questionQueueEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('questionQueueEnabled')" (click)="resetLiveSettingField('questionQueueEnabled', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().allowAnonymousQuestions" (change)="updateLiveSettingsForm('allowAnonymousQuestions', checkedValue($event))" />
+              <span>Anonymous questions</span>
+              <small [class.override]="liveSettingOverridden('allowAnonymousQuestions')">{{ liveSettingInheritanceLabel('allowAnonymousQuestions') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowAnonymousQuestions')" (click)="resetLiveSettingField('allowAnonymousQuestions', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().allowStudentUpvotes" (change)="updateLiveSettingsForm('allowStudentUpvotes', checkedValue($event))" />
+              <span>Student upvotes</span>
+              <small [class.override]="liveSettingOverridden('allowStudentUpvotes')">{{ liveSettingInheritanceLabel('allowStudentUpvotes') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowStudentUpvotes')" (click)="resetLiveSettingField('allowStudentUpvotes', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().teacherCanMarkAnswered" (change)="updateLiveSettingsForm('teacherCanMarkAnswered', checkedValue($event))" />
+              <span>Teacher marks answered</span>
+              <small [class.override]="liveSettingOverridden('teacherCanMarkAnswered')">{{ liveSettingInheritanceLabel('teacherCanMarkAnswered') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('teacherCanMarkAnswered')" (click)="resetLiveSettingField('teacherCanMarkAnswered', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Open per student</span>
+              <input type="number" min="1" max="20" [value]="liveSettingsForm().maxOpenQuestionsPerStudent" (input)="updateLiveSettingsForm('maxOpenQuestionsPerStudent', numberValue($event, liveSettingsForm().maxOpenQuestionsPerStudent))" />
+              <small [class.override]="liveSettingOverridden('maxOpenQuestionsPerStudent')">{{ liveSettingInheritanceLabel('maxOpenQuestionsPerStudent') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('maxOpenQuestionsPerStudent')" (click)="resetLiveSettingField('maxOpenQuestionsPerStudent', $event)">Inherit</button>
+            </label>
+          </div>
+
+          <div class="settings-group wide">
+            <strong>Recording retention and student share</strong>
+            <label class="number-row">
+              <span>Retention days</span>
+              <input type="number" min="1" max="3650" [value]="liveSettingsForm().recordingRetentionDays" (input)="updateLiveSettingsForm('recordingRetentionDays', numberValue($event, liveSettingsForm().recordingRetentionDays))" />
+              <small [class.override]="liveSettingOverridden('recordingRetentionDays')">{{ liveSettingInheritanceLabel('recordingRetentionDays') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('recordingRetentionDays')" (click)="resetLiveSettingField('recordingRetentionDays', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().allowTeacherPublishRecording" (change)="updateLiveSettingsForm('allowTeacherPublishRecording', checkedValue($event))" />
+              <span>Teacher can publish recording</span>
+              <small [class.override]="liveSettingOverridden('allowTeacherPublishRecording')">{{ liveSettingInheritanceLabel('allowTeacherPublishRecording') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowTeacherPublishRecording')" (click)="resetLiveSettingField('allowTeacherPublishRecording', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().allowStudentsDownloadRecording" (change)="updateLiveSettingsForm('allowStudentsDownloadRecording', checkedValue($event))" />
+              <span>Students can download recordings</span>
+              <small [class.override]="liveSettingOverridden('allowStudentsDownloadRecording')">{{ liveSettingInheritanceLabel('allowStudentsDownloadRecording') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowStudentsDownloadRecording')" (click)="resetLiveSettingField('allowStudentsDownloadRecording', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().autoArchiveExpiredRecordings" (change)="updateLiveSettingsForm('autoArchiveExpiredRecordings', checkedValue($event))" />
+              <span>Archive expired recordings</span>
+              <small [class.override]="liveSettingOverridden('autoArchiveExpiredRecordings')">{{ liveSettingInheritanceLabel('autoArchiveExpiredRecordings') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('autoArchiveExpiredRecordings')" (click)="resetLiveSettingField('autoArchiveExpiredRecordings', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().studentScreenShareEnabled" (change)="updateLiveSettingsForm('studentScreenShareEnabled', checkedValue($event))" />
+              <span>Student screen share</span>
+              <small [class.override]="liveSettingOverridden('studentScreenShareEnabled')">{{ liveSettingInheritanceLabel('studentScreenShareEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('studentScreenShareEnabled')" (click)="resetLiveSettingField('studentScreenShareEnabled', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().studentScreenShareRequiresApproval" (change)="updateLiveSettingsForm('studentScreenShareRequiresApproval', checkedValue($event))" />
+              <span>Require share approval</span>
+              <small [class.override]="liveSettingOverridden('studentScreenShareRequiresApproval')">{{ liveSettingInheritanceLabel('studentScreenShareRequiresApproval') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('studentScreenShareRequiresApproval')" (click)="resetLiveSettingField('studentScreenShareRequiresApproval', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Active student shares</span>
+              <input type="number" min="1" max="4" [value]="liveSettingsForm().maxActiveStudentShares" (input)="updateLiveSettingsForm('maxActiveStudentShares', numberValue($event, liveSettingsForm().maxActiveStudentShares))" />
+              <small [class.override]="liveSettingOverridden('maxActiveStudentShares')">{{ liveSettingInheritanceLabel('maxActiveStudentShares') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('maxActiveStudentShares')" (click)="resetLiveSettingField('maxActiveStudentShares', $event)">Inherit</button>
+            </label>
+          </div>
+
+          <div class="settings-group wide">
+            <strong>Analytics and inactivity</strong>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().analyticsEnabled" (change)="updateLiveSettingsForm('analyticsEnabled', checkedValue($event))" />
+              <span>Advanced analytics</span>
+              <small [class.override]="liveSettingOverridden('analyticsEnabled')">{{ liveSettingInheritanceLabel('analyticsEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('analyticsEnabled')" (click)="resetLiveSettingField('analyticsEnabled', $event)">Inherit</button>
+            </label>
+            <label>
+              <span>Analytics visibility</span>
+              <select [value]="liveSettingsForm().analyticsVisibility" (change)="updateLiveSettingsForm('analyticsVisibility', analyticsVisibilityValue($event))">
+                <option value="teacher_only">Teacher only</option>
+                <option value="admin_and_teacher">Admin and teacher</option>
+                <option value="admin_only">Admin only</option>
+              </select>
+              <small [class.override]="liveSettingOverridden('analyticsVisibility')">{{ liveSettingInheritanceLabel('analyticsVisibility') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('analyticsVisibility')" (click)="resetLiveSettingField('analyticsVisibility', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().trackEngagementEvents" (change)="updateLiveSettingsForm('trackEngagementEvents', checkedValue($event))" />
+              <span>Track engagement</span>
+              <small [class.override]="liveSettingOverridden('trackEngagementEvents')">{{ liveSettingInheritanceLabel('trackEngagementEvents') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('trackEngagementEvents')" (click)="resetLiveSettingField('trackEngagementEvents', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().trackMediaQuality" (change)="updateLiveSettingsForm('trackMediaQuality', checkedValue($event))" />
+              <span>Track media quality</span>
+              <small [class.override]="liveSettingOverridden('trackMediaQuality')">{{ liveSettingInheritanceLabel('trackMediaQuality') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('trackMediaQuality')" (click)="resetLiveSettingField('trackMediaQuality', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().trackChatParticipation" (change)="updateLiveSettingsForm('trackChatParticipation', checkedValue($event))" />
+              <span>Track chat participation</span>
+              <small [class.override]="liveSettingOverridden('trackChatParticipation')">{{ liveSettingInheritanceLabel('trackChatParticipation') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('trackChatParticipation')" (click)="resetLiveSettingField('trackChatParticipation', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().trackWhiteboardParticipation" (change)="updateLiveSettingsForm('trackWhiteboardParticipation', checkedValue($event))" />
+              <span>Track whiteboard participation</span>
+              <small [class.override]="liveSettingOverridden('trackWhiteboardParticipation')">{{ liveSettingInheritanceLabel('trackWhiteboardParticipation') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('trackWhiteboardParticipation')" (click)="resetLiveSettingField('trackWhiteboardParticipation', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().trackQuestionParticipation" (change)="updateLiveSettingsForm('trackQuestionParticipation', checkedValue($event))" />
+              <span>Track question participation</span>
+              <small [class.override]="liveSettingOverridden('trackQuestionParticipation')">{{ liveSettingInheritanceLabel('trackQuestionParticipation') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('trackQuestionParticipation')" (click)="resetLiveSettingField('trackQuestionParticipation', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().inactiveDetectionEnabled" (change)="updateLiveSettingsForm('inactiveDetectionEnabled', checkedValue($event))" />
+              <span>Inactive detection</span>
+              <small [class.override]="liveSettingOverridden('inactiveDetectionEnabled')">{{ liveSettingInheritanceLabel('inactiveDetectionEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('inactiveDetectionEnabled')" (click)="resetLiveSettingField('inactiveDetectionEnabled', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Inactive minutes</span>
+              <input type="number" min="1" max="240" [value]="liveSettingsForm().inactiveAfterMinutes" (input)="updateLiveSettingsForm('inactiveAfterMinutes', numberValue($event, liveSettingsForm().inactiveAfterMinutes))" />
+              <small [class.override]="liveSettingOverridden('inactiveAfterMinutes')">{{ liveSettingInheritanceLabel('inactiveAfterMinutes') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('inactiveAfterMinutes')" (click)="resetLiveSettingField('inactiveAfterMinutes', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().countBackgroundTabAsInactive" (change)="updateLiveSettingsForm('countBackgroundTabAsInactive', checkedValue($event))" />
+              <span>Background tab inactive</span>
+              <small [class.override]="liveSettingOverridden('countBackgroundTabAsInactive')">{{ liveSettingInheritanceLabel('countBackgroundTabAsInactive') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('countBackgroundTabAsInactive')" (click)="resetLiveSettingField('countBackgroundTabAsInactive', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().countMutedNoCameraAsInactive" (change)="updateLiveSettingsForm('countMutedNoCameraAsInactive', checkedValue($event))" />
+              <span>Muted and camera off inactive</span>
+              <small [class.override]="liveSettingOverridden('countMutedNoCameraAsInactive')">{{ liveSettingInheritanceLabel('countMutedNoCameraAsInactive') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('countMutedNoCameraAsInactive')" (click)="resetLiveSettingField('countMutedNoCameraAsInactive', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().notifyTeacherOnInactiveStudents" (change)="updateLiveSettingsForm('notifyTeacherOnInactiveStudents', checkedValue($event))" />
+              <span>Notify inactive students</span>
+              <small [class.override]="liveSettingOverridden('notifyTeacherOnInactiveStudents')">{{ liveSettingInheritanceLabel('notifyTeacherOnInactiveStudents') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('notifyTeacherOnInactiveStudents')" (click)="resetLiveSettingField('notifyTeacherOnInactiveStudents', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().includeInactiveTimeInAttendance" (change)="updateLiveSettingsForm('includeInactiveTimeInAttendance', checkedValue($event))" />
+              <span>Include inactive time in attendance</span>
+              <small [class.override]="liveSettingOverridden('includeInactiveTimeInAttendance')">{{ liveSettingInheritanceLabel('includeInactiveTimeInAttendance') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('includeInactiveTimeInAttendance')" (click)="resetLiveSettingField('includeInactiveTimeInAttendance', $event)">Inherit</button>
+            </label>
+          </div>
+
+          <div class="settings-group wide">
+            <strong>Network and exports</strong>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().adaptiveQualityEnabled" (change)="updateLiveSettingsForm('adaptiveQualityEnabled', checkedValue($event))" />
+              <span>Adaptive quality</span>
+              <small [class.override]="liveSettingOverridden('adaptiveQualityEnabled')">{{ liveSettingInheritanceLabel('adaptiveQualityEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('adaptiveQualityEnabled')" (click)="resetLiveSettingField('adaptiveQualityEnabled', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().lowBandwidthModeEnabled" (change)="updateLiveSettingsForm('lowBandwidthModeEnabled', checkedValue($event))" />
+              <span>Low bandwidth mode</span>
+              <small [class.override]="liveSettingOverridden('lowBandwidthModeEnabled')">{{ liveSettingInheritanceLabel('lowBandwidthModeEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('lowBandwidthModeEnabled')" (click)="resetLiveSettingField('lowBandwidthModeEnabled', $event)">Inherit</button>
+            </label>
+            <label>
+              <span>Student video quality</span>
+              <select [value]="liveSettingsForm().maxStudentVideoQuality" (change)="updateLiveSettingsForm('maxStudentVideoQuality', studentVideoQualityValue($event))">
+                <option value="auto">Auto</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+              <small [class.override]="liveSettingOverridden('maxStudentVideoQuality')">{{ liveSettingInheritanceLabel('maxStudentVideoQuality') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('maxStudentVideoQuality')" (click)="resetLiveSettingField('maxStudentVideoQuality', $event)">Inherit</button>
+            </label>
+            <label>
+              <span>Screen share quality</span>
+              <select [value]="liveSettingsForm().maxScreenShareQuality" (change)="updateLiveSettingsForm('maxScreenShareQuality', screenShareQualityValue($event))">
+                <option value="auto">Auto</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+              <small [class.override]="liveSettingOverridden('maxScreenShareQuality')">{{ liveSettingInheritanceLabel('maxScreenShareQuality') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('maxScreenShareQuality')" (click)="resetLiveSettingField('maxScreenShareQuality', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().disableStudentVideoOnPoorNetwork" (change)="updateLiveSettingsForm('disableStudentVideoOnPoorNetwork', checkedValue($event))" />
+              <span>Disable video on poor network</span>
+              <small [class.override]="liveSettingOverridden('disableStudentVideoOnPoorNetwork')">{{ liveSettingInheritanceLabel('disableStudentVideoOnPoorNetwork') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('disableStudentVideoOnPoorNetwork')" (click)="resetLiveSettingField('disableStudentVideoOnPoorNetwork', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().preferAudioOnPoorNetwork" (change)="updateLiveSettingsForm('preferAudioOnPoorNetwork', checkedValue($event))" />
+              <span>Prefer audio on poor network</span>
+              <small [class.override]="liveSettingOverridden('preferAudioOnPoorNetwork')">{{ liveSettingInheritanceLabel('preferAudioOnPoorNetwork') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('preferAudioOnPoorNetwork')" (click)="resetLiveSettingField('preferAudioOnPoorNetwork', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().showNetworkWarnings" (change)="updateLiveSettingsForm('showNetworkWarnings', checkedValue($event))" />
+              <span>Network warnings</span>
+              <small [class.override]="liveSettingOverridden('showNetworkWarnings')">{{ liveSettingInheritanceLabel('showNetworkWarnings') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('showNetworkWarnings')" (click)="resetLiveSettingField('showNetworkWarnings', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().exportControlsEnabled" (change)="updateLiveSettingsForm('exportControlsEnabled', checkedValue($event))" />
+              <span>Export controls</span>
+              <small [class.override]="liveSettingOverridden('exportControlsEnabled')">{{ liveSettingInheritanceLabel('exportControlsEnabled') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('exportControlsEnabled')" (click)="resetLiveSettingField('exportControlsEnabled', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().allowAttendanceExport" (change)="updateLiveSettingsForm('allowAttendanceExport', checkedValue($event))" />
+              <span>Attendance export</span>
+              <small [class.override]="liveSettingOverridden('allowAttendanceExport')">{{ liveSettingInheritanceLabel('allowAttendanceExport') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowAttendanceExport')" (click)="resetLiveSettingField('allowAttendanceExport', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().allowRecordingDownload" (change)="updateLiveSettingsForm('allowRecordingDownload', checkedValue($event))" />
+              <span>Recording download</span>
+              <small [class.override]="liveSettingOverridden('allowRecordingDownload')">{{ liveSettingInheritanceLabel('allowRecordingDownload') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowRecordingDownload')" (click)="resetLiveSettingField('allowRecordingDownload', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().allowChatExport" (change)="updateLiveSettingsForm('allowChatExport', checkedValue($event))" />
+              <span>Chat export</span>
+              <small [class.override]="liveSettingOverridden('allowChatExport')">{{ liveSettingInheritanceLabel('allowChatExport') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowChatExport')" (click)="resetLiveSettingField('allowChatExport', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().allowQuestionExport" (change)="updateLiveSettingsForm('allowQuestionExport', checkedValue($event))" />
+              <span>Question export</span>
+              <small [class.override]="liveSettingOverridden('allowQuestionExport')">{{ liveSettingInheritanceLabel('allowQuestionExport') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('allowQuestionExport')" (click)="resetLiveSettingField('allowQuestionExport', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().includePrivateChatInExports" (change)="updateLiveSettingsForm('includePrivateChatInExports', checkedValue($event))" />
+              <span>Include private chat exports</span>
+              <small [class.override]="liveSettingOverridden('includePrivateChatInExports')">{{ liveSettingInheritanceLabel('includePrivateChatInExports') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('includePrivateChatInExports')" (click)="resetLiveSettingField('includePrivateChatInExports', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().anonymizeStudentExports" (change)="updateLiveSettingsForm('anonymizeStudentExports', checkedValue($event))" />
+              <span>Anonymize exports</span>
+              <small [class.override]="liveSettingOverridden('anonymizeStudentExports')">{{ liveSettingInheritanceLabel('anonymizeStudentExports') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('anonymizeStudentExports')" (click)="resetLiveSettingField('anonymizeStudentExports', $event)">Inherit</button>
+            </label>
+            <label class="number-row">
+              <span>Export retention days</span>
+              <input type="number" min="1" max="3650" [value]="liveSettingsForm().exportRetentionDays" (input)="updateLiveSettingsForm('exportRetentionDays', numberValue($event, liveSettingsForm().exportRetentionDays))" />
+              <small [class.override]="liveSettingOverridden('exportRetentionDays')">{{ liveSettingInheritanceLabel('exportRetentionDays') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('exportRetentionDays')" (click)="resetLiveSettingField('exportRetentionDays', $event)">Inherit</button>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" [checked]="liveSettingsForm().requireExportAuditLog" (change)="updateLiveSettingsForm('requireExportAuditLog', checkedValue($event))" />
+              <span>Require export audit log</span>
+              <small [class.override]="liveSettingOverridden('requireExportAuditLog')">{{ liveSettingInheritanceLabel('requireExportAuditLog') }}</small>
+              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('requireExportAuditLog')" (click)="resetLiveSettingField('requireExportAuditLog', $event)">Inherit</button>
+            </label>
+          </div>
+        </div>
+      }
+    </section>
+
     <section class="panel students-panel">
       <header>
         <div>

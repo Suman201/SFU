@@ -27,6 +27,12 @@ interface BatchFormModel {
   schedule: Partial<Record<BatchDayOfWeek, string>>;
 }
 
+interface DashboardMetric {
+  label: string;
+  value: string;
+  tone: 'green' | 'rose' | 'coral' | 'amber';
+}
+
 @Component({
   selector: 'sfu-teacher-dashboard',
   standalone: true,
@@ -55,6 +61,38 @@ export class TeacherDashboard {
   protected readonly loading = this.dashboard.loading;
   protected readonly saving = this.dashboard.saving;
   protected readonly sessionActionLoadingId = this.dashboard.sessionActionLoadingId;
+  protected readonly todaySessions = this.dashboard.todaySessions;
+  protected readonly liveSessions = this.dashboard.liveSessions;
+  protected readonly upcomingSessions = this.dashboard.upcomingSessions;
+  protected readonly recentRecordings = this.dashboard.recentRecordings;
+  protected readonly messageIndicators = this.dashboard.messageIndicators;
+  protected readonly metrics = computed<DashboardMetric[]>(() => [
+    { label: 'Live now', value: `${this.liveSessions().length}`, tone: 'coral' },
+    { label: "Today's sessions", value: `${this.todaySessions().length}`, tone: 'green' },
+    { label: 'Upcoming', value: `${this.upcomingSessions().length}`, tone: 'amber' },
+    { label: 'Students enrolled', value: `${this.dashboard.totalStudents()}`, tone: 'rose' },
+    { label: 'Attendance alerts', value: `${this.dashboard.attendanceWarnings().length}`, tone: 'amber' },
+    { label: 'Recordings ready', value: `${this.dashboard.recordingsReadyCount()}`, tone: 'green' }
+  ]);
+  protected readonly batchHealth = computed(() =>
+    this.batches()
+      .map((batch) => ({
+        batch,
+        nextSession: this.nextSession(batch),
+        averageAttendance: this.dashboard.averageAttendance(batch),
+        fillPercent: batch.capacity ? Math.round((batch.enrolledCount / batch.capacity) * 100) : 0,
+        warning:
+          batch.enrolledCount === 0
+            ? 'No active roster'
+            : batch.enrolledCount >= batch.capacity
+              ? 'Batch at capacity'
+              : this.dashboard.averageAttendance(batch) !== null && (this.dashboard.averageAttendance(batch) ?? 100) < 75
+                ? 'Attendance needs review'
+                : ''
+      }))
+      .sort((left, right) => Number(Boolean(right.warning)) - Number(Boolean(left.warning)))
+      .slice(0, 6)
+  );
   protected readonly batchModel = signal<BatchFormModel>(this.initialBatchModel());
   protected readonly selectedSchedule = computed(() => this.scheduleFromModel(this.batchModel()));
   protected readonly dateRangeLabel = computed(() => {
@@ -145,7 +183,70 @@ export class TeacherDashboard {
       return;
     }
 
-    await this.openSession(session);
+    this.startSession(session);
+  }
+
+  protected startSession(session: TeacherSession): void {
+    this.dashboard.startSession(session).subscribe({
+      next: (payload) => {
+        void this.router.navigate(['/class-session/teacher'], {
+          queryParams: {
+            batchId: payload.batchId,
+            sessionId: payload.sessionId
+          }
+        });
+      }
+    });
+  }
+
+  protected enterSession(session: TeacherSession): void {
+    void this.openSession(session);
+  }
+
+  protected endSession(session: TeacherSession): void {
+    if (!confirm(`End ${session.title} for everyone?`)) {
+      return;
+    }
+    this.dashboard.completeSession(session).subscribe();
+  }
+
+  protected openMessageIndicator(message: { sessionId: string; batchId: string }): void {
+    void this.router.navigate(['/class-session/teacher'], {
+      queryParams: {
+        batchId: message.batchId,
+        sessionId: message.sessionId
+      }
+    });
+  }
+
+  protected refreshDashboard(): void {
+    this.dashboard.refreshOperations();
+  }
+
+  protected sessionStatusLabel(session: TeacherSession): string {
+    switch (session.status) {
+      case 'live':
+        return 'Live';
+      case 'completed':
+        return 'Completed';
+      case 'cancelled':
+        return 'Cancelled';
+      case 'scheduled':
+      default:
+        return 'Scheduled';
+    }
+  }
+
+  protected sessionBatchName(session: TeacherSession): string {
+    return this.dashboard.batchForSession(session)?.name ?? 'Batch';
+  }
+
+  protected sessionActionDisabled(session: TeacherSession): boolean {
+    return this.sessionActionLoadingId() === session.id;
+  }
+
+  protected actionState(session: TeacherSession) {
+    return this.dashboard.sessionActionState(session);
   }
 
   private async openSession(session: TeacherSession): Promise<void> {

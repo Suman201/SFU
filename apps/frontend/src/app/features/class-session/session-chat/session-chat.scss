@@ -9,6 +9,7 @@
   --chat-safe-bottom: env(safe-area-inset-bottom, 0px);
   --chat-safe-top: env(safe-area-inset-top, 0px);
   --chat-reserved-bottom: 0px;
+  --chat-keyboard-offset: 0px;
 }
 
 :host(.docked-host) {
@@ -806,7 +807,7 @@
 @media (max-width: 720px) {
   :host {
     right: 16px;
-    bottom: calc(16px + var(--chat-safe-bottom));
+    bottom: calc(16px + var(--chat-safe-bottom) + var(--chat-keyboard-offset));
     left: 16px;
     width: auto;
   }
@@ -815,13 +816,22 @@
     justify-items: stretch;
   }
 
+  .session-chat:not(.docked) {
+    transform: none !important;
+  }
+
+  .drag-handle {
+    touch-action: manipulation;
+  }
+
   .chat-toggle {
     width: 100%;
     justify-content: center;
   }
 
   .chat-panel {
-    max-height: min(520px, calc(100dvh - 32px - var(--chat-safe-bottom) - var(--chat-safe-top) - var(--chat-reserved-bottom)));
+    height: min(62dvh, calc(100dvh - 32px - var(--chat-safe-bottom) - var(--chat-safe-top) - var(--chat-reserved-bottom) - var(--chat-keyboard-offset)));
+    max-height: none;
     border-radius: 12px 12px 8px 8px;
   }
 
@@ -864,6 +874,7 @@
 
   .chat-composer {
     padding: 10px 10px calc(10px + var(--chat-safe-bottom));
+    scroll-margin-bottom: calc(16px + var(--chat-safe-bottom) + var(--chat-keyboard-offset));
   }
 
   .composer-fields {
@@ -888,7 +899,7 @@
 
 @media (max-width: 420px) {
   .chat-panel {
-    max-height: min(500px, calc(100dvh - 24px - var(--chat-safe-bottom) - var(--chat-safe-top) - var(--chat-reserved-bottom)));
+    height: min(64dvh, calc(100dvh - 24px - var(--chat-safe-bottom) - var(--chat-safe-top) - var(--chat-reserved-bottom) - var(--chat-keyboard-offset)));
   }
 
   .thread-button {
@@ -911,7 +922,8 @@
 
 @media (max-height: 620px) and (orientation: landscape) {
   .chat-panel {
-    max-height: calc(100dvh - 24px - var(--chat-safe-bottom) - var(--chat-safe-top) - var(--chat-reserved-bottom));
+    height: calc(100dvh - 24px - var(--chat-safe-bottom) - var(--chat-safe-top) - var(--chat-reserved-bottom) - var(--chat-keyboard-offset));
+    min-height: 180px;
   }
 
   .chat-header {
@@ -924,5 +936,28 @@
 
   .pending-attachments {
     max-height: min(48px, 14dvh);
+  }
+}
+
+@media (pointer: coarse) {
+  .session-chat button:hover {
+    transform: none;
+  }
+
+  .chat-toggle,
+  .collapse-button,
+  .attach-button,
+  .link-button,
+  .send-button,
+  .thread-button,
+  .mode-button {
+    min-height: 44px;
+  }
+
+  .attach-button,
+  .link-button,
+  .send-button,
+  .collapse-button {
+    min-width: 44px;
   }
 }

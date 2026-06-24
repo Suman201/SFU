@@ -4,6 +4,7 @@ import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type {
   AdminAttendanceQuery,
+  AdminAttendanceSessionStudentRow,
   AdminAttendanceSessionRow,
   AdminAttendanceStudentRow,
   AdminAttendanceSummary,
@@ -36,12 +37,16 @@ export class AttendanceList implements OnInit {
   protected readonly summary = signal<AdminAttendanceSummary | null>(null);
   protected readonly loading = signal(false);
   protected readonly exporting = signal(false);
+  protected readonly detailLoading = signal(false);
   protected readonly error = signal('');
+  protected readonly detailError = signal('');
   protected readonly activeTab = signal<AttendanceTab>('sessions');
   protected readonly page = signal(1);
   protected readonly limit = signal(25);
   protected readonly sessionsTotal = signal(0);
   protected readonly studentsTotal = signal(0);
+  protected readonly selectedSession = signal<AdminAttendanceSessionRow | null>(null);
+  protected readonly selectedSessionStudents = signal<AdminAttendanceSessionStudentRow[]>([]);
 
   protected readonly filters = this.formBuilder.nonNullable.group({
     status: ['all' as AttendanceStatusFilter],
@@ -156,6 +161,41 @@ export class AttendanceList implements OnInit {
         next: (blob) => this.saveBlob(blob, 'attendance-analytics.csv'),
         error: (error: unknown) => this.error.set(this.api.apiErrorMessage(error))
       });
+  }
+
+  protected openSessionStudents(row: AdminAttendanceSessionRow): void {
+    this.selectedSession.set(row);
+    this.selectedSessionStudents.set([]);
+    this.detailError.set('');
+    this.detailLoading.set(true);
+    this.api
+      .getAttendanceSessionStudents(row.sessionId)
+      .pipe(finalize(() => this.detailLoading.set(false)))
+      .subscribe({
+        next: (response) => {
+          this.selectedSession.set(response.session);
+          this.selectedSessionStudents.set(response.items);
+        },
+        error: (error: unknown) => this.detailError.set(this.api.apiErrorMessage(error))
+      });
+  }
+
+  protected closeSessionStudents(): void {
+    this.selectedSession.set(null);
+    this.selectedSessionStudents.set([]);
+    this.detailError.set('');
+  }
+
+  protected sourceClass(source: string): string {
+    return source === 'snapshot' ? 'source-snapshot' : 'source-inferred';
+  }
+
+  protected attendanceStatusClass(status: string): string {
+    return status === 'present' ? 'attendance-present' : 'attendance-absent';
+  }
+
+  protected trackBySessionStudent(_index: number, row: AdminAttendanceSessionStudentRow): string {
+    return row.studentId;
   }
 
   private load(page = this.page()): void {

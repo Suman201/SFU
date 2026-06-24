@@ -2,6 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import type {
   ChatMessage,
   ChatReadState,
+  ClassSessionMaterialEvent,
   ClassStudentSpeakEvent,
   ConsumerLayerEvent,
   ClassSessionLifecycleEvent,
@@ -231,6 +232,25 @@ describe('RoomsGateway', () => {
       expect(signals.publish).toHaveBeenCalledWith('class-session:session-1:lifecycle', 'session:started', payload);
     });
 
+    it('broadcasts class-session material events to authorized watchers', async () => {
+      const { emitClassSessionMaterial, emissions, signals } = createGatewayHarness();
+      const payload: ClassSessionMaterialEvent = {
+        sessionId: 'session-1',
+        batchId: 'batch-1',
+        roomId: 'room-1',
+        materialId: 'material-1',
+        shared: true,
+        actorUserId: 'teacher-1',
+        createdAt: '2026-06-22T10:05:00.000Z'
+      };
+
+      emitClassSessionMaterial('material:shared', payload);
+      await flushPromises();
+
+      expect(emissions).toEqual([{ target: 'class-session:session-1:lifecycle', event: 'material:shared', payload }]);
+      expect(signals.publish).toHaveBeenCalledWith('class-session:session-1:lifecycle', 'material:shared', payload);
+    });
+
     it('targets private chat messages after chat send ack succeeds', async () => {
       const { gateway, rooms, emissions, signals } = createGatewayHarness();
       const message: ChatMessage = {
@@ -456,6 +476,60 @@ describe('RoomsGateway', () => {
       expect(ack).toHaveBeenCalledWith({ ok: true, data: event });
     });
 
+    it('forwards scoped whiteboard control grants to targeted participants', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      const event = {
+        roomId: 'room-1',
+        participantId: 'student-participant',
+        displayName: 'Student One',
+        granted: true,
+        permissionLevel: 'draw' as const,
+        pageId: 'page-1',
+        grantedAt: '2026-06-22T10:20:00.000Z',
+        grantedByParticipantId: 'teacher-participant',
+        message: 'Teacher allowed you to use the whiteboard.'
+      };
+      rooms.grantWhiteboardControl.mockResolvedValue({
+        event,
+        targets: [
+          { roomId: 'room-1', participantId: 'student-participant', socketId: 'student-socket-a', userId: 'student-1', nodeId: 'node-a' },
+          { roomId: 'room-1', participantId: 'teacher-participant', socketId: 'teacher-socket', userId: 'teacher-1', nodeId: 'node-a' }
+        ]
+      });
+      const ack = jest.fn();
+
+      await gateway.grantWhiteboardControl(
+        { data: { participantId: 'teacher-participant' } } as never,
+        { roomId: 'room-1', participantId: 'student-participant', permissionLevel: 'draw', pageId: 'page-1' },
+        ack
+      );
+
+      expect(rooms.grantWhiteboardControl).toHaveBeenCalledWith(
+        'room-1',
+        'teacher-participant',
+        'student-participant',
+        'draw',
+        'page-1'
+      );
+      expect(emissions).toEqual([
+        { target: 'student-socket-a', event: 'whiteboard:control-granted', payload: event },
+        { target: 'teacher-socket', event: 'whiteboard:control-granted', payload: event }
+      ]);
+      expect(signals.publish).not.toHaveBeenCalledWith('room-1', 'whiteboard:control-granted', event);
+      expect(signals.publishTargeted).toHaveBeenCalledWith(
+        'room-1',
+        {
+          socketIds: ['student-socket-a', 'teacher-socket'],
+          participantIds: ['student-participant', 'teacher-participant'],
+          userIds: ['student-1', 'teacher-1'],
+          nodeIds: ['node-a']
+        },
+        'whiteboard:control-granted',
+        event
+      );
+      expect(ack).toHaveBeenCalledWith({ ok: true, data: event });
+    });
+
     it('mutes all class-session students through the bulk moderation event', async () => {
       const { gateway, rooms, emissions, signals } = createGatewayHarness();
       const permissions = {
@@ -535,6 +609,37 @@ describe('RoomsGateway', () => {
       );
 
       expect(rooms.raiseHand).toHaveBeenCalledWith('room-1', 'student-participant', true);
+      expect(emissions).toEqual([{ target: 'room-1', event: 'participant:updated', payload: ['student-participant', patch] }]);
+      expect(signals.publish).toHaveBeenCalledWith('room-1', 'participant:updated', 'student-participant', patch);
+      expect(ack).toHaveBeenCalledWith({ ok: true, data: patch });
+    });
+
+    it('records class activity and broadcasts inactive participant state', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      const patch = { inactive: true, inactiveSince: '2026-06-23T08:05:00.000Z', lastSeenAt: '2026-06-23T08:10:00.000Z' };
+      rooms.updateClassSessionParticipantActivity.mockResolvedValue(patch);
+      const ack = jest.fn();
+      const socket = {
+        id: 'socket-1',
+        data: {
+          participantId: 'student-participant',
+          user: { id: 'student-1', email: 'student@example.test', roles: ['STUDENT'] }
+        }
+      };
+
+      await gateway.updateClassActivity(
+        socket as never,
+        { roomId: 'room-1', active: false, visible: false, focused: false, reason: 'visibility' },
+        ack
+      );
+
+      expect(rooms.updateClassSessionParticipantActivity).toHaveBeenCalledWith(
+        'room-1',
+        'student-participant',
+        'socket-1',
+        socket.data.user,
+        { roomId: 'room-1', active: false, visible: false, focused: false, reason: 'visibility' }
+      );
       expect(emissions).toEqual([{ target: 'room-1', event: 'participant:updated', payload: ['student-participant', patch] }]);
       expect(signals.publish).toHaveBeenCalledWith('room-1', 'participant:updated', 'student-participant', patch);
       expect(ack).toHaveBeenCalledWith({ ok: true, data: patch });
@@ -1108,6 +1213,45 @@ describe('RoomsGateway', () => {
       expect(ack.mock.calls[0]![0]?.data?.admitted).toBe(false);
     });
 
+    it('does not rebroadcast reused room joins as new participants', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      const participant = {
+        id: 'participant-1',
+        socketId: 'socket-new',
+        admitted: true
+      };
+      const room = {
+        id: 'room-1',
+        participants: [participant]
+      };
+      rooms.joinRoom.mockResolvedValue({
+        room,
+        participantId: 'participant-1',
+        admitted: true,
+        rejoined: true
+      });
+      const socket = {
+        id: 'socket-new',
+        data: { user: { id: 'user-1', email: 'teacher@example.test', roles: ['TEACHER'] } },
+        join: jest.fn()
+      };
+      const ack = jest.fn();
+
+      await gateway.joinRoom(socket as never, { roomId: 'room-1', displayName: 'Teacher' }, ack);
+
+      expect(socket.join).toHaveBeenCalledWith('room-1');
+      expect(emissions).toEqual([
+        { target: 'room-1', event: 'participant:updated', payload: ['participant-1', { connected: true, socketId: 'socket-new' }] },
+        { target: 'room-1', event: 'room:updated', payload: room }
+      ]);
+      expect(signals.publish.mock.calls).toEqual([
+        ['room-1', 'participant:updated', 'participant-1', { connected: true, socketId: 'socket-new' }],
+        ['room-1', 'room:updated', room]
+      ]);
+      expect(ack.mock.calls[0]![0]?.ok).toBe(true);
+      expect(ack.mock.calls[0]![0]?.data?.rejoined).toBe(true);
+    });
+
     it('joins the admitted participant socket before broadcasting room admission events', async () => {
       const { gateway, rooms, emissions, signals, socketRegistry } = createGatewayHarness();
       const pendingSocket: { join: jest.Mock<Promise<void>, [string]> } = {
@@ -1189,6 +1333,7 @@ interface GatewayRoomsHarness {
   onRoomClosed: jest.Mock;
   onChatReadReceipt: jest.Mock;
   onClassSessionLifecycleEvent: jest.Mock;
+  onClassSessionMaterialEvent: jest.Mock;
   assertCanWatchClassSession: jest.Mock;
   lookupRoomOwner: jest.Mock;
   getTransportQualityState: jest.Mock;
@@ -1201,8 +1346,14 @@ interface GatewayRoomsHarness {
   sendChat: jest.Mock;
   markChatRead: jest.Mock;
   raiseHand: jest.Mock;
+  updateClassSessionParticipantActivity: jest.Mock;
   lowerStudentHand: jest.Mock;
   setStudentSpeakingPermission: jest.Mock;
+  whiteboardControlForParticipant: jest.Mock;
+  grantWhiteboardControl: jest.Mock;
+  revokeWhiteboardControl: jest.Mock;
+  sendWhiteboardCommand: jest.Mock;
+  sendWhiteboardCursor: jest.Mock;
   moderateStudentMedia: jest.Mock;
   moderateAllStudentMedia: jest.Mock;
   producerDynacastSignalTarget: jest.Mock;
@@ -1227,6 +1378,7 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
   emitRoomFailure: (event: RoomFailureEvent) => void;
   emitRoomClosed: (roomId: string) => void;
   emitClassSessionLifecycle: (event: 'session:started' | 'session:ended', payload: ClassSessionLifecycleEvent) => void;
+  emitClassSessionMaterial: (event: 'material:shared' | 'material:unshared' | 'material:updated', payload: ClassSessionMaterialEvent) => void;
   emissions: Array<{ target: string; event: string; payload: unknown }>;
   socketRegistry: Map<string, ReturnType<typeof socketStub>>;
 } {
@@ -1242,6 +1394,9 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
   let roomClosedListener: ((roomId: string) => void) | undefined;
   let classSessionLifecycleListener:
     | ((event: 'session:started' | 'session:ended', payload: ClassSessionLifecycleEvent) => void)
+    | undefined;
+  let classSessionMaterialListener:
+    | ((event: 'material:shared' | 'material:unshared' | 'material:updated', payload: ClassSessionMaterialEvent) => void)
     | undefined;
   let signalListener:
     | ((signal: { sourceNodeId: string; roomId: string; event: string; payload: unknown[]; target?: Record<string, string[]> }) => void)
@@ -1292,6 +1447,10 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
     onChatReadReceipt: jest.fn(() => jest.fn()),
     onClassSessionLifecycleEvent: jest.fn((listener: (event: 'session:started' | 'session:ended', payload: ClassSessionLifecycleEvent) => void) => {
       classSessionLifecycleListener = listener;
+      return jest.fn();
+    }),
+    onClassSessionMaterialEvent: jest.fn((listener: (event: 'material:shared' | 'material:unshared' | 'material:updated', payload: ClassSessionMaterialEvent) => void) => {
+      classSessionMaterialListener = listener;
       return jest.fn();
     }),
     assertCanWatchClassSession: jest.fn(async () => undefined),
@@ -1379,8 +1538,14 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
     sendChat: jest.fn(),
     markChatRead: jest.fn(),
     raiseHand: jest.fn(),
+    updateClassSessionParticipantActivity: jest.fn(),
     lowerStudentHand: jest.fn(),
     setStudentSpeakingPermission: jest.fn(),
+    whiteboardControlForParticipant: jest.fn(async () => undefined),
+    grantWhiteboardControl: jest.fn(),
+    revokeWhiteboardControl: jest.fn(),
+    sendWhiteboardCommand: jest.fn(),
+    sendWhiteboardCursor: jest.fn(),
     moderateStudentMedia: jest.fn(),
     moderateAllStudentMedia: jest.fn(),
     producerDynacastSignalTarget: jest.fn(async (_event: ProducerDynacastEvent, roomSocketCount: number) =>
@@ -1497,6 +1662,12 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
         throw new Error('Class session lifecycle listener was not registered');
       }
       classSessionLifecycleListener(event, payload);
+    },
+    emitClassSessionMaterial: (event, payload) => {
+      if (!classSessionMaterialListener) {
+        throw new Error('Class session material listener was not registered');
+      }
+      classSessionMaterialListener(event, payload);
     },
     emissions,
     socketRegistry

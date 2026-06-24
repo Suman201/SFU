@@ -2,6 +2,8 @@
   display: grid;
   gap: 20px;
   min-height: calc(100vh - 132px);
+  min-height: calc(100svh - 132px);
+  min-height: calc(100dvh - 132px);
   padding: 28px 32px 36px;
 }
 
@@ -85,6 +87,23 @@
   line-height: 1;
 }
 
+.cover-upload {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgb(255 255 255 / 0.32);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 0.16);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
+}
+
 .profile-identity-panel {
   position: relative;
   z-index: 2;
@@ -114,6 +133,17 @@
 
 .identity-actions {
   justify-items: end;
+}
+
+.button-link {
+  cursor: pointer;
+  font: inherit;
+}
+
+.button-link:disabled,
+.cover-upload:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .eyebrow,
@@ -201,6 +231,147 @@ h3 {
   padding: 18px;
 }
 
+.form-alert {
+  border: 1px solid rgb(242 96 118 / 0.34);
+  border-radius: var(--radius);
+  background: rgb(242 96 118 / 0.1);
+  color: #9f2338;
+  padding: 12px 14px;
+  font-weight: 800;
+}
+
+.form-alert.success {
+  border-color: rgb(69 139 115 / 0.36);
+  background: rgb(69 139 115 / 0.12);
+  color: #28624f;
+}
+
+.edit-panel {
+  gap: 16px;
+}
+
+.edit-header,
+.editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.toggle-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--text);
+  font-weight: 850;
+}
+
+.toggle-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.form-grid label.wide {
+  grid-column: 1 / -1;
+}
+
+.form-grid input,
+.form-grid select,
+.form-grid textarea {
+  width: 100%;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  color: var(--text);
+  font: inherit;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.form-grid .toggle-row {
+  display: flex;
+}
+
+.form-grid .toggle-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+}
+
+.form-grid input:focus,
+.form-grid select:focus,
+.form-grid textarea:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+
+.form-grid small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.settings-panel {
+  align-content: start;
+}
+
+.settings-grid {
+  align-items: start;
+}
+
+.settings-group {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.settings-group.wide {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-group strong {
+  grid-column: 1 / -1;
+  color: var(--text);
+}
+
+.settings-group .toggle-row {
+  justify-content: space-between;
+}
+
+.number-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.number-row input {
+  text-align: right;
+}
+
 .about-panel {
   align-content: start;
 }
@@ -242,6 +413,29 @@ h3 {
   display: grid;
   grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
   gap: 10px 14px;
+}
+
+.pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill-list span {
+  min-height: 30px;
+  padding: 7px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.pill-list.subtle span {
+  border-color: var(--line-soft);
+  background: var(--panel-soft);
+  color: var(--muted);
 }
 
 .detail-list strong {
@@ -418,6 +612,10 @@ h3 {
   padding: 14px;
 }
 
+.batch-row.link-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .batch-row > div:first-child {
   display: grid;
   gap: 4px;
@@ -532,8 +730,15 @@ h3 {
     justify-items: start;
   }
 
+  .edit-header,
+  .editor-actions {
+    align-items: start;
+    flex-direction: column;
+  }
+
   .metric-grid,
   .profile-grid,
+  .form-grid,
   .gallery-grid,
   .review-grid,
   .batch-meta,

@@ -24,6 +24,8 @@ import type {
 import type { Participant, ParticipantPatch } from './participants.js';
 import type { Permissions } from './permissions.js';
 import type { ClassSessionRecordingEvent } from './recordings.js';
+import type { ClassSessionMaterialEvent } from './materials.js';
+import type { WhiteboardCommand, WhiteboardCursor, WhiteboardPermissionLevel } from './whiteboard.js';
 import type { CreateProducerRequest, Producer, ProducerDynacastControlFailureReport, ProducerDynacastEvent, ProducerLayerState } from './producers.js';
 import type {
   CreateRoomRequest,
@@ -104,6 +106,57 @@ export interface ClassStudentSpeakEvent {
   message: string;
 }
 
+export interface WhiteboardControlRequest {
+  roomId: string;
+  participantId: string;
+  permissionLevel?: WhiteboardPermissionLevel;
+  pageId?: string;
+}
+
+export interface WhiteboardControlEvent {
+  roomId: string;
+  participantId: string;
+  displayName?: string;
+  granted: boolean;
+  permissionLevel: WhiteboardPermissionLevel;
+  pageId?: string;
+  grantedAt?: string;
+  grantedByParticipantId?: string;
+  revokedByParticipantId?: string;
+  reason?: string;
+  message?: string;
+}
+
+export interface WhiteboardCommandRequest {
+  roomId: string;
+  command: WhiteboardCommand;
+}
+
+export interface WhiteboardCommandEvent {
+  roomId: string;
+  participantId: string;
+  displayName: string;
+  command: WhiteboardCommand;
+}
+
+export interface WhiteboardCursorRequest {
+  roomId: string;
+  cursor: Pick<WhiteboardCursor, 'position'> & Partial<Pick<WhiteboardCursor, 'color'>>;
+}
+
+export interface WhiteboardCursorEvent {
+  roomId: string;
+  cursor: WhiteboardCursor;
+}
+
+export interface ClassSessionActivityRequest {
+  roomId: string;
+  active: boolean;
+  visible: boolean;
+  focused: boolean;
+  reason?: 'heartbeat' | 'user' | 'visibility' | 'focus' | 'blur';
+}
+
 export interface ClientToServerEvents {
   'session:watch': (request: ClassSessionWatchRequest, ack: Ack<void>) => void;
   'session:unwatch': (request: { sessionId: string }, ack: Ack<void>) => void;
@@ -156,6 +209,10 @@ export interface ClientToServerEvents {
   'class:allow-speak': (request: ClassStudentSpeakRequest, ack: Ack<ClassStudentSpeakEvent>) => void;
   'class:revoke-speak': (request: ClassStudentSpeakRequest, ack: Ack<ClassStudentSpeakEvent>) => void;
   'class:lower-hand': (request: ClassStudentSpeakRequest, ack: Ack<ParticipantPatch>) => void;
+  'whiteboard:grant-control': (request: WhiteboardControlRequest, ack: Ack<WhiteboardControlEvent>) => void;
+  'whiteboard:revoke-control': (request: Partial<WhiteboardControlRequest> & { roomId: string }, ack: Ack<WhiteboardControlEvent>) => void;
+  'whiteboard:command': (request: WhiteboardCommandRequest, ack: Ack<WhiteboardCommandEvent>) => void;
+  'whiteboard:cursor': (request: WhiteboardCursorRequest, ack: Ack<WhiteboardCursorEvent>) => void;
   'student:mute-mic': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
   'student:unmute-mic': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
   'student:stop-camera': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
@@ -165,6 +222,7 @@ export interface ClientToServerEvents {
   'chat:send': (request: SendChatMessageRequest, ack: Ack<SendChatMessageResponse>) => void;
   'chat:mark-read': (request: MarkChatReadRequest, ack: Ack<ChatReadState>) => void;
   'hand:raise': (request: { roomId: string; raised: boolean }, ack: Ack<ParticipantPatch>) => void;
+  'class:activity': (request: ClassSessionActivityRequest, ack: Ack<ParticipantPatch>) => void;
 }
 
 export interface ServerToClientEvents {
@@ -174,6 +232,9 @@ export interface ServerToClientEvents {
   'recording:updated': (event: ClassSessionRecordingEvent) => void;
   'recording:stopped': (event: ClassSessionRecordingEvent) => void;
   'recording:failed': (event: ClassSessionRecordingEvent) => void;
+  'material:shared': (event: ClassSessionMaterialEvent) => void;
+  'material:unshared': (event: ClassSessionMaterialEvent) => void;
+  'material:updated': (event: ClassSessionMaterialEvent) => void;
   'room:updated': (room: Room) => void;
   'room:closed': (roomId: string) => void;
   'room:failed': (event: RoomFailureEvent) => void;
@@ -188,6 +249,10 @@ export interface ServerToClientEvents {
   'participant:banned': (reason?: string) => void;
   'permissions:updated': (participantId: string, permissions: Permissions) => void;
   'student:media-moderated': (event: StudentMediaModerationEvent) => void;
+  'whiteboard:control-granted': (event: WhiteboardControlEvent) => void;
+  'whiteboard:control-revoked': (event: WhiteboardControlEvent) => void;
+  'whiteboard:command': (event: WhiteboardCommandEvent) => void;
+  'whiteboard:cursor': (event: WhiteboardCursorEvent) => void;
   'producer:created': (producer: Producer) => void;
   'producer:updated': (producer: Producer) => void;
   'producer:closed': (producerId: string) => void;

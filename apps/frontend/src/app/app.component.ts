@@ -1,6 +1,7 @@
 import { Component, ChangeDetectionStrategy, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { AuthService } from './core/services/auth.service';
+import { ProfileService } from './core/services/profile.service';
 import { ThemeService } from './core/services/theme.service';
 
 @Component({
@@ -72,9 +73,18 @@ import { ThemeService } from './core/services/theme.service';
 })
 export class AppComponent {
   protected readonly auth = inject(AuthService);
+  private readonly profiles = inject(ProfileService);
+  private readonly theme = inject(ThemeService);
 
   constructor() {
-    inject(ThemeService);
-    this.auth.checkSession().subscribe();
+    this.auth.checkSession().subscribe((user) => {
+      if (!user) {
+        return;
+      }
+      this.profiles.getMySettings().subscribe({
+        next: (settings) => this.theme.setPreference(settings.theme),
+        error: () => undefined
+      });
+    });
   }
 }

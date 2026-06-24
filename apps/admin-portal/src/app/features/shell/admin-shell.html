@@ -1,11 +1,19 @@
 <div class="admin-shell">
   <aside class="sidebar" aria-label="Admin navigation">
-    <a routerLink="/class-sessions" class="brand">
+    <a routerLink="/dashboard" class="brand">
       <span aria-hidden="true">NS</span>
       <strong>Native SFU</strong>
     </a>
 
     <nav>
+      <a routerLink="/dashboard" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
+        <span aria-hidden="true">●</span>
+        Dashboard
+      </a>
+      <a routerLink="/audit-logs" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
+        <span aria-hidden="true">●</span>
+        Audit logs
+      </a>
       <a routerLink="/class-sessions" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
         <span aria-hidden="true">●</span>
         Class sessions

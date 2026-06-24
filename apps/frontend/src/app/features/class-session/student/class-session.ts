@@ -1,13 +1,20 @@
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal, type Signal, type WritableSignal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, ViewChild, computed, inject, signal, type Signal, type WritableSignal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import type {
   ClassSessionRecordingEvent,
+  Consumer,
   Participant,
   Producer,
   Recording,
+  Room,
   RoomOwnerRedirect,
   ServerToClientEvents,
-  StudentMediaModerationEvent
+  StudentMediaModerationEvent,
+  WhiteboardCommand as WireWhiteboardCommand,
+  WhiteboardCommandEvent,
+  WhiteboardControlEvent,
+  WhiteboardCursorEvent,
+  WhiteboardPermissionLevel
 } from '@native-sfu/contracts';
 import { buildRoomOwnerRedirectUrl } from '../../../core/services/app-environment';
 import { AuthService } from '../../../core/services/auth.service';
@@ -15,8 +22,10 @@ import { RoomStore } from '../../../core/services/room.store';
 import { SocketAckError, SocketService } from '../../../core/services/socket.service';
 import { WebRtcService } from '../../../core/services/webrtc.service';
 import { MediaStreamDirective } from '../../../shared/media-stream/media-stream.directive';
+import { Whiteboard, type WhiteboardCommand, type WhiteboardCursor, type WhiteboardTool } from '../../../shared/whiteboard/whiteboard';
 import { ClassSessionService, type ClassroomPayload } from '../class-session.service';
 import { SessionChat } from '../session-chat/session-chat';
+import { SessionMaterials } from '../session-materials/session-materials';
 
 interface StudentSessionParticipant {
   id: string;
@@ -45,6 +54,42 @@ interface RemoteWebRtcContract {
 
 type DeviceSelectionValue = string | null | Signal<string | null> | WritableSignal<string | null>;
 type ModeratedStudentMediaKind = Extract<Producer['kind'], 'audio' | 'video'>;
+type LocalWhiteboardUpsertElement = Extract<WhiteboardCommand, { type: 'upsert' }>['element'];
+
+const DRAW_WHITEBOARD_TOOLS: readonly WhiteboardTool[] = ['pen', 'laser', 'pan'];
+const ANNOTATE_WHITEBOARD_TOOLS: readonly WhiteboardTool[] = [
+  'pen',
+  'line',
+  'arrow',
+  'rectangle',
+  'ellipse',
+  'star',
+  'text',
+  'equation',
+  'graph',
+  'segment',
+  'angle',
+  'circle',
+  'arc',
+  'perpendicular',
+  'parallel',
+  'midpoint',
+  'point',
+  'vector',
+  'venn',
+  'node-edge',
+  'tree',
+  'flow',
+  'probability-tree',
+  'laser',
+  'pan'
+];
+const CURRENT_PAGE_EDIT_WHITEBOARD_TOOLS: readonly WhiteboardTool[] = [
+  'select',
+  'pen',
+  'eraser',
+  ...ANNOTATE_WHITEBOARD_TOOLS
+];
 
 interface DeviceSwitchingWebRtcContract {
   selectedAudioDeviceId?: DeviceSelectionValue;
@@ -78,11 +123,13 @@ interface TeacherMediaDisableCommand {
 }
 
 type TerminalClassSessionStatus = Extract<ClassroomPayload['status'], 'completed' | 'cancelled'>;
+const TEACHER_MEDIA_STREAM_TIMEOUT_MS = 7_000;
+const TEACHER_MEDIA_STREAM_MAX_RETRIES = 2;
 
 @Component({
   selector: 'sfu-student-class-session',
   standalone: true,
-  imports: [RouterLink, SessionChat, MediaStreamDirective],
+  imports: [RouterLink, SessionChat, SessionMaterials, MediaStreamDirective, Whiteboard],
   templateUrl: './class-session.html',
   styleUrl: './class-session.scss',
   changeDetection: ChangeDetectionStrategy.Eager
@@ -112,6 +159,9 @@ export class StudentClassSession implements OnInit, OnDestroy {
   private readonly socketDisposers: Array<() => void> = [];
   private readonly consumedProducerIds = new Set<string>();
   private readonly pendingProducerIds = new Set<string>();
+  private readonly teacherMediaWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly teacherMediaRetryCounts = new Map<string, number>();
+  private readonly consumerProducerIds = new Map<string, string>();
   private joinedRoomId = '';
   private watchedSessionId = '';
   private destroyed = false;
@@ -122,6 +172,14 @@ export class StudentClassSession implements OnInit, OnDestroy {
   private lifecycleWatchSupported = false;
   private socketConnectedOnce = false;
   private mediaDevicesPrepared = false;
+  private browserRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  private activityHeartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  private lastUserActivityAt = Date.now();
+  private lastActivitySentAt = 0;
+  private readonly whiteboardCursorTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private pendingWhiteboardCommands: WhiteboardCommand[] = [];
+
+  @ViewChild(Whiteboard) private readonly interactiveWhiteboard?: Whiteboard;
 
   protected readonly session = signal<ClassroomPayload | null>(null);
   protected readonly loading = signal(true);
@@ -129,6 +187,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
   protected readonly mediaError = signal('');
   protected readonly localMediaError = signal('');
   protected readonly deviceError = signal('');
+  protected readonly teacherAudioPlaybackBlocked = signal(false);
   protected readonly downloadingRecording = signal(false);
   protected readonly joiningMedia = signal(false);
   protected readonly publishingStudentMedia = signal(false);
@@ -146,13 +205,42 @@ export class StudentClassSession implements OnInit, OnDestroy {
   private readonly selectedVideoDeviceFallback = signal('');
   protected readonly localProducerIds = signal<readonly string[]>([]);
   protected readonly participantsOpen = signal(false);
+  protected readonly materialsOpen = signal(false);
+  protected readonly whiteboardControlGranted = signal(false);
+  protected readonly whiteboardPermissionLevel = signal<WhiteboardPermissionLevel>('view_only');
+  protected readonly whiteboardPermittedPageId = signal('');
+  protected readonly whiteboardDrawerOpen = signal(false);
+  protected readonly whiteboardControlNotice = signal('');
+  protected readonly whiteboardCursors = signal<WhiteboardCursor[]>([]);
   protected readonly returnedRemoteStreams = signal<Record<string, MediaStream>>({});
+  protected readonly mediaRecoveryError = this.webrtc.lastMediaError;
   protected readonly localStream = this.webrtc.localStream;
   protected readonly localVideoPreviewStream = computed(() => {
     const stream = this.localStream();
     return stream && this.localVideoEnabled() && stream.getVideoTracks().some((track) => track.readyState === 'live') ? stream : null;
   });
   protected readonly sessionLive = computed(() => this.session()?.status === 'live');
+  protected readonly liveSettings = computed(() => this.session()?.resolvedLiveSettings ?? null);
+  protected readonly studentWhiteboardReadOnly = computed(
+    () => !this.whiteboardControlGranted() || !this.sessionLive() || this.whiteboardPermissionLevel() === 'view_only'
+  );
+  protected readonly studentWhiteboardPermissionLabel = computed(() => this.whiteboardPermissionLabel(this.whiteboardPermissionLevel()));
+  protected readonly studentWhiteboardTools = computed<readonly WhiteboardTool[]>(() => {
+    switch (this.whiteboardPermissionLevel()) {
+      case 'draw':
+        return DRAW_WHITEBOARD_TOOLS;
+      case 'current_page_edit':
+        return CURRENT_PAGE_EDIT_WHITEBOARD_TOOLS;
+      case 'annotate':
+        return ANNOTATE_WHITEBOARD_TOOLS;
+      default:
+        return ['pan'];
+    }
+  });
+  protected readonly studentCanSelfUnmute = computed(() => this.liveSettings()?.media.allowStudentsToUnmuteSelf !== false);
+  protected readonly studentCanSelfStartCamera = computed(() => this.liveSettings()?.media.allowStudentsToStartCameraSelf !== false);
+  protected readonly prejoinDeviceCheckRequired = computed(() => this.liveSettings()?.media.requirePrejoinDeviceCheck !== false);
+  protected readonly handRaiseAvailable = computed(() => this.liveSettings()?.speaking.handRaiseEnabled !== false);
   protected readonly activeRecording = computed(() => this.session()?.activeRecording ?? null);
   protected readonly latestRecording = computed(() => this.session()?.latestRecording ?? null);
   protected readonly recordingActive = computed(() => this.isActiveRecording(this.activeRecording()));
@@ -182,10 +270,26 @@ export class StudentClassSession implements OnInit, OnDestroy {
     if (this.teacherDisabledVideo()) return this.teacherModerationNotice() || 'Teacher stopped your camera.';
     return '';
   });
-  protected readonly mediaDeviceProblem = computed(() => this.teacherModerationMessage() || this.deviceError() || this.localMediaError());
+  protected readonly mediaDeviceProblem = computed(
+    () =>
+      this.teacherModerationMessage() ||
+      this.deviceError() ||
+      this.localMediaError() ||
+      (this.teacherAudioPlaybackBlocked() ? 'Browser blocked teacher audio.' : this.mediaRecoveryError()?.message ?? '')
+  );
+  protected readonly networkWarning = computed(() => {
+    const policy = this.liveSettings()?.bandwidthPolicy;
+    if (policy?.showNetworkWarnings === false || this.webrtc.networkScore() > 2) {
+      return '';
+    }
+    return policy?.preferAudioOnPoorNetwork
+      ? 'Network is weak. Audio will be more reliable than video.'
+      : 'Network is weak. Media may take longer to recover.';
+  });
   protected readonly canSwitchAudioDevice = computed(
     () =>
       !this.teacherDisabledAudio() &&
+      this.studentCanSelfUnmute() &&
       !this.publishingStudentMedia() &&
       !this.switchingAudioDevice() &&
       !this.refreshingDevices() &&
@@ -194,6 +298,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
   protected readonly canSwitchVideoDevice = computed(
     () =>
       !this.teacherDisabledVideo() &&
+      this.studentCanSelfStartCamera() &&
       !this.publishingStudentMedia() &&
       !this.switchingVideoDevice() &&
       !this.refreshingDevices() &&
@@ -208,6 +313,9 @@ export class StudentClassSession implements OnInit, OnDestroy {
     if (this.teacherDisabledAudio() && this.teacherDisabledVideo()) return 'Mic and camera disabled by teacher';
     if (this.teacherDisabledAudio()) return 'Mic disabled by teacher';
     if (this.teacherDisabledVideo()) return 'Camera disabled by teacher';
+    if (!this.studentCanSelfUnmute() && !this.studentCanSelfStartCamera()) return 'Mic and camera locked by class settings';
+    if (!this.studentCanSelfUnmute()) return 'Mic locked by class settings';
+    if (!this.studentCanSelfStartCamera()) return 'Camera locked by class settings';
     if (this.localMediaError()) return this.localMediaError();
     if (this.deviceError()) return 'Device needs attention';
     if (!this.roomJoined()) {
@@ -222,6 +330,13 @@ export class StudentClassSession implements OnInit, OnDestroy {
     if (!this.localVideoEnabled()) return 'Camera off';
     return 'You are live';
   });
+  protected readonly prejoinJoinDisabled = computed(() => this.joiningMedia() || (this.prejoinDeviceCheckRequired() && this.refreshingDevices()));
+  protected readonly prejoinPolicyHint = computed(() => {
+    if (!this.prejoinDeviceCheckRequired()) return 'Device check is optional for this class.';
+    if (this.refreshingDevices()) return 'Checking available camera and microphone devices.';
+    if (this.deviceError()) return this.deviceError();
+    return 'Device check complete.';
+  });
   protected readonly localParticipantState = computed(() => {
     const participantId = this.store.localParticipantId();
     return participantId ? this.store.room()?.participants.find((participant) => participant.id === participantId) ?? null : null;
@@ -235,6 +350,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
   });
   protected readonly speakingPermissionLabel = computed(() => {
     if (this.allowedToSpeak()) return 'Teacher allowed you to speak.';
+    if (!this.handRaiseAvailable()) return 'Hand raise is disabled for this class.';
     if (this.teacherDisabledAudio()) return 'Teacher muted your microphone.';
     if (this.handRaised()) return 'Waiting for teacher.';
     return 'Raise your hand to request the mic.';
@@ -269,7 +385,10 @@ export class StudentClassSession implements OnInit, OnDestroy {
   protected readonly pipStream = computed(() => this.streamForProducer(this.pipProducer()?.id));
   protected readonly teacherAudioStream = computed(() => this.streamForProducer(this.teacherAudioProducer()?.id));
   protected readonly teacherName = computed(() => this.teacherParticipant()?.displayName ?? 'Teacher');
-  protected readonly stageTitle = computed(() => (this.teacherScreenProducer() ? 'Teacher screen' : `${this.teacherName()} camera`));
+  protected readonly stageTitle = computed(() => {
+    const screenProducer = this.teacherScreenProducer();
+    return screenProducer ? this.sharedContentTitle(screenProducer) : `${this.teacherName()} camera`;
+  });
   protected readonly stageInitials = computed(() => this.initials(this.teacherName()));
   protected readonly stageStatusText = computed(() => {
     if (this.mediaError()) return this.mediaError();
@@ -280,9 +399,9 @@ export class StudentClassSession implements OnInit, OnDestroy {
     if (!producer) return 'Waiting for the teacher camera.';
     if (!this.remoteWebRtc.remoteStreams) return 'Remote media receive support is not available yet.';
     if (!this.streamForProducer(producer.id)) {
-      return producer.kind === 'screen' ? 'Connecting to the teacher screen.' : 'Connecting to the teacher camera.';
+      return producer.kind === 'screen' ? this.sharedContentStatusText(producer, 'connecting') : 'Connecting to the teacher camera.';
     }
-    return producer.kind === 'screen' ? 'Screen sharing' : 'Camera live';
+    return producer.kind === 'screen' ? this.sharedContentStatusText(producer, 'live') : 'Camera live';
   });
   protected readonly blockedMessage = computed(() => {
     const status = this.session()?.status;
@@ -293,12 +412,16 @@ export class StudentClassSession implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.bindSocketEvents();
+    this.bindBrowserRecoveryEvents();
     this.loadSession();
   }
 
   ngOnDestroy(): void {
     this.destroyed = true;
     this.stopLifecyclePolling();
+    this.clearBrowserRecoveryTimer();
+    this.stopActivityHeartbeat();
+    this.clearTeacherMediaWatchdogs();
     for (const dispose of this.socketDisposers.splice(0)) {
       dispose();
     }
@@ -307,11 +430,52 @@ export class StudentClassSession implements OnInit, OnDestroy {
   }
 
   protected toggleParticipants(): void {
-    this.participantsOpen.update((open) => !open);
+    this.participantsOpen.update((open) => {
+      const nextOpen = !open;
+      if (nextOpen) {
+        this.materialsOpen.set(false);
+        this.whiteboardDrawerOpen.set(false);
+      }
+      return nextOpen;
+    });
   }
 
   protected closeParticipants(): void {
     this.participantsOpen.set(false);
+  }
+
+  protected toggleMaterials(): void {
+    this.materialsOpen.update((open) => {
+      const nextOpen = !open;
+      if (nextOpen) {
+        this.participantsOpen.set(false);
+        this.whiteboardDrawerOpen.set(false);
+      }
+      return nextOpen;
+    });
+  }
+
+  protected closeMaterials(): void {
+    this.materialsOpen.set(false);
+  }
+
+  protected toggleWhiteboardDrawer(): void {
+    if (!this.whiteboardControlGranted()) {
+      return;
+    }
+    this.whiteboardDrawerOpen.update((open) => {
+      const nextOpen = !open;
+      if (nextOpen) {
+        this.participantsOpen.set(false);
+        this.materialsOpen.set(false);
+      }
+      return nextOpen;
+    });
+    window.setTimeout(() => this.flushPendingWhiteboardCommands(), 0);
+  }
+
+  protected closeWhiteboardDrawer(): void {
+    this.whiteboardDrawerOpen.set(false);
   }
 
   protected roomJoined(): boolean {
@@ -325,6 +489,10 @@ export class StudentClassSession implements OnInit, OnDestroy {
       return;
     }
     if (this.joiningMedia()) {
+      return;
+    }
+    if (this.prejoinDeviceCheckRequired() && this.refreshingDevices()) {
+      this.mediaError.set('Device check is still running. Please wait a moment.');
       return;
     }
     this.joiningMedia.set(true);
@@ -342,14 +510,26 @@ export class StudentClassSession implements OnInit, OnDestroy {
   }
 
   protected async toggleMicrophone(): Promise<void> {
+    if (!this.localAudioEnabled() && !this.studentCanSelfUnmute()) {
+      this.localMediaError.set('Microphone self-unmute is disabled for this class.');
+      return;
+    }
     await this.setStudentMediaKindEnabled('audio', !this.localAudioEnabled());
   }
 
   protected async toggleCamera(): Promise<void> {
+    if (!this.localVideoEnabled() && !this.studentCanSelfStartCamera()) {
+      this.localMediaError.set('Camera self-start is disabled for this class.');
+      return;
+    }
     await this.setStudentMediaKindEnabled('video', !this.localVideoEnabled());
   }
 
   protected async toggleHandRaise(): Promise<void> {
+    if (!this.handRaiseAvailable()) {
+      this.mediaError.set('Hand raise is disabled for this class.');
+      return;
+    }
     const roomId = this.joinedRoomId;
     const participantId = this.store.localParticipantId();
     if (!roomId || !participantId || !this.sessionLive() || this.updatingHandRaise()) {
@@ -367,6 +547,39 @@ export class StudentClassSession implements OnInit, OnDestroy {
     }
   }
 
+  protected handleStudentWhiteboardCommand(command: WhiteboardCommand): void {
+    const roomId = this.joinedRoomId;
+    if (!roomId || !this.whiteboardControlGranted() || !this.sessionLive()) {
+      return;
+    }
+    const normalizedCommand = this.normalizeWhiteboardCommand(command);
+    if (!this.isStudentWhiteboardCommandAllowed(normalizedCommand)) {
+      this.whiteboardControlNotice.set('That whiteboard action is not allowed for your current permission.');
+      return;
+    }
+    void this.socket
+      .emitAck('whiteboard:command', { roomId, command: this.toWireWhiteboardCommand(normalizedCommand) })
+      .catch((error) => {
+        this.whiteboardControlNotice.set(error instanceof Error ? error.message : 'Unable to sync whiteboard change.');
+      });
+  }
+
+  protected handleStudentWhiteboardCursor(cursor: WhiteboardCursor): void {
+    const roomId = this.joinedRoomId;
+    if (!roomId || !this.whiteboardControlGranted() || !this.sessionLive()) {
+      return;
+    }
+    void this.socket
+      .emitAck('whiteboard:cursor', {
+        roomId,
+        cursor: {
+          color: cursor.color,
+          position: cursor.position
+        }
+      })
+      .catch(() => undefined);
+  }
+
   protected async refreshMediaDevices(): Promise<void> {
     if (this.refreshingDevices()) {
       return;
@@ -377,9 +590,65 @@ export class StudentClassSession implements OnInit, OnDestroy {
       await this.deviceWebRtc.refreshDevices();
       this.syncSelectedDevicesFromLocalStream();
     } catch (error) {
-      this.deviceError.set(this.deviceErrorMessage(error, 'Unable to refresh camera and microphone devices.'));
+      this.deviceError.set(this.mediaRecoveryError()?.message ?? this.deviceErrorMessage(error, 'Unable to refresh camera and microphone devices.'));
     } finally {
       this.refreshingDevices.set(false);
+    }
+  }
+
+  protected handleTeacherAudioPlaybackBlocked(error: unknown): void {
+    this.teacherAudioPlaybackBlocked.set(true);
+    const mediaError = this.webrtc.recordAutoplayBlocked(error);
+    this.mediaError.set(mediaError.message);
+  }
+
+  protected handleTeacherVideoPlaybackBlocked(_error: unknown): void {
+    this.mediaError.set('Teacher video could not start automatically. Tap retry media if the stage stays blank.');
+  }
+
+  protected async runStudentMediaRecovery(): Promise<void> {
+    const recoveryError = this.mediaRecoveryError();
+    if (this.teacherAudioPlaybackBlocked() || recoveryError?.code === 'autoplay_blocked') {
+      await this.enableTeacherAudio();
+      return;
+    }
+    if (this.joiningMedia() || this.publishingStudentMedia() || this.refreshingDevices()) {
+      return;
+    }
+    if (recoveryError?.kind === 'consumer') {
+      this.mediaError.set('');
+      await this.consumeAvailableTeacherProducers();
+      return;
+    }
+    if (recoveryError?.operation === 'refresh' || recoveryError?.code === 'device_unavailable') {
+      await this.refreshMediaDevices();
+      return;
+    }
+    const payload = this.session();
+    if (payload && this.roomJoined()) {
+      await this.publishEnabledStudentMedia(payload);
+      return;
+    }
+    await this.refreshMediaDevices();
+  }
+
+  protected async enableTeacherAudio(): Promise<void> {
+    const audio = document.querySelector<HTMLAudioElement>('.teacher-audio');
+    if (!audio) {
+      this.teacherAudioPlaybackBlocked.set(false);
+      this.webrtc.clearMediaIssue('audio');
+      return;
+    }
+    try {
+      await audio.play();
+      this.teacherAudioPlaybackBlocked.set(false);
+      this.webrtc.clearMediaIssue('audio');
+      if (this.mediaRecoveryError()?.code === 'autoplay_blocked') {
+        this.mediaError.set('');
+      }
+    } catch (error) {
+      const mediaError = this.webrtc.recordAutoplayBlocked(error);
+      this.mediaError.set(mediaError.message);
     }
   }
 
@@ -400,7 +669,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
       await this.startOrSwitchLocalTrack('audio', nextDeviceId);
       await this.publishOrResumeStudentMediaKind('audio');
     } catch (error) {
-      this.deviceError.set(this.deviceErrorMessage(error, 'Unable to switch microphones.'));
+      this.deviceError.set(this.mediaRecoveryError()?.message ?? this.deviceErrorMessage(error, 'Unable to switch microphones.'));
     }
   }
 
@@ -421,7 +690,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
       await this.startOrSwitchLocalTrack('video', nextDeviceId);
       await this.publishOrResumeStudentMediaKind('video');
     } catch (error) {
-      this.deviceError.set(this.deviceErrorMessage(error, 'Unable to switch cameras.'));
+      this.deviceError.set(this.mediaRecoveryError()?.message ?? this.deviceErrorMessage(error, 'Unable to switch cameras.'));
     }
   }
 
@@ -581,6 +850,11 @@ export class StudentClassSession implements OnInit, OnDestroy {
       return;
     }
     this.mediaDevicesPrepared = true;
+    const settings = this.liveSettings();
+    if (settings) {
+      this.localAudioEnabled.set(!settings.media.studentsJoinMuted && settings.media.allowStudentsToUnmuteSelf);
+      this.localVideoEnabled.set(!settings.media.studentsJoinCameraOff && settings.media.allowStudentsToStartCameraSelf);
+    }
     void this.refreshMediaDevices();
   }
 
@@ -590,6 +864,10 @@ export class StudentClassSession implements OnInit, OnDestroy {
   }
 
   private async joinClassroomRoom(payload: ClassroomPayload, forceRejoin = false): Promise<void> {
+    if (this.isTerminalStatus(payload.status) || this.isTerminalStatus(this.session()?.status)) {
+      this.joiningMedia.set(false);
+      return;
+    }
     if (!payload.roomId) {
       this.mediaError.set('Classroom media room is not available yet.');
       this.joiningMedia.set(false);
@@ -600,23 +878,23 @@ export class StudentClassSession implements OnInit, OnDestroy {
       return;
     }
     if (this.joinedRoomId) {
-      await this.leaveCurrentRoom();
+      await this.leaveCurrentRoom({ preserveMediaIntent: forceRejoin });
     }
     const displayName = this.studentDisplayName(payload);
     this.joiningMedia.set(true);
     this.mediaError.set('');
-    this.joinedRoomId = payload.roomId;
     try {
       const response = await this.socket.emitAck('room:join', { roomId: payload.roomId, displayName, asViewer: false });
-      if (this.destroyed) {
-        this.joinedRoomId = '';
+      if (this.destroyed || this.isTerminalStatus(this.session()?.status)) {
         await this.socket.emitAck('room:leave', { roomId: payload.roomId }).catch(() => undefined);
         return;
       }
+      this.joinedRoomId = payload.roomId;
       this.store.setRoom(response.room);
       this.store.setLocalParticipant(response.participantId);
       this.syncTeacherModerationFromLocalParticipant();
       this.syncLocalParticipantMediaState();
+      this.startActivityHeartbeat();
       await this.consumeAvailableTeacherProducers();
       await this.publishEnabledStudentMedia(payload);
     } catch (error) {
@@ -636,12 +914,17 @@ export class StudentClassSession implements OnInit, OnDestroy {
     this.bindLifecycleSocketEvents();
     this.bindModerationSocketEvents();
     this.registerSocketHandler('student:media-moderated', (event) => this.handleStudentMediaModerated(event));
+    this.registerSocketHandler('whiteboard:control-granted', (event) => this.applyWhiteboardControlEvent(event));
+    this.registerSocketHandler('whiteboard:control-revoked', (event) => this.applyWhiteboardControlEvent(event));
+    this.registerSocketHandler('whiteboard:command', (event) => this.applyRemoteWhiteboardCommand(event));
+    this.registerSocketHandler('whiteboard:cursor', (event) => this.applyRemoteWhiteboardCursor(event));
     this.registerSocketHandler('recording:started', (event) => this.applyRecordingEvent(event));
     this.registerSocketHandler('recording:updated', (event) => this.applyRecordingEvent(event));
     this.registerSocketHandler('recording:stopped', (event) => this.applyRecordingEvent(event));
     this.registerSocketHandler('recording:failed', (event) => this.applyRecordingEvent(event));
     this.registerSocketHandler('room:updated', (room) => {
       if (this.isCurrentRoom(room.id)) {
+        this.cleanupRemovedRoomProducers(room);
         this.store.setRoom(room);
         this.syncTeacherModerationFromLocalParticipant();
         void this.consumeAvailableTeacherProducers();
@@ -687,18 +970,33 @@ export class StudentClassSession implements OnInit, OnDestroy {
       }
     });
     this.registerSocketHandler('consumer:created', (consumer) => {
-      if (this.isCurrentRoom(consumer.roomId)) {
-        this.store.upsertConsumer(consumer);
-      }
+      this.applyConsumerEvent(consumer);
     });
     this.registerSocketHandler('consumer:updated', (consumer) => {
-      if (this.isCurrentRoom(consumer.roomId)) {
-        this.store.upsertConsumer(consumer);
+      this.applyConsumerEvent(consumer);
+    });
+    this.registerSocketHandler('consumer:closed', (consumerId) => {
+      const room = this.store.room();
+      const producerId = this.consumerProducerIds.get(consumerId) ?? room?.consumers.find((consumer) => consumer.id === consumerId)?.producerId;
+      this.consumerProducerIds.delete(consumerId);
+      if (this.isCurrentRoom(room?.id) && room?.consumers.some((consumer) => consumer.id === consumerId)) {
+        this.store.room.set({
+          ...room,
+          consumers: room.consumers.filter((consumer) => consumer.id !== consumerId)
+        });
+      }
+      if (producerId) {
+        this.cleanupRemoteProducer(producerId);
       }
     });
     this.registerSocketHandler('consumer:score-updated', (state) => {
       if (this.isCurrentRoom(state.roomId)) {
         this.store.applyConsumerQuality(state);
+      }
+    });
+    this.registerSocketHandler('network:quality', (quality) => {
+      if (quality.participantId === this.store.localParticipantId()) {
+        this.webrtc.networkScore.set(quality.score);
       }
     });
     this.registerSocketHandler('consumer:layers-changed', (event) => this.applyConsumerLayerEvent(event));
@@ -735,6 +1033,123 @@ export class StudentClassSession implements OnInit, OnDestroy {
       }
       this.refreshSessionSnapshot({ allowMediaJoin: true, forceMediaRejoin: Boolean(this.joinedRoomId), silent: true });
     });
+    this.registerRawSocketHandler('disconnect', () => {
+      if (this.sessionLive()) {
+        this.mediaError.set('Connection lost. Reconnecting when the network returns...');
+      }
+    });
+  }
+
+  private bindBrowserRecoveryEvents(): void {
+    const handleOnline = () => this.requestBrowserRecovery('online');
+    const handleOffline = () => {
+      if (this.sessionLive()) {
+        this.mediaError.set('You are offline. The class will try to recover when the network returns.');
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        this.requestBrowserRecovery('visible');
+      }
+      this.noteUserActivity('visibility');
+    };
+    const handleActivity = () => this.noteUserActivity('user');
+    const handleFocus = () => this.noteUserActivity('focus');
+    const handleBlur = () => this.noteUserActivity('blur');
+    this.registerBrowserEvent(window, 'online', handleOnline);
+    this.registerBrowserEvent(window, 'offline', handleOffline);
+    this.registerBrowserEvent(window, 'pageshow', handleOnline);
+    this.registerBrowserEvent(window, 'focus', handleFocus);
+    this.registerBrowserEvent(window, 'blur', handleBlur);
+    this.registerBrowserEvent(document, 'pointerdown', handleActivity);
+    this.registerBrowserEvent(document, 'keydown', handleActivity);
+    this.registerBrowserEvent(document, 'touchstart', handleActivity);
+    this.registerBrowserEvent(document, 'visibilitychange', handleVisibilityChange);
+  }
+
+  private registerBrowserEvent(target: EventTarget, event: string, handler: EventListener): void {
+    target.addEventListener(event, handler);
+    this.socketDisposers.push(() => target.removeEventListener(event, handler));
+  }
+
+  private startActivityHeartbeat(): void {
+    if (this.activityHeartbeatTimer || !this.joinedRoomId) {
+      return;
+    }
+    this.lastUserActivityAt = Date.now();
+    void this.sendActivityHeartbeat('heartbeat', true);
+    this.activityHeartbeatTimer = setInterval(() => void this.sendActivityHeartbeat('heartbeat'), 30_000);
+  }
+
+  private stopActivityHeartbeat(): void {
+    if (!this.activityHeartbeatTimer) {
+      return;
+    }
+    clearInterval(this.activityHeartbeatTimer);
+    this.activityHeartbeatTimer = undefined;
+  }
+
+  private noteUserActivity(reason: 'user' | 'visibility' | 'focus' | 'blur'): void {
+    this.lastUserActivityAt = Date.now();
+    const force = reason !== 'user';
+    if (force || Date.now() - this.lastActivitySentAt > 5_000) {
+      void this.sendActivityHeartbeat(reason, force);
+    }
+  }
+
+  private async sendActivityHeartbeat(
+    reason: 'heartbeat' | 'user' | 'visibility' | 'focus' | 'blur',
+    force = false
+  ): Promise<void> {
+    const roomId = this.joinedRoomId;
+    if (this.destroyed || !roomId || !this.sessionLive() || (!force && Date.now() - this.lastActivitySentAt < 5_000)) {
+      return;
+    }
+    const inactiveSettings = this.liveSettings()?.inactiveDetection;
+    const thresholdMs = Math.max(1, inactiveSettings?.inactiveAfterMinutes ?? 10) * 60_000;
+    const visible = typeof document === 'undefined' || document.visibilityState !== 'hidden';
+    const focused = typeof document === 'undefined' || document.hasFocus();
+    const activeByTime = Date.now() - this.lastUserActivityAt < thresholdMs;
+    const active = activeByTime && (visible || inactiveSettings?.countBackgroundTabAsInactive === false);
+    this.lastActivitySentAt = Date.now();
+    await this.socket
+      .emitAck('class:activity', {
+        roomId,
+        active,
+        visible,
+        focused,
+        reason
+      })
+      .catch(() => undefined);
+  }
+
+  private requestBrowserRecovery(reason: 'online' | 'visible'): void {
+    if (this.destroyed || !this.session() || this.isBrowserOffline() || document.visibilityState === 'hidden') {
+      return;
+    }
+    this.clearBrowserRecoveryTimer();
+    this.browserRecoveryTimer = setTimeout(() => {
+      this.browserRecoveryTimer = undefined;
+      if (this.destroyed || this.isBrowserOffline()) {
+        return;
+      }
+      if (this.sessionLive()) {
+        this.mediaError.set(reason === 'online' ? 'Network restored. Recovering classroom media...' : '');
+      }
+      this.refreshSessionSnapshot({ allowMediaJoin: true, forceMediaRejoin: Boolean(this.joinedRoomId), silent: true });
+    }, 600);
+  }
+
+  private clearBrowserRecoveryTimer(): void {
+    if (!this.browserRecoveryTimer) {
+      return;
+    }
+    clearTimeout(this.browserRecoveryTimer);
+    this.browserRecoveryTimer = undefined;
+  }
+
+  private isBrowserOffline(): boolean {
+    return typeof navigator !== 'undefined' && navigator.onLine === false;
   }
 
   private bindLifecycleSocketEvents(): void {
@@ -921,6 +1336,13 @@ export class StudentClassSession implements OnInit, OnDestroy {
 
   private markSessionEnded(status: TerminalClassSessionStatus): void {
     this.stopLifecyclePolling();
+    this.joiningMedia.set(false);
+    this.publishingStudentMedia.set(false);
+    this.refreshingDevices.set(false);
+    this.switchingAudioDevice.set(false);
+    this.switchingVideoDevice.set(false);
+    this.updatingHandRaise.set(false);
+    this.clearWhiteboardControlState();
     const current = this.session();
     if (!current) {
       return;
@@ -1037,6 +1459,17 @@ export class StudentClassSession implements OnInit, OnDestroy {
     void this.consumeTeacherProducer(producer);
   }
 
+  private applyConsumerEvent(consumer: Consumer): void {
+    if (!this.isCurrentRoom(consumer.roomId)) {
+      return;
+    }
+    this.consumerProducerIds.set(consumer.id, consumer.producerId);
+    this.store.upsertConsumer(consumer);
+    if (consumer.status === 'closed') {
+      this.cleanupRemoteProducer(consumer.producerId);
+    }
+  }
+
   private applyConsumerLayerEvent(event: Parameters<ServerToClientEvents['consumer:layers-changed']>[0]): void {
     if (this.isCurrentRoom(event.roomId)) {
       this.store.applyConsumerLayerEvent(event);
@@ -1066,11 +1499,59 @@ export class StudentClassSession implements OnInit, OnDestroy {
         this.returnedRemoteStreams.update((streams) => ({ ...streams, [producer.id]: stream }));
       }
       this.consumedProducerIds.add(producer.id);
+      if (this.streamForProducer(producer.id)) {
+        this.clearTeacherMediaWatchdog(producer.id);
+      } else {
+        this.scheduleTeacherMediaWatchdog(producer);
+      }
     } catch (error) {
-      this.mediaError.set(error instanceof Error ? error.message : 'Unable to connect teacher media.');
+      this.mediaError.set(this.mediaRecoveryError()?.message ?? (error instanceof Error ? error.message : 'Unable to connect teacher media.'));
     } finally {
       this.pendingProducerIds.delete(producer.id);
     }
+  }
+
+  private scheduleTeacherMediaWatchdog(producer: Producer): void {
+    this.clearTeacherMediaWatchdog(producer.id, false);
+    const timer = setTimeout(() => {
+      this.teacherMediaWatchdogs.delete(producer.id);
+      if (this.destroyed || !this.isTeacherMediaProducer(producer)) {
+        return;
+      }
+      if (this.streamForProducer(producer.id)) {
+        this.teacherMediaRetryCounts.delete(producer.id);
+        return;
+      }
+      const nextRetryCount = (this.teacherMediaRetryCounts.get(producer.id) ?? 0) + 1;
+      this.teacherMediaRetryCounts.set(producer.id, nextRetryCount);
+      this.cleanupRemoteProducer(producer.id, { resetRetry: false });
+      if (nextRetryCount > TEACHER_MEDIA_STREAM_MAX_RETRIES) {
+        this.mediaError.set(producer.kind === 'screen' ? 'Teacher shared content could not load. Wait for the teacher to share again.' : 'Teacher camera could not load. Wait for the teacher to retry camera.');
+        return;
+      }
+      this.mediaError.set(producer.kind === 'screen' ? 'Teacher shared content is taking longer than expected. Retrying...' : 'Teacher camera is taking longer than expected. Retrying...');
+      void this.consumeTeacherProducer(producer);
+    }, TEACHER_MEDIA_STREAM_TIMEOUT_MS);
+    this.teacherMediaWatchdogs.set(producer.id, timer);
+  }
+
+  private clearTeacherMediaWatchdog(producerId: string, resetRetry = true): void {
+    const timer = this.teacherMediaWatchdogs.get(producerId);
+    if (timer) {
+      clearTimeout(timer);
+      this.teacherMediaWatchdogs.delete(producerId);
+    }
+    if (resetRetry) {
+      this.teacherMediaRetryCounts.delete(producerId);
+    }
+  }
+
+  private clearTeacherMediaWatchdogs(): void {
+    for (const timer of this.teacherMediaWatchdogs.values()) {
+      clearTimeout(timer);
+    }
+    this.teacherMediaWatchdogs.clear();
+    this.teacherMediaRetryCounts.clear();
   }
 
   private async publishEnabledStudentMedia(payload: ClassroomPayload): Promise<void> {
@@ -1078,8 +1559,8 @@ export class StudentClassSession implements OnInit, OnDestroy {
       return;
     }
     const kinds: ModeratedStudentMediaKind[] = [
-      ...(this.localAudioEnabled() && !this.teacherDisabledAudio() ? (['audio'] as const) : []),
-      ...(this.localVideoEnabled() && !this.teacherDisabledVideo() ? (['video'] as const) : [])
+      ...(this.localAudioEnabled() && !this.teacherDisabledAudio() && this.studentCanSelfUnmute() ? (['audio'] as const) : []),
+      ...(this.localVideoEnabled() && !this.teacherDisabledVideo() && this.studentCanSelfStartCamera() ? (['video'] as const) : [])
     ];
     if (!kinds.length) {
       return;
@@ -1094,7 +1575,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
           this.setLocalMediaKindState(kind, false);
           this.setLocalTracksEnabled(kind, false);
           this.stopLocalTrackKind(kind);
-          this.localMediaError.set(this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to publish your microphone.' : 'Unable to publish your camera.'));
+          this.localMediaError.set(this.mediaRecoveryError()?.message ?? this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to publish your microphone.' : 'Unable to publish your camera.'));
         }
       }
     } finally {
@@ -1108,6 +1589,10 @@ export class StudentClassSession implements OnInit, OnDestroy {
   }
 
   private async setStudentMediaKindEnabled(kind: ModeratedStudentMediaKind, enabled: boolean): Promise<void> {
+    if (enabled && !this.canSelfEnableMediaKind(kind)) {
+      this.localMediaError.set(kind === 'audio' ? 'Microphone self-unmute is disabled for this class.' : 'Camera self-start is disabled for this class.');
+      return;
+    }
     if (enabled && this.isTeacherDisabledKind(kind)) {
       this.showTeacherDisabledMessage(kind);
       return;
@@ -1125,7 +1610,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
         this.setLocalTracksEnabled(kind, wasEnabled);
         this.setLocalMediaKindState(kind, wasEnabled);
         this.patchLocalParticipantMedia(kind, wasEnabled);
-        this.localMediaError.set(this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to turn off your microphone.' : 'Unable to turn off your camera.'));
+        this.localMediaError.set(this.mediaRecoveryError()?.message ?? this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to turn off your microphone.' : 'Unable to turn off your camera.'));
       }
       return;
     }
@@ -1140,12 +1625,15 @@ export class StudentClassSession implements OnInit, OnDestroy {
       this.setLocalMediaKindState(kind, false);
       this.setLocalTracksEnabled(kind, false);
       this.stopLocalTrackKind(kind);
-      this.localMediaError.set(this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to start your microphone.' : 'Unable to start your camera.'));
+      this.localMediaError.set(this.mediaRecoveryError()?.message ?? this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to start your microphone.' : 'Unable to start your camera.'));
     }
   }
 
   private async publishOrResumeStudentMediaKind(kind: ModeratedStudentMediaKind): Promise<void> {
     if (this.isTeacherDisabledKind(kind) || !this.localMediaKindEnabled(kind)) {
+      return;
+    }
+    if (!this.canSelfEnableMediaKind(kind)) {
       return;
     }
     const payload = this.session();
@@ -1165,14 +1653,14 @@ export class StudentClassSession implements OnInit, OnDestroy {
       this.setLocalMediaKindState(kind, false);
       this.setLocalTracksEnabled(kind, false);
       this.stopLocalTrackKind(kind);
-      this.localMediaError.set(this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to publish your microphone.' : 'Unable to publish your camera.'));
+      this.localMediaError.set(this.mediaRecoveryError()?.message ?? this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to publish your microphone.' : 'Unable to publish your camera.'));
     } finally {
       this.publishingStudentMedia.set(false);
     }
   }
 
   private async publishStudentMediaKind(payload: ClassroomPayload, kind: ModeratedStudentMediaKind): Promise<void> {
-    if (!this.canPublishInRoom(payload) || this.isTeacherDisabledKind(kind) || !this.localMediaKindEnabled(kind)) {
+    if (!this.canPublishInRoom(payload) || this.isTeacherDisabledKind(kind) || !this.localMediaKindEnabled(kind) || !this.canSelfEnableMediaKind(kind)) {
       return;
     }
     const existingProducer = this.localProducerForKind(kind);
@@ -1195,7 +1683,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
   }
 
   private canPublishInRoom(payload: ClassroomPayload): boolean {
-    return Boolean(payload.roomId && payload.status === 'live' && payload.canJoin && this.joinedRoomId === payload.roomId);
+    return Boolean(payload.roomId && payload.status === 'live' && this.session()?.status === 'live' && payload.canJoin && this.joinedRoomId === payload.roomId);
   }
 
   private async ensureLocalTrack(kind: ModeratedStudentMediaKind): Promise<MediaStream> {
@@ -1237,6 +1725,10 @@ export class StudentClassSession implements OnInit, OnDestroy {
 
   private localMediaKindEnabled(kind: ModeratedStudentMediaKind): boolean {
     return kind === 'audio' ? this.localAudioEnabled() : this.localVideoEnabled();
+  }
+
+  private canSelfEnableMediaKind(kind: ModeratedStudentMediaKind): boolean {
+    return kind === 'audio' ? this.studentCanSelfUnmute() : this.studentCanSelfStartCamera();
   }
 
   private setLocalMediaKindState(kind: ModeratedStudentMediaKind, enabled: boolean): void {
@@ -1306,7 +1798,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
         })
       );
     } catch (error) {
-      this.localMediaError.set(this.deviceErrorMessage(error, live ? 'Unable to resume your media.' : 'Unable to pause your media.'));
+      this.localMediaError.set(this.mediaRecoveryError()?.message ?? this.deviceErrorMessage(error, live ? 'Unable to resume your media.' : 'Unable to pause your media.'));
       throw error;
     }
   }
@@ -1330,11 +1822,12 @@ export class StudentClassSession implements OnInit, OnDestroy {
     );
   }
 
-  private async leaveCurrentRoom(): Promise<void> {
+  private async leaveCurrentRoom(options: { preserveMediaIntent?: boolean } = {}): Promise<void> {
     const roomId = this.joinedRoomId;
     this.joinedRoomId = '';
+    this.stopActivityHeartbeat();
     await this.closeStudentProducers();
-    this.cleanupLocalMediaLocally();
+    this.cleanupLocalMediaLocally({ preserveMediaIntent: Boolean(options.preserveMediaIntent) });
     if (roomId && this.store.room()?.id === roomId) {
       this.store.room.set(null);
     }
@@ -1343,21 +1836,26 @@ export class StudentClassSession implements OnInit, OnDestroy {
     }
   }
 
-  private cleanupLocalMediaLocally(): void {
+  private cleanupLocalMediaLocally(options: { preserveMediaIntent?: boolean } = {}): void {
     this.localProducerIds.set([]);
-    this.localAudioEnabled.set(false);
-    this.localVideoEnabled.set(false);
+    if (!options.preserveMediaIntent) {
+      this.localAudioEnabled.set(false);
+      this.localVideoEnabled.set(false);
+      this.selectedAudioDeviceFallback.set('');
+      this.selectedVideoDeviceFallback.set('');
+    }
     this.publishingStudentMedia.set(false);
     this.refreshingDevices.set(false);
     this.switchingAudioDevice.set(false);
     this.switchingVideoDevice.set(false);
     this.updatingHandRaise.set(false);
-    this.selectedAudioDeviceFallback.set('');
-    this.selectedVideoDeviceFallback.set('');
     this.webrtc.resetRoomMedia();
     this.returnedRemoteStreams.set({});
     this.consumedProducerIds.clear();
     this.pendingProducerIds.clear();
+    this.clearTeacherMediaWatchdogs();
+    this.consumerProducerIds.clear();
+    this.clearWhiteboardControlState();
   }
 
   private applyLocalTrackState(): void {
@@ -1382,6 +1880,151 @@ export class StudentClassSession implements OnInit, OnDestroy {
       return;
     }
     void this.applyTeacherMediaDisable(event.kind, event.message ?? this.teacherDisabledActionMessage(event.kind), { syncProducer: false });
+  }
+
+  protected whiteboardPermissionLabel(permissionLevel: WhiteboardPermissionLevel): string {
+    switch (permissionLevel) {
+      case 'draw':
+        return 'Draw only';
+      case 'annotate':
+        return 'Annotate';
+      case 'current_page_edit':
+        return 'Current page edit';
+      default:
+        return 'View only';
+    }
+  }
+
+  private isStudentWhiteboardCommandAllowed(command: WhiteboardCommand): boolean {
+    const permissionLevel = this.whiteboardPermissionLevel();
+    if (permissionLevel === 'view_only') {
+      return false;
+    }
+    const permittedPageId = this.whiteboardPermittedPageId();
+    if (permittedPageId && command.pageId !== permittedPageId) {
+      return false;
+    }
+    if (command.type === 'clear') {
+      return false;
+    }
+    if (command.type === 'delete') {
+      return permissionLevel === 'current_page_edit';
+    }
+    if (command.type !== 'upsert') {
+      return false;
+    }
+    const elementType = command.element.type;
+    if (elementType === 'file') {
+      return false;
+    }
+    if (permissionLevel === 'draw') {
+      return elementType === 'stroke';
+    }
+    return ['stroke', 'shape', 'text', 'equation', 'graph', 'geometry', 'diagram'].includes(elementType);
+  }
+
+  private applyWhiteboardControlEvent(event: WhiteboardControlEvent): void {
+    if (!this.isWhiteboardEventForCurrentRoom(event.roomId)) {
+      return;
+    }
+    const localParticipantId = this.store.localParticipantId();
+    const targetsLocalStudent = Boolean(localParticipantId && event.participantId === localParticipantId);
+    if (event.granted && targetsLocalStudent) {
+      const permissionLevel = event.permissionLevel ?? 'annotate';
+      this.participantsOpen.set(false);
+      this.materialsOpen.set(false);
+      this.whiteboardControlGranted.set(true);
+      this.whiteboardPermissionLevel.set(permissionLevel);
+      this.whiteboardPermittedPageId.set(event.pageId ?? '');
+      this.whiteboardDrawerOpen.set(true);
+      this.whiteboardControlNotice.set(
+        event.message ?? `Teacher allowed ${this.whiteboardPermissionLabel(permissionLevel).toLowerCase()} whiteboard control.`
+      );
+      window.setTimeout(() => this.flushPendingWhiteboardCommands(), 0);
+      return;
+    }
+    if (!event.granted && (targetsLocalStudent || this.whiteboardControlGranted())) {
+      this.clearWhiteboardControlState(event.message ?? event.reason ?? 'Whiteboard control was revoked.');
+    }
+  }
+
+  private applyRemoteWhiteboardCommand(event: WhiteboardCommandEvent): void {
+    if (!this.isWhiteboardEventForCurrentRoom(event.roomId) || event.participantId === this.store.localParticipantId() || !this.whiteboardControlGranted()) {
+      return;
+    }
+    const command = this.normalizeWhiteboardCommand(event.command);
+    const whiteboard = this.interactiveWhiteboard;
+    if (!whiteboard) {
+      this.pendingWhiteboardCommands.push(command);
+      window.setTimeout(() => this.flushPendingWhiteboardCommands(), 0);
+      return;
+    }
+    whiteboard.applyCommand(command);
+  }
+
+  private applyRemoteWhiteboardCursor(event: WhiteboardCursorEvent): void {
+    if (!this.isWhiteboardEventForCurrentRoom(event.roomId) || event.cursor.participantId === this.store.localParticipantId() || !this.whiteboardControlGranted()) {
+      return;
+    }
+    this.whiteboardCursors.update((cursors) => [
+      ...cursors.filter((cursor) => cursor.participantId !== event.cursor.participantId),
+      event.cursor
+    ]);
+    const previousTimer = this.whiteboardCursorTimers.get(event.cursor.participantId);
+    if (previousTimer) {
+      clearTimeout(previousTimer);
+    }
+    const timer = setTimeout(() => {
+      this.whiteboardCursors.update((cursors) => cursors.filter((cursor) => cursor.participantId !== event.cursor.participantId));
+      this.whiteboardCursorTimers.delete(event.cursor.participantId);
+    }, 1800);
+    this.whiteboardCursorTimers.set(event.cursor.participantId, timer);
+  }
+
+  private flushPendingWhiteboardCommands(): void {
+    const whiteboard = this.interactiveWhiteboard;
+    if (!whiteboard || !this.pendingWhiteboardCommands.length) {
+      return;
+    }
+    const commands = this.pendingWhiteboardCommands.splice(0);
+    for (const command of commands) {
+      whiteboard.applyCommand(command);
+    }
+  }
+
+  private normalizeWhiteboardCommand(command: WhiteboardCommand | WireWhiteboardCommand): WhiteboardCommand {
+    if (command.type === 'clear') {
+      return { type: 'clear', ...(command.pageId ? { pageId: command.pageId } : {}) };
+    }
+    if (command.type === 'delete') {
+      return { type: 'delete', elementId: command.elementId, ...(command.pageId ? { pageId: command.pageId } : {}) };
+    }
+    if (command.type !== 'upsert') {
+      return { type: 'clear' };
+    }
+    return { type: 'upsert', element: command.element as LocalWhiteboardUpsertElement, ...(command.pageId ? { pageId: command.pageId } : {}) };
+  }
+
+  private toWireWhiteboardCommand(command: WhiteboardCommand): WireWhiteboardCommand {
+    return this.normalizeWhiteboardCommand(command) as unknown as WireWhiteboardCommand;
+  }
+
+  private clearWhiteboardControlState(message = ''): void {
+    this.whiteboardControlGranted.set(false);
+    this.whiteboardPermissionLevel.set('view_only');
+    this.whiteboardPermittedPageId.set('');
+    this.whiteboardDrawerOpen.set(false);
+    this.whiteboardControlNotice.set(message);
+    this.pendingWhiteboardCommands = [];
+    for (const timer of this.whiteboardCursorTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.whiteboardCursorTimers.clear();
+    this.whiteboardCursors.set([]);
+  }
+
+  private isWhiteboardEventForCurrentRoom(roomId: string): boolean {
+    return Boolean(roomId && (this.joinedRoomId === roomId || this.store.room()?.id === roomId || this.session()?.roomId === roomId));
   }
 
   private teacherMediaDisableCommandFromUnknown(eventName: string, args: unknown[]): TeacherMediaDisableCommand | null {
@@ -1493,7 +2136,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
     try {
       await this.setLocalProducerKindStatus(kind, false);
     } catch (error) {
-      this.localMediaError.set(this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to mute your microphone.' : 'Unable to stop your camera.'));
+      this.localMediaError.set(this.mediaRecoveryError()?.message ?? this.deviceErrorMessage(error, kind === 'audio' ? 'Unable to mute your microphone.' : 'Unable to stop your camera.'));
     }
   }
 
@@ -1740,6 +2383,33 @@ export class StudentClassSession implements OnInit, OnDestroy {
     );
   }
 
+  private sharedContentTitle(producer: Producer): string {
+    const source = this.sharedContentSource(producer);
+    if (source === 'whiteboard') {
+      return 'Teacher whiteboard';
+    }
+    if (source === 'screen') {
+      return 'Teacher screen';
+    }
+    return 'Teacher shared content';
+  }
+
+  private sharedContentStatusText(producer: Producer, state: 'connecting' | 'live'): string {
+    const source = this.sharedContentSource(producer);
+    if (state === 'connecting') {
+      if (source === 'whiteboard') return 'Connecting to the teacher whiteboard.';
+      if (source === 'screen') return 'Connecting to the teacher screen.';
+      return 'Connecting to the teacher share.';
+    }
+    if (source === 'whiteboard') return 'Whiteboard live';
+    if (source === 'screen') return 'Screen sharing';
+    return 'Sharing content';
+  }
+
+  private sharedContentSource(producer: Producer): 'screen' | 'whiteboard' | undefined {
+    return producer.source === 'whiteboard' || producer.source === 'screen' ? producer.source : undefined;
+  }
+
   private isTeacherMediaProducer(producer: Producer): boolean {
     if (producer.status !== 'live' || !this.isCurrentRoom(producer.roomId)) {
       return false;
@@ -1829,11 +2499,31 @@ export class StudentClassSession implements OnInit, OnDestroy {
     });
   }
 
-  private cleanupRemoteProducer(producerId: string): void {
+  private cleanupRemovedRoomProducers(nextRoom: Room): void {
+    const currentRoom = this.store.room();
+    if (!currentRoom || !this.isCurrentRoom(currentRoom.id)) {
+      return;
+    }
+    const nextProducerIds = new Set(nextRoom.producers.map((producer) => producer.id));
+    for (const producer of currentRoom.producers) {
+      if (!nextProducerIds.has(producer.id)) {
+        this.cleanupRemoteProducer(producer.id);
+        this.forgetLocalProducer(producer.id);
+      }
+    }
+  }
+
+  private cleanupRemoteProducer(producerId: string, options: { resetRetry?: boolean } = {}): void {
+    this.clearTeacherMediaWatchdog(producerId, options.resetRetry !== false);
     this.webrtc.removeRemoteProducer(producerId);
     this.removeReturnedStream(producerId);
     this.consumedProducerIds.delete(producerId);
     this.pendingProducerIds.delete(producerId);
+    for (const [consumerId, mappedProducerId] of this.consumerProducerIds.entries()) {
+      if (mappedProducerId === producerId) {
+        this.consumerProducerIds.delete(consumerId);
+      }
+    }
   }
 
   private isCurrentRoom(roomId: string | null | undefined): boolean {

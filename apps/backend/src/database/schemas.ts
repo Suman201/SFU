@@ -12,12 +12,15 @@ import {
   WEBHOOK_ENDPOINT_HEALTH_STATES,
   Role
 } from '@native-sfu/contracts';
+import type { LiveClassSettings, LiveClassSettingsPatch } from '@native-sfu/contracts';
 
 export type UserMongoDocument = HydratedDocument<UserDocument>;
 export type BatchMongoDocument = HydratedDocument<BatchDocument>;
 export type StudentEnrollmentMongoDocument = HydratedDocument<StudentEnrollmentDocument>;
 export type BatchScheduleMongoDocument = HydratedDocument<BatchScheduleDocument>;
 export type ClassSessionMongoDocument = HydratedDocument<ClassSessionDocument>;
+export type ClassSessionAttendanceSnapshotMongoDocument = HydratedDocument<ClassSessionAttendanceSnapshotDocument>;
+export type ClassSessionMaterialMongoDocument = HydratedDocument<ClassSessionMaterialDocument>;
 export type RoomMongoDocument = HydratedDocument<RoomDocument>;
 export type RoomIncidentEventMongoDocument = HydratedDocument<RoomIncidentEventDocument>;
 export type RoomSnapshotBundleMongoDocument = HydratedDocument<RoomSnapshotBundleDocument>;
@@ -43,6 +46,57 @@ export type ChatAttachmentFileMongoDocument = HydratedDocument<ChatAttachmentFil
 export type ChatReadStateMongoDocument = HydratedDocument<ChatReadStateDocument>;
 export type RecordingMongoDocument = HydratedDocument<RecordingDocument>;
 
+@Schema({ _id: false })
+export class UserNotificationSettingsDocument {
+  @Prop({ default: true })
+  email!: boolean;
+
+  @Prop({ default: true })
+  classReminders!: boolean;
+
+  @Prop({ default: true })
+  chatMessages!: boolean;
+
+  @Prop({ default: true })
+  announcements!: boolean;
+
+  @Prop({ default: true })
+  recordingReady!: boolean;
+}
+
+export const UserNotificationSettingsSchema = SchemaFactory.createForClass(UserNotificationSettingsDocument);
+
+@Schema({ _id: false })
+export class UserPrivacySettingsDocument {
+  @Prop({ default: false })
+  showEmailOnPublicProfile!: boolean;
+
+  @Prop({ default: true })
+  allowTeacherMessages!: boolean;
+}
+
+export const UserPrivacySettingsSchema = SchemaFactory.createForClass(UserPrivacySettingsDocument);
+
+@Schema({ _id: false })
+export class UserSettingsDocument {
+  @Prop({ required: true, enum: ['system', 'light', 'dark'], default: 'system' })
+  theme!: 'system' | 'light' | 'dark';
+
+  @Prop({ required: true, trim: true, maxlength: 24, default: 'en-US' })
+  locale!: string;
+
+  @Prop({ type: UserNotificationSettingsSchema, default: () => ({}) })
+  notifications!: UserNotificationSettingsDocument;
+
+  @Prop({ type: UserPrivacySettingsSchema, default: () => ({}) })
+  privacy!: UserPrivacySettingsDocument;
+
+  @Prop({ type: Object })
+  liveClassDefaults?: LiveClassSettings;
+}
+
+export const UserSettingsSchema = SchemaFactory.createForClass(UserSettingsDocument);
+
 @Schema({ collection: 'users', timestamps: true })
 export class UserDocument {
   @Prop({ trim: true, maxlength: 120 })
@@ -56,6 +110,57 @@ export class UserDocument {
 
   @Prop({ trim: true, maxlength: 40 })
   phone?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  headline?: string;
+
+  @Prop({ trim: true, maxlength: 2000 })
+  bio?: string;
+
+  @Prop({ trim: true, maxlength: 2048 })
+  avatarUrl?: string;
+
+  @Prop({ trim: true, maxlength: 2048 })
+  coverImageUrl?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  location?: string;
+
+  @Prop({ trim: true, maxlength: 80 })
+  timezone?: string;
+
+  @Prop({ type: [String], default: [] })
+  languages!: string[];
+
+  @Prop({ type: [String], default: [] })
+  skills!: string[];
+
+  @Prop({ type: [Object], default: [] })
+  credentials!: Array<Record<string, string>>;
+
+  @Prop({ type: [Object], default: [] })
+  education!: Array<Record<string, string>>;
+
+  @Prop({ type: [Object], default: [] })
+  experience!: Array<Record<string, string>>;
+
+  @Prop({ type: [Object], default: [] })
+  socialLinks!: Array<Record<string, string>>;
+
+  @Prop({ trim: true, maxlength: 500 })
+  availability?: string;
+
+  @Prop({ default: false, index: true })
+  publicProfileEnabled!: boolean;
+
+  @Prop({ type: [String], default: [] })
+  learningGoals!: string[];
+
+  @Prop({ type: [String], default: [] })
+  interests!: string[];
+
+  @Prop({ type: UserSettingsSchema, default: () => ({}) })
+  settings!: UserSettingsDocument;
 
   @Prop({ required: true, select: false })
   passwordHash!: string;
@@ -135,6 +240,9 @@ export class BatchDocument {
   @Prop({ type: Date, index: true })
   deletedAt?: Date;
 
+  @Prop({ type: Object })
+  liveSettingsOverrides?: LiveClassSettingsPatch;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
@@ -148,6 +256,16 @@ BatchSchema.index({ teacherId: 1, deletedAt: 1, createdAt: -1 });
 
 export const STUDENT_ENROLLMENT_STATUSES = ['active', 'pending', 'completed', 'cancelled', 'suspended'] as const;
 export type StudentEnrollmentStatus = (typeof STUDENT_ENROLLMENT_STATUSES)[number];
+export const CLASS_SESSION_ATTENDANCE_STATUSES = ['present', 'absent'] as const;
+export type ClassSessionAttendanceStatus = (typeof CLASS_SESSION_ATTENDANCE_STATUSES)[number];
+export const CLASS_SESSION_ATTENDANCE_ROSTER_SOURCES = ['roster', 'participant'] as const;
+export type ClassSessionAttendanceRosterSource = (typeof CLASS_SESSION_ATTENDANCE_ROSTER_SOURCES)[number];
+export const CLASS_SESSION_ATTENDANCE_SNAPSHOT_SOURCES = ['session_end', 'backfill'] as const;
+export type ClassSessionAttendanceSnapshotSource = (typeof CLASS_SESSION_ATTENDANCE_SNAPSHOT_SOURCES)[number];
+export const CLASS_SESSION_MATERIAL_KINDS = ['pdf', 'image', 'document', 'slides', 'link', 'file'] as const;
+export type ClassSessionMaterialKind = (typeof CLASS_SESSION_MATERIAL_KINDS)[number];
+export const CLASS_SESSION_MATERIAL_SOURCES = ['upload', 'link'] as const;
+export type ClassSessionMaterialSource = (typeof CLASS_SESSION_MATERIAL_SOURCES)[number];
 
 @Schema({ collection: 'student_enrollments', timestamps: true })
 export class StudentEnrollmentDocument {
@@ -275,6 +393,9 @@ export class ClassSessionDocument {
   @Prop({ required: true, trim: true })
   whiteboardChannelId!: string;
 
+  @Prop({ type: Object })
+  liveSettings?: LiveClassSettings;
+
   @Prop({ type: Date })
   startedAt?: Date;
 
@@ -307,6 +428,136 @@ ClassSessionSchema.index(
     name: 'uniq_live_class_session_per_batch'
   }
 );
+
+@Schema({ collection: 'class_session_attendance_snapshots', timestamps: true })
+export class ClassSessionAttendanceSnapshotDocument {
+  @Prop({ type: String, default: randomUUID })
+  _id!: string;
+
+  @Prop({ required: true, index: true })
+  sessionId!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ required: true, index: true })
+  roomId!: string;
+
+  @Prop({ required: true, index: true })
+  studentId!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 160 })
+  studentName!: string;
+
+  @Prop({ lowercase: true, trim: true, maxlength: 254 })
+  studentEmail?: string;
+
+  @Prop({ type: Date })
+  enrolledAt?: Date;
+
+  @Prop({ required: true, enum: CLASS_SESSION_ATTENDANCE_ROSTER_SOURCES, default: 'roster', index: true })
+  rosterSource!: ClassSessionAttendanceRosterSource;
+
+  @Prop({ type: Date })
+  firstJoinAt?: Date;
+
+  @Prop({ type: Date })
+  lastLeaveAt?: Date;
+
+  @Prop({ required: true, min: 0, default: 0 })
+  totalDurationSeconds!: number;
+
+  @Prop({ required: true, min: 0, default: 0 })
+  reconnectCount!: number;
+
+  @Prop({ required: true, enum: CLASS_SESSION_ATTENDANCE_STATUSES, default: 'absent', index: true })
+  status!: ClassSessionAttendanceStatus;
+
+  @Prop({ required: true, enum: CLASS_SESSION_ATTENDANCE_SNAPSHOT_SOURCES, default: 'session_end', index: true })
+  snapshotSource!: ClassSessionAttendanceSnapshotSource;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const ClassSessionAttendanceSnapshotSchema = SchemaFactory.createForClass(ClassSessionAttendanceSnapshotDocument);
+ClassSessionAttendanceSnapshotSchema.index({ sessionId: 1, studentId: 1 }, { unique: true });
+ClassSessionAttendanceSnapshotSchema.index({ sessionId: 1, status: 1, studentName: 1 });
+ClassSessionAttendanceSnapshotSchema.index({ batchId: 1, status: 1, updatedAt: -1 });
+ClassSessionAttendanceSnapshotSchema.index({ roomId: 1, studentId: 1 });
+
+@Schema({ collection: 'class_session_materials', timestamps: true })
+export class ClassSessionMaterialDocument {
+  @Prop({ required: true, default: randomUUID, unique: true, index: true })
+  materialId!: string;
+
+  @Prop({ required: true, index: true })
+  sessionId!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ index: true })
+  roomId?: string;
+
+  @Prop({ required: true, trim: true, maxlength: 180 })
+  title!: string;
+
+  @Prop({ trim: true, maxlength: 1000 })
+  description?: string;
+
+  @Prop({ required: true, enum: CLASS_SESSION_MATERIAL_KINDS, index: true })
+  kind!: ClassSessionMaterialKind;
+
+  @Prop({ required: true, enum: CLASS_SESSION_MATERIAL_SOURCES, index: true })
+  source!: ClassSessionMaterialSource;
+
+  @Prop({ trim: true, maxlength: 180 })
+  fileName?: string;
+
+  @Prop({ trim: true, maxlength: 120 })
+  mimeType?: string;
+
+  @Prop({ min: 0 })
+  size?: number;
+
+  @Prop({ enum: ['local', 's3'] })
+  storageProvider?: 'local' | 's3';
+
+  @Prop({ trim: true, maxlength: 1024 })
+  storageKey?: string;
+
+  @Prop({ trim: true, maxlength: 2048 })
+  path?: string;
+
+  @Prop({ trim: true, maxlength: 2048 })
+  url?: string;
+
+  @Prop({ required: true, index: true })
+  uploadedByUserId!: string;
+
+  @Prop({ required: true, default: false, index: true })
+  shared!: boolean;
+
+  @Prop({ type: Date })
+  sharedAt?: Date;
+
+  @Prop({ index: true })
+  sharedByUserId?: string;
+
+  @Prop({ type: Date, index: true })
+  deletedAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const ClassSessionMaterialSchema = SchemaFactory.createForClass(ClassSessionMaterialDocument);
+ClassSessionMaterialSchema.index({ sessionId: 1, deletedAt: 1, createdAt: -1 });
+ClassSessionMaterialSchema.index({ sessionId: 1, shared: 1, deletedAt: 1 });
+ClassSessionMaterialSchema.index({ batchId: 1, deletedAt: 1, createdAt: -1 });
+ClassSessionMaterialSchema.index({ roomId: 1, shared: 1, deletedAt: 1 });
+ClassSessionMaterialSchema.index({ uploadedByUserId: 1, createdAt: -1 });
 
 @Schema({ collection: 'roles', timestamps: true })
 export class RoleDocument {
@@ -448,14 +699,41 @@ export class AuditLogDocument {
   @Prop({ index: true })
   actorId?: string;
 
+  @Prop({ trim: true, lowercase: true, maxlength: 320 })
+  actorEmail?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  actorName?: string;
+
+  @Prop({ type: [String], default: [] })
+  actorRoles!: string[];
+
   @Prop({ required: true, index: true })
   action!: string;
+
+  @Prop({ required: true, enum: ['success', 'failure'], default: 'success', index: true })
+  status!: 'success' | 'failure';
+
+  @Prop({ index: true })
+  resourceType?: string;
+
+  @Prop({ index: true })
+  resourceId?: string;
+
+  @Prop({ trim: true, maxlength: 240 })
+  resourceLabel?: string;
+
+  @Prop({ index: true })
+  targetUserId?: string;
 
   @Prop({ index: true })
   targetType?: string;
 
   @Prop({ index: true })
   targetId?: string;
+
+  @Prop({ trim: true, maxlength: 120 })
+  requestId?: string;
 
   @Prop({ trim: true, maxlength: 100 })
   ipAddress?: string;
@@ -465,9 +743,20 @@ export class AuditLogDocument {
 
   @Prop({ type: Object })
   metadata?: Record<string, unknown>;
+
+  @Prop({ type: Object })
+  before?: Record<string, unknown>;
+
+  @Prop({ type: Object })
+  after?: Record<string, unknown>;
 }
 
 export const AuditLogSchema = SchemaFactory.createForClass(AuditLogDocument);
+AuditLogSchema.index({ createdAt: -1 });
+AuditLogSchema.index({ actorId: 1, createdAt: -1 });
+AuditLogSchema.index({ resourceType: 1, resourceId: 1, createdAt: -1 });
+AuditLogSchema.index({ action: 1, createdAt: -1 });
+AuditLogSchema.index({ status: 1, createdAt: -1 });
 AuditLogSchema.index({ actorId: 1, action: 1, createdAt: -1 });
 
 @Schema({ _id: false })
@@ -1319,6 +1608,12 @@ export class ParticipantDocument {
   lastSeenAt!: Date;
 
   @Prop({ type: Date })
+  lastActiveAt?: Date;
+
+  @Prop({ type: Date, index: true })
+  inactiveSince?: Date;
+
+  @Prop({ type: Date })
   leftAt?: Date;
 
   createdAt!: Date;
@@ -1332,6 +1627,7 @@ ParticipantSchema.index({ roomId: 1, socketId: 1 }, { unique: true, partialFilte
 ParticipantSchema.index({ roomId: 1, role: 1 });
 ParticipantSchema.index({ roomId: 1, admitted: 1, leftAt: 1 });
 ParticipantSchema.index({ roomId: 1, handRaised: 1, handRaisedAt: 1 });
+ParticipantSchema.index({ roomId: 1, inactiveSince: 1 });
 
 @Schema({ collection: 'participant_permissions', timestamps: true })
 export class PermissionDocument {
@@ -1370,6 +1666,9 @@ export class ProducerDocument {
 
   @Prop({ required: true, enum: ['audio', 'video', 'screen'] })
   kind!: 'audio' | 'video' | 'screen';
+
+  @Prop({ enum: ['screen', 'whiteboard'] })
+  source?: 'screen' | 'whiteboard';
 
   @Prop({ required: true, index: true })
   transportId!: string;

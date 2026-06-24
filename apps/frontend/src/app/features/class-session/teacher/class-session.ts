@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type {
+  ClassSessionLifecycleEvent,
   ClassSessionRecordingEvent,
   ClassStudentSpeakEvent,
   ClassStudentMediaModerationResponse,
@@ -9,8 +10,14 @@ import type {
   ParticipantPatch,
   Producer,
   Recording,
+  Room,
   ServerToClientEvents,
-  StudentMediaModerationEvent
+  StudentMediaModerationEvent,
+  WhiteboardCommand as WireWhiteboardCommand,
+  WhiteboardCommandEvent,
+  WhiteboardControlEvent,
+  WhiteboardCursorEvent,
+  WhiteboardPermissionLevel
 } from '@native-sfu/contracts';
 import { AuthService } from '../../../core/services/auth.service';
 import { RoomStore } from '../../../core/services/room.store';
@@ -18,8 +25,9 @@ import { SocketService } from '../../../core/services/socket.service';
 import { WebRtcService, type DeviceOption } from '../../../core/services/webrtc.service';
 import { MediaStreamDirective } from '../../../shared/media-stream/media-stream.directive';
 import { ClassSessionService, type ClassroomPayload } from '../class-session.service';
-import { Whiteboard, type WhiteboardCursor } from '../../../shared/whiteboard/whiteboard';
+import { Whiteboard, type WhiteboardCommand, type WhiteboardCursor } from '../../../shared/whiteboard/whiteboard';
 import { SessionChat } from '../session-chat/session-chat';
+import { SessionMaterials } from '../session-materials/session-materials';
 
 interface SessionParticipant {
   id: string;
@@ -36,14 +44,33 @@ interface SessionParticipant {
   allowedToSpeak: boolean;
   allowedToSpeakAt?: string;
   connected: boolean;
+  inactive: boolean;
+  inactiveSince?: string;
 }
 
 type DeviceIdSignal = (() => string | null) & { set(value: string | null): void };
 type DeviceIdState = DeviceIdSignal | (() => string | null) | string | null | undefined;
 type ParticipantMediaState = 'video' | 'audio-only' | 'muted' | 'camera-off' | 'local-hidden' | 'unavailable';
-type ParticipantCardAction = 'mute' | 'camera' | 'visibility' | 'speak' | 'hand';
+type ParticipantCardAction = 'mute' | 'camera' | 'visibility' | 'speak' | 'hand' | 'whiteboard';
+type LocalWhiteboardUpsertElement = Extract<WhiteboardCommand, { type: 'upsert' }>['element'];
+type WhiteboardPermissionOption = {
+  value: WhiteboardPermissionLevel;
+  label: string;
+  description: string;
+};
+
+const WHITEBOARD_PERMISSION_OPTIONS: readonly WhiteboardPermissionOption[] = [
+  { value: 'draw', label: 'Draw', description: 'Pen strokes only' },
+  { value: 'annotate', label: 'Annotate', description: 'Text, shapes, math, and diagrams' },
+  { value: 'current_page_edit', label: 'Page edit', description: 'Edit/delete objects on this page' },
+  { value: 'view_only', label: 'View only', description: 'No editing tools' }
+];
+interface CloseLocalProducerOptions {
+  strict?: boolean;
+}
 type ParticipantActionState = Partial<Record<ParticipantCardAction, boolean>>;
 type TeacherPreflightMode = 'start' | 'enter';
+type TerminalClassSessionStatus = Extract<ClassroomPayload['status'], 'completed' | 'cancelled'>;
 
 interface DeviceSwitchingWebRtc {
   refreshDevices(): Promise<void>;
@@ -57,7 +84,7 @@ interface DeviceSwitchingWebRtc {
 @Component({
   selector: 'sfu-teacher-class-session',
   standalone: true,
-  imports: [RouterLink, SessionChat, Whiteboard, MediaStreamDirective],
+  imports: [RouterLink, SessionChat, SessionMaterials, Whiteboard, MediaStreamDirective],
   templateUrl: './class-session.html',
   styleUrl: './class-session.scss',
   changeDetection: ChangeDetectionStrategy.Eager
@@ -83,6 +110,10 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   private reconnectingRoom = false;
   private socketWasDisconnected = false;
   private watchedSessionId = '';
+  private browserRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  private activityHeartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  private lastUserActivityAt = Date.now();
+  private lastActivitySentAt = 0;
   private preflightAudioContext?: AudioContext;
   private preflightAnalyser?: AnalyserNode;
   private preflightMeterFrame = 0;
@@ -91,17 +122,25 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   private readonly consumedStudentProducerIds = new Set<string>();
   private readonly pendingStudentProducerIds = new Set<string>();
   private readonly consumerProducerIds = new Map<string, string>();
+  private terminalSessionHandled = false;
+  private whiteboardCaptureStream: MediaStream | null = null;
+  private readonly whiteboardCursorTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  @ViewChild(Whiteboard) private readonly whiteboard?: Whiteboard;
 
   protected readonly session = signal<ClassroomPayload | null>(null);
   protected readonly loading = signal(true);
   protected readonly error = signal('');
   protected readonly mediaNotice = signal('');
   protected readonly mediaError = signal('');
+  protected readonly audioPlaybackBlocked = signal(false);
   protected readonly joiningRoom = signal(false);
   protected readonly roomJoined = signal(false);
   protected readonly publishingCamera = signal(false);
   protected readonly cameraPublished = signal(false);
   protected readonly publishingScreen = signal(false);
+  protected readonly publishingWhiteboard = signal(false);
+  protected readonly whiteboardSharing = signal(false);
   protected readonly stoppingScreen = signal(false);
   protected readonly refreshingDevices = signal(false);
   protected readonly switchingAudioDevice = signal(false);
@@ -121,6 +160,12 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   protected readonly ending = signal(false);
   protected readonly participants = signal<SessionParticipant[]>([]);
   protected readonly studentCursors = signal<WhiteboardCursor[]>([]);
+  protected readonly whiteboardControllerParticipantId = signal('');
+  protected readonly whiteboardControllerName = signal('');
+  protected readonly whiteboardPermissionOptions = WHITEBOARD_PERMISSION_OPTIONS;
+  protected readonly selectedWhiteboardPermissionLevel = signal<WhiteboardPermissionLevel>('annotate');
+  protected readonly whiteboardControllerPermissionLevel = signal<WhiteboardPermissionLevel>('view_only');
+  protected readonly whiteboardControllerPageId = signal('');
   protected readonly chatCollapsed = signal(false);
   protected readonly chatDisplayName = computed(() => this.auth.user()?.name ?? 'Teacher');
   protected readonly sidebarSplitPercent = signal(50);
@@ -129,9 +174,31 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   protected readonly pendingParticipantActions = signal<Record<string, ParticipantActionState>>({});
   private readonly localSelectedAudioDeviceId = signal('');
   private readonly localSelectedVideoDeviceId = signal('');
+  private readonly lastSharedContentSource = signal<'screen' | 'whiteboard'>('screen');
+  protected readonly mediaRecoveryError = this.webrtc.lastMediaError;
   protected readonly sessionLive = computed(() => this.session()?.status === 'live');
+  protected readonly liveSettings = computed(() => this.session()?.resolvedLiveSettings ?? null);
+  protected readonly whiteboardSharingEnabled = computed(() => this.liveSettings()?.whiteboard.whiteboardSharingEnabled !== false);
+  protected readonly studentWhiteboardControlEnabled = computed(() => this.liveSettings()?.whiteboard.studentWhiteboardControlEnabled !== false);
+  protected readonly recordingEnabled = computed(() => this.liveSettings()?.recording.recordingEnabled !== false);
+  protected readonly teacherRecordingControlEnabled = computed(
+    () => this.recordingEnabled() && this.liveSettings()?.recording.teacherManualRecordingControlEnabled !== false
+  );
+  protected readonly handRaiseEnabled = computed(() => this.liveSettings()?.speaking.handRaiseEnabled !== false);
+  protected readonly networkWarning = computed(() => {
+    const policy = this.liveSettings()?.bandwidthPolicy;
+    if (policy?.showNetworkWarnings === false || this.webrtc.networkScore() > 2) {
+      return '';
+    }
+    return policy?.preferAudioOnPoorNetwork
+      ? 'Network is weak. Prefer audio-first teaching until quality improves.'
+      : 'Network is weak. Media quality may be reduced.';
+  });
   protected readonly roomLocked = computed(() => Boolean(this.store.room()?.settings.locked));
   protected readonly studentControlTargets = computed(() => this.participants().filter((participant) => participant.canModerate));
+  protected readonly whiteboardControlActive = computed(() => Boolean(this.whiteboardControllerParticipantId()));
+  protected readonly selectedWhiteboardPermissionLabel = computed(() => this.whiteboardPermissionLabel(this.selectedWhiteboardPermissionLevel()));
+  protected readonly whiteboardControllerPermissionLabel = computed(() => this.whiteboardPermissionLabel(this.whiteboardControllerPermissionLevel()));
   protected readonly raisedHandParticipants = computed(() =>
     this.studentControlTargets()
       .filter((participant) => participant.handRaised)
@@ -154,6 +221,11 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   protected readonly recordingControlLabel = computed(() => {
     if (this.recordingActionPending()) return this.recordingActive() ? 'Stopping...' : 'Starting...';
     return this.recordingActive() ? 'Stop Recording' : 'Start Recording';
+  });
+  protected readonly recordingControlTitle = computed(() => {
+    if (!this.recordingEnabled() && !this.recordingActive()) return 'Recording is disabled for this class';
+    if (!this.teacherRecordingControlEnabled() && !this.recordingActive()) return 'Teacher recording control is disabled for this class';
+    return this.recordingActive() ? 'Stop server-side recording' : 'Start server-side recording';
   });
   protected readonly recordingStatusLabel = computed(() => {
     const active = this.activeRecording();
@@ -202,12 +274,13 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     this.joiningRoom() ||
     this.publishingCamera() ||
     this.publishingScreen() ||
+    this.publishingWhiteboard() ||
     this.stoppingScreen() ||
     this.refreshingDevices() ||
     this.switchingAudioDevice() ||
     this.switchingVideoDevice()
   );
-  protected readonly screenSharing = computed(() => Boolean(this.webrtc.screenStream()));
+  protected readonly screenSharing = computed(() => Boolean(this.webrtc.screenStream()) && !this.whiteboardSharing());
   protected readonly studentAudioStreams = computed(() =>
     this.webrtc.remoteStreams()
       .filter((remote) => remote.kind === 'audio' && this.isStudentParticipantId(remote.participantId) && !this.isParticipantMediaHidden(remote.participantId))
@@ -227,10 +300,12 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     if (this.joiningRoom()) return 'Joining room';
     if (this.publishingCamera()) return 'Publishing camera';
     if (this.publishingScreen()) return 'Starting screen share';
-    if (this.stoppingScreen()) return 'Stopping screen share';
+    if (this.publishingWhiteboard()) return 'Starting whiteboard share';
+    if (this.stoppingScreen()) return this.whiteboardSharing() ? 'Stopping whiteboard share' : 'Stopping screen share';
     if (this.switchingAudioDevice()) return 'Switching microphone';
     if (this.switchingVideoDevice()) return 'Switching camera';
     if (this.refreshingDevices()) return 'Refreshing devices';
+    if (this.whiteboardSharing()) return 'Whiteboard sharing';
     if (this.screenSharing()) return 'Screen sharing';
     if (this.mediaError()) return 'Media attention';
     if (this.cameraPublished()) return 'Camera live';
@@ -245,12 +320,15 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.preflightSocketReady.set(this.realtimeSocket.connected);
     this.bindSocketEvents();
+    this.bindBrowserRecoveryEvents();
     this.loadSession();
   }
 
   ngOnDestroy(): void {
     this.destroyed = true;
     this.unwatchSession();
+    this.clearBrowserRecoveryTimer();
+    this.stopActivityHeartbeat();
     void this.stopPreflightPreview();
     for (const dispose of this.socketDisposers.splice(0)) {
       dispose();
@@ -353,6 +431,95 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     }
   }
 
+  protected hasWhiteboardControl(participantId: string): boolean {
+    return this.whiteboardControllerParticipantId() === participantId;
+  }
+
+  protected setWhiteboardPermissionLevel(event: Event): void {
+    const selectElement = event.target as HTMLSelectElement;
+    const nextLevel = selectElement.value as WhiteboardPermissionLevel;
+    if (!WHITEBOARD_PERMISSION_OPTIONS.some((option) => option.value === nextLevel)) {
+      return;
+    }
+    this.selectedWhiteboardPermissionLevel.set(nextLevel);
+  }
+
+  protected async grantWhiteboardControl(participantId: string): Promise<void> {
+    const roomId = this.currentRoomId();
+    if (!this.studentWhiteboardControlEnabled()) {
+      this.mediaError.set('Student whiteboard control is disabled for this class.');
+      return;
+    }
+    if (!this.canModerateParticipant(participantId) || !roomId || this.isParticipantActionPending(participantId, 'whiteboard')) {
+      return;
+    }
+
+    this.setParticipantActionPending(participantId, 'whiteboard', true);
+    this.mediaError.set('');
+    try {
+      const pageId = this.whiteboard?.currentPageId();
+      const permissionLevel = this.selectedWhiteboardPermissionLevel();
+      const event = await this.socket.emitAck('whiteboard:grant-control', {
+        roomId,
+        participantId,
+        permissionLevel,
+        ...(pageId ? { pageId } : {})
+      });
+      this.applyWhiteboardControlEvent(event);
+      await this.sendWhiteboardSnapshot(roomId);
+      this.mediaNotice.set(`Whiteboard ${this.whiteboardPermissionLabel(event.permissionLevel ?? permissionLevel)} allowed for ${event.displayName ?? 'student'}.`);
+    } catch (error) {
+      this.mediaError.set(error instanceof Error ? error.message : 'Unable to allow whiteboard control.');
+    } finally {
+      this.setParticipantActionPending(participantId, 'whiteboard', false);
+    }
+  }
+
+  protected async revokeWhiteboardControl(participantId = this.whiteboardControllerParticipantId()): Promise<void> {
+    const roomId = this.currentRoomId();
+    if (!participantId || !roomId || this.isParticipantActionPending(participantId, 'whiteboard')) {
+      return;
+    }
+
+    this.setParticipantActionPending(participantId, 'whiteboard', true);
+    this.mediaError.set('');
+    try {
+      const event = await this.socket.emitAck('whiteboard:revoke-control', { roomId, participantId });
+      this.applyWhiteboardControlEvent(event);
+      this.mediaNotice.set('Whiteboard control revoked.');
+    } catch (error) {
+      this.mediaError.set(error instanceof Error ? error.message : 'Unable to revoke whiteboard control.');
+    } finally {
+      this.setParticipantActionPending(participantId, 'whiteboard', false);
+    }
+  }
+
+  protected handleTeacherWhiteboardCommand(command: WhiteboardCommand): void {
+    const roomId = this.currentRoomId();
+    if (!roomId || !this.sessionLive() || !this.roomJoined() || !this.whiteboardControlActive()) {
+      return;
+    }
+    void this.socket
+      .emitAck('whiteboard:command', { roomId, command: this.toWireWhiteboardCommand(command) })
+      .catch((error) => this.mediaError.set(error instanceof Error ? error.message : 'Unable to sync whiteboard command.'));
+  }
+
+  protected handleTeacherWhiteboardCursor(cursor: WhiteboardCursor): void {
+    const roomId = this.currentRoomId();
+    if (!roomId || !this.sessionLive() || !this.roomJoined() || !this.whiteboardControlActive()) {
+      return;
+    }
+    void this.socket
+      .emitAck('whiteboard:cursor', {
+        roomId,
+        cursor: {
+          color: cursor.color,
+          position: cursor.position
+        }
+      })
+      .catch(() => undefined);
+  }
+
   protected async stopStudentCamera(participantId: string): Promise<void> {
     const roomId = this.currentRoomId();
     if (!this.canModerateParticipant(participantId) || !roomId || this.isParticipantActionPending(participantId, 'camera') || this.isParticipantCameraTeacherDisabled(participantId)) {
@@ -420,11 +587,96 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       await this.stopScreenShare();
       return;
     }
+    if (this.whiteboardSharing()) {
+      await this.stopScreenShare();
+      if (this.whiteboardSharing() || this.screenProducerId) {
+        return;
+      }
+    }
     await this.shareScreen();
+  }
+
+  protected async toggleWhiteboardShare(): Promise<void> {
+    if (!this.whiteboardSharingEnabled()) {
+      this.mediaError.set('Whiteboard sharing is disabled for this class.');
+      return;
+    }
+    if (this.whiteboardSharing()) {
+      await this.stopScreenShare();
+      return;
+    }
+    if (this.screenSharing()) {
+      await this.stopScreenShare();
+      if (this.screenSharing() || this.screenProducerId) {
+        return;
+      }
+    }
+    await this.shareWhiteboard();
   }
 
   protected async refreshDevices(): Promise<void> {
     await this.refreshMediaDevices();
+  }
+
+  protected async runTeacherMediaRecovery(): Promise<void> {
+    const recoveryError = this.mediaRecoveryError();
+    if (this.audioPlaybackBlocked() || recoveryError?.code === 'autoplay_blocked') {
+      await this.enableStudentAudio();
+      return;
+    }
+    if (this.mediaBusy()) {
+      return;
+    }
+    if (recoveryError?.kind === 'screen') {
+      if (this.lastSharedContentSource() === 'whiteboard') {
+        await this.shareWhiteboard();
+      } else {
+        await this.shareScreen();
+      }
+      return;
+    }
+    if (recoveryError?.kind === 'consumer') {
+      this.mediaError.set('');
+      await this.consumeAvailableStudentProducers();
+      return;
+    }
+    if (recoveryError?.operation === 'refresh' || recoveryError?.code === 'device_unavailable') {
+      await this.refreshMediaDevices();
+      return;
+    }
+    const payload = this.session();
+    if (payload?.roomId && this.roomJoined()) {
+      await this.publishCamera(payload.roomId);
+      return;
+    }
+    await this.refreshMediaDevices();
+  }
+
+  protected handleStudentAudioPlaybackBlocked(error: unknown): void {
+    this.audioPlaybackBlocked.set(true);
+    const mediaError = this.webrtc.recordAutoplayBlocked(error);
+    this.mediaError.set(mediaError.message);
+  }
+
+  protected async enableStudentAudio(): Promise<void> {
+    const audioElements = Array.from(document.querySelectorAll<HTMLAudioElement>('.student-audio-streams audio'));
+    if (!audioElements.length) {
+      this.audioPlaybackBlocked.set(false);
+      this.webrtc.clearMediaIssue('audio');
+      return;
+    }
+    try {
+      await Promise.all(audioElements.map((audio) => audio.play()));
+      this.audioPlaybackBlocked.set(false);
+      this.webrtc.clearMediaIssue('audio');
+      if (this.mediaRecoveryError()?.code === 'autoplay_blocked') {
+        this.mediaError.set('');
+      }
+      this.mediaNotice.set('Student audio enabled.');
+    } catch (error) {
+      const mediaError = this.webrtc.recordAutoplayBlocked(error);
+      this.mediaError.set(mediaError.message);
+    }
   }
 
   protected async switchMicrophone(deviceId: string): Promise<void> {
@@ -483,10 +735,17 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     this.ending.set(true);
     this.error.set('');
     this.classSessions.endSession(session.sessionId).subscribe({
-      next: async (payload) => {
-        this.session.set(payload);
-        await this.leaveCurrentRoom();
-        await this.router.navigate(['/teacher/dashboard/batches', payload.batchId]);
+      next: (payload) => {
+        void (async () => {
+          try {
+            this.applyPayload(payload, { leaveOnTerminal: false });
+            await this.leaveCurrentRoom();
+            await this.router.navigate(['/teacher/dashboard/batches', payload.batchId]);
+          } catch (error) {
+            this.error.set(error instanceof Error ? error.message : 'The session ended, but the classroom cleanup did not finish.');
+            this.ending.set(false);
+          }
+        })();
       },
       error: (error) => {
         this.error.set(this.classSessions.errorMessage(error));
@@ -590,6 +849,14 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     if (!session || !this.sessionLive() || this.recordingActionPending() || this.recordingActive()) {
       return;
     }
+    if (!this.recordingEnabled()) {
+      this.mediaError.set('Recording is disabled for this class.');
+      return;
+    }
+    if (!this.teacherRecordingControlEnabled()) {
+      this.mediaError.set('Teacher recording control is disabled for this class.');
+      return;
+    }
     const confirmed = globalThis.confirm('Start server-side recording for this class? Students will see a recording indicator.');
     if (!confirmed) {
       return;
@@ -630,6 +897,14 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   }
 
   protected toggleRecording(): void {
+    if (!this.recordingEnabled() && !this.recordingActive()) {
+      this.mediaError.set('Recording is disabled for this class.');
+      return;
+    }
+    if (!this.teacherRecordingControlEnabled() && !this.recordingActive()) {
+      this.mediaError.set('Teacher recording control is disabled for this class.');
+      return;
+    }
     if (this.recordingActive()) {
       this.stopRecording();
       return;
@@ -737,10 +1012,19 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     });
   }
 
-  private applyPayload(payload: ClassroomPayload): void {
+  private applyPayload(payload: ClassroomPayload, options: { leaveOnTerminal?: boolean } = {}): void {
+    if (!this.isTerminalStatus(payload.status)) {
+      this.terminalSessionHandled = false;
+    }
     this.session.set(payload);
     this.watchSession(payload.sessionId, payload.batchId);
     this.participants.set(payload.participants.map((participant) => this.classroomParticipantToCard(participant)));
+    if (this.isTerminalStatus(payload.status)) {
+      this.markSessionTerminal(payload.status, payload.completedAt);
+      if (options.leaveOnTerminal !== false) {
+        void this.leaveCurrentRoom();
+      }
+    }
   }
 
   private async joinAndPublish(payload: ClassroomPayload, options: { showLoading: boolean }): Promise<boolean> {
@@ -770,6 +1054,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       this.store.setLocalParticipant(response.participantId);
       this.syncParticipantsFromRoom();
       void this.consumeAvailableStudentProducers();
+      this.startActivityHeartbeat();
       this.joiningRoom.set(false);
       if (await this.publishCamera(payload.roomId)) {
         this.mediaNotice.set('Camera and audio are live.');
@@ -805,7 +1090,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       this.cameraPublished.set(true);
       return true;
     } catch (error) {
-      this.mediaError.set(error instanceof Error ? error.message : 'Unable to publish teacher camera and audio.');
+      this.mediaError.set(this.mediaRecoveryError()?.message ?? (error instanceof Error ? error.message : 'Unable to publish teacher camera and audio.'));
       await this.closeLocalProducers([audioProducer?.id, videoProducer?.id].filter((id): id is string => Boolean(id)));
       this.webrtc.stopCamera();
       this.cameraPublished.set(false);
@@ -835,7 +1120,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     await this.stopPreflightPreview({ keepStream: true });
   }
 
-  private async preparePreflightPreview(): Promise<void> {
+  protected async preparePreflightPreview(): Promise<void> {
     if (this.preflightPreparing()) {
       return;
     }
@@ -964,6 +1249,10 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   }
 
   private mediaDeviceErrorMessage(error: unknown, fallback: string): string {
+    const recoveryError = this.mediaRecoveryError();
+    if (recoveryError?.message) {
+      return recoveryError.message;
+    }
     if (error instanceof DOMException) {
       if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
         return 'Camera or microphone permission was blocked. Allow access in your browser, then try again.';
@@ -977,26 +1266,68 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   private async shareScreen(): Promise<void> {
     const roomId = this.joinedRoomId || this.session()?.roomId;
-    if (!roomId || this.publishingScreen()) {
+    if (!roomId || this.publishingScreen() || this.whiteboardSharing()) {
       return;
     }
     this.publishingScreen.set(true);
+    this.lastSharedContentSource.set('screen');
     this.mediaError.set('');
     try {
       const stream = await this.webrtc.startScreen();
       stream.getVideoTracks()[0]?.addEventListener('ended', () => void this.handleScreenTrackEnded(), { once: true });
       const transport = await this.webrtc.preparePeer(roomId);
-      const producer = await this.webrtc.publish(roomId, transport, 'screen', stream);
+      const producer = await this.webrtc.publish(roomId, transport, 'screen', stream, { source: 'screen' });
       this.screenProducerId = producer.id;
       this.addLocalProducer(producer);
       this.applyProducerPolicyNotice(producer);
       this.mediaNotice.set('Screen sharing is live.');
     } catch (error) {
-      this.mediaError.set(error instanceof Error ? error.message : 'Unable to share screen.');
+      this.mediaError.set(this.mediaRecoveryError()?.message ?? (error instanceof Error ? error.message : 'Unable to share screen.'));
+      this.webrtc.stopScreen();
+      this.screenProducerId = '';
+      this.whiteboardSharing.set(false);
+    } finally {
+      this.publishingScreen.set(false);
+    }
+  }
+
+  private async shareWhiteboard(): Promise<void> {
+    const roomId = this.joinedRoomId || this.session()?.roomId;
+    if (!roomId || this.publishingWhiteboard() || this.screenSharing() || this.screenProducerId) {
+      return;
+    }
+    const stream = this.whiteboard?.captureMediaStream(15);
+    if (!stream) {
+      this.mediaError.set('Whiteboard capture is not available in this browser. Use Share Screen as a fallback.');
+      return;
+    }
+
+    let producer: Producer | null = null;
+    this.publishingWhiteboard.set(true);
+    this.lastSharedContentSource.set('whiteboard');
+    this.mediaError.set('');
+    this.whiteboardCaptureStream = stream;
+    this.webrtc.screenStream.set(stream);
+    stream.getVideoTracks()[0]?.addEventListener('ended', () => void this.handleScreenTrackEnded(), { once: true });
+    try {
+      const transport = await this.webrtc.preparePeer(roomId);
+      producer = await this.webrtc.publish(roomId, transport, 'screen', stream, { source: 'whiteboard' });
+      this.screenProducerId = producer.id;
+      this.whiteboardSharing.set(true);
+      this.addLocalProducer(producer);
+      this.applyProducerPolicyNotice(producer);
+      this.whiteboard?.requestCaptureFrame(stream);
+      this.mediaNotice.set('Whiteboard sharing is live.');
+    } catch (error) {
+      if (producer?.id) {
+        await this.closeLocalProducers([producer.id]).catch(() => undefined);
+      }
+      this.mediaError.set(this.mediaRecoveryError()?.message ?? (error instanceof Error ? error.message : 'Unable to share the whiteboard.'));
+      this.clearWhiteboardShareState();
       this.webrtc.stopScreen();
       this.screenProducerId = '';
     } finally {
-      this.publishingScreen.set(false);
+      this.publishingWhiteboard.set(false);
     }
   }
 
@@ -1007,16 +1338,22 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     this.stoppingScreen.set(true);
     this.mediaError.set('');
     const producerId = this.screenProducerId;
+    const wasWhiteboardSharing = this.whiteboardSharing();
+    let stopped = false;
     try {
       if (producerId) {
-        await this.closeLocalProducers([producerId]);
+        await this.closeLocalProducers([producerId], { strict: true });
       }
-      this.mediaNotice.set('Screen sharing stopped.');
+      stopped = true;
+      this.mediaNotice.set(wasWhiteboardSharing ? 'Whiteboard sharing stopped.' : 'Screen sharing stopped.');
     } catch (error) {
-      this.mediaError.set(error instanceof Error ? error.message : 'Unable to stop screen sharing on the server.');
+      this.mediaError.set(error instanceof Error ? error.message : wasWhiteboardSharing ? 'Unable to stop whiteboard sharing on the server.' : 'Unable to stop screen sharing on the server.');
     } finally {
-      this.webrtc.stopScreen();
-      this.screenProducerId = '';
+      if (stopped || !producerId) {
+        this.clearWhiteboardShareState();
+        this.webrtc.stopScreen();
+        this.screenProducerId = '';
+      }
       this.stoppingScreen.set(false);
       this.syncParticipantsFromRoom();
     }
@@ -1024,15 +1361,25 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   private async handleScreenTrackEnded(): Promise<void> {
     if (!this.roomJoined() || !this.screenProducerId) {
+      this.clearWhiteboardShareState();
       this.webrtc.stopScreen();
       return;
     }
     await this.stopScreenShare();
   }
 
+  private clearWhiteboardShareState(): void {
+    this.whiteboardCaptureStream?.getTracks().forEach((track) => track.stop());
+    this.whiteboardCaptureStream = null;
+    this.whiteboard?.stopMediaCapture();
+    this.whiteboardSharing.set(false);
+    this.publishingWhiteboard.set(false);
+  }
+
   private async leaveCurrentRoom(): Promise<void> {
     const roomId = this.joinedRoomId;
     this.joinedRoomId = '';
+    this.stopActivityHeartbeat();
     await this.closeLocalProducers();
     this.cleanupRoomMediaLocally();
     if (roomId) {
@@ -1051,24 +1398,40 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     this.store.upsertProducer(producer);
   }
 
-  private async closeLocalProducers(producerIds = [...this.localProducerIds]): Promise<void> {
+  private async closeLocalProducers(producerIds = [...this.localProducerIds], options: CloseLocalProducerOptions = {}): Promise<void> {
     const uniqueProducerIds = [...new Set(producerIds)];
+    const errors: unknown[] = [];
     await Promise.all(
       uniqueProducerIds.map(async (producerId) => {
+        let closeFailed = false;
         try {
           if (this.realtimeSocket.connected) {
             await this.webrtc.closeProducer(producerId);
+          } else if (options.strict) {
+            throw new Error('Socket is disconnected. Reconnect before stopping shared media.');
           }
-        } catch {
+        } catch (error) {
           // The socket or room may already be gone during disconnect/end-session cleanup.
+          closeFailed = true;
+          if (options.strict) {
+            errors.push(error);
+          }
+        }
+        if (closeFailed && options.strict) {
+          return;
         }
         this.localProducerIds.delete(producerId);
         if (producerId === this.screenProducerId) {
           this.screenProducerId = '';
+          this.clearWhiteboardShareState();
         }
         this.store.removeProducer(producerId);
       })
     );
+    if (errors.length) {
+      const error = errors[0];
+      throw error instanceof Error ? error : new Error('Unable to close shared media.');
+    }
   }
 
   private cleanupRoomMediaLocally(): void {
@@ -1079,7 +1442,9 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     this.cameraPublished.set(false);
     this.publishingCamera.set(false);
     this.publishingScreen.set(false);
+    this.publishingWhiteboard.set(false);
     this.stoppingScreen.set(false);
+    this.clearWhiteboardShareState();
     this.refreshingDevices.set(false);
     this.switchingAudioDevice.set(false);
     this.switchingVideoDevice.set(false);
@@ -1089,20 +1454,70 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     this.consumerProducerIds.clear();
     this.locallyHiddenParticipantIds.set([]);
     this.pendingParticipantActions.set({});
+    this.clearWhiteboardControlState();
     this.webrtc.resetRoomMedia();
   }
 
-  private markSessionCompleted(): void {
+  private cleanupRemovedRoomProducers(nextRoom: Room): void {
+    const currentRoom = this.store.room();
+    if (!currentRoom || !this.isCurrentRoom(currentRoom.id)) {
+      return;
+    }
+    const nextProducerIds = new Set(nextRoom.producers.map((producer) => producer.id));
+    for (const producer of currentRoom.producers) {
+      if (nextProducerIds.has(producer.id)) {
+        continue;
+      }
+      if (producer.id === this.screenProducerId) {
+        this.screenProducerId = '';
+        this.localProducerIds.delete(producer.id);
+        this.clearWhiteboardShareState();
+        this.webrtc.stopScreen();
+      }
+      this.cleanupStudentProducer(producer.id);
+    }
+  }
+
+  private markSessionTerminal(status: TerminalClassSessionStatus = 'completed', completedAt?: string): void {
+    this.cleanupTerminalUiState();
     const current = this.session();
-    if (!current || current.status === 'completed') {
+    if (!current) {
       return;
     }
     this.session.set({
       ...current,
-      status: 'completed',
+      status,
       canJoin: false,
-      completedAt: current.completedAt ?? new Date().toISOString()
+      ...(status === 'completed' ? { completedAt: completedAt ?? current.completedAt ?? new Date().toISOString() } : {})
     });
+    this.terminalSessionHandled = true;
+  }
+
+  private cleanupTerminalUiState(): void {
+    this.preflightOpen.set(false);
+    this.preflightPreparing.set(false);
+    this.preflightActionPending.set(false);
+    this.joiningRoom.set(false);
+    this.publishingCamera.set(false);
+    this.publishingScreen.set(false);
+    this.publishingWhiteboard.set(false);
+    this.stoppingScreen.set(false);
+    this.clearWhiteboardShareState();
+    this.refreshingDevices.set(false);
+    this.switchingAudioDevice.set(false);
+    this.switchingVideoDevice.set(false);
+    this.mutingAllStudents.set(false);
+    this.stoppingAllStudentCameras.set(false);
+    this.lockingClass.set(false);
+    this.recordingActionPending.set(false);
+    this.downloadingRecording.set(false);
+    this.ending.set(false);
+    this.pendingParticipantActions.set({});
+    this.clearWhiteboardControlState();
+  }
+
+  private isTerminalStatus(status: ClassroomPayload['status'] | undefined): status is TerminalClassSessionStatus {
+    return status === 'completed' || status === 'cancelled';
   }
 
   private async refreshMediaDevices(): Promise<void> {
@@ -1117,7 +1532,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       this.syncSelectedDevices();
       this.mediaNotice.set('Device list refreshed.');
     } catch (error) {
-      this.mediaError.set(error instanceof Error ? error.message : 'Unable to refresh camera and microphone list.');
+      this.mediaError.set(this.mediaRecoveryError()?.message ?? (error instanceof Error ? error.message : 'Unable to refresh camera and microphone list.'));
     } finally {
       this.refreshingDevices.set(false);
     }
@@ -1273,6 +1688,10 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     return participant.role;
   }
 
+  protected whiteboardPermissionLabel(permissionLevel: WhiteboardPermissionLevel): string {
+    return WHITEBOARD_PERMISSION_OPTIONS.find((option) => option.value === permissionLevel)?.label ?? 'Annotate';
+  }
+
   private canModerateParticipant(participantId: string): boolean {
     return this.participants().some((participant) => participant.id === participantId && participant.canModerate);
   }
@@ -1367,6 +1786,91 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     this.syncParticipantsFromRoom();
   }
 
+  private applyWhiteboardControlEvent(event: WhiteboardControlEvent): void {
+    if (!this.isCurrentRoom(event.roomId)) {
+      return;
+    }
+    if (event.granted) {
+      const permissionLevel = event.permissionLevel ?? 'annotate';
+      this.whiteboardControllerParticipantId.set(event.participantId);
+      this.whiteboardControllerName.set(event.displayName ?? this.participants().find((participant) => participant.id === event.participantId)?.name ?? 'Student');
+      this.whiteboardControllerPermissionLevel.set(permissionLevel);
+      this.whiteboardControllerPageId.set(event.pageId ?? '');
+      this.clearWhiteboardCursors();
+      return;
+    }
+    if (!this.whiteboardControllerParticipantId() || this.whiteboardControllerParticipantId() === event.participantId) {
+      this.clearWhiteboardControlState();
+    }
+  }
+
+  private applyRemoteWhiteboardCommand(event: WhiteboardCommandEvent): void {
+    if (!this.isCurrentRoom(event.roomId) || event.participantId === this.store.localParticipantId()) {
+      return;
+    }
+    this.whiteboard?.applyCommand(this.normalizeWhiteboardCommand(event.command));
+    this.whiteboard?.requestCaptureFrame();
+  }
+
+  private applyRemoteWhiteboardCursor(event: WhiteboardCursorEvent): void {
+    if (!this.isCurrentRoom(event.roomId) || event.cursor.participantId === this.store.localParticipantId()) {
+      return;
+    }
+    this.studentCursors.update((cursors) => [
+      ...cursors.filter((cursor) => cursor.participantId !== event.cursor.participantId),
+      event.cursor
+    ]);
+    const previousTimer = this.whiteboardCursorTimers.get(event.cursor.participantId);
+    if (previousTimer) {
+      clearTimeout(previousTimer);
+    }
+    const timer = setTimeout(() => {
+      this.studentCursors.update((cursors) => cursors.filter((cursor) => cursor.participantId !== event.cursor.participantId));
+      this.whiteboardCursorTimers.delete(event.cursor.participantId);
+    }, 1800);
+    this.whiteboardCursorTimers.set(event.cursor.participantId, timer);
+  }
+
+  private async sendWhiteboardSnapshot(roomId: string): Promise<void> {
+    const commands = this.whiteboard?.snapshotCommands() ?? [];
+    for (const command of commands) {
+      await this.socket.emitAck('whiteboard:command', { roomId, command: this.toWireWhiteboardCommand(command) });
+    }
+  }
+
+  private normalizeWhiteboardCommand(command: WhiteboardCommand | WireWhiteboardCommand): WhiteboardCommand {
+    if (command.type === 'clear') {
+      return { type: 'clear', ...(command.pageId ? { pageId: command.pageId } : {}) };
+    }
+    if (command.type === 'delete') {
+      return { type: 'delete', elementId: command.elementId, ...(command.pageId ? { pageId: command.pageId } : {}) };
+    }
+    if (command.type !== 'upsert') {
+      return { type: 'clear' };
+    }
+    return { type: 'upsert', element: command.element as LocalWhiteboardUpsertElement, ...(command.pageId ? { pageId: command.pageId } : {}) };
+  }
+
+  private toWireWhiteboardCommand(command: WhiteboardCommand): WireWhiteboardCommand {
+    return this.normalizeWhiteboardCommand(command) as unknown as WireWhiteboardCommand;
+  }
+
+  private clearWhiteboardControlState(): void {
+    this.whiteboardControllerParticipantId.set('');
+    this.whiteboardControllerName.set('');
+    this.whiteboardControllerPermissionLevel.set('view_only');
+    this.whiteboardControllerPageId.set('');
+    this.clearWhiteboardCursors();
+  }
+
+  private clearWhiteboardCursors(): void {
+    for (const timer of this.whiteboardCursorTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.whiteboardCursorTimers.clear();
+    this.studentCursors.set([]);
+  }
+
   private saveBlob(blob: Blob, fileName: string): void {
     const url = window.URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -1434,6 +1938,22 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     void this.socket.emitAck('session:watch', { sessionId, ...(batchId ? { batchId } : {}) }).catch(() => undefined);
   }
 
+  private handleClassSessionEnded(event: ClassSessionLifecycleEvent): void {
+    const current = this.session();
+    if (!current || event.sessionId !== current.sessionId) {
+      return;
+    }
+    if (event.roomId && current.roomId && event.roomId !== current.roomId) {
+      return;
+    }
+    if (this.terminalSessionHandled && this.isTerminalStatus(current.status)) {
+      return;
+    }
+    this.mediaError.set('This class session has ended.');
+    this.markSessionTerminal('completed', event.completedAt);
+    void this.leaveCurrentRoom();
+  }
+
   private unwatchSession(): void {
     const sessionId = this.watchedSessionId;
     this.watchedSessionId = '';
@@ -1451,10 +1971,16 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   private bindSocketEvents(): void {
     this.bindSocketLifecycle();
+    this.registerSocketHandler('session:ended', (event) => this.handleClassSessionEnded(event));
+    this.registerSocketHandler('whiteboard:control-granted', (event) => this.applyWhiteboardControlEvent(event));
+    this.registerSocketHandler('whiteboard:control-revoked', (event) => this.applyWhiteboardControlEvent(event));
+    this.registerSocketHandler('whiteboard:command', (event) => this.applyRemoteWhiteboardCommand(event));
+    this.registerSocketHandler('whiteboard:cursor', (event) => this.applyRemoteWhiteboardCursor(event));
     this.registerSocketHandler('room:updated', (room) => {
       if (!this.isCurrentRoom(room.id)) {
         return;
       }
+      this.cleanupRemovedRoomProducers(room);
       this.store.setRoom(room);
       this.syncParticipantsFromRoom();
       void this.consumeAvailableStudentProducers();
@@ -1473,6 +1999,9 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       }
       this.cleanupStudentParticipantMedia(participantId);
       this.clearParticipantCardState(participantId);
+      if (this.whiteboardControllerParticipantId() === participantId) {
+        this.clearWhiteboardControlState();
+      }
       this.store.removeParticipant(participantId);
       this.syncParticipantsFromRoom();
     });
@@ -1515,6 +2044,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       if (producerId === this.screenProducerId) {
         this.screenProducerId = '';
         this.localProducerIds.delete(producerId);
+        this.clearWhiteboardShareState();
         this.webrtc.stopScreen();
       }
       this.cleanupStudentProducer(producerId);
@@ -1562,9 +2092,9 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     this.registerSocketHandler('recording:stopped', (event) => this.applyRecordingEvent(event));
     this.registerSocketHandler('recording:failed', (event) => this.applyRecordingEvent(event));
     this.registerSocketHandler('room:closed', (roomId) => {
-      if (roomId === this.joinedRoomId) {
+      if (this.isCurrentRoom(roomId) || roomId === this.session()?.roomId) {
         this.mediaError.set('This room has closed.');
-        this.markSessionCompleted();
+        this.markSessionTerminal('completed');
         void this.leaveCurrentRoom();
       }
     });
@@ -1626,15 +2156,143 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     });
   }
 
+  private bindBrowserRecoveryEvents(): void {
+    const handleOnline = () => this.requestBrowserRecovery('online');
+    const handleOffline = () => {
+      if (this.sessionLive()) {
+        this.mediaError.set('You are offline. The live class will recover when the network returns.');
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        this.requestBrowserRecovery('visible');
+      }
+      this.noteUserActivity('visibility');
+    };
+    const handleActivity = () => this.noteUserActivity('user');
+    const handleFocus = () => this.noteUserActivity('focus');
+    const handleBlur = () => this.noteUserActivity('blur');
+    this.registerBrowserEvent(window, 'online', handleOnline);
+    this.registerBrowserEvent(window, 'offline', handleOffline);
+    this.registerBrowserEvent(window, 'pageshow', handleOnline);
+    this.registerBrowserEvent(window, 'focus', handleFocus);
+    this.registerBrowserEvent(window, 'blur', handleBlur);
+    this.registerBrowserEvent(document, 'pointerdown', handleActivity);
+    this.registerBrowserEvent(document, 'keydown', handleActivity);
+    this.registerBrowserEvent(document, 'touchstart', handleActivity);
+    this.registerBrowserEvent(document, 'visibilitychange', handleVisibilityChange);
+  }
+
+  private registerBrowserEvent(target: EventTarget, event: string, handler: EventListener): void {
+    target.addEventListener(event, handler);
+    this.socketDisposers.push(() => target.removeEventListener(event, handler));
+  }
+
+  private startActivityHeartbeat(): void {
+    if (this.activityHeartbeatTimer || !this.joinedRoomId) {
+      return;
+    }
+    this.lastUserActivityAt = Date.now();
+    void this.sendActivityHeartbeat('heartbeat', true);
+    this.activityHeartbeatTimer = setInterval(() => void this.sendActivityHeartbeat('heartbeat'), 30_000);
+  }
+
+  private stopActivityHeartbeat(): void {
+    if (!this.activityHeartbeatTimer) {
+      return;
+    }
+    clearInterval(this.activityHeartbeatTimer);
+    this.activityHeartbeatTimer = undefined;
+  }
+
+  private noteUserActivity(reason: 'user' | 'visibility' | 'focus' | 'blur'): void {
+    this.lastUserActivityAt = Date.now();
+    const force = reason !== 'user';
+    if (force || Date.now() - this.lastActivitySentAt > 5_000) {
+      void this.sendActivityHeartbeat(reason, force);
+    }
+  }
+
+  private async sendActivityHeartbeat(
+    reason: 'heartbeat' | 'user' | 'visibility' | 'focus' | 'blur',
+    force = false
+  ): Promise<void> {
+    const roomId = this.joinedRoomId;
+    if (this.destroyed || !roomId || !this.sessionLive() || (!force && Date.now() - this.lastActivitySentAt < 5_000)) {
+      return;
+    }
+    const inactiveSettings = this.liveSettings()?.inactiveDetection;
+    const thresholdMs = Math.max(1, inactiveSettings?.inactiveAfterMinutes ?? 10) * 60_000;
+    const visible = typeof document === 'undefined' || document.visibilityState !== 'hidden';
+    const focused = typeof document === 'undefined' || document.hasFocus();
+    const activeByTime = Date.now() - this.lastUserActivityAt < thresholdMs;
+    const active = activeByTime && (visible || inactiveSettings?.countBackgroundTabAsInactive === false);
+    this.lastActivitySentAt = Date.now();
+    await this.socket
+      .emitAck('class:activity', {
+        roomId,
+        active,
+        visible,
+        focused,
+        reason
+      })
+      .catch(() => undefined);
+  }
+
+  private requestBrowserRecovery(reason: 'online' | 'visible'): void {
+    if (this.destroyed || !this.session() || this.isBrowserOffline() || document.visibilityState === 'hidden') {
+      return;
+    }
+    this.clearBrowserRecoveryTimer();
+    this.browserRecoveryTimer = setTimeout(() => {
+      this.browserRecoveryTimer = undefined;
+      if (this.destroyed || this.isBrowserOffline()) {
+        return;
+      }
+      if (this.sessionLive() && this.joinedRoomId && !this.roomJoined()) {
+        this.mediaNotice.set(reason === 'online' ? 'Network restored. Rejoining the live room...' : 'Checking live room connection...');
+        this.restoreRoomAfterReconnect();
+        return;
+      }
+      const session = this.session();
+      if (!session) {
+        this.loadSession();
+        return;
+      }
+      this.classSessions.getSession(session.sessionId, session.batchId).subscribe({
+        next: (payload) => {
+          this.applyPayload(payload);
+          if (payload.status === 'live' && this.roomJoined()) {
+            void this.consumeAvailableStudentProducers();
+          }
+        },
+        error: (error) => this.mediaError.set(this.classSessions.errorMessage(error))
+      });
+    }, 600);
+  }
+
+  private clearBrowserRecoveryTimer(): void {
+    if (!this.browserRecoveryTimer) {
+      return;
+    }
+    clearTimeout(this.browserRecoveryTimer);
+    this.browserRecoveryTimer = undefined;
+  }
+
+  private isBrowserOffline(): boolean {
+    return typeof navigator !== 'undefined' && navigator.onLine === false;
+  }
+
   private handleSocketDisconnect(): void {
     if (this.destroyed || !this.joinedRoomId || !this.sessionLive()) {
       return;
     }
 
-    const wasScreenSharing = Boolean(this.screenProducerId || this.screenSharing());
+    const wasWhiteboardSharing = this.whiteboardSharing();
+    const wasScreenSharing = Boolean(this.screenProducerId || this.screenSharing() || wasWhiteboardSharing);
     this.mediaError.set('Connection lost. Reconnecting to the live room...');
     if (wasScreenSharing) {
-      this.mediaNotice.set('Screen sharing stopped. Start sharing again after reconnecting.');
+      this.mediaNotice.set(wasWhiteboardSharing ? 'Whiteboard sharing stopped. Start sharing again after reconnecting.' : 'Screen sharing stopped. Start sharing again after reconnecting.');
     }
     this.cleanupRoomMediaLocally();
     this.store.room.set(null);
@@ -1741,7 +2399,8 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       screenSharing: false,
       handRaised: false,
       allowedToSpeak: false,
-      connected: false
+      connected: false,
+      inactive: false
     };
   }
 
@@ -1761,7 +2420,9 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       handRaisedAt: participant.handRaisedAt,
       allowedToSpeak: Boolean(participant.allowedToSpeak),
       allowedToSpeakAt: participant.allowedToSpeakAt,
-      connected: participant.connected !== false
+      connected: participant.connected !== false,
+      inactive: Boolean(participant.inactive),
+      inactiveSince: participant.inactiveSince
     };
   }
 
@@ -1837,7 +2498,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       }
       this.consumedStudentProducerIds.add(producer.id);
     } catch (error) {
-      this.mediaError.set(error instanceof Error ? error.message : 'Unable to connect student media.');
+      this.mediaError.set(this.mediaRecoveryError()?.message ?? (error instanceof Error ? error.message : 'Unable to connect student media.'));
     } finally {
       this.pendingStudentProducerIds.delete(producer.id);
     }

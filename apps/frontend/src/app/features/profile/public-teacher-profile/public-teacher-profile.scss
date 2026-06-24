@@ -2,6 +2,8 @@
   display: grid;
   gap: 20px;
   min-height: calc(100vh - 132px);
+  min-height: calc(100svh - 132px);
+  min-height: calc(100dvh - 132px);
   padding: 28px 32px 36px;
 }
 
@@ -247,6 +249,29 @@ h3 {
   white-space: nowrap;
 }
 
+.pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill-list span {
+  min-height: 30px;
+  padding: 7px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.pill-list.subtle span {
+  border-color: var(--line-soft);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
 .tab-panel {
   gap: 16px;
   padding: 0;
@@ -422,6 +447,10 @@ h3 {
   gap: 14px;
   align-items: center;
   padding: 14px;
+}
+
+.batch-row.link-row {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .batch-row > div:first-child {

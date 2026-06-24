@@ -211,7 +211,17 @@ export class UsersService {
     if (nextRoles || updated.status !== 'active' || updated.disabled) {
       await this.revokeUserSessions(updated.id);
     }
-    await this.auditLogs.record({ actorId: actor.sub, action: 'admin.users.update', targetType: 'user', targetId: updated.id });
+    await this.auditLogs.record({
+      actor,
+      action: 'admin.users.update',
+      resourceType: 'user',
+      resourceId: updated.id,
+      resourceLabel: updated.displayName ?? updated.name,
+      targetUserId: updated.id,
+      metadata: { summary: `Updated user ${updated.displayName ?? updated.email}` },
+      before: { roles: user.roles, status: user.status, disabled: user.disabled },
+      after: { roles: updated.roles, status: updated.status, disabled: updated.disabled }
+    });
     return this.toAdminDetail(updated);
   }
 
@@ -223,7 +233,16 @@ export class UsersService {
       .findOneAndUpdate({ _id: user.id, deletedAt: { $exists: false } }, { $set: { status: 'active', disabled: false } }, { new: true })
       .exec();
     if (!updated) throw new NotFoundException('User not found');
-    await this.auditLogs.record({ actorId: actor.sub, action: 'admin.users.activate', targetType: 'user', targetId: updated.id });
+    await this.auditLogs.record({
+      actor,
+      action: 'admin.users.activate',
+      resourceType: 'user',
+      resourceId: updated.id,
+      resourceLabel: updated.displayName ?? updated.name,
+      targetUserId: updated.id,
+      metadata: { summary: `Activated user ${updated.displayName ?? updated.email}` },
+      after: { status: updated.status, disabled: updated.disabled }
+    });
     return { action: 'activated', user: this.toAdminDetail(updated) };
   }
 
@@ -240,7 +259,17 @@ export class UsersService {
       .exec();
     if (!updated) throw new NotFoundException('User not found');
     await this.revokeUserSessions(updated.id);
-    await this.auditLogs.record({ actorId: actor.sub, action: 'admin.users.deactivate', targetType: 'user', targetId: updated.id });
+    await this.auditLogs.record({
+      actor,
+      action: 'admin.users.deactivate',
+      resourceType: 'user',
+      resourceId: updated.id,
+      resourceLabel: updated.displayName ?? updated.name,
+      targetUserId: updated.id,
+      metadata: { summary: `Deactivated user ${updated.displayName ?? updated.email}` },
+      before: { status: user.status, disabled: user.disabled },
+      after: { status: updated.status, disabled: updated.disabled }
+    });
     return { action: 'deactivated', user: this.toAdminDetail(updated) };
   }
 

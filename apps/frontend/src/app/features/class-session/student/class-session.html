@@ -61,7 +61,7 @@
         </div>
       }
       @if (stageStream(); as stream) {
-        <video class="stage-video" autoplay muted playsinline [sfuMediaStream]="stream"></video>
+        <video class="stage-video" autoplay muted playsinline [sfuMediaStream]="stream" (playbackBlocked)="handleTeacherVideoPlaybackBlocked($event)"></video>
       } @else {
         <div class="video-placeholder" aria-live="polite">
           <span class="speaker-avatar large">{{ stageInitials() }}</span>
@@ -80,7 +80,7 @@
       @if (pipProducer()) {
         <aside class="teacher-pip" aria-label="Teacher camera">
           @if (pipStream(); as stream) {
-            <video autoplay muted playsinline [sfuMediaStream]="stream"></video>
+            <video autoplay muted playsinline [sfuMediaStream]="stream" (playbackBlocked)="handleTeacherVideoPlaybackBlocked($event)"></video>
           } @else {
             <div class="pip-placeholder">
               <span class="speaker-avatar">{{ stageInitials() }}</span>
@@ -96,7 +96,7 @@
   </section>
 
   @if (teacherAudioStream(); as audioStream) {
-    <audio class="teacher-audio" autoplay [sfuMediaStream]="audioStream"></audio>
+    <audio class="teacher-audio" autoplay [sfuMediaStream]="audioStream" (playbackBlocked)="handleTeacherAudioPlaybackBlocked($event)"></audio>
   }
 
   @if (!roomJoined()) {
@@ -161,9 +161,9 @@
             [class.off]="!localAudioEnabled()"
             [class.switching]="switchingAudioDevice()"
             [class.teacher-disabled]="teacherDisabledAudio()"
-            [disabled]="publishingStudentMedia() || switchingAudioDevice()"
-            [title]="teacherDisabledAudio() ? 'Teacher muted your microphone' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
-            [attr.aria-label]="teacherDisabledAudio() ? 'Teacher muted your microphone' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
+            [disabled]="publishingStudentMedia() || switchingAudioDevice() || (!localAudioEnabled() && !studentCanSelfUnmute())"
+            [title]="teacherDisabledAudio() ? 'Teacher muted your microphone' : !studentCanSelfUnmute() ? 'Microphone self-unmute is disabled for this class' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
+            [attr.aria-label]="teacherDisabledAudio() ? 'Teacher muted your microphone' : !studentCanSelfUnmute() ? 'Microphone self-unmute is disabled for this class' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
             [attr.aria-pressed]="localAudioEnabled()"
             (click)="toggleMicrophone()"
           >
@@ -175,9 +175,9 @@
             [class.off]="!localVideoEnabled()"
             [class.switching]="switchingVideoDevice()"
             [class.teacher-disabled]="teacherDisabledVideo()"
-            [disabled]="publishingStudentMedia() || switchingVideoDevice()"
-            [title]="teacherDisabledVideo() ? 'Teacher stopped your camera' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
-            [attr.aria-label]="teacherDisabledVideo() ? 'Teacher stopped your camera' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
+            [disabled]="publishingStudentMedia() || switchingVideoDevice() || (!localVideoEnabled() && !studentCanSelfStartCamera())"
+            [title]="teacherDisabledVideo() ? 'Teacher stopped your camera' : !studentCanSelfStartCamera() ? 'Camera self-start is disabled for this class' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
+            [attr.aria-label]="teacherDisabledVideo() ? 'Teacher stopped your camera' : !studentCanSelfStartCamera() ? 'Camera self-start is disabled for this class' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
             [attr.aria-pressed]="localVideoEnabled()"
             (click)="toggleCamera()"
           >
@@ -216,11 +216,22 @@
           </button>
           @if (mediaDeviceProblem(); as message) {
             <span class="device-problem-message" role="alert">{{ message }}</span>
+            @if (teacherAudioPlaybackBlocked() || mediaRecoveryError()?.actionLabel) {
+              <button
+                class="student-media-recovery-button"
+                type="button"
+                [disabled]="joiningMedia() || publishingStudentMedia() || refreshingDevices()"
+                (click)="runStudentMediaRecovery()"
+              >
+                {{ teacherAudioPlaybackBlocked() ? 'Enable audio' : mediaRecoveryError()?.actionLabel }}
+              </button>
+            }
           }
         </div>
 
         <footer class="student-prejoin-actions">
-          <button class="button primary prejoin-join-button" type="button" [disabled]="joiningMedia()" (click)="joinClass()">
+          <span class="prejoin-policy-hint">{{ prejoinPolicyHint() }}</span>
+          <button class="button primary prejoin-join-button" type="button" [disabled]="prejoinJoinDisabled()" (click)="joinClass()">
             {{ joiningMedia() ? 'Joining...' : 'Join Class' }}
           </button>
         </footer>
@@ -261,9 +272,9 @@
       [class.off]="!localAudioEnabled()"
       [class.switching]="switchingAudioDevice()"
       [class.teacher-disabled]="teacherDisabledAudio()"
-      [disabled]="publishingStudentMedia() || switchingAudioDevice()"
-      [title]="teacherDisabledAudio() ? 'Teacher muted your microphone' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
-      [attr.aria-label]="teacherDisabledAudio() ? 'Teacher muted your microphone' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
+      [disabled]="publishingStudentMedia() || switchingAudioDevice() || (!localAudioEnabled() && !studentCanSelfUnmute())"
+      [title]="teacherDisabledAudio() ? 'Teacher muted your microphone' : !studentCanSelfUnmute() ? 'Microphone self-unmute is disabled for this class' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
+      [attr.aria-label]="teacherDisabledAudio() ? 'Teacher muted your microphone' : !studentCanSelfUnmute() ? 'Microphone self-unmute is disabled for this class' : localAudioEnabled() ? 'Turn microphone off' : 'Turn microphone on'"
       [attr.aria-pressed]="localAudioEnabled()"
       (click)="toggleMicrophone()"
     >
@@ -275,9 +286,9 @@
       [class.off]="!localVideoEnabled()"
       [class.switching]="switchingVideoDevice()"
       [class.teacher-disabled]="teacherDisabledVideo()"
-      [disabled]="publishingStudentMedia() || switchingVideoDevice()"
-      [title]="teacherDisabledVideo() ? 'Teacher stopped your camera' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
-      [attr.aria-label]="teacherDisabledVideo() ? 'Teacher stopped your camera' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
+      [disabled]="publishingStudentMedia() || switchingVideoDevice() || (!localVideoEnabled() && !studentCanSelfStartCamera())"
+      [title]="teacherDisabledVideo() ? 'Teacher stopped your camera' : !studentCanSelfStartCamera() ? 'Camera self-start is disabled for this class' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
+      [attr.aria-label]="teacherDisabledVideo() ? 'Teacher stopped your camera' : !studentCanSelfStartCamera() ? 'Camera self-start is disabled for this class' : localVideoEnabled() ? 'Turn camera off' : 'Turn camera on'"
       [attr.aria-pressed]="localVideoEnabled()"
       (click)="toggleCamera()"
     >
@@ -320,7 +331,7 @@
       [class.raised]="handRaised()"
       [class.allowed]="allowedToSpeak()"
       [class.pending]="updatingHandRaise()"
-      [disabled]="updatingHandRaise() || !roomJoined() || !sessionLive()"
+      [disabled]="updatingHandRaise() || !roomJoined() || !sessionLive() || !handRaiseAvailable()"
       [attr.aria-pressed]="handRaised()"
       [title]="speakingPermissionLabel()"
       (click)="toggleHandRaise()"
@@ -332,13 +343,52 @@
     <span class="speaking-permission-status" [class.waiting]="handRaised()" [class.allowed]="allowedToSpeak()" aria-live="polite">
       {{ speakingPermissionLabel() }}
     </span>
+    @if (networkWarning()) {
+      <span class="student-network-warning" role="status">{{ networkWarning() }}</span>
+    }
     @if (mediaDeviceProblem(); as message) {
       <span class="device-problem-message" role="alert">{{ message }}</span>
+      @if (teacherAudioPlaybackBlocked() || mediaRecoveryError()?.actionLabel) {
+        <button
+          class="student-media-recovery-button"
+          type="button"
+          [disabled]="joiningMedia() || publishingStudentMedia() || refreshingDevices()"
+          (click)="runStudentMediaRecovery()"
+        >
+          {{ teacherAudioPlaybackBlocked() ? 'Enable audio' : mediaRecoveryError()?.actionLabel }}
+        </button>
+      }
     }
   </div>
   }
 
   @if (roomJoined()) {
+  @if (whiteboardControlGranted()) {
+    <button
+      class="student-whiteboard-button"
+      type="button"
+      aria-controls="student-whiteboard-control"
+      [attr.aria-expanded]="whiteboardDrawerOpen()"
+      title="Whiteboard control"
+      (click)="toggleWhiteboardDrawer()"
+    >
+      <span class="board-icon" aria-hidden="true"></span>
+      Board
+    </button>
+  }
+
+  <button
+    class="student-materials-button"
+    type="button"
+    aria-controls="student-session-materials"
+    [attr.aria-expanded]="materialsOpen()"
+    title="Class materials"
+    aria-label="Open class materials"
+    (click)="toggleMaterials()"
+  >
+    Materials
+  </button>
+
   <button
     class="participants-button"
     type="button"
@@ -354,6 +404,72 @@
 
   @if (participantsOpen()) {
     <button class="participants-backdrop" type="button" aria-label="Close participants" (click)="closeParticipants()"></button>
+  }
+
+  @if (materialsOpen()) {
+    <button class="student-materials-backdrop" type="button" aria-label="Close materials" (click)="closeMaterials()"></button>
+    <aside
+      id="student-session-materials"
+      class="student-materials-drawer"
+      aria-label="Class materials"
+    >
+      <header>
+        <div>
+          <p>Materials</p>
+          <h1>Lesson assets</h1>
+        </div>
+        <button type="button" class="close-button" title="Close materials" aria-label="Close materials" (click)="closeMaterials()">
+          <span aria-hidden="true"></span>
+        </button>
+      </header>
+      @if (session(); as activeSession) {
+        <sfu-session-materials
+          [sessionId]="activeSession.sessionId"
+          [batchId]="activeSession.batchId"
+          [role]="activeSession.role"
+          [live]="sessionLive()"
+          [joined]="roomJoined()"
+          [compact]="true"
+          [materialSettings]="liveSettings()?.materials ?? null"
+        />
+      }
+    </aside>
+  }
+
+  @if (whiteboardDrawerOpen() && whiteboardControlGranted()) {
+    <button class="student-whiteboard-backdrop" type="button" aria-label="Close whiteboard control" (click)="closeWhiteboardDrawer()"></button>
+    <aside
+      id="student-whiteboard-control"
+      class="student-whiteboard-drawer"
+      aria-label="Interactive whiteboard control"
+    >
+      <header>
+        <div>
+          <p>Whiteboard</p>
+          <h1>Your turn</h1>
+          <span>{{ studentWhiteboardPermissionLabel() }}</span>
+        </div>
+        <button type="button" class="close-button" title="Close whiteboard" aria-label="Close whiteboard" (click)="closeWhiteboardDrawer()">
+          <span aria-hidden="true"></span>
+        </button>
+      </header>
+      @if (whiteboardControlNotice()) {
+        <p class="student-whiteboard-notice">{{ whiteboardControlNotice() }}</p>
+      }
+      <sfu-whiteboard
+        title="Whiteboard control"
+        [eyebrow]="studentWhiteboardPermissionLabel()"
+        [readOnly]="studentWhiteboardReadOnly()"
+        [allowedTools]="studentWhiteboardTools()"
+        [allowPageManagement]="false"
+        [allowAssetImport]="false"
+        [allowExport]="false"
+        [allowClear]="false"
+        [cursors]="whiteboardCursors()"
+        (commandCommitted)="handleStudentWhiteboardCommand($event)"
+        (cursorMoved)="handleStudentWhiteboardCursor($event)"
+      />
+    </aside>
   }
 
   <aside
@@ -396,13 +512,19 @@
   </aside>
   }
 </main>
-<sfu-session-chat
-  [currentUser]="chatDisplayName()"
-  currentRole="Student"
-  [sessionId]="session()?.sessionId ?? ''"
-  [batchId]="session()?.batchId ?? ''"
-  [roomId]="session()?.roomId ?? ''"
-  [live]="sessionLive()"
-  [joined]="roomJoined()"
-/>
+@if (roomJoined()) {
+  <sfu-session-chat
+    [currentUser]="chatDisplayName()"
+    currentRole="Student"
+    [sessionId]="session()?.sessionId ?? ''"
+    [batchId]="session()?.batchId ?? ''"
+    [roomId]="session()?.roomId ?? ''"
+    [live]="sessionLive()"
+    [joined]="roomJoined()"
+    [privateChatEnabled]="liveSettings()?.chat?.privateTeacherStudentChatEnabled !== false"
+    [broadcastChatEnabled]="false"
+    [chatAttachmentsEnabled]="liveSettings()?.chat?.chatAttachmentsEnabled !== false"
+    [maxMessageLength]="liveSettings()?.chat?.messageLengthLimit ?? 2000"
+  />
+}
 }

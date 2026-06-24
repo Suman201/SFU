@@ -2,6 +2,8 @@
   display: grid;
   gap: 22px;
   min-height: calc(100vh - 132px);
+  min-height: calc(100svh - 132px);
+  min-height: calc(100dvh - 132px);
   padding: 28px 32px 36px;
 }
 
@@ -31,6 +33,11 @@
   box-shadow: var(--shadow-sm);
 }
 
+.image-avatar {
+  object-fit: cover;
+  padding: 0;
+}
+
 .profile-hero p,
 .profile-hero h1,
 .profile-hero span,
@@ -50,15 +57,33 @@
   font-weight: 700;
 }
 
-.profile-hero a {
+.profile-hero a,
+.hero-actions button,
+.editor-actions button,
+.empty-state a {
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--panel-elevated);
   color: var(--accent);
   padding: 11px 14px;
   text-decoration: none;
+  cursor: pointer;
+  font: inherit;
   font-weight: 850;
   box-shadow: var(--shadow-sm);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.hero-actions button:disabled,
+.editor-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .eyebrow {
@@ -143,6 +168,175 @@
   white-space: nowrap;
 }
 
+.form-alert {
+  border: 1px solid rgb(242 96 118 / 0.34);
+  border-radius: var(--radius);
+  background: rgb(242 96 118 / 0.1);
+  color: #9f2338;
+  padding: 12px 14px;
+  font-weight: 800;
+}
+
+.form-alert.success {
+  border-color: rgb(69 139 115 / 0.36);
+  background: rgb(69 139 115 / 0.12);
+  color: #28624f;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.form-grid label.wide {
+  grid-column: 1 / -1;
+}
+
+.form-grid input,
+.form-grid select,
+.form-grid textarea {
+  width: 100%;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  color: var(--text);
+  font: inherit;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.form-grid input:focus,
+.form-grid select:focus,
+.form-grid textarea:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+
+.editor-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-panel {
+  align-content: start;
+}
+
+.settings-grid {
+  align-items: start;
+}
+
+.settings-group {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.settings-group strong {
+  color: var(--text);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.toggle-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.form-grid .toggle-row {
+  display: flex;
+}
+
+.form-grid .toggle-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+}
+
+.pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill-list span {
+  min-height: 30px;
+  padding: 7px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.pill-list.subtle span {
+  border-color: var(--line-soft);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.batch-list {
+  display: grid;
+  gap: 10px;
+}
+
+.batch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  padding: 14px;
+}
+
+.batch-row div {
+  display: grid;
+  gap: 5px;
+}
+
+.batch-row strong {
+  color: var(--text);
+}
+
+.batch-row span,
+.empty-state p {
+  color: var(--muted);
+}
+
+.empty-state {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  padding: 18px;
+}
+
 @media (max-width: 760px) {
   .profile-shell {
     padding: 20px 16px 28px;
@@ -153,8 +347,15 @@
     flex-direction: column;
   }
 
+  .hero-actions,
+  .editor-actions {
+    justify-content: start;
+  }
+
   .metric-grid,
-  .detail-grid {
+  .detail-grid,
+  .form-grid,
+  .batch-row {
     grid-template-columns: 1fr;
   }
 }

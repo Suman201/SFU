@@ -136,7 +136,7 @@ export class AuthService {
   }
 
   redirectPath(): string {
-    return '/class-sessions';
+    return '/dashboard';
   }
 
   hasAdminAccess(user: AuthUser | null | undefined): boolean {
