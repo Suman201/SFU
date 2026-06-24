@@ -414,8 +414,8 @@ export class ClassSessionsService {
         { new: true, upsert: true }
       );
     } catch (error) {
+      await this.closeNewlyCreatedStartRoom(room.id, resolution, user);
       if (this.isDuplicateKeyError(error)) {
-        await this.closeNewlyCreatedStartRoom(room.id, resolution, user);
         throw new ConflictException('Another session for this batch is already live. End it before starting a new one.');
       }
       throw error;

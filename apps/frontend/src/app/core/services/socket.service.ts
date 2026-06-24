@@ -47,12 +47,14 @@ export class SocketService {
   ): Promise<ExtractAckData<Parameters<ClientToServerEvents[K]>[1]>> {
     const socket = this.connect();
     return new Promise((resolve, reject) => {
-      const emitWithAck = socket.timeout(SOCKET_ACK_TIMEOUT_MS).emit as unknown as (
-        name: K,
-        body: unknown,
-        ack: (error: Error | null, response?: AckResponse<unknown>) => void
-      ) => void;
-      emitWithAck(event, payload, (error, response) => {
+      const timeoutSocket = socket.timeout(SOCKET_ACK_TIMEOUT_MS) as unknown as {
+        emit(
+          name: K,
+          body: unknown,
+          ack: (error: Error | null, response?: AckResponse<unknown>) => void
+        ): void;
+      };
+      timeoutSocket.emit(event, payload, (error, response) => {
         if (error) {
           reject(new SocketAckError('ACK_TIMEOUT', 'The server did not acknowledge this action. Please try again.'));
           return;

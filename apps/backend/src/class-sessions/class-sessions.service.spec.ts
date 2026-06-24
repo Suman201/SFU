@@ -112,6 +112,35 @@ describe('ClassSessionsService', () => {
     expect(rooms.emitClassSessionLifecycleEvent).not.toHaveBeenCalled();
   });
 
+  it('closes a newly created room when class-session persistence fails', async () => {
+    const { service, classSessions, rooms } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'scheduled',
+        roomId: `classroom:${sessionId}`
+      })
+    );
+    classSessions.exists.mockResolvedValue(null);
+    rooms.ensureClassSessionRoom.mockResolvedValue({ id: 'room-failed-start' });
+    classSessions.findOneAndUpdate.mockRejectedValue(new Error('database unavailable'));
+
+    let thrown: unknown;
+    try {
+      await service.startSession(sessionId, 'batch-1', teacher);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe('database unavailable');
+    expect(rooms.closeClassSessionRoom).toHaveBeenCalledWith({
+      roomId: 'room-failed-start',
+      actorUserId: 'teacher-1',
+      actorLabel: 'teacher@example.test'
+    });
+    expect(rooms.emitClassSessionLifecycleEvent).not.toHaveBeenCalled();
+  });
+
   it('blocks completed sessions from being started', async () => {
     const { service, classSessions, rooms } = createService();
     classSessions.findById.mockResolvedValue(

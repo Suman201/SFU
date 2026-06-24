@@ -1,4 +1,4 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { Request } from 'express';
 import { REQUEST_ID_HEADER } from '../middleware/request-id.middleware';
@@ -15,6 +15,8 @@ interface ErrorResponseBody {
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(GlobalExceptionFilter.name);
+
   constructor(private readonly httpAdapterHost: HttpAdapterHost) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
@@ -34,6 +36,14 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       requestId: String(request.id ?? request.header(REQUEST_ID_HEADER) ?? 'unknown')
     };
+
+    if (!(exception instanceof HttpException)) {
+      const error = exception instanceof Error ? exception : new Error(String(exception));
+      this.logger.error(
+        `${request.method} ${request.url} failed (requestId=${body.requestId}): ${error.message}`,
+        error.stack
+      );
+    }
 
     httpAdapter.reply(context.getResponse(), body, statusCode);
   }

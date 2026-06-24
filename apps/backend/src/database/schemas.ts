@@ -207,7 +207,7 @@ export type ClassSessionStatus = (typeof CLASS_SESSION_STATUSES)[number];
 
 @Schema({ collection: 'batches', timestamps: true })
 export class BatchDocument {
-  @Prop({ type: String, default: randomUUID })
+  @Prop({ type: String, default: () => randomUUID() })
   _id!: string;
 
   @Prop({ required: true, trim: true, maxlength: 120 })
@@ -269,7 +269,7 @@ export type ClassSessionMaterialSource = (typeof CLASS_SESSION_MATERIAL_SOURCES)
 
 @Schema({ collection: 'student_enrollments', timestamps: true })
 export class StudentEnrollmentDocument {
-  @Prop({ type: String, default: randomUUID })
+  @Prop({ type: String, default: () => randomUUID() })
   _id!: string;
 
   @Prop({ required: true, index: true })
@@ -339,7 +339,7 @@ StudentEnrollmentSchema.index({ teacherId: 1, status: 1, updatedAt: -1 });
 
 @Schema({ collection: 'batch_schedules', timestamps: true })
 export class BatchScheduleDocument {
-  @Prop({ type: String, default: randomUUID })
+  @Prop({ type: String, default: () => randomUUID() })
   _id!: string;
 
   @Prop({ required: true, index: true })
@@ -360,7 +360,7 @@ BatchScheduleSchema.index({ batchId: 1, dayOfWeek: 1 }, { unique: true });
 
 @Schema({ collection: 'class_sessions', timestamps: true })
 export class ClassSessionDocument {
-  @Prop({ type: String, default: randomUUID })
+  @Prop({ type: String, default: () => randomUUID() })
   _id!: string;
 
   @Prop({ required: true, index: true })
@@ -431,7 +431,7 @@ ClassSessionSchema.index(
 
 @Schema({ collection: 'class_session_attendance_snapshots', timestamps: true })
 export class ClassSessionAttendanceSnapshotDocument {
-  @Prop({ type: String, default: randomUUID })
+  @Prop({ type: String, default: () => randomUUID() })
   _id!: string;
 
   @Prop({ required: true, index: true })
@@ -488,7 +488,7 @@ ClassSessionAttendanceSnapshotSchema.index({ roomId: 1, studentId: 1 });
 
 @Schema({ collection: 'class_session_materials', timestamps: true })
 export class ClassSessionMaterialDocument {
-  @Prop({ required: true, default: randomUUID, unique: true, index: true })
+  @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
   materialId!: string;
 
   @Prop({ required: true, index: true })
@@ -1797,7 +1797,7 @@ ModerationSchema.index({ roomId: 1, userId: 1, action: 1, active: 1 });
 
 @Schema({ _id: false })
 export class ChatAttachmentDocument {
-  @Prop({ required: true, default: randomUUID })
+  @Prop({ required: true, default: () => randomUUID() })
   id!: string;
 
   @Prop({ index: true })
@@ -1838,7 +1838,7 @@ export const ChatAttachmentSchema = SchemaFactory.createForClass(ChatAttachmentD
 
 @Schema({ collection: 'chat_attachments', timestamps: true })
 export class ChatAttachmentFileDocument {
-  @Prop({ required: true, default: randomUUID, unique: true, index: true })
+  @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
   attachmentId!: string;
 
   @Prop({ required: true, index: true })
@@ -2020,7 +2020,7 @@ ChatReadStateSchema.index({ sessionId: 1, threadKey: 1, updatedAt: -1 });
 
 @Schema({ collection: 'recordings', timestamps: true })
 export class RecordingDocument {
-  @Prop({ required: true, default: randomUUID, unique: true, index: true })
+  @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
   recordingId!: string;
 
   @Prop({ index: true })
