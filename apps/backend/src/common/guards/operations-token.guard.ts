@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
@@ -13,7 +14,7 @@ export class OperationsTokenGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<{ headers: Record<string, string | string[] | undefined> }>();
     const providedToken = normalizeHeaderValue(request.headers['x-operations-token']);
-    if (providedToken === configuredToken) {
+    if (operationsTokenMatches(providedToken, configuredToken)) {
       return true;
     }
 
@@ -26,4 +27,13 @@ function normalizeHeaderValue(value: string | string[] | undefined): string | un
     return value[0]?.trim();
   }
   return value?.trim();
+}
+
+export function operationsTokenMatches(providedToken: string | undefined, configuredToken: string): boolean {
+  if (!providedToken) {
+    return false;
+  }
+  const provided = Buffer.from(providedToken);
+  const configured = Buffer.from(configuredToken);
+  return provided.length === configured.length && timingSafeEqual(provided, configured);
 }

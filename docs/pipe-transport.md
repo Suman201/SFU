@@ -33,14 +33,31 @@ Implemented:
 - UDP pipe transport for controlled node-to-node RTP/RTCP validation with framed datagrams, peer auth, advertised endpoints, and socket cleanup.
 - MediaService pipe ingress/egress hooks for controlled owner-to-remote RTP and remote-to-owner RTCP validation.
 - Owner-orchestrated remote feed setup so a non-owner subscriber node can request a producer feed, establish a pipe, and register a remote proxy producer while keeping WebRTC transport local to the subscriber node.
+- Remote publisher setup so a non-owner publisher node can publish locally while the owner node receives a proxy producer through coordinated pipe bindings.
 - Cross-node room event fanout for room-scoped participant, producer, room-close, room-failure, permission, and chat updates.
 - Prometheus metrics for pipe transport state, durable control-plane delivery, replay, duplicate suppression, and worker rejection.
 - Worker-mode distributed pipe transport for controlled cross-node publish/subscribe validation.
 
 Not production-ready yet:
 
-- Remote publishing on non-owner nodes.
-- Multi-node RTP forwarding as a default path.
+- Multi-node RTP forwarding as the default production path.
+- Active-room migration or automatic owner handoff during node drain/owner expiry.
+- Public-network proof for real `PIPE_PORT_RANGE` UDP exposure in the target staging/production deployment.
+
+## Local Two-Node Validation
+
+Use the checked-in local proof stack for controlled backend/socket validation:
+
+```bash
+npm run docker:start:multi-node
+npm run seed:dummy-users:multi-node
+npm run test:live-soak:local
+npm run docker:down:multi-node
+```
+
+That stack starts two backend nodes with pipe enabled, distinct media and pipe UDP ranges, shared MongoDB/Redis, and worker-mode media. The soak harness writes a report under `reports/live-soak/` and fails when the expected distributed/pipe health checks do not pass.
+
+This local validation is intentionally not a browser or public-network proof. Production readiness still requires staging evidence for public TURN, public ICE candidate reachability, ingress behavior, and real inter-node UDP exposure.
 
 ## Troubleshooting
 

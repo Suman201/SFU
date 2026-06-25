@@ -17,6 +17,8 @@ const forbiddenSecretValues = [
   'password',
   'replace-with-strong-access-secret',
   'replace-with-strong-refresh-secret',
+  'replace-with-strong-webhook-secret',
+  'replace-with-strong-webhook-encryption-key',
   'replace-with-turn-rest-secret',
   'replace-with-strong-operations-token',
   'replace-with-strong-pipe-cluster-secret'
@@ -63,6 +65,19 @@ const schema = Joi.object({
   CLASS_MATERIAL_MAX_FILE_SIZE_BYTES: Joi.number().integer().min(1).max(50 * 1024 * 1024).default(10 * 1024 * 1024),
   PROFILE_MEDIA_LOCAL_PATH: Joi.string().default('/app/profile-media'),
   PROFILE_MEDIA_MAX_FILE_SIZE_BYTES: Joi.number().integer().min(1).max(10 * 1024 * 1024).default(2 * 1024 * 1024),
+  SMTP_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  SMTP_HOST: Joi.string().allow('').default(''),
+  SMTP_PORT: Joi.number().port().default(587),
+  SMTP_SECURE: Joi.boolean().truthy('true').falsy('false').default(false),
+  SMTP_USER: Joi.string().allow('').default(''),
+  SMTP_PASSWORD: Joi.string().allow('').default(''),
+  SMTP_FROM_EMAIL: Joi.string().email().allow('').default(''),
+  SMTP_FROM_NAME: Joi.string().allow('').default(''),
+  SMTP_REPLY_TO: Joi.string().email().allow('').default(''),
+  PUSH_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  PUSH_VAPID_PUBLIC_KEY: Joi.string().allow('').default(''),
+  PUSH_VAPID_PRIVATE_KEY: Joi.string().allow('').default(''),
+  PUSH_VAPID_SUBJECT: Joi.string().uri({ scheme: ['mailto', 'https'] }).allow('').default(''),
   WEBHOOK_SECRET_ENCRYPTION_KEY: secretSchema.optional(),
   WEBHOOK_DELIVERY_ENABLED: Joi.boolean().truthy('true').falsy('false').default(true),
   WEBHOOK_DEFAULT_TIMEOUT_MS: Joi.number().integer().min(500).max(30000).default(5000),
@@ -97,7 +112,7 @@ const schema = Joi.object({
   MEDIA_WORKER_HEARTBEAT_INTERVAL_MS: Joi.number().integer().min(250).default(2000),
   MEDIA_WORKER_HEARTBEAT_TIMEOUT_MS: Joi.number().integer().min(500).default(6000),
   ENABLE_PIPE_TRANSPORT: Joi.boolean().truthy('true').falsy('false').default(false),
-  PIPE_CLUSTER_SECRET: Joi.string().min(24).allow('').when('ENABLE_PIPE_TRANSPORT', { is: true, then: Joi.required().invalid('') }),
+  PIPE_CLUSTER_SECRET: secretSchema.allow('').when('ENABLE_PIPE_TRANSPORT', { is: true, then: Joi.required().invalid('') }),
   PIPE_ADVERTISE_IP: Joi.string().allow('').when('ENABLE_PIPE_TRANSPORT', { is: true, then: Joi.required().invalid('') }),
   PIPE_PORT_RANGE: Joi.string().pattern(/^\d{2,5}-\d{2,5}$/).default('41000-41100'),
   NODE_PUBLIC_URL: Joi.string().uri().default(Joi.ref('PUBLIC_URL')),
@@ -151,6 +166,8 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
   if (nodeEnv === 'production') {
     validatePublicUrl(validated.PUBLIC_URL, 'PUBLIC_URL', semanticErrors);
     validatePublicUrl(validated.NODE_PUBLIC_URL, 'NODE_PUBLIC_URL', semanticErrors);
+    validateProductionCorsOrigins(validated.CORS_ALLOWED_ORIGINS, semanticErrors);
+    validateProductionSecretUniqueness(validated, semanticErrors);
 
     const turnUris = splitConfigList(validated.TURN_URIS);
     if (turnUris.length === 0) {
@@ -163,6 +180,14 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
 
     if (validated.WEBHOOK_DELIVERY_ENABLED === true && !String(validated.WEBHOOK_SECRET_ENCRYPTION_KEY ?? '').trim()) {
       semanticErrors.push('WEBHOOK_SECRET_ENCRYPTION_KEY is required in production when webhook delivery is enabled');
+    }
+
+    if (validated.SMTP_ENABLED === true) {
+      requireNonEmpty(validated, ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_FROM_EMAIL', 'SMTP_FROM_NAME'], semanticErrors, 'when SMTP_ENABLED=true in production');
+    }
+
+    if (validated.PUSH_ENABLED === true) {
+      requireNonEmpty(validated, ['PUSH_VAPID_PUBLIC_KEY', 'PUSH_VAPID_PRIVATE_KEY', 'PUSH_VAPID_SUBJECT'], semanticErrors, 'when PUSH_ENABLED=true in production');
     }
   }
 
@@ -208,10 +233,73 @@ function validatePortRange(value: unknown, key: string, errors: string[]): void 
   }
 }
 
+function requireNonEmpty(config: Record<string, unknown>, keys: string[], errors: string[], suffix: string): void {
+  for (const key of keys) {
+    if (!String(config[key] ?? '').trim()) {
+      errors.push(`${key} is required ${suffix}`);
+    }
+  }
+}
+
 function validatePublicUrl(value: unknown, key: string, errors: string[]): void {
   const url = new URL(String(value));
   if (['localhost', '127.0.0.1', '0.0.0.0'].includes(url.hostname)) {
     errors.push(`${key} must not point to localhost or wildcard addresses in production`);
+  }
+}
+
+function validateProductionCorsOrigins(value: unknown, errors: string[]): void {
+  const origins = splitConfigList(value);
+  if (origins.length === 0) {
+    errors.push('CORS_ALLOWED_ORIGINS must include at least one explicit production origin');
+    return;
+  }
+
+  for (const origin of origins) {
+    if (origin === '*') {
+      errors.push('CORS_ALLOWED_ORIGINS must not use wildcard origins in production');
+      continue;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(origin);
+    } catch {
+      errors.push(`CORS_ALLOWED_ORIGINS entry "${origin}" must be a valid origin URL`);
+      continue;
+    }
+    if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
+      errors.push(`CORS_ALLOWED_ORIGINS entry "${origin}" must be an origin only, without paths or query strings`);
+    }
+    if (parsed.protocol !== 'https:') {
+      errors.push(`CORS_ALLOWED_ORIGINS entry "${origin}" must use https in production`);
+    }
+    if (isLocalOrWildcardHost(parsed.hostname)) {
+      errors.push(`CORS_ALLOWED_ORIGINS entry "${origin}" must not point to localhost or wildcard addresses in production`);
+    }
+  }
+}
+
+function validateProductionSecretUniqueness(config: Record<string, unknown>, errors: string[]): void {
+  const rawSecretEntries: Array<[string, unknown]> = [
+    ['JWT_ACCESS_SECRET', config.JWT_ACCESS_SECRET],
+    ['JWT_REFRESH_SECRET', config.JWT_REFRESH_SECRET],
+    ['TURN_SECRET', config.TURN_SECRET],
+    ['OPERATIONS_TOKEN', config.OPERATIONS_TOKEN],
+    ['WEBHOOK_SECRET_ENCRYPTION_KEY', config.WEBHOOK_SECRET_ENCRYPTION_KEY],
+    ['PIPE_CLUSTER_SECRET', config.ENABLE_PIPE_TRANSPORT === true ? config.PIPE_CLUSTER_SECRET : undefined]
+  ];
+  const secretEntries = rawSecretEntries
+    .map(([key, value]): [string, string] => [key, String(value ?? '').trim()])
+    .filter(([, value]) => value.length > 0);
+
+  const seen = new Map<string, string>();
+  for (const [key, value] of secretEntries) {
+    const previousKey = seen.get(value);
+    if (previousKey) {
+      errors.push(`${key} must not reuse the same secret value as ${previousKey}`);
+      continue;
+    }
+    seen.set(value, key);
   }
 }
 

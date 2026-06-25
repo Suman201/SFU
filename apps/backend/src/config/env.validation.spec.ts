@@ -9,6 +9,18 @@ const baseConfig = {
   TURN_SECRET: 'test-turn-secret-valid-length-32chars'
 };
 
+const productionConfig = {
+  ...baseConfig,
+  NODE_ENV: 'production',
+  PUBLIC_URL: 'https://sfu.example.com',
+  NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
+  FRONTEND_URL: 'https://app.example.com',
+  CORS_ALLOWED_ORIGINS: 'https://app.example.com',
+  TURN_URIS: 'turn:sfu.example.com:3478?transport=udp',
+  OPERATIONS_TOKEN: 'operations-token-valid-length-32',
+  WEBHOOK_SECRET_ENCRYPTION_KEY: 'webhook-secret-encryption-key-32+'
+};
+
 describe('validateConfig', () => {
   it('rejects placeholder secrets', () => {
     expect(() => validateConfig({ ...baseConfig, JWT_ACCESS_SECRET: 'secret' })).toThrow(/Invalid environment configuration/);
@@ -59,11 +71,8 @@ describe('validateConfig', () => {
   it('requires an operations token for production deployments', () => {
     expect(() =>
       validateConfig({
-        ...baseConfig,
-        NODE_ENV: 'production',
-        PUBLIC_URL: 'https://sfu.example.com',
-        NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
-        TURN_URIS: 'turn:sfu.example.com:3478?transport=udp'
+        ...productionConfig,
+        OPERATIONS_TOKEN: ''
       })
     ).toThrow(/OPERATIONS_TOKEN/);
   });
@@ -71,11 +80,7 @@ describe('validateConfig', () => {
   it('rejects placeholder operations tokens in production', () => {
     expect(() =>
       validateConfig({
-        ...baseConfig,
-        NODE_ENV: 'production',
-        PUBLIC_URL: 'https://sfu.example.com',
-        NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
-        TURN_URIS: 'turn:sfu.example.com:3478?transport=udp',
+        ...productionConfig,
         OPERATIONS_TOKEN: 'replace-with-strong-operations-token'
       })
     ).toThrow(/Invalid environment configuration/);
@@ -84,41 +89,114 @@ describe('validateConfig', () => {
   it('rejects localhost public urls in production', () => {
     expect(() =>
       validateConfig({
-        ...baseConfig,
-        NODE_ENV: 'production',
+        ...productionConfig,
         PUBLIC_URL: 'http://localhost:3000',
-        NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
-        TURN_URIS: 'turn:sfu.example.com:3478?transport=udp',
-        OPERATIONS_TOKEN: 'operations-token-valid-length-32'
       })
     ).toThrow(/PUBLIC_URL/);
   });
 
   it('accepts hardened production values', () => {
-    expect(() =>
-      validateConfig({
-        ...baseConfig,
-        NODE_ENV: 'production',
-        PUBLIC_URL: 'https://sfu.example.com',
-        NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
-        TURN_URIS: 'turn:sfu.example.com:3478?transport=udp',
-        OPERATIONS_TOKEN: 'operations-token-valid-length-32',
-        WEBHOOK_SECRET_ENCRYPTION_KEY: 'webhook-secret-encryption-key-32+'
-      })
-    ).not.toThrow();
+    expect(() => validateConfig(productionConfig)).not.toThrow();
   });
 
   it('requires a dedicated webhook secret encryption key in production when delivery is enabled', () => {
     expect(() =>
       validateConfig({
-        ...baseConfig,
-        NODE_ENV: 'production',
-        PUBLIC_URL: 'https://sfu.example.com',
-        NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
-        TURN_URIS: 'turn:sfu.example.com:3478?transport=udp',
-        OPERATIONS_TOKEN: 'operations-token-valid-length-32'
+        ...productionConfig,
+        WEBHOOK_SECRET_ENCRYPTION_KEY: undefined
       })
     ).toThrow(/WEBHOOK_SECRET_ENCRYPTION_KEY/);
+  });
+
+  it('does not require SMTP or push config when providers are disabled in production', () => {
+    expect(() =>
+      validateConfig({
+        ...productionConfig,
+        SMTP_ENABLED: 'false',
+        PUSH_ENABLED: 'false'
+      })
+    ).not.toThrow();
+  });
+
+  it('requires SMTP provider fields when SMTP is enabled in production', () => {
+    expect(() =>
+      validateConfig({
+        ...productionConfig,
+        SMTP_ENABLED: 'true',
+        SMTP_HOST: '',
+        SMTP_USER: '',
+        SMTP_PASSWORD: '',
+        SMTP_FROM_EMAIL: '',
+        SMTP_FROM_NAME: ''
+      })
+    ).toThrow(/SMTP_HOST/);
+  });
+
+  it('accepts SMTP provider fields when SMTP is enabled in production', () => {
+    expect(() =>
+      validateConfig({
+        ...productionConfig,
+        SMTP_ENABLED: 'true',
+        SMTP_HOST: 'smtp.example.com',
+        SMTP_PORT: '587',
+        SMTP_SECURE: 'false',
+        SMTP_USER: 'mailer@example.com',
+        SMTP_PASSWORD: 'smtp-password',
+        SMTP_FROM_EMAIL: 'classes@example.com',
+        SMTP_FROM_NAME: 'Native SFU'
+      })
+    ).not.toThrow();
+  });
+
+  it('requires VAPID config when push is enabled in production', () => {
+    expect(() =>
+      validateConfig({
+        ...productionConfig,
+        PUSH_ENABLED: 'true',
+        PUSH_VAPID_PUBLIC_KEY: '',
+        PUSH_VAPID_PRIVATE_KEY: '',
+        PUSH_VAPID_SUBJECT: ''
+      })
+    ).toThrow(/PUSH_VAPID_PUBLIC_KEY/);
+  });
+
+  it('accepts VAPID config when push is enabled in production', () => {
+    expect(() =>
+      validateConfig({
+        ...productionConfig,
+        PUSH_ENABLED: 'true',
+        PUSH_VAPID_PUBLIC_KEY: 'public-vapid-key',
+        PUSH_VAPID_PRIVATE_KEY: 'private-vapid-key',
+        PUSH_VAPID_SUBJECT: 'mailto:admin@example.com'
+      })
+    ).not.toThrow();
+  });
+
+  it('rejects localhost CORS origins in production', () => {
+    expect(() =>
+      validateConfig({
+        ...productionConfig,
+        CORS_ALLOWED_ORIGINS: 'http://localhost:4200'
+      })
+    ).toThrow(/CORS_ALLOWED_ORIGINS/);
+  });
+
+  it('rejects wildcard CORS origins in production', () => {
+    expect(() =>
+      validateConfig({
+        ...productionConfig,
+        CORS_ALLOWED_ORIGINS: '*'
+      })
+    ).toThrow(/wildcard origins/);
+  });
+
+  it('rejects reused production secret values', () => {
+    expect(() =>
+      validateConfig({
+        ...productionConfig,
+        JWT_REFRESH_SECRET: productionConfig.JWT_ACCESS_SECRET
+      })
+    ).toThrow(/must not reuse the same secret value/);
   });
 
   it('rejects event retention shorter than delivery retention', () => {
@@ -154,12 +232,8 @@ describe('validateConfig', () => {
   it('rejects localhost TURN URIs in production', () => {
     expect(() =>
       validateConfig({
-        ...baseConfig,
-        NODE_ENV: 'production',
-        PUBLIC_URL: 'https://sfu.example.com',
-        NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
+        ...productionConfig,
         TURN_URIS: 'turn:127.0.0.1:3478?transport=udp',
-        OPERATIONS_TOKEN: 'operations-token-valid-length-32'
       })
     ).toThrow(/must not advertise localhost or wildcard hosts in production/);
   });
@@ -167,12 +241,7 @@ describe('validateConfig', () => {
   it('rejects localhost pipe advertise IPs in production when pipe transport is enabled', () => {
     expect(() =>
       validateConfig({
-        ...baseConfig,
-        NODE_ENV: 'production',
-        PUBLIC_URL: 'https://sfu.example.com',
-        NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
-        TURN_URIS: 'turn:sfu.example.com:3478?transport=udp',
-        OPERATIONS_TOKEN: 'operations-token-valid-length-32',
+        ...productionConfig,
         ENABLE_PIPE_TRANSPORT: 'true',
         PIPE_CLUSTER_SECRET: '0123456789abcdef01234567',
         PIPE_ADVERTISE_IP: '127.0.0.1'
@@ -240,12 +309,7 @@ describe('validateConfig', () => {
   it('rejects localhost announced candidate addresses in production', () => {
     expect(() =>
       validateConfig({
-        ...baseConfig,
-        NODE_ENV: 'production',
-        PUBLIC_URL: 'https://sfu.example.com',
-        NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
-        TURN_URIS: 'turn:sfu.example.com:3478?transport=udp',
-        OPERATIONS_TOKEN: 'operations-token-valid-length-32',
+        ...productionConfig,
         ICE_ANNOUNCED_ADDRESS: '127.0.0.1'
       })
     ).toThrow(/ICE_ANNOUNCED_ADDRESS must not use localhost or wildcard hosts in production/);

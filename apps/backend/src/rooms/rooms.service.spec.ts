@@ -4536,6 +4536,15 @@ function createService(): {
     activeProducers: { labels: jest.Mock };
     activeConsumers: { inc: jest.Mock; dec: jest.Mock };
     roomAdmissionRejections: { labels: jest.Mock };
+    classSessionLifecycleTransitions: { labels: jest.Mock };
+    classSessionJoinAttempts: { labels: jest.Mock };
+    classSessionReconnectGraceEvents: { labels: jest.Mock };
+    activeClassSessionReconnectGraceTimers: { set: jest.Mock };
+    classSessionMediaFailures: { labels: jest.Mock };
+    classSessionChatFailures: { labels: jest.Mock };
+    classSessionModerationActions: { labels: jest.Mock };
+    classSessionWhiteboardControlActions: { labels: jest.Mock };
+    classSessionMaterialActions: { labels: jest.Mock };
     roomJoinDuration: { observe: jest.Mock };
     roomProfileDistribution: { labels: jest.Mock };
     roomProfileChanges: { labels: jest.Mock };
@@ -4744,6 +4753,8 @@ function createService(): {
   const activeConsumers = { inc: jest.fn(), dec: jest.fn() };
   const activeRooms = { inc: jest.fn(), dec: jest.fn() };
   const roomAdmissionRejectionMetric = { inc: jest.fn() };
+  const classSessionMetric = { inc: jest.fn() };
+  const activeClassSessionReconnectGraceTimers = { set: jest.fn() };
   const roomProfileDistributionMetric = { inc: jest.fn(), dec: jest.fn() };
   const roomProfileChangesMetric = { inc: jest.fn() };
   const roomProtectionDecisionMetric = { inc: jest.fn() };
@@ -4773,6 +4784,31 @@ function createService(): {
     activeConsumers,
     roomAdmissionRejections: {
       labels: jest.fn(() => roomAdmissionRejectionMetric)
+    },
+    classSessionLifecycleTransitions: {
+      labels: jest.fn(() => classSessionMetric)
+    },
+    classSessionJoinAttempts: {
+      labels: jest.fn(() => classSessionMetric)
+    },
+    classSessionReconnectGraceEvents: {
+      labels: jest.fn(() => classSessionMetric)
+    },
+    activeClassSessionReconnectGraceTimers,
+    classSessionMediaFailures: {
+      labels: jest.fn(() => classSessionMetric)
+    },
+    classSessionChatFailures: {
+      labels: jest.fn(() => classSessionMetric)
+    },
+    classSessionModerationActions: {
+      labels: jest.fn(() => classSessionMetric)
+    },
+    classSessionWhiteboardControlActions: {
+      labels: jest.fn(() => classSessionMetric)
+    },
+    classSessionMaterialActions: {
+      labels: jest.fn(() => classSessionMetric)
     },
     roomJoinDuration: {
       observe: jest.fn()

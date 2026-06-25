@@ -35,6 +35,100 @@ npm run docker:up
 npm run test:e2e -w @native-sfu/backend
 ```
 
+## Build and Dev Runtime Verification
+
+Use this slice when you need to prove that the repo is not only compile-green, but also starts locally in development mode.
+
+Toolchain:
+
+- Node.js `22.22.3` or newer from the root [.nvmrc](/Volumes/Extarnal/RND/SFU/.nvmrc)
+- npm `10` or newer
+- MongoDB reachable from the backend, default `mongodb://127.0.0.1:27017/native_sfu`
+- Redis reachable from the backend, default `redis://127.0.0.1:6379`
+- Optional TURN/Coturn for media proof beyond this smoke slice
+
+Build verification:
+
+```bash
+npm run build --workspace @native-sfu/contracts
+npm run build --workspace @native-sfu/sfu-core
+npm run build --workspace @native-sfu/nest-sfu
+npm run build --workspace @native-sfu/backend
+npm run build --workspace @native-sfu/frontend
+npm run build --workspace @native-sfu/admin-portal
+```
+
+The convenience wrapper is:
+
+```bash
+npm run verify:build
+```
+
+Local dev startup order:
+
+1. Start MongoDB and Redis. For the repo compose stack:
+
+```bash
+npm run docker:up
+```
+
+The dev compose stack exposes MongoDB on host port `27018` and Redis on host port `6379`. If you use those host ports from a backend running directly on the host, set `MONGODB_URI=mongodb://127.0.0.1:27018/native_sfu`.
+
+2. Start the backend:
+
+```bash
+npm run verify:dev:backend
+```
+
+If another local stack already owns port `3000`, start the backend on a different port and point the portals at it:
+
+```bash
+PORT=3100 \
+PUBLIC_URL=http://localhost:3100 \
+NODE_PUBLIC_URL=http://localhost:3100 \
+FRONTEND_URL=http://localhost:4200 \
+CORS_ALLOWED_ORIGINS=http://localhost:4200,http://localhost:4300 \
+npm run verify:dev:backend
+```
+
+3. Start the frontend portal:
+
+```bash
+SFU_BACKEND_ORIGIN=http://localhost:3100 npm run verify:dev:frontend
+```
+
+4. Start the admin portal:
+
+```bash
+SFU_BACKEND_ORIGIN=http://localhost:3100 npm run verify:dev:admin
+```
+
+5. Run the smoke probe from another terminal:
+
+```bash
+BACKEND_ORIGIN=http://127.0.0.1:3100 \
+FRONTEND_ORIGIN=http://127.0.0.1:4200 \
+ADMIN_ORIGIN=http://127.0.0.1:4300 \
+npm run verify:dev:smoke
+```
+
+That smoke checks backend live/ready health, the protected API route shape, the Socket.IO Engine.IO handshake at `/socket.io`, and unauthenticated frontend/admin route shells. It does not prove real camera, microphone, TURN relay, or authenticated class-session media behavior.
+
+Expected dev ports:
+
+| Service | Default port | Notes |
+| --- | --- | --- |
+| Backend API and Socket.IO | `3000` | Use `PORT=3100` or another free port when `3000` is occupied. |
+| Frontend portal | `4200` | Proxy uses `SFU_BACKEND_ORIGIN`, default `http://localhost:3000`. |
+| Admin portal | `4300` | Proxy uses `SFU_BACKEND_ORIGIN`, default `http://localhost:3000`. |
+| MongoDB via dev compose | `27018` | Backend inside compose uses service DNS `mongo:27017`. |
+| Redis via dev compose | `6379` | Backend inside compose uses service DNS `redis:6379`. |
+
+Current local caveats:
+
+- Authenticated admin smoke needs a seeded admin credential for the local database. If the documented bootstrap credential is not present, login will correctly return `401`.
+- Angular dev servers start successfully under Node `22.22.3`. If a production `ng build` fails with an esbuild runtime crash on a specific machine, keep the dev-server smoke result separate from the build result and report the exact esbuild stack.
+
 ## Browser Interop
 
 The release-candidate browser slice runs through the repo wrapper so the Playwright loader patch is applied first.
@@ -81,7 +175,7 @@ Notes:
 | Local single-node browser media | Partial local regression evidence | `npm run test:browser` | Good for repo/runtime regressions, not public-network proof |
 | Staged TURN relay gathering | Chromium validated | `npm run test:browser:staging-turn` | Proves relay candidate gathering only, not full publish/subscribe over ingress |
 | Staged full browser publish/subscribe over shared ingress | Chromium harness available | `npm run test:browser -- tests/browser/staging-ingress-browser-proof.spec.ts --project=chromium` | Requires real staging credentials and still needs a real out-of-sandbox browser run for signoff |
-| Two-node distributed soak | Synthetic distributed soak evidence | `npm run test:live-soak` | Uses backend/socket flows, not a browser DTLS/SRTP media path |
+| Two-node distributed soak | Synthetic distributed soak evidence with report output | `npm run docker:start:multi-node && npm run seed:dummy-users:multi-node && npm run test:live-soak:local` | Uses backend/socket flows, not a browser DTLS/SRTP media path |
 | Firefox | Partial | `npm run test:browser:firefox` | Some live multi-layer and impairment slices still skip in Playwright |
 | WebKit | Partial | `npm run test:browser:webkit` | Flow coverage exists, but live adaptive/browser edge coverage is thinner than Chromium |
 | TURN transport support | UDP only | `npm run test:browser:staging-turn` | Do not advertise TURN-over-TCP or TURNS in the current RC |
@@ -118,6 +212,16 @@ What that preflight proves:
 - the deployed nodes are booted with a sane control-plane config surface
 - production token hardening and operator diagnostics are behaving as expected
 - the process is not obviously advertising localhost or unsupported TURN settings
+
+Repo-side P0 security hardening was verified on 2026-06-25 with:
+
+- `npm test --workspace @native-sfu/backend -- env.validation.spec.ts operations-token.guard.spec.ts health.controller.spec.ts metrics.controller.spec.ts`
+- `npm test --workspace @native-sfu/backend -- rooms.gateway.spec.ts rooms.service.spec.ts class-sessions.service.spec.ts`
+- `npm test --workspace @native-sfu/backend -- media.controller.spec.ts recordings.service.spec.ts platform-events.service.spec.ts`
+- backend, frontend, and admin portal builds
+- `git diff --check`
+
+That local verification proves compile/test coverage for the guardrails. It does not replace staging proof with real production-like secrets, ingress, TURN, CORS origins, and operator-token-protected scrape/diagnostic access.
 
 What it does not prove:
 
@@ -181,18 +285,35 @@ Without `APPLY_NODE_DRAIN=true`, the script runs a read-only health/auth smoke p
 The two-node synthetic distributed soak harness lives in `tests/load/live-soak-signoff.mjs`:
 
 ```bash
-npm run seed:dummy-users
-NODE_A_URL=http://127.0.0.1:3000 \
-NODE_B_URL=http://127.0.0.1:3002 \
-SEED_USER_PASSWORD=Password@12345 \
-npm run test:live-soak
+npm run docker:start:multi-node
+npm run seed:dummy-users:multi-node
+npm run test:live-soak:local
+npm run docker:down:multi-node
 ```
 
-If operations hardening is enabled in the target environment, add `OPERATIONS_TOKEN=...` to the drain and live-soak commands so metrics and media diagnostics remain reachable during validation.
+This starts two backend containers against shared MongoDB/Redis using `infra/docker-compose.multi-node.yml`. Node A is exposed on `http://127.0.0.1:3000`, node B is exposed on `http://127.0.0.1:3002`, pipe transport is enabled by default for this local proof, and the checked-in local operations token is `local-multinode-operations-token-32chars`.
+
+The local soak command writes a timestamped JSON report under `reports/live-soak/`. It exits non-zero when declared proof expectations fail, including final baseline cleanup, worker readiness, metrics refresh status, drain new-room rejection, distributed node presence when `EXPECT_DISTRIBUTED=true`, and pipe runtime health when `EXPECT_PIPE_ENABLED=true`.
+
+If operations hardening is enabled in a different target environment, add `OPERATIONS_TOKEN=...` to the drain and live-soak commands so metrics and media diagnostics remain reachable during validation.
 
 The live soak report now captures worker CPU / RSS snapshots, process memory, default event-loop lag metrics, and Prometheus refresh status in addition to rooms / transports / consumers / pipe state.
 
 For public staging, prefer direct node URLs for `NODE_A_URL` / `NODE_B_URL` so you can distinguish owner and non-owner behavior during distributed soak. Use the shared ingress hostname for the browser TURN and shared-ingress publish/subscribe proofs.
+
+For a staging two-node soak, keep the same harness but replace the URLs and token:
+
+```bash
+NODE_A_URL=https://node-a.example.com \
+NODE_B_URL=https://node-b.example.com \
+OPERATIONS_TOKEN=... \
+EXPECT_DISTRIBUTED=true \
+EXPECT_PIPE_ENABLED=true \
+REPORT_DIR=reports/live-soak-staging \
+npm run test:live-soak
+```
+
+This harness proves owner routing, remote publisher/subscriber signaling, node drain, cleanup, and pipe-health metrics at the backend/socket layer. It does not prove public browser ICE/DTLS/SRTP, TURN relay gathering, shared ingress stickiness, or Kubernetes UDP exposure; run the staging browser and TURN proofs separately for those.
 
 Worker crash validation is intentionally destructive and opt-in. It only runs against local node targets and must be enabled explicitly:
 

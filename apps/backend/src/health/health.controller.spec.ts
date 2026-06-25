@@ -51,10 +51,32 @@ describe('HealthController', () => {
     expect((result as any).readiness).toEqual({
       status: 'up',
       acceptingTraffic: true,
-      nodeId: 'node-a',
-      reason: undefined,
-      capacityScore: 0.4
+      reason: undefined
     });
+  });
+
+  it('keeps public health details sanitized', async () => {
+    const controller = createController({
+      clusterSnapshot: clusterSnapshot({ health: 'healthy', draining: false, capacityScore: 0.4 }),
+      workerSnapshot: {
+        ...workerSnapshot(),
+        failures: [{ reason: 'worker_crash' }],
+        workers: [{ workerId: 'worker-1', pid: 1234, lastError: 'boom' }]
+      },
+      pipeHealth: pipeHealth(),
+      memoryHeap: { memory_heap: { status: 'up' } },
+      memoryRss: { memory_rss: { status: 'up' } },
+      mongodb: { mongodb: { status: 'up' } }
+    });
+
+    const result = await controller.check();
+
+    expect((result as any).cluster.nodes).toBeUndefined();
+    expect((result as any).cluster.localNode).toBeUndefined();
+    expect((result as any).media_workers.workers).toBeUndefined();
+    expect((result as any).media_workers.failures).toBeUndefined();
+    expect((result as any).media_workers.failedRooms).toBeUndefined();
+    expect((result as any).media_workers.failedRoomCount).toBe(0);
   });
 
   it('marks readiness down while the local node is draining', async () => {

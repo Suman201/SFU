@@ -9,6 +9,7 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { buildPublicRouteExclusions } from './bootstrap/public-routes';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { operationsTokenMatches } from './common/guards/operations-token.guard';
 import { SuccessResponseInterceptor } from './common/interceptors/success-response.interceptor';
 import { MetricsController } from './metrics/metrics.controller';
 
@@ -19,6 +20,7 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(Logger));
   const config = app.get(ConfigService);
   const allowedOrigins = config.get<string[]>('cors.allowedOrigins', ['http://localhost:4200']);
+  const nodeEnv = config.get<string>('app.nodeEnv', 'development');
 
   app.enableShutdownHooks();
   app.use(helmet());
@@ -50,6 +52,10 @@ async function bootstrap(): Promise<void> {
   app.useGlobalInterceptors(new SuccessResponseInterceptor());
 
   if (config.get<boolean>('swagger.enabled', true)) {
+    const swaggerPath = config.get<string>('swagger.path', 'api/docs');
+    if (nodeEnv === 'production') {
+      installSwaggerOperationsTokenProtection(app, swaggerPath, config.getOrThrow<string>('security.operationsToken'));
+    }
     const document = SwaggerModule.createDocument(
       app,
       new DocumentBuilder()
@@ -59,7 +65,7 @@ async function bootstrap(): Promise<void> {
         .addBearerAuth()
         .build()
     );
-    SwaggerModule.setup(config.get<string>('swagger.path', 'api/docs'), app, document);
+    SwaggerModule.setup(swaggerPath, app, document);
   }
 
   const port = config.get<number>('app.port', 3000);
@@ -71,7 +77,7 @@ async function bootstrap(): Promise<void> {
     ) => {
       const configuredOperationsToken = config.get<string | undefined>('security.operationsToken')?.trim();
       const requestOperationsToken = normalizeHeaderValue(req.headers?.['x-operations-token']);
-      if (configuredOperationsToken && requestOperationsToken !== configuredOperationsToken) {
+      if (configuredOperationsToken && !operationsTokenMatches(requestOperationsToken, configuredOperationsToken)) {
         res.status(401).send('Missing or invalid operations token');
         return;
       }
@@ -94,4 +100,49 @@ function normalizeHeaderValue(value: string | string[] | undefined): string | un
     return value[0]?.trim();
   }
   return value?.trim();
+}
+
+function installSwaggerOperationsTokenProtection(
+  app: {
+    getHttpAdapter: () => {
+      getInstance: () => {
+        use: (handler: (
+          req: { path?: string; url?: string; headers?: Record<string, string | string[] | undefined> },
+          res: { status: (code: number) => { send: (body: string) => void } },
+          next: () => void
+        ) => void) => void
+      }
+    }
+  },
+  swaggerPath: string,
+  operationsToken: string
+): void {
+  const protectedPath = `/${normalizeOperationalPath(swaggerPath)}`;
+  const protectedJsonPath = `${protectedPath}-json`;
+  const protectedYamlPath = `${protectedPath}-yaml`;
+  app.getHttpAdapter().getInstance().use((
+    req: { path?: string; url?: string; headers?: Record<string, string | string[] | undefined> },
+    res: { status: (code: number) => { send: (body: string) => void } },
+    next: () => void
+  ) => {
+    const requestPath = normalizeRequestPath(req.path ?? req.url ?? '/');
+    if (
+      requestPath === protectedPath ||
+      requestPath.startsWith(`${protectedPath}/`) ||
+      requestPath === protectedJsonPath ||
+      requestPath === protectedYamlPath
+    ) {
+      const requestOperationsToken = normalizeHeaderValue(req.headers?.['x-operations-token']);
+      if (!operationsTokenMatches(requestOperationsToken, operationsToken)) {
+        res.status(401).send('Missing or invalid operations token');
+        return;
+      }
+    }
+    next();
+  });
+}
+
+function normalizeRequestPath(path: string): string {
+  const base = path.split('?')[0] ?? '/';
+  return base.startsWith('/') ? base : `/${base}`;
 }

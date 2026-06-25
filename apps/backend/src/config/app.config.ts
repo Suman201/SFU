@@ -131,6 +131,25 @@ export const appConfig = () => ({
     localPath: process.env.PROFILE_MEDIA_LOCAL_PATH ?? './profile-media',
     maxFileSizeBytes: Number(process.env.PROFILE_MEDIA_MAX_FILE_SIZE_BYTES ?? 2 * 1024 * 1024)
   },
+  notifications: {
+    email: {
+      enabled: parseBoolean(process.env.SMTP_ENABLED, false),
+      host: process.env.SMTP_HOST?.trim() || undefined,
+      port: Number(process.env.SMTP_PORT ?? 587),
+      secure: parseBoolean(process.env.SMTP_SECURE, false),
+      user: process.env.SMTP_USER?.trim() || undefined,
+      password: process.env.SMTP_PASSWORD?.trim() || undefined,
+      fromEmail: process.env.SMTP_FROM_EMAIL?.trim() || undefined,
+      fromName: process.env.SMTP_FROM_NAME?.trim() || undefined,
+      replyTo: process.env.SMTP_REPLY_TO?.trim() || undefined
+    },
+    push: {
+      enabled: parseBoolean(process.env.PUSH_ENABLED, false),
+      vapidPublicKey: process.env.PUSH_VAPID_PUBLIC_KEY?.trim() || undefined,
+      vapidPrivateKey: process.env.PUSH_VAPID_PRIVATE_KEY?.trim() || undefined,
+      vapidSubject: process.env.PUSH_VAPID_SUBJECT?.trim() || undefined
+    }
+  },
   events: {
     webhooks: {
       enabled: parseBoolean(process.env.WEBHOOK_DELIVERY_ENABLED, true),

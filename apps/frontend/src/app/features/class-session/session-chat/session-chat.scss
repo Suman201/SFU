@@ -127,6 +127,95 @@
   font-size: 12px;
 }
 
+.link-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, #07100d 62%, transparent);
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+
+.link-dialog {
+  box-sizing: border-box;
+  display: grid;
+  gap: 12px;
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, #458b73 34%, var(--line-soft));
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--panel-elevated) 92%, #458b73 8%), var(--panel)),
+    var(--panel);
+  box-shadow:
+    var(--shadow-md),
+    0 24px 80px color-mix(in srgb, #07100d 38%, transparent);
+}
+
+.link-dialog header,
+.link-dialog p,
+.link-dialog h3 {
+  margin: 0;
+}
+
+.link-dialog h3 {
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.link-dialog > p,
+.link-dialog label span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.link-dialog label {
+  display: grid;
+  gap: 7px;
+}
+
+.link-dialog input {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font: inherit;
+  padding: 0 12px;
+}
+
+.link-dialog input:focus-visible {
+  border-color: color-mix(in srgb, #f26076 54%, var(--line-soft));
+  box-shadow: 0 0 0 3px color-mix(in srgb, #f26076 15%, transparent);
+  outline: none;
+}
+
+.link-dialog-error {
+  border: 1px solid color-mix(in srgb, #f26076 32%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, #f26076 10%, transparent);
+  color: #f26076;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.link-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .chat-icon {
   position: relative;
   display: inline-block;

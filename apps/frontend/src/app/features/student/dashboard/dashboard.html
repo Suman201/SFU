@@ -38,11 +38,19 @@
     @if (classOpenError()) {
       <div class="form-alert">{{ classOpenError() }}</div>
     }
+    @if (enrollment.enrolledBatchesError()) {
+      <div class="form-alert">{{ enrollment.enrolledBatchesError() }}</div>
+    }
     @if (enrollment.enrollmentError()) {
       <div class="form-alert">{{ enrollment.enrollmentError() }}</div>
     }
 
-    @if (enrolledBatches().length) {
+    @if (enrollment.loadingEnrolledBatches() && !enrollment.enrolledBatchesLoaded()) {
+      <div class="empty-state">
+        <h3>Loading enrolled batches</h3>
+        <p>Fetching your current enrollments from the server.</p>
+      </div>
+    } @else if (enrolledBatches().length) {
       <div class="enrolled-list">
         @for (batch of enrolledBatches(); track batch.id) {
           <article class="enrolled-row">
@@ -73,6 +81,12 @@
             </div>
           </article>
         }
+      </div>
+    } @else if (enrollment.enrolledBatchesError()) {
+      <div class="empty-state">
+        <h3>Unable to load enrolled batches</h3>
+        <p>Your enrollments could not be loaded. Try again when the connection is stable.</p>
+        <button type="button" (click)="enrollment.loadEnrolledBatches()">Try again</button>
       </div>
     } @else {
       <div class="empty-state">

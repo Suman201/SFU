@@ -42,10 +42,12 @@
   box-sizing: border-box;
   display: grid;
   min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
   align-content: center;
   justify-items: center;
   gap: 12px;
-  padding: 24px;
+  padding: max(24px, env(safe-area-inset-top, 0px)) 24px max(24px, env(safe-area-inset-bottom, 0px));
   text-align: center;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--panel-elevated) 88%, var(--student-base) 12%), color-mix(in srgb, var(--panel) 92%, var(--student-action) 8%)),
@@ -1020,6 +1022,17 @@
   backdrop-filter: blur(14px);
 }
 
+.student-materials-button::before {
+  display: none;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+  box-shadow: inset 0 5px 0 rgba(255, 255, 255, 0.22);
+  content: '';
+}
+
 .student-whiteboard-button .board-icon {
   position: relative;
   display: inline-block;
@@ -1137,11 +1150,16 @@
   top: 0;
   right: 0;
   z-index: 27;
+  box-sizing: border-box;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   width: min(680px, calc(100vw - 32px));
   height: 100vh;
+  height: 100svh;
   height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: contain;
   padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
   border-left: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(16, 24, 21, 0.96);
@@ -1210,12 +1228,17 @@
   top: 0;
   right: 0;
   z-index: 27;
+  box-sizing: border-box;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 14px;
   width: min(430px, calc(100vw - 28px));
   height: 100vh;
+  height: 100svh;
   height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: contain;
   padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(20px + env(safe-area-inset-bottom, 0px));
   border-left: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(16, 24, 21, 0.94);
@@ -1261,11 +1284,16 @@
   top: 0;
   right: 0;
   z-index: 26;
+  box-sizing: border-box;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   width: min(380px, calc(100vw - 28px));
   height: 100vh;
+  height: 100svh;
   height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: contain;
   padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(20px + env(safe-area-inset-bottom, 0px));
   border-left: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(16, 24, 21, 0.94);
@@ -1446,6 +1474,11 @@ sfu-session-chat {
     --student-action-top: calc(16px + var(--student-safe-top));
   }
 
+  .student-session-shell:has(.student-media-controls.problem),
+  .student-session-shell:has(.student-network-warning) {
+    --student-control-height: 214px;
+  }
+
   .student-session-shell.has-pip {
     --student-stage-pip-reserve: var(--student-stage-pad);
   }
@@ -1482,6 +1515,24 @@ sfu-session-chat {
     right: 16px;
     min-height: 40px;
     padding: 0 11px;
+  }
+
+  .student-materials-button,
+  .student-whiteboard-button,
+  .participants-button {
+    max-width: min(176px, calc(100vw - 32px));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .student-materials-button span:not(.materials-icon),
+  .student-whiteboard-button span:not(.board-icon),
+  .participants-button span:not(.list-icon),
+  .participants-button strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .student-materials-drawer {
@@ -1566,6 +1617,7 @@ sfu-session-chat {
     max-height: min(46dvh, calc(100dvh - 96px - var(--student-safe-top) - var(--student-safe-bottom)));
     overflow-y: auto;
     overscroll-behavior: contain;
+    scrollbar-width: thin;
     padding: 5px 8px 6px;
     border-radius: 16px;
     transform: none;
@@ -1660,6 +1712,11 @@ sfu-session-chat {
     --student-pip-bottom: calc(var(--student-bottom-rail) + 12px);
   }
 
+  .student-session-shell:has(.student-media-controls.problem),
+  .student-session-shell:has(.student-network-warning) {
+    --student-control-height: 232px;
+  }
+
   .speaker-badge {
     right: 82px;
     grid-template-columns: 34px minmax(0, 1fr);
@@ -1700,6 +1757,23 @@ sfu-session-chat {
     display: none;
   }
 
+  .student-materials-button,
+  .student-whiteboard-button {
+    gap: 0;
+  }
+
+  .student-materials-button span:not(.materials-icon),
+  .student-whiteboard-button span:not(.board-icon),
+  .participants-button span:not(.list-icon) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
   .student-media-controls {
     grid-template-areas:
       'mic camera refresh hand'
@@ -1735,6 +1809,11 @@ sfu-session-chat {
     --student-pip-width: clamp(104px, 34vw, 132px);
     --student-pip-bottom: calc(var(--student-bottom-rail) + 10px);
     --student-stage-pad: 8px;
+  }
+
+  .student-session-shell:has(.student-media-controls.problem),
+  .student-session-shell:has(.student-network-warning) {
+    --student-control-height: 218px;
   }
 
   .student-session-shell.has-pip {
@@ -1805,6 +1884,11 @@ sfu-session-chat {
     --student-action-top: calc(10px + var(--student-safe-top));
   }
 
+  .student-session-shell:has(.student-media-controls.problem),
+  .student-session-shell:has(.student-network-warning) {
+    --student-control-height: 124px;
+  }
+
   .student-session-shell.has-pip {
     --student-stage-pip-reserve: var(--student-stage-pad);
   }
@@ -1822,6 +1906,24 @@ sfu-session-chat {
 
   .student-whiteboard-button {
     right: 224px;
+  }
+
+  .student-materials-button,
+  .student-whiteboard-button,
+  .participants-button {
+    max-width: 104px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .student-materials-button span:not(.materials-icon),
+  .student-whiteboard-button span:not(.board-icon),
+  .participants-button span:not(.list-icon),
+  .participants-button strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .student-media-controls {
@@ -1873,6 +1975,11 @@ sfu-session-chat {
 }
 
 @media (max-height: 430px) and (orientation: landscape) {
+  .student-session-shell:has(.student-media-controls.problem),
+  .student-session-shell:has(.student-network-warning) {
+    --student-control-height: 132px;
+  }
+
   .speaker-badge {
     max-width: min(260px, calc(100vw - 320px));
     padding-block: 7px;
@@ -1882,11 +1989,56 @@ sfu-session-chat {
   .student-whiteboard-button,
   .participants-button {
     min-height: 38px;
+    max-width: 44px;
     padding-inline: 10px;
+  }
+
+  .student-materials-button,
+  .student-whiteboard-button {
+    font-size: 0;
+  }
+
+  .student-materials-button::before {
+    display: inline-block;
+  }
+
+  .student-materials-button span:not(.materials-icon),
+  .student-whiteboard-button span:not(.board-icon),
+  .participants-button span:not(.list-icon),
+  .participants-button strong {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .video-frame.screen-mode .stage-video {
     inset: 8px 8px calc(var(--student-screen-safe-bottom) + 2px) 8px;
+  }
+
+  .student-whiteboard-drawer,
+  .student-materials-drawer,
+  .participants-sidebar {
+    height: 100dvh;
+    max-height: 100dvh;
+    padding-top: calc(10px + var(--student-safe-top));
+    padding-bottom: calc(10px + var(--student-safe-bottom));
+    border-radius: 0;
+  }
+
+  .student-whiteboard-drawer header,
+  .student-materials-drawer header,
+  .participants-sidebar header {
+    padding-bottom: 8px;
+  }
+
+  .student-whiteboard-drawer header h1,
+  .student-materials-drawer h1,
+  .participants-sidebar h1 {
+    font-size: 18px;
   }
 
   .teacher-reconnect-banner,
@@ -1904,5 +2056,33 @@ sfu-session-chat {
   .student-prejoin-header,
   .student-prejoin-actions {
     grid-column: auto;
+  }
+}
+
+@media (pointer: coarse) {
+  .student-media-toggle,
+  .student-device-refresh,
+  .student-hand-button,
+  .participants-button,
+  .student-materials-button,
+  .student-whiteboard-button,
+  .close-button,
+  .prejoin-join-button,
+  .student-media-recovery-button {
+    min-height: 44px;
+  }
+
+  .student-device-refresh,
+  .close-button {
+    min-width: 44px;
+  }
+
+  .student-device-select select {
+    min-height: 38px;
+  }
+
+  .student-media-toggle:hover:not(:disabled),
+  .student-device-refresh:hover:not(:disabled) {
+    transform: none;
   }
 }

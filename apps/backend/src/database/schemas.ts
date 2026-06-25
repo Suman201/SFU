@@ -21,6 +21,8 @@ export type BatchScheduleMongoDocument = HydratedDocument<BatchScheduleDocument>
 export type ClassSessionMongoDocument = HydratedDocument<ClassSessionDocument>;
 export type ClassSessionAttendanceSnapshotMongoDocument = HydratedDocument<ClassSessionAttendanceSnapshotDocument>;
 export type ClassSessionMaterialMongoDocument = HydratedDocument<ClassSessionMaterialDocument>;
+export type ClassSessionWhiteboardStateMongoDocument = HydratedDocument<ClassSessionWhiteboardStateDocument>;
+export type ClassSessionWhiteboardVersionMongoDocument = HydratedDocument<ClassSessionWhiteboardVersionDocument>;
 export type RoomMongoDocument = HydratedDocument<RoomDocument>;
 export type RoomIncidentEventMongoDocument = HydratedDocument<RoomIncidentEventDocument>;
 export type RoomSnapshotBundleMongoDocument = HydratedDocument<RoomSnapshotBundleDocument>;
@@ -45,6 +47,7 @@ export type ChatMessageMongoDocument = HydratedDocument<ChatMessageDocument>;
 export type ChatAttachmentFileMongoDocument = HydratedDocument<ChatAttachmentFileDocument>;
 export type ChatReadStateMongoDocument = HydratedDocument<ChatReadStateDocument>;
 export type RecordingMongoDocument = HydratedDocument<RecordingDocument>;
+export type PushSubscriptionMongoDocument = HydratedDocument<PushSubscriptionDocument>;
 
 @Schema({ _id: false })
 export class UserNotificationSettingsDocument {
@@ -196,6 +199,51 @@ export class UserDocument {
 export const UserSchema = SchemaFactory.createForClass(UserDocument);
 UserSchema.index({ disabled: 1 });
 UserSchema.index({ status: 1, deletedAt: 1 });
+
+@Schema({ _id: false })
+export class PushSubscriptionKeysDocument {
+  @Prop({ required: true, trim: true })
+  p256dh!: string;
+
+  @Prop({ required: true, trim: true })
+  auth!: string;
+}
+
+export const PushSubscriptionKeysSchema = SchemaFactory.createForClass(PushSubscriptionKeysDocument);
+
+@Schema({ collection: 'push_subscriptions', timestamps: true })
+export class PushSubscriptionDocument {
+  @Prop({ required: true, index: true })
+  userId!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 4096 })
+  endpoint!: string;
+
+  @Prop({ type: PushSubscriptionKeysSchema, required: true })
+  keys!: PushSubscriptionKeysDocument;
+
+  @Prop({ type: Number })
+  expirationTime?: number | null;
+
+  @Prop({ trim: true, maxlength: 512 })
+  userAgent?: string;
+
+  @Prop({ type: Date })
+  lastUsedAt?: Date;
+
+  @Prop({ type: Date, index: true })
+  revokedAt?: Date;
+
+  @Prop({ type: Date, index: true })
+  deletedAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const PushSubscriptionSchema = SchemaFactory.createForClass(PushSubscriptionDocument);
+PushSubscriptionSchema.index({ userId: 1, deletedAt: 1, revokedAt: 1 });
+PushSubscriptionSchema.index({ endpoint: 1 }, { unique: true });
 
 export const BATCH_STATUSES = ['ACTIVE', 'INACTIVE', 'COMPLETED', 'CANCELLED'] as const;
 export type BatchStatus = (typeof BATCH_STATUSES)[number];
@@ -558,6 +606,124 @@ ClassSessionMaterialSchema.index({ sessionId: 1, shared: 1, deletedAt: 1 });
 ClassSessionMaterialSchema.index({ batchId: 1, deletedAt: 1, createdAt: -1 });
 ClassSessionMaterialSchema.index({ roomId: 1, shared: 1, deletedAt: 1 });
 ClassSessionMaterialSchema.index({ uploadedByUserId: 1, createdAt: -1 });
+
+@Schema({ _id: false })
+export class ClassSessionWhiteboardPageMetaDocument {
+  @Prop({ required: true, trim: true, maxlength: 128 })
+  pageId!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 180 })
+  title!: string;
+
+  @Prop({ type: [String], default: [], index: true })
+  tags!: string[];
+
+  @Prop({ required: true, min: 0 })
+  order!: number;
+
+  @Prop({ required: true, min: 0, default: 0 })
+  elementCount!: number;
+}
+
+export const ClassSessionWhiteboardPageMetaSchema = SchemaFactory.createForClass(ClassSessionWhiteboardPageMetaDocument);
+
+@Schema({ collection: 'class_session_whiteboard_states', timestamps: true })
+export class ClassSessionWhiteboardStateDocument {
+  @Prop({ required: true, unique: true, index: true })
+  sessionId!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ index: true })
+  roomId?: string;
+
+  @Prop({ required: true, index: true })
+  whiteboardChannelId!: string;
+
+  @Prop({ required: true, default: 1 })
+  schemaVersion!: number;
+
+  @Prop({ required: true, min: 1, default: 1 })
+  snapshotVersion!: number;
+
+  @Prop({ required: true, type: Object })
+  currentSnapshot!: Record<string, unknown>;
+
+  @Prop({ type: [ClassSessionWhiteboardPageMetaSchema], default: [] })
+  pages!: ClassSessionWhiteboardPageMetaDocument[];
+
+  @Prop({ min: 0, default: 0 })
+  pageCount!: number;
+
+  @Prop({ min: 0, default: 0 })
+  elementCount!: number;
+
+  @Prop({ trim: true })
+  latestVersionId?: string;
+
+  @Prop({ trim: true })
+  createdByUserId?: string;
+
+  @Prop({ trim: true })
+  updatedByUserId?: string;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const ClassSessionWhiteboardStateSchema = SchemaFactory.createForClass(ClassSessionWhiteboardStateDocument);
+ClassSessionWhiteboardStateSchema.index({ batchId: 1, updatedAt: -1 });
+ClassSessionWhiteboardStateSchema.index({ batchId: 1, 'pages.title': 1, 'pages.tags': 1, updatedAt: -1 });
+
+@Schema({ collection: 'class_session_whiteboard_versions', timestamps: true })
+export class ClassSessionWhiteboardVersionDocument {
+  @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
+  versionId!: string;
+
+  @Prop({ required: true, index: true })
+  sessionId!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ index: true })
+  roomId?: string;
+
+  @Prop({ required: true, index: true })
+  whiteboardChannelId!: string;
+
+  @Prop({ required: true, enum: ['autosave', 'manual-save', 'export', 'restore', 'session-end'], index: true })
+  reason!: string;
+
+  @Prop({ required: true, default: 1 })
+  schemaVersion!: number;
+
+  @Prop({ required: true, min: 1 })
+  snapshotVersion!: number;
+
+  @Prop({ required: true, type: Object })
+  snapshot!: Record<string, unknown>;
+
+  @Prop({ type: [ClassSessionWhiteboardPageMetaSchema], default: [] })
+  pages!: ClassSessionWhiteboardPageMetaDocument[];
+
+  @Prop({ min: 0, default: 0 })
+  pageCount!: number;
+
+  @Prop({ min: 0, default: 0 })
+  elementCount!: number;
+
+  @Prop({ trim: true })
+  createdByUserId?: string;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const ClassSessionWhiteboardVersionSchema = SchemaFactory.createForClass(ClassSessionWhiteboardVersionDocument);
+ClassSessionWhiteboardVersionSchema.index({ sessionId: 1, createdAt: -1 });
+ClassSessionWhiteboardVersionSchema.index({ batchId: 1, createdAt: -1 });
 
 @Schema({ collection: 'roles', timestamps: true })
 export class RoleDocument {

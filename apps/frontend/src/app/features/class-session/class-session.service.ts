@@ -9,8 +9,17 @@ import type {
   ChatThreadSummaryResponse,
   ClassSessionMaterial,
   CreateClassSessionMaterialLinkRequest,
+  CreateWhiteboardMemoryCheckpointRequest,
   LiveClassSettings,
-  Recording
+  PreviousWhiteboardMemoryListResponse,
+  Recording,
+  RestorePreviousWhiteboardMemoryRequest,
+  RestoreWhiteboardMemoryVersionRequest,
+  SaveWhiteboardMemoryRequest,
+  WhiteboardMemoryPageSearchResponse,
+  WhiteboardMemoryState,
+  WhiteboardMemoryVersion,
+  WhiteboardMemoryVersionListResponse
 } from '@native-sfu/contracts';
 import { Observable, map } from 'rxjs';
 import { API_BASE_URL } from '../../core/services/app-environment';
@@ -241,6 +250,89 @@ export class ClassSessionService {
       url.searchParams.set('batchId', options.batchId);
     }
     return this.http.get(url.toString(), { responseType: 'blob' });
+  }
+
+  getWhiteboardMemory(sessionId: string, options: { batchId?: string } = {}): Observable<WhiteboardMemoryState | null> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/whiteboard`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    return this.http
+      .get<WhiteboardMemoryState | null | ApiEnvelope<WhiteboardMemoryState | null>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  saveWhiteboardMemory(sessionId: string, request: SaveWhiteboardMemoryRequest): Observable<WhiteboardMemoryState> {
+    return this.http
+      .put<WhiteboardMemoryState | ApiEnvelope<WhiteboardMemoryState>>(
+        `${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/whiteboard`,
+        request
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  createWhiteboardCheckpoint(sessionId: string, request: CreateWhiteboardMemoryCheckpointRequest): Observable<WhiteboardMemoryVersion> {
+    return this.http
+      .post<WhiteboardMemoryVersion | ApiEnvelope<WhiteboardMemoryVersion>>(
+        `${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/whiteboard/checkpoints`,
+        request
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  listWhiteboardVersions(sessionId: string, options: { batchId?: string } = {}): Observable<WhiteboardMemoryVersionListResponse> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/whiteboard/versions`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    return this.http
+      .get<WhiteboardMemoryVersionListResponse | ApiEnvelope<WhiteboardMemoryVersionListResponse>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  restoreWhiteboardVersion(
+    sessionId: string,
+    versionId: string,
+    request: RestoreWhiteboardMemoryVersionRequest
+  ): Observable<WhiteboardMemoryState> {
+    return this.http
+      .post<WhiteboardMemoryState | ApiEnvelope<WhiteboardMemoryState>>(
+        `${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/whiteboard/versions/${encodeURIComponent(versionId)}/restore`,
+        request
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  listPreviousWhiteboards(sessionId: string, options: { batchId?: string } = {}): Observable<PreviousWhiteboardMemoryListResponse> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/whiteboard/previous`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    return this.http
+      .get<PreviousWhiteboardMemoryListResponse | ApiEnvelope<PreviousWhiteboardMemoryListResponse>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  restorePreviousWhiteboard(sessionId: string, request: RestorePreviousWhiteboardMemoryRequest): Observable<WhiteboardMemoryState> {
+    return this.http
+      .post<WhiteboardMemoryState | ApiEnvelope<WhiteboardMemoryState>>(
+        `${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/whiteboard/previous/restore`,
+        request
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  searchWhiteboardPages(sessionId: string, options: { batchId?: string; query?: string } = {}): Observable<WhiteboardMemoryPageSearchResponse> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/whiteboard/pages/search`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    if (options.query) {
+      url.searchParams.set('q', options.query);
+    }
+    return this.http
+      .get<WhiteboardMemoryPageSearchResponse | ApiEnvelope<WhiteboardMemoryPageSearchResponse>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
   }
 
   getChatSummary(sessionId: string, options: { batchId?: string } = {}): Observable<ChatThreadSummaryResponse> {

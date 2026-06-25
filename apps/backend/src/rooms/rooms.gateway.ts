@@ -44,7 +44,8 @@ import type {
   UpdateRoomMediaProfileRequest,
   WhiteboardCommandEvent,
   WhiteboardControlEvent,
-  WhiteboardCursorEvent
+  WhiteboardCursorEvent,
+  WhiteboardLockEvent
 } from '@native-sfu/contracts';
 import type { Server, Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
@@ -304,6 +305,15 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
             whiteboardControl.targets,
             'whiteboard:control-granted',
             whiteboardControl.event
+          );
+        }
+        const whiteboardLock = await this.rooms.whiteboardLockForParticipant(request.roomId, response.participantId);
+        if (whiteboardLock) {
+          await this.emitTargetedRoomEvent(
+            request.roomId,
+            whiteboardLock.targets,
+            'whiteboard:lock-changed',
+            whiteboardLock.event
           );
         }
       } else {
@@ -716,6 +726,10 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
       await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:control-granted', delivery.event);
+      const whiteboardLock = await this.rooms.whiteboardLockForParticipant(request.roomId, request.participantId);
+      if (whiteboardLock) {
+        await this.emitTargetedRoomEvent(request.roomId, whiteboardLock.targets, 'whiteboard:lock-changed', whiteboardLock.event);
+      }
       return delivery.event;
     });
   }
@@ -729,6 +743,19 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return socketAck(ack, async () => {
       const delivery = await this.rooms.revokeWhiteboardControl(request.roomId, this.requireParticipant(socket), request.participantId);
       await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:control-revoked', delivery.event);
+      return delivery.event;
+    });
+  }
+
+  @SubscribeMessage('whiteboard:set-lock')
+  setWhiteboardLock(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: Parameters<ClientToServerEvents['whiteboard:set-lock']>[0],
+    @WsAck() ack: SocketAck<WhiteboardLockEvent>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const delivery = await this.rooms.setWhiteboardLock(request.roomId, this.requireParticipant(socket), request.locked);
+      await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:lock-changed', delivery.event);
       return delivery.event;
     });
   }

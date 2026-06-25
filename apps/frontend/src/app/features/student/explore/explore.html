@@ -9,52 +9,73 @@
   </section>
 
   <section class="batch-grid" aria-label="Available batches">
+    @if (enrollment.availableBatchesError()) {
+      <div class="form-alert">{{ enrollment.availableBatchesError() }}</div>
+    }
     @if (enrollment.enrollmentError()) {
       <div class="form-alert">{{ enrollment.enrollmentError() }}</div>
     }
 
-    @for (batch of batches(); track batch.id) {
-      <article class="batch-card" [class.enrolled]="isEnrolled(batch)">
-        <header>
-          <div>
-            <p class="level">{{ batch.level }}</p>
-            <h2>{{ batch.title }}</h2>
+    @if (enrollment.loadingAvailableBatches() && !enrollment.availableBatchesLoaded()) {
+      <div class="empty-state">
+        <h3>Loading batches</h3>
+        <p>Fetching available batches from the server.</p>
+      </div>
+    } @else if (batches().length) {
+      @for (batch of batches(); track batch.id) {
+        <article class="batch-card" [class.enrolled]="isEnrolled(batch)">
+          <header>
+            <div>
+              <p class="level">{{ batch.level }}</p>
+              <h2>{{ batch.title }}</h2>
+            </div>
+            <span class="capacity">{{ enrollment.enrollmentCount(batch) }}/{{ batch.capacity }}</span>
+          </header>
+
+          <p class="subject">{{ batch.subject }}</p>
+
+          <a class="teacher-row" [routerLink]="['/teachers', batch.teacherId]">
+            <span>{{ batch.teacherName[0] }}</span>
+            <div>
+              <strong>{{ batch.teacherName }}</strong>
+              <small>{{ batch.teacherTitle }}</small>
+            </div>
+          </a>
+
+          <div class="batch-meta">
+            <span>{{ batch.schedule }}</span>
+            <span>{{ batch.durationMinutes }} min</span>
+            <span>{{ batch.totalWeeks }} weeks</span>
+            <span>Starts {{ formatStart(batch.startsAt) }}</span>
           </div>
-          <span class="capacity">{{ enrollment.enrollmentCount(batch) }}/{{ batch.capacity }}</span>
-        </header>
 
-        <p class="subject">{{ batch.subject }}</p>
-
-        <a class="teacher-row" [routerLink]="['/teachers', batch.teacherId]">
-          <span>{{ batch.teacherName[0] }}</span>
-          <div>
-            <strong>{{ batch.teacherName }}</strong>
-            <small>{{ batch.teacherTitle }}</small>
+          <div class="progress-track" aria-label="Batch enrollment">
+            <span [style.width.%]="enrollmentPercent(batch)"></span>
           </div>
-        </a>
 
-        <div class="batch-meta">
-          <span>{{ batch.schedule }}</span>
-          <span>{{ batch.durationMinutes }} min</span>
-          <span>{{ batch.totalWeeks }} weeks</span>
-          <span>Starts {{ formatStart(batch.startsAt) }}</span>
-        </div>
-
-        <div class="progress-track" aria-label="Batch enrollment">
-          <span [style.width.%]="enrollmentPercent(batch)"></span>
-        </div>
-
-        <footer>
-          <span>{{ seatsLabel(batch) }}</span>
-          @if (isEnrolled(batch)) {
-            <a routerLink="/student/dashboard">Enrolled</a>
-          } @else {
-            <button type="button" class="primary" [disabled]="isEnrollmentPending(batch)" (click)="enroll(batch)">
-              {{ isEnrollmentPending(batch) ? 'Enrolling...' : 'Enroll' }}
-            </button>
-          }
-        </footer>
-      </article>
+          <footer>
+            <span>{{ seatsLabel(batch) }}</span>
+            @if (isEnrolled(batch)) {
+              <a routerLink="/student/dashboard">Enrolled</a>
+            } @else {
+              <button type="button" class="primary" [disabled]="isEnrollmentPending(batch)" (click)="enroll(batch)">
+                {{ isEnrollmentPending(batch) ? 'Enrolling...' : 'Enroll' }}
+              </button>
+            }
+          </footer>
+        </article>
+      }
+    } @else if (enrollment.availableBatchesError()) {
+      <div class="empty-state">
+        <h3>Unable to load batches</h3>
+        <p>Available batches could not be loaded. Try again when the connection is stable.</p>
+        <button type="button" (click)="enrollment.loadAvailableBatches()">Try again</button>
+      </div>
+    } @else {
+      <div class="empty-state">
+        <h3>No available batches</h3>
+        <p>There are no active batches open for enrollment right now.</p>
+      </div>
     }
   </section>
 </main>

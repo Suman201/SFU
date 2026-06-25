@@ -200,8 +200,14 @@ h1 {
       &.zoom-in-icon::before { content: '+'; }
       &.zoom-out-icon::before { content: '-'; }
       &.import-menu-icon::before { content: 'I'; }
+      &.math-menu-icon::before {
+        content: 'Σ';
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 14px;
+      }
       &.measure-menu-icon::before { content: '°'; }
       &.background-menu-icon::before { content: 'BG'; }
+      &.slides-menu-icon::before { content: 'SL'; }
       &.fit-menu-icon::before { content: '↗'; }
       &.grid-menu-icon::before {
         content: '';
@@ -240,11 +246,610 @@ h1 {
     }
   }
 
+  .export-pages-panel {
+    display: grid;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 7px;
+    border: 1px solid var(--wb-control-border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--panel-elevated) 92%, var(--wb-base) 8%);
+  }
+
+  .export-pages-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+
+    > div {
+      display: inline-flex;
+      gap: 4px;
+    }
+
+    button {
+      min-height: 24px;
+      padding: 0 7px;
+      border: 1px solid var(--wb-control-border);
+      border-radius: 6px;
+      background: var(--control-bg);
+      color: var(--text);
+      font-size: 10px;
+      font-weight: 900;
+    }
+  }
+
+  .export-page-list {
+    display: grid;
+    gap: 4px;
+    max-height: 126px;
+    overflow-y: auto;
+    padding-right: 2px;
+    scrollbar-width: thin;
+  }
+
+  .export-page-option {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 28px;
+    padding: 0 7px;
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 750;
+
+    &:hover {
+      background: var(--accent-soft);
+    }
+
+    input {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--accent);
+    }
+
+    span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .selected-pages-export {
+    border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--wb-control-border));
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+  }
+
   .menu-divider {
     height: 1px;
     margin: 5px 0;
     border: none;
     background: linear-gradient(90deg, transparent, var(--line-soft), transparent);
+  }
+}
+
+.math-tools-popover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 45;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: min(392px, calc(100vw - 24px));
+  max-height: min(640px, calc(100dvh - 24px));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--wb-base) 34%, var(--wb-control-border));
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-elevated) 95%, var(--wb-base) 5%), var(--panel));
+  color: var(--text);
+  box-shadow:
+    0 24px 60px rgba(7, 28, 65, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  backdrop-filter: blur(16px);
+}
+
+.math-tools-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--wb-control-border);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--wb-base) 14%, transparent), color-mix(in srgb, var(--wb-primary) 8%, transparent));
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+
+  &:active {
+    cursor: grabbing;
+  }
+
+  div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  strong {
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  span:not(.math-tools-grip) {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    text-transform: capitalize;
+  }
+}
+
+.math-tools-grip {
+  display: inline-block;
+  width: 14px;
+  height: 22px;
+  opacity: 0.58;
+  background:
+    radial-gradient(circle, currentColor 1px, transparent 1.5px) 0 0 / 7px 7px,
+    radial-gradient(circle, currentColor 1px, transparent 1.5px) 3.5px 3.5px / 7px 7px;
+  color: var(--muted);
+}
+
+.math-tools-close {
+  display: inline-grid;
+  width: 32px;
+  min-height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--wb-control-border);
+  border-radius: 8px;
+  background: var(--control-bg);
+  color: var(--muted);
+  font-size: 20px;
+  font-weight: 750;
+  line-height: 1;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--wb-primary) 42%, var(--wb-control-border));
+    background: color-mix(in srgb, var(--wb-primary) 10%, var(--control-bg));
+    color: var(--wb-primary);
+    transform: none;
+  }
+}
+
+.math-tools-tabs {
+  display: flex;
+  gap: 5px;
+  padding: 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--wb-control-border);
+  background: color-mix(in srgb, var(--panel) 90%, var(--wb-base) 10%);
+  scrollbar-width: thin;
+
+  button {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--wb-control-border);
+    border-radius: 999px;
+    background: var(--control-bg);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 850;
+
+    &:hover:not(:disabled) {
+      border-color: var(--accent-border);
+      color: var(--accent);
+      transform: none;
+    }
+
+    &.active {
+      border-color: var(--accent);
+      background: linear-gradient(135deg, var(--wb-primary), var(--wb-live));
+      color: #ffffff;
+      box-shadow: 0 8px 18px color-mix(in srgb, var(--wb-primary) 18%, transparent);
+    }
+  }
+}
+
+.math-tools-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.math-tools-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.math-field {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.math-equation-input {
+  width: 100%;
+  min-height: 92px;
+  padding: 8px 9px;
+  resize: vertical;
+  border: 1px solid var(--wb-control-border);
+  border-radius: 8px;
+  background: var(--panel-elevated);
+  color: var(--text);
+  font: 13px/1.45 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  outline: none;
+  text-transform: none;
+  letter-spacing: 0;
+
+  &:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+}
+
+.math-preview-card {
+  display: grid;
+  min-height: 94px;
+  place-items: center start;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--wb-base) 24%, var(--wb-control-border));
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-elevated) 94%, var(--wb-attention) 6%), var(--panel-elevated));
+
+  img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
+  span {
+    color: var(--muted);
+    font: 13px/1.4 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+}
+
+.math-size-control {
+  display: grid;
+  grid-template-columns: auto minmax(130px, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+
+  input {
+    width: 100%;
+    accent-color: var(--accent);
+  }
+
+  strong {
+    min-width: 42px;
+    color: var(--text);
+    font-size: 11px;
+    text-align: right;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+}
+
+.math-color-row,
+.math-align-row,
+.math-snippet-strip,
+.math-shortcut-groups,
+.math-tools-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.math-color-row {
+  min-height: 32px;
+}
+
+.math-error {
+  margin: -2px 0 0;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--wb-control-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 9%, var(--panel-elevated));
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.math-align-row {
+  justify-content: space-between;
+  padding: 7px;
+  border: 1px solid var(--wb-control-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-elevated) 92%, var(--wb-base) 8%);
+
+  > span {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 850;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  > div {
+    display: inline-flex;
+    gap: 5px;
+  }
+}
+
+.math-shortcut-groups {
+  align-items: stretch;
+}
+
+.math-shortcut-group {
+  display: grid;
+  flex: 1 1 170px;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--wb-control-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-elevated) 94%, var(--wb-attention) 6%);
+
+  > span {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+}
+
+.math-snippet-strip button,
+.math-shortcut-group button,
+.math-align-row button,
+.math-tools-actions button,
+.math-snippet-grid button,
+.math-template-card,
+.math-feature-button,
+.math-tool-grid button {
+  border: 1px solid var(--wb-control-border);
+  border-radius: 8px;
+  background: var(--control-bg);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+
+  &:hover:not(:disabled) {
+    border-color: var(--accent-border);
+    background: linear-gradient(135deg, var(--accent-soft), var(--wb-live-soft));
+    color: var(--accent);
+    transform: none;
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.math-align-row button {
+  min-height: 28px;
+  padding: 0 9px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: capitalize;
+
+  &.active {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, var(--wb-primary), var(--wb-live));
+    color: #ffffff;
+  }
+}
+
+.math-snippet-strip button {
+  min-height: 28px;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.math-shortcut-group button {
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.math-tools-actions {
+  justify-content: flex-end;
+
+  button {
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .primary {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, var(--wb-primary), var(--wb-live));
+    color: #ffffff;
+  }
+}
+
+.math-template-grid,
+.math-snippet-grid,
+.math-tool-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.math-current-draft {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--wb-base) 26%, var(--wb-control-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wb-base) 9%, var(--control-bg));
+
+  span {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  code {
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--text);
+    font: 12px/1.35 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.math-template-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.math-template-grid.compact {
+  grid-template-columns: 1fr;
+}
+
+.math-template-card,
+.math-snippet-grid button,
+.math-tool-grid button {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-height: 66px;
+  padding: 10px;
+  text-align: left;
+
+  strong {
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1.1;
+  }
+
+  span {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 720;
+    line-height: 1.25;
+  }
+
+  &.active {
+    border-color: color-mix(in srgb, var(--wb-base) 62%, var(--wb-control-border));
+    background: color-mix(in srgb, var(--wb-base) 13%, var(--control-bg));
+    color: var(--wb-base);
+  }
+}
+
+.math-snippet-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.math-snippet-grid button span {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--accent);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.math-feature-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 62px;
+  padding: 10px;
+  text-align: left;
+
+  .tool-icon {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    color: var(--wb-base);
+  }
+
+  span:last-child {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  strong {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 900;
+  }
+
+  small {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 720;
+  }
+}
+
+.math-tool-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.math-tool-grid button {
+  min-height: 76px;
+  place-items: center;
+  justify-items: center;
+  text-align: center;
+
+  .tool-icon {
+    width: 22px;
+    height: 22px;
+    color: var(--wb-base);
+  }
+
+  &.active {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, var(--wb-primary), var(--wb-live));
+    color: #ffffff;
+
+    .tool-icon {
+      color: #ffffff;
+    }
   }
 }
 
@@ -402,7 +1007,9 @@ h1 {
   z-index: 11;
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   gap: 6px;
+  width: min(204px, calc(100vw - 24px));
   padding: 8px;
   border: 1px solid var(--wb-control-border);
   border-radius: 8px;
@@ -415,6 +1022,12 @@ h1 {
     width: 26px;
     height: 26px;
   }
+}
+
+.recent-color {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--wb-attention) 70%, var(--line-strong)),
+    0 6px 16px rgba(7, 28, 65, 0.12);
 }
 
 .brush-group-container {
@@ -430,6 +1043,11 @@ h1 {
     border-radius: 50%;
     background: currentColor;
     transition: transform 150ms ease;
+  }
+
+  .eraser-preview {
+    border: 1px dashed currentColor;
+    background: color-mix(in srgb, currentColor 18%, transparent);
   }
 
   .chevron-icon {
@@ -469,6 +1087,46 @@ h1 {
   flex-direction: column;
   gap: 9px;
   padding: 9px;
+}
+
+.eraser-mode-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.eraser-mode-grid button {
+  display: grid;
+  gap: 2px;
+  min-height: 48px;
+  padding: 7px 9px;
+  border: 1px solid var(--wb-control-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--control-bg) 90%, var(--wb-base) 10%);
+  color: var(--text);
+  text-align: left;
+}
+
+.eraser-mode-grid button strong {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.eraser-mode-grid button span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.eraser-mode-grid button.active {
+  border-color: color-mix(in srgb, var(--wb-primary) 58%, var(--line-soft));
+  background: color-mix(in srgb, var(--wb-primary) 14%, var(--panel-elevated));
+}
+
+.eraser-presets .brush-size span {
+  max-width: 28px;
+  max-height: 28px;
+  border: 1px dashed currentColor;
+  background: color-mix(in srgb, currentColor 18%, transparent);
 }
 
 .geometry-dropdown,
@@ -656,6 +1314,17 @@ h1 {
   scrollbar-width: thin;
 }
 
+.page-empty-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .page-tools {
   display: flex;
   align-items: center;
@@ -701,7 +1370,9 @@ h1 {
   color: var(--text);
 }
 
+.page-search-input,
 .page-title-input,
+.page-tags-input,
 .template-select {
   height: 34px;
   min-width: 0;
@@ -715,12 +1386,24 @@ h1 {
   outline: none;
 }
 
+.page-search-input {
+  width: clamp(112px, 14vw, 168px);
+  padding: 0 10px;
+}
+
 .page-title-input {
   width: clamp(112px, 15vw, 172px);
   padding: 0 10px;
 }
 
+.page-tags-input {
+  width: clamp(96px, 12vw, 148px);
+  padding: 0 10px;
+}
+
+.page-search-input:focus,
 .page-title-input:focus,
+.page-tags-input:focus,
 .template-select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -827,6 +1510,8 @@ h1 {
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--canvas-bg) 96%, var(--wb-base) 4%), var(--canvas-bg));
   box-shadow:
@@ -850,6 +1535,8 @@ h1 {
   position: absolute;
   inset: 0;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
   transform-origin: 0 0;
 }
 
@@ -859,6 +1546,8 @@ h1 {
   height: 100%;
   min-height: 520px;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
   cursor: crosshair;
 }
 
@@ -1456,6 +2145,10 @@ h1 {
 .geometry-icon::after,
 .segment-icon::before,
 .segment-icon::after,
+.ruler-icon::before,
+.ruler-icon::after,
+.protractor-icon::before,
+.protractor-icon::after,
 .angle-icon::before,
 .angle-icon::after,
 .circle-icon::before,
@@ -1472,6 +2165,8 @@ h1 {
 .point-icon::after,
 .vector-icon::before,
 .vector-icon::after,
+.polygon-icon::before,
+.polygon-icon::after,
 .diagram-icon::before,
 .diagram-icon::after,
 .venn-icon::before,
@@ -1523,6 +2218,48 @@ h1 {
   border-radius: 50%;
   background: currentColor;
   box-shadow: -14px 7px 0 currentColor;
+}
+
+.ruler-icon::before {
+  left: 1px;
+  top: 7px;
+  width: 18px;
+  height: 7px;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+  transform: rotate(-18deg);
+}
+
+.ruler-icon::after {
+  left: 4px;
+  top: 7px;
+  width: 1px;
+  height: 6px;
+  background: currentColor;
+  box-shadow:
+    4px -1px 0 currentColor,
+    8px 0 0 currentColor,
+    12px -1px 0 currentColor;
+  transform: rotate(-18deg);
+}
+
+.protractor-icon::before {
+  left: 2px;
+  bottom: 4px;
+  width: 16px;
+  height: 9px;
+  border: 2px solid currentColor;
+  border-bottom: 0;
+  border-radius: 16px 16px 0 0;
+}
+
+.protractor-icon::after {
+  left: 5px;
+  bottom: 4px;
+  width: 10px;
+  height: 2px;
+  background: currentColor;
+  box-shadow: 5px -4px 0 -0.5px currentColor;
 }
 
 .angle-icon::before {
@@ -1667,6 +2404,25 @@ h1 {
   transform: rotate(20deg);
 }
 
+.polygon-icon::before {
+  left: 2px;
+  top: 2px;
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  clip-path: polygon(50% 0, 92% 25%, 92% 75%, 50% 100%, 8% 75%, 8% 25%);
+  opacity: 0.9;
+}
+
+.polygon-icon::after {
+  left: 5px;
+  top: 5px;
+  width: 10px;
+  height: 10px;
+  background: var(--control-bg);
+  clip-path: polygon(50% 0, 92% 25%, 92% 75%, 50% 100%, 8% 75%, 8% 25%);
+}
+
 .diagram-icon::before {
   left: 2px;
   top: 3px;
@@ -1787,6 +2543,22 @@ h1 {
   height: 6px;
   border-radius: 50%;
   background: currentColor;
+}
+
+.point-snap-icon::before {
+  inset: 2px;
+  border-style: solid;
+  border-radius: 50%;
+}
+
+.point-snap-icon::after {
+  top: 3px;
+  left: 3px;
+  width: 4px;
+  height: 4px;
+  box-shadow:
+    8px 0 0 currentColor,
+    4px 9px 0 currentColor;
 }
 
 .grid-icon::before {
@@ -1937,6 +2709,38 @@ h1 {
     z-index: 40;
   }
 
+  .math-tools-popover {
+    top: auto;
+    right: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    left: 10px;
+    width: auto;
+    max-height: min(72dvh, 620px);
+    transform: none !important;
+    z-index: 48;
+  }
+
+  .math-tools-header {
+    min-height: 48px;
+  }
+
+  .math-tools-tabs {
+    padding: 7px;
+  }
+
+  .math-tools-body {
+    padding: 9px;
+  }
+
+  .math-template-grid,
+  .math-snippet-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .math-tool-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .color-dropdown {
     flex-wrap: wrap;
   }
@@ -1998,6 +2802,10 @@ h1 {
 
   .canvas-hud {
     display: none;
+  }
+
+  .math-tools-popover {
+    max-height: calc(100dvh - 18px);
   }
 }
 

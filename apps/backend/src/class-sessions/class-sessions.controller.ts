@@ -6,6 +6,7 @@ import {
   Header,
   Param,
   Post,
+  Put,
   Query,
   Res,
   StreamableFile,
@@ -22,8 +23,17 @@ import type {
   ChatReadState,
   ChatThreadSummaryResponse,
   ClassSessionMaterial,
+  CreateWhiteboardMemoryCheckpointRequest,
   CreateClassSessionMaterialLinkRequest,
-  Recording
+  PreviousWhiteboardMemoryListResponse,
+  Recording,
+  RestorePreviousWhiteboardMemoryRequest,
+  RestoreWhiteboardMemoryVersionRequest,
+  SaveWhiteboardMemoryRequest,
+  WhiteboardMemoryPageSearchResponse,
+  WhiteboardMemoryState,
+  WhiteboardMemoryVersion,
+  WhiteboardMemoryVersionListResponse
 } from '@native-sfu/contracts';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AuthenticatedUser, CurrentUser } from '../common/decorators/current-user.decorator';
@@ -235,6 +245,119 @@ export class ClassSessionsController {
     response.setHeader('Cache-Control', 'private, no-store');
     response.setHeader('Content-Disposition', `inline; filename="${this.contentDispositionFileName(download.fileName)}"`);
     return new StreamableFile(download.stream);
+  }
+
+  @Get(':sessionId/whiteboard')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get persisted class session whiteboard memory' })
+  getWhiteboardMemory(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WhiteboardMemoryState | null> {
+    return this.classSessions.getWhiteboardMemory(sessionId, batchId, user);
+  }
+
+  @Put(':sessionId/whiteboard')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Save persisted class session whiteboard memory' })
+  saveWhiteboardMemory(
+    @Param('sessionId') sessionId: string,
+    @Body() body: SaveWhiteboardMemoryRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WhiteboardMemoryState> {
+    return this.classSessions.saveWhiteboardMemory(sessionId, body.batchId, user, body);
+  }
+
+  @Post(':sessionId/whiteboard/checkpoints')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Create a class session whiteboard checkpoint' })
+  createWhiteboardCheckpoint(
+    @Param('sessionId') sessionId: string,
+    @Body() body: CreateWhiteboardMemoryCheckpointRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WhiteboardMemoryVersion> {
+    return this.classSessions.createWhiteboardCheckpoint(sessionId, body.batchId, user, body);
+  }
+
+  @Get(':sessionId/whiteboard/versions')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'List class session whiteboard versions' })
+  listWhiteboardVersions(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WhiteboardMemoryVersionListResponse> {
+    return this.classSessions.listWhiteboardVersions(sessionId, batchId, user);
+  }
+
+  @Post(':sessionId/whiteboard/versions/:versionId/restore')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Restore a class session whiteboard version' })
+  restoreWhiteboardVersion(
+    @Param('sessionId') sessionId: string,
+    @Param('versionId') versionId: string,
+    @Body() body: RestoreWhiteboardMemoryVersionRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WhiteboardMemoryState> {
+    return this.classSessions.restoreWhiteboardVersion(sessionId, versionId, body.batchId, user, body);
+  }
+
+  @Get(':sessionId/whiteboard/previous')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'List previous whiteboards in the same batch' })
+  listPreviousWhiteboardMemories(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<PreviousWhiteboardMemoryListResponse> {
+    return this.classSessions.listPreviousWhiteboardMemories(sessionId, batchId, user);
+  }
+
+  @Post(':sessionId/whiteboard/previous/restore')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Restore a previous class session whiteboard into this session' })
+  restorePreviousWhiteboardMemory(
+    @Param('sessionId') sessionId: string,
+    @Body() body: RestorePreviousWhiteboardMemoryRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WhiteboardMemoryState> {
+    return this.classSessions.restorePreviousWhiteboardMemory(sessionId, body.batchId, user, body);
+  }
+
+  @Post(':sessionId/whiteboard/restore-previous')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Restore a previous class session whiteboard into this session' })
+  restorePreviousWhiteboardMemoryAlias(
+    @Param('sessionId') sessionId: string,
+    @Body() body: RestorePreviousWhiteboardMemoryRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WhiteboardMemoryState> {
+    return this.classSessions.restorePreviousWhiteboardMemory(sessionId, body.batchId, user, body);
+  }
+
+  @Get(':sessionId/whiteboard/pages/search')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Search saved whiteboard pages by title or tags' })
+  searchWhiteboardPages(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @Query('q') query: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WhiteboardMemoryPageSearchResponse> {
+    return this.classSessions.searchWhiteboardPages(sessionId, batchId, query, user);
+  }
+
+  @Get(':sessionId/whiteboard/search')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Search saved whiteboard pages by title or tags' })
+  searchWhiteboardPagesAlias(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @Query('q') query: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WhiteboardMemoryPageSearchResponse> {
+    return this.classSessions.searchWhiteboardPages(sessionId, batchId, query, user);
   }
 
   @Get(':sessionId/chat/summary')

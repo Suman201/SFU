@@ -40,7 +40,10 @@ export class StudentExplore implements OnInit {
   }
 
   protected enrollmentPercent(batch: StudentBatch): number {
-    return Math.round((this.enrollment.enrollmentCount(batch) / batch.capacity) * 100);
+    if (batch.capacity <= 0) {
+      return 0;
+    }
+    return Math.min(100, Math.round((this.enrollment.enrollmentCount(batch) / batch.capacity) * 100));
   }
 
   protected formatStart(value: string): string {

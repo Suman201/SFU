@@ -237,4 +237,42 @@
       </form>
     </div>
   }
+
+  @if (linkDialogOpen()) {
+    <div
+      class="link-dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="chat-link-dialog-title"
+      aria-describedby="chat-link-dialog-copy"
+      (click)="cancelLinkAttachment()"
+    >
+      <form class="link-dialog" (submit)="confirmLinkAttachment($event)" (click)="$event.stopPropagation()">
+        <header>
+          <p class="eyebrow">Attach link</p>
+          <h3 id="chat-link-dialog-title">Add a chat link</h3>
+        </header>
+        <p id="chat-link-dialog-copy">Paste a trusted http or https URL. It will be attached to your next message.</p>
+        <label>
+          <span>Link URL</span>
+          <input
+            #linkUrlInput
+            type="url"
+            autocomplete="off"
+            inputmode="url"
+            placeholder="https://example.com/resource"
+            [value]="linkDraft()"
+            (input)="updateLinkDraft($event)"
+          />
+        </label>
+        @if (linkDialogError()) {
+          <p class="link-dialog-error" role="alert">{{ linkDialogError() }}</p>
+        }
+        <footer>
+          <button class="button ghost" type="button" (click)="cancelLinkAttachment()">Cancel</button>
+          <button class="button primary" type="submit">Attach link</button>
+        </footer>
+      </form>
+    </div>
+  }
 </section>

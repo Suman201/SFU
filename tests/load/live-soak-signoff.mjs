@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { io } from 'socket.io-client';
 
@@ -13,6 +15,15 @@ const stabilizeMs = parseInteger(process.env.STABILIZE_MS, 350);
 const baselineTimeoutMs = parseInteger(process.env.BASELINE_TIMEOUT_MS, 20_000);
 const enableWorkerCrashValidation = process.env.ENABLE_WORKER_CRASH_VALIDATION === 'true';
 const operationsToken = process.env.OPERATIONS_TOKEN;
+const reportDir = process.env.REPORT_DIR ?? 'reports/live-soak';
+const reportFile = process.env.REPORT_FILE;
+const expectDistributed = process.env.EXPECT_DISTRIBUTED === 'true';
+const expectPipeEnabled = process.env.EXPECT_PIPE_ENABLED === 'true';
+const expectDrainRejectsNewRooms = process.env.EXPECT_DRAIN_REJECTS_NEW_ROOMS !== 'false';
+const maxEventLoopMeanMs = parseOptionalNumber(process.env.MAX_EVENT_LOOP_MEAN_MS);
+const maxEventLoopMaxMs = parseOptionalNumber(process.env.MAX_EVENT_LOOP_MAX_MS);
+const maxProcessRssBytes = parseOptionalNumber(process.env.MAX_PROCESS_RSS_BYTES);
+const maxWorkerRssBytes = parseOptionalNumber(process.env.MAX_WORKER_RSS_BYTES);
 
 const accounts = {
   hostA: { email: 'teacher.one@example.com', password },
@@ -29,6 +40,22 @@ async function main() {
     startedAt,
     nodeAUrl,
     nodeBUrl,
+    scenario: {
+      capacitySteps,
+      soakCycles,
+      soakRooms,
+      enableWorkerCrashValidation,
+      expectDistributed,
+      expectPipeEnabled,
+      expectDrainRejectsNewRooms,
+      thresholds: {
+        maxEventLoopMeanMs,
+        maxEventLoopMaxMs,
+        maxProcessRssBytes,
+        maxWorkerRssBytes
+      },
+      operationsTokenConfigured: Boolean(operationsToken)
+    },
     soak: [],
     capacity: [],
     remotePublish: null,
@@ -89,8 +116,15 @@ async function main() {
 
   report.workerCrash = await runWorkerCrashScenario(auth);
   report.finalBaseline = await waitForBaseline(auth.hostA.accessToken, auth.hostB.accessToken);
+  report.completedAt = new Date().toISOString();
+  report.result = evaluateReport(report);
+  report.reportPath = resolveReportPath(report.startedAt);
+  await writeReport(report, report.reportPath);
 
   console.log(JSON.stringify(report, null, 2));
+  if (!report.result.passed) {
+    process.exitCode = 1;
+  }
 }
 
 async function authenticateAll() {
@@ -346,10 +380,14 @@ async function waitForBaseline(tokenA, tokenB) {
     if (cluster.nodeA.metrics.activeRooms === 0
       && cluster.nodeA.metrics.activeTransports === 0
       && cluster.nodeA.metrics.activeConsumers === 0
+      && cluster.nodeA.metrics.activeProducers === 0
+      && cluster.nodeA.metrics.activeParticipants === 0
       && cluster.nodeA.metrics.activePipeTransports === 0
       && cluster.nodeB.metrics.activeRooms === 0
       && cluster.nodeB.metrics.activeTransports === 0
       && cluster.nodeB.metrics.activeConsumers === 0
+      && cluster.nodeB.metrics.activeProducers === 0
+      && cluster.nodeB.metrics.activeParticipants === 0
       && cluster.nodeB.metrics.activePipeTransports === 0) {
       return cluster;
     }
@@ -641,8 +679,13 @@ function pickNodeSummary(diagnostics) {
     turnSupportedUriCount: diagnostics.turn?.supportedUriCount,
     turnLocalhostUriCount: diagnostics.turn?.localhostUriCount,
     turnUdpOnly: diagnostics.turn?.udpOnly,
+    pipeEnabled: diagnostics.pipe?.health?.enabled,
+    pipeSupported: diagnostics.pipe?.health?.supported,
+    pipeRuntimeReason: diagnostics.pipe?.health?.reason,
     pipeActive: diagnostics.pipe?.summary?.activePipeTransports,
-    pipeRejectedRequests: diagnostics.pipe?.summary?.rejectedRequests
+    pipeRejectedRequests: diagnostics.pipe?.summary?.rejectedRequests,
+    pipeConsumers: diagnostics.pipe?.summary?.pipeConsumers,
+    pipeProducers: diagnostics.pipe?.summary?.pipeProducers
   };
 }
 
@@ -681,6 +724,186 @@ function parseSteps(value) {
 function parseInteger(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseOptionalNumber(value) {
+  if (value === undefined || value === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function evaluateReport(report) {
+  const failedChecks = [];
+  const warningChecks = [];
+  const allSamples = [
+    ...report.soak.flatMap((entry) => [entry.peak, entry.baseline]),
+    ...report.capacity.flatMap((entry) => [entry.peak].filter(Boolean)),
+    report.remotePublish?.peak,
+    report.remotePublish?.baseline,
+    report.drain?.before,
+    report.drain?.baseline,
+    report.workerCrash?.baseline,
+    report.finalBaseline
+  ].filter(Boolean);
+
+  if (!report.finalBaseline) {
+    failedChecks.push({ check: 'final-baseline', reason: 'No final baseline sample was captured.' });
+  } else {
+    for (const [nodeKey, node] of Object.entries(nodesOf(report.finalBaseline))) {
+      assertZero(node.metrics.activeRooms, `${nodeKey}.activeRooms`, failedChecks);
+      assertZero(node.metrics.activeTransports, `${nodeKey}.activeTransports`, failedChecks);
+      assertZero(node.metrics.activeConsumers, `${nodeKey}.activeConsumers`, failedChecks);
+      assertZero(node.metrics.activeProducers, `${nodeKey}.activeProducers`, failedChecks);
+      assertZero(node.metrics.activeParticipants, `${nodeKey}.activeParticipants`, failedChecks);
+      assertZero(node.metrics.activePipeTransports, `${nodeKey}.activePipeTransports`, failedChecks);
+      assertZero(node.metrics.workerFailedRooms, `${nodeKey}.workerFailedRooms`, failedChecks);
+    }
+  }
+
+  if (!report.capacity.every((entry) => entry.success)) {
+    failedChecks.push({ check: 'capacity', reason: 'At least one capacity step failed.', failedSteps: report.capacity.filter((entry) => !entry.success) });
+  }
+
+  if (expectDrainRejectsNewRooms && report.drain?.newRoomRejected !== true) {
+    failedChecks.push({ check: 'drain-new-room-rejection', reason: 'Node drain did not reject a new room create request.' });
+  }
+
+  for (const [sampleIndex, sample] of allSamples.entries()) {
+    for (const [nodeKey, node] of Object.entries(nodesOf(sample))) {
+      if (node.readyStatus !== 200) {
+        failedChecks.push({ check: 'ready-status', sampleIndex, node: nodeKey, expected: 200, actual: node.readyStatus });
+      }
+      if (node.liveStatus !== 200) {
+        failedChecks.push({ check: 'live-status', sampleIndex, node: nodeKey, expected: 200, actual: node.liveStatus });
+      }
+      if (node.workers.readyWorkers !== node.workers.workerCount) {
+        failedChecks.push({
+          check: 'worker-readiness',
+          sampleIndex,
+          node: nodeKey,
+          expected: node.workers.workerCount,
+          actual: node.workers.readyWorkers
+        });
+      }
+      const refreshStatus = node.metrics.metricsRefreshStatus ?? {};
+      for (const [component, status] of Object.entries(refreshStatus)) {
+        if (status !== undefined && status !== 1) {
+          failedChecks.push({ check: 'metrics-refresh-status', sampleIndex, node: nodeKey, component, expected: 1, actual: status });
+        }
+      }
+      if (maxEventLoopMeanMs !== undefined && node.metrics.eventLoopLagMeanMs !== undefined && node.metrics.eventLoopLagMeanMs > maxEventLoopMeanMs) {
+        failedChecks.push({
+          check: 'event-loop-mean',
+          sampleIndex,
+          node: nodeKey,
+          max: maxEventLoopMeanMs,
+          actual: node.metrics.eventLoopLagMeanMs
+        });
+      }
+      if (maxEventLoopMaxMs !== undefined && node.metrics.eventLoopLagMaxMs !== undefined && node.metrics.eventLoopLagMaxMs > maxEventLoopMaxMs) {
+        failedChecks.push({
+          check: 'event-loop-max',
+          sampleIndex,
+          node: nodeKey,
+          max: maxEventLoopMaxMs,
+          actual: node.metrics.eventLoopLagMaxMs
+        });
+      }
+      if (maxProcessRssBytes !== undefined && node.metrics.processResidentMemoryBytes !== undefined && node.metrics.processResidentMemoryBytes > maxProcessRssBytes) {
+        failedChecks.push({
+          check: 'process-rss',
+          sampleIndex,
+          node: nodeKey,
+          max: maxProcessRssBytes,
+          actual: node.metrics.processResidentMemoryBytes
+        });
+      }
+      if (maxWorkerRssBytes !== undefined && node.metrics.workerRssBytes !== undefined && node.metrics.workerRssBytes > maxWorkerRssBytes) {
+        failedChecks.push({
+          check: 'worker-rss',
+          sampleIndex,
+          node: nodeKey,
+          max: maxWorkerRssBytes,
+          actual: node.metrics.workerRssBytes
+        });
+      }
+    }
+  }
+
+  if (expectDistributed) {
+    const distributedSamples = allSamples.filter((sample) => {
+      const nodes = Object.values(nodesOf(sample));
+      return nodes.some((node) => (node.metrics.clusterRegisteredNodes ?? 0) >= 2)
+        && nodes.some((node) => (node.metrics.clusterHealthyNodes ?? 0) >= 2);
+    });
+    if (distributedSamples.length === 0) {
+      failedChecks.push({ check: 'distributed-cluster', reason: 'No sample observed at least two registered and healthy nodes.' });
+    }
+  }
+
+  if (expectPipeEnabled) {
+    const pipeHealthSamples = allSamples.flatMap((sample) => Object.values(nodesOf(sample))).filter((node) => node.diagnostics.pipeEnabled);
+    if (pipeHealthSamples.length === 0) {
+      failedChecks.push({ check: 'pipe-enabled', reason: 'No node diagnostics sample reported pipe enabled.' });
+    }
+    const unsupported = pipeHealthSamples.filter((node) => node.diagnostics.pipeSupported === false);
+    if (unsupported.length > 0) {
+      failedChecks.push({
+        check: 'pipe-supported',
+        reason: 'At least one pipe-enabled node reported unsupported runtime.',
+        nodes: unsupported.map((node) => ({ nodeId: node.diagnostics.localNodeId, reason: node.diagnostics.pipeRuntimeReason }))
+      });
+    }
+    const hadPipeTraffic = allSamples.some((sample) => Object.values(nodesOf(sample)).some((node) => {
+      return (node.metrics.activePipeTransports ?? 0) > 0
+        || (node.metrics.pipeConsumers ?? 0) > 0
+        || (node.diagnostics.pipeActive ?? 0) > 0
+        || (node.diagnostics.pipeConsumers ?? 0) > 0;
+    }));
+    if (!hadPipeTraffic) {
+      warningChecks.push({ check: 'pipe-traffic', reason: 'Pipe is enabled, but no sampled peak showed active pipe transports or consumers.' });
+    }
+  }
+
+  return {
+    passed: failedChecks.length === 0,
+    failedChecks,
+    warningChecks
+  };
+}
+
+function nodesOf(sample) {
+  return {
+    nodeA: sample.nodeA,
+    nodeB: sample.nodeB
+  };
+}
+
+function assertZero(value, name, failedChecks) {
+  if ((value ?? 0) !== 0) {
+    failedChecks.push({ check: 'baseline-zero', metric: name, expected: 0, actual: value });
+  }
+}
+
+function resolveReportPath(startedAt) {
+  if (reportFile === 'stdout') {
+    return undefined;
+  }
+  return reportFile ?? join(reportDir, `live-soak-${safeTimestamp(startedAt)}.json`);
+}
+
+async function writeReport(report, path) {
+  if (!path) {
+    return;
+  }
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+}
+
+function safeTimestamp(value) {
+  return value.replace(/[:.]/g, '-');
 }
 
 function delay(ms) {

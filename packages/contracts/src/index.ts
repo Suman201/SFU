@@ -8,6 +8,7 @@ export * from './chat.js';
 export * from './materials.js';
 export * from './recordings.js';
 export * from './whiteboard.js';
+export * from './whiteboard-memory.js';
 export * from './live-settings.js';
 export * from './admin.js';
 export * from './profile.js';

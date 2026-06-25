@@ -114,6 +114,8 @@ export interface WhiteboardControlRequest {
 }
 
 export interface WhiteboardControlEvent {
+  sessionId?: string;
+  batchId?: string;
   roomId: string;
   participantId: string;
   displayName?: string;
@@ -123,6 +125,23 @@ export interface WhiteboardControlEvent {
   grantedAt?: string;
   grantedByParticipantId?: string;
   revokedByParticipantId?: string;
+  reason?: string;
+  message?: string;
+}
+
+export interface WhiteboardLockRequest {
+  roomId: string;
+  locked: boolean;
+}
+
+export interface WhiteboardLockEvent {
+  sessionId?: string;
+  batchId?: string;
+  roomId: string;
+  locked: boolean;
+  changedAt: string;
+  lockedByParticipantId?: string;
+  unlockedByParticipantId?: string;
   reason?: string;
   message?: string;
 }
@@ -211,6 +230,7 @@ export interface ClientToServerEvents {
   'class:lower-hand': (request: ClassStudentSpeakRequest, ack: Ack<ParticipantPatch>) => void;
   'whiteboard:grant-control': (request: WhiteboardControlRequest, ack: Ack<WhiteboardControlEvent>) => void;
   'whiteboard:revoke-control': (request: Partial<WhiteboardControlRequest> & { roomId: string }, ack: Ack<WhiteboardControlEvent>) => void;
+  'whiteboard:set-lock': (request: WhiteboardLockRequest, ack: Ack<WhiteboardLockEvent>) => void;
   'whiteboard:command': (request: WhiteboardCommandRequest, ack: Ack<WhiteboardCommandEvent>) => void;
   'whiteboard:cursor': (request: WhiteboardCursorRequest, ack: Ack<WhiteboardCursorEvent>) => void;
   'student:mute-mic': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
@@ -251,6 +271,7 @@ export interface ServerToClientEvents {
   'student:media-moderated': (event: StudentMediaModerationEvent) => void;
   'whiteboard:control-granted': (event: WhiteboardControlEvent) => void;
   'whiteboard:control-revoked': (event: WhiteboardControlEvent) => void;
+  'whiteboard:lock-changed': (event: WhiteboardLockEvent) => void;
   'whiteboard:command': (event: WhiteboardCommandEvent) => void;
   'whiteboard:cursor': (event: WhiteboardCursorEvent) => void;
   'producer:created': (producer: Producer) => void;

@@ -30,7 +30,6 @@
 .metric-grid article,
 .batch-row,
 .gallery-card,
-.demo-card,
 .review-card,
 .award-list article,
 .empty-state {
@@ -157,7 +156,6 @@ h3 {
 .detail-list span,
 .batch-row span,
 .gallery-card p,
-.demo-card p,
 .review-card p,
 .award-list p,
 .empty-state p {
@@ -205,7 +203,6 @@ h3 {
 
 .about-panel p:last-child,
 .timeline-list p,
-.demo-card p,
 .review-card p {
   line-height: 1.6;
 }
@@ -225,7 +222,6 @@ h3 {
 .timeline-list strong,
 .detail-list strong,
 .gallery-card strong,
-.demo-card strong,
 .review-card strong,
 .award-list strong,
 .batch-row strong {
@@ -368,26 +364,6 @@ h3 {
   font-weight: 900;
 }
 
-.demo-list {
-  display: grid;
-  gap: 14px;
-}
-
-.demo-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 18px;
-}
-
-.demo-card div {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
-.demo-card span,
 .review-card span,
 .batch-row footer > span {
   width: fit-content;
@@ -519,8 +495,7 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .tab-panel-header,
-  .demo-card {
+  .tab-panel-header {
     align-items: start;
     flex-direction: column;
   }

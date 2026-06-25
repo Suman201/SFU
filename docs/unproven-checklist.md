@@ -19,9 +19,12 @@ These items were not fully proven in the current local pass.
 - [ ] Clean backend unit-suite proof
   - Current issue: `apps/backend/src/auth/dto/auth.dto.spec.ts` was red due to TypeScript/Jest matcher typing issues.
 - [ ] Honest local distributed/two-node proof
-  - Current issue: no checked-in one-command local two-node pipe-enabled cluster was available for `npm run test:live-soak`.
+  - Done: the checked-in local two-node stack and report-writing soak harness now exist (`npm run docker:start:multi-node`, `npm run seed:dummy-users:multi-node`, `npm run test:live-soak:local`).
+  - Current issue: keep this proof item open until a real passing report from `reports/live-soak/` is attached. The latest run did not start the soak because existing Docker containers already occupied host ports `3000`, `3002`, and `6379`.
 - [ ] Honest local soak/drain proof
   - Current issue: the fallback `npm run test:load:node-drain` could not run because `k6` was not installed.
+- [ ] True two-gateway targeted-event integration proof
+  - Current issue: service and gateway unit coverage proves private targeting and Redis fanout separately, but there is not yet a two-live-gateway integration run proving private chat, moderation, read receipts, and whiteboard commands reach only intended sockets across nodes.
 
 ## Staging Proof Gaps
 
@@ -35,6 +38,7 @@ These items block a truthful controlled-rollout signoff until they are executed 
 - [ ] Prove real UDP media-plane exposure for `HOST_CANDIDATE_PORT_RANGE`
 - [ ] Prove real UDP media-plane exposure for `PIPE_PORT_RANGE` when pipe transport is enabled
 - [ ] Prove multi-node distributed behavior end to end with a trustworthy owner-routing story
+- [ ] Prove targeted class-session events across real multi-node Socket.IO instances without private-message or moderation leaks
 - [ ] Prove drain and recovery behavior in the real staging deployment shape
 - [ ] Prove that the deployment has a working `preStop` drain-hook path or equivalent rollout-safe drain mechanism
 

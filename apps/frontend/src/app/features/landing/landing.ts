@@ -109,24 +109,24 @@ export class Landing {
   protected readonly testimonials = [
     {
       quote: 'EDCONNECTION has allowed me to reach thousands of students in rural India. I can teach what I love and make a real impact.',
-      name: 'Rahul Sharma',
-      role: 'Physics Teacher, Delhi',
+      name: 'Teacher partner',
+      role: 'Live class instructor',
       badge: 'Teacher',
       tone: 'green',
       image: '/assets/images/testimonial-1.webp'
     },
     {
       quote: 'I can now learn from the best teachers without leaving my village. It is affordable and the classes are amazing.',
-      name: 'Sunita Kumari',
-      role: 'Class 11 Student, Bihar',
+      name: 'Learner',
+      role: 'Student community',
       badge: 'Learner',
       tone: 'blue',
       image: '/assets/images/testimonial-2.webp'
     },
     {
       quote: 'The platform is very easy to use and has opened new income opportunities for me while helping students grow.',
-      name: 'Neha Iyer',
-      role: 'Dance Instructor, Mumbai',
+      name: 'Independent instructor',
+      role: 'Course creator',
       badge: 'Teacher',
       tone: 'amber',
       image: '/assets/images/testimonial-3.webp'

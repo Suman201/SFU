@@ -429,7 +429,7 @@
           [role]="activeSession.role"
           [live]="sessionLive()"
           [joined]="roomJoined()"
-          [compact]="true"
+          [compact]="false"
           [materialSettings]="liveSettings()?.materials ?? null"
         />
       }
@@ -447,7 +447,7 @@
         <div>
           <p>Whiteboard</p>
           <h1>Your turn</h1>
-          <span>{{ studentWhiteboardPermissionLabel() }}</span>
+          <span>{{ whiteboardLocked() ? 'Board locked' : studentWhiteboardPermissionLabel() }}</span>
         </div>
         <button type="button" class="close-button" title="Close whiteboard" aria-label="Close whiteboard" (click)="closeWhiteboardDrawer()">
           <span aria-hidden="true"></span>

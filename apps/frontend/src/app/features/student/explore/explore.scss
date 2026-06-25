@@ -206,6 +206,46 @@
   opacity: .64;
 }
 
+.empty-state {
+  grid-column: 1 / -1;
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-height: 220px;
+  align-content: center;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  padding: 24px;
+}
+
+.empty-state h3,
+.empty-state p {
+  margin: 0;
+}
+
+.empty-state h3 {
+  color: var(--text);
+  font-size: 22px;
+}
+
+.empty-state p {
+  color: var(--muted);
+}
+
+.empty-state button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--panel-elevated);
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+  box-shadow: var(--shadow-sm);
+}
+
 @media (max-width: 700px) {
   .student-page-shell {
     padding: 20px 16px 28px;

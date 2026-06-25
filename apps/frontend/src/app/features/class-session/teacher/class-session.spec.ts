@@ -1,6 +1,7 @@
 import { NO_ERRORS_SCHEMA, signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router } from '@angular/router';
+import type { LiveClassSettings } from '@native-sfu/contracts';
 import { of } from 'rxjs';
 import { AuthService } from '../../../core/services/auth.service';
 import { RoomStore } from '../../../core/services/room.store';
@@ -57,7 +58,8 @@ describe('TeacherClassSession participant cards', () => {
     },
     role: 'teacher',
     canJoin: true,
-    participants: []
+    participants: [],
+    resolvedLiveSettings: createLiveClassSettings()
   };
 
   beforeEach(async () => {
@@ -190,6 +192,124 @@ describe('TeacherClassSession participant cards', () => {
     expect(routerMock.navigate).toHaveBeenCalledWith(['/teacher/dashboard/batches', 'batch-1']);
   });
 
+  it('uses an app confirmation modal for ending the class', () => {
+    const confirmSpy = spyOn(globalThis, 'confirm').and.returnValue(true);
+    const component = fixture.componentInstance as unknown as {
+      endSession(): void;
+      confirmationDialog: () => { title: string; variant: string; confirmLabel: string; pendingLabel: string } | null;
+    };
+
+    component.endSession();
+    fixture.detectChanges();
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(component.confirmationDialog()).toEqual(jasmine.objectContaining({
+      title: 'End class for everyone?',
+      variant: 'danger',
+      confirmLabel: 'End session',
+      pendingLabel: 'Ending...'
+    }));
+    expect((fixture.nativeElement as HTMLElement).querySelector('.teacher-confirm-modal')).not.toBeNull();
+  });
+
+  it('cancels the end confirmation without calling the backend', () => {
+    const component = fixture.componentInstance as unknown as {
+      endSession(): void;
+      cancelConfirmation(): void;
+      confirmationDialog: () => { title: string } | null;
+    };
+
+    component.endSession();
+    component.cancelConfirmation();
+
+    expect(classSessionsMock.endSession).not.toHaveBeenCalled();
+    expect(component.confirmationDialog()).toBeNull();
+  });
+
+  it('opens confirmation modal before stopping all student cameras', async () => {
+    const confirmSpy = spyOn(globalThis, 'confirm').and.returnValue(true);
+    const component = fixture.componentInstance as unknown as {
+      session: { set(value: ClassroomPayload): void };
+      participants: { set(value: unknown[]): void };
+      roomJoined: { set(value: boolean): void };
+      stopAllStudentCameras(): Promise<void>;
+      confirmationDialog: () => { title: string; variant: string; pendingLabel: string } | null;
+    };
+    component.session.set({ ...payload, roomId: 'room-1' });
+    component.roomJoined.set(true);
+    component.participants.set([
+      {
+        id: 'student-participant',
+        name: 'Student One',
+        role: 'Student',
+        isStudent: true,
+        canModerate: true,
+        initials: 'SO',
+        muted: false,
+        cameraOff: false,
+        screenSharing: false,
+        connected: true
+      }
+    ]);
+
+    await component.stopAllStudentCameras();
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(socketServiceMock.emitAck).not.toHaveBeenCalledWith('class:stop-all-cameras', jasmine.anything());
+    expect(component.confirmationDialog()).toEqual(jasmine.objectContaining({
+      title: 'Stop all student cameras?',
+      variant: 'warning',
+      pendingLabel: 'Stopping cameras...'
+    }));
+  });
+
+  it('opens confirmation modal before starting recording', () => {
+    const confirmSpy = spyOn(globalThis, 'confirm').and.returnValue(true);
+    const component = fixture.componentInstance as unknown as {
+      startRecording(): void;
+      confirmationDialog: () => { title: string; variant: string; pendingLabel: string } | null;
+    };
+
+    component.startRecording();
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(classSessionsMock.startSession).not.toHaveBeenCalled();
+    expect(component.confirmationDialog()).toEqual(jasmine.objectContaining({
+      title: 'Start class recording?',
+      variant: 'warning',
+      pendingLabel: 'Starting recording...'
+    }));
+  });
+
+  it('closes confirmation modal on Escape', () => {
+    const component = fixture.componentInstance as unknown as {
+      endSession(): void;
+      confirmationDialog: () => { title: string } | null;
+    };
+
+    component.endSession();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(component.confirmationDialog()).toBeNull();
+    expect(classSessionsMock.endSession).not.toHaveBeenCalled();
+  });
+
+  it('opens device and class controls drawers on demand', () => {
+    const component = fixture.componentInstance as unknown as {
+      openMediaDrawer(mode: 'devices' | 'controls'): void;
+      mediaDrawerOpen: () => boolean;
+      mediaDrawerMode: () => 'devices' | 'controls';
+    };
+
+    component.openMediaDrawer('devices');
+    expect(component.mediaDrawerOpen()).toBeTrue();
+    expect(component.mediaDrawerMode()).toBe('devices');
+
+    component.openMediaDrawer('controls');
+    expect(component.mediaDrawerOpen()).toBeTrue();
+    expect(component.mediaDrawerMode()).toBe('controls');
+  });
+
   it('renders moderation controls only for student participant cards', () => {
     const component = fixture.componentInstance as unknown as {
       participants: { set(value: unknown[]): void };
@@ -269,7 +389,7 @@ describe('TeacherClassSession participant cards', () => {
     const teacherCard = cards[2]!;
     const adminCard = cards[3]!;
     const cohostCard = cards[4]!;
-    expect(studentCard.querySelectorAll('.participant-controls .control-button').length).toBe(3);
+    expect(studentCard.querySelectorAll('.participant-controls .control-button').length).toBe(4);
     expect(offlineStudentCard.querySelector('.participant-controls')).toBeNull();
     expect(teacherCard.querySelector('.participant-controls')).toBeNull();
     expect(adminCard.querySelector('.participant-controls')).toBeNull();
@@ -356,4 +476,123 @@ function createReadyPreviewStream(): MediaStream {
     getAudioTracks: () => [audioTrack],
     getVideoTracks: () => [videoTrack]
   } as unknown as MediaStream;
+}
+
+function createLiveClassSettings(): LiveClassSettings {
+  return {
+    media: {
+      studentsJoinMuted: true,
+      studentsJoinCameraOff: true,
+      requirePrejoinDeviceCheck: true,
+      allowStudentsToUnmuteSelf: true,
+      allowStudentsToStartCameraSelf: true
+    },
+    chat: {
+      privateTeacherStudentChatEnabled: true,
+      teacherBroadcastEnabled: true,
+      chatAttachmentsEnabled: true,
+      messageLengthLimit: 2000
+    },
+    whiteboard: {
+      whiteboardSharingEnabled: true,
+      studentWhiteboardControlEnabled: true,
+      maxActiveWhiteboardControllers: 1
+    },
+    speaking: {
+      handRaiseEnabled: true,
+      maxActiveSpeakers: 3,
+      autoLowerHandAfterSpeakPermissionEnds: true
+    },
+    recording: {
+      recordingEnabled: true,
+      autoRecordOnStart: false,
+      teacherManualRecordingControlEnabled: true,
+      visibility: 'enrolled_students'
+    },
+    attendance: {
+      presentThresholdMinutes: 10,
+      presentThresholdPercentage: 50,
+      lateJoinThresholdMinutes: 10,
+      countReconnects: true,
+      teacherAttendanceExportEnabled: true
+    },
+    access: {
+      waitingRoomEnabled: false,
+      lockClassAfterTeacherStarts: false,
+      allowEnrolledStudentReconnectAfterLock: true,
+      teacherReconnectGraceMessagingEnabled: true
+    },
+    materials: {
+      materialsEnabled: true,
+      teacherCanUploadMaterials: true,
+      studentsCanDownloadMaterials: true,
+      publishMaterialsBeforeClass: false,
+      publishMaterialsAfterClass: true,
+      allowedMaterialTypes: ['pdf', 'image', 'document', 'slides', 'link', 'file'],
+      maxMaterialFileSizeMb: 10
+    },
+    notifications: {
+      classReminderEnabled: true,
+      classReminderMinutesBefore: 30,
+      notifyWhenTeacherStarts: true,
+      notifyRecordingAvailable: true,
+      notifyNewMaterialUploaded: true,
+      notifyMissedClass: false
+    },
+    questionQueue: {
+      questionQueueEnabled: true,
+      allowAnonymousQuestions: false,
+      allowStudentUpvotes: true,
+      teacherCanMarkAnswered: true,
+      maxOpenQuestionsPerStudent: 3
+    },
+    recordingRetention: {
+      recordingRetentionDays: 30,
+      allowTeacherPublishRecording: false,
+      allowStudentsDownloadRecording: true,
+      autoArchiveExpiredRecordings: true
+    },
+    studentScreenShare: {
+      studentScreenShareEnabled: false,
+      studentScreenShareRequiresApproval: true,
+      maxActiveStudentShares: 1
+    },
+    advancedAnalytics: {
+      analyticsEnabled: true,
+      trackEngagementEvents: true,
+      trackMediaQuality: true,
+      trackChatParticipation: true,
+      trackWhiteboardParticipation: true,
+      trackQuestionParticipation: true,
+      analyticsVisibility: 'admin_and_teacher'
+    },
+    inactiveDetection: {
+      inactiveDetectionEnabled: false,
+      inactiveAfterMinutes: 10,
+      countBackgroundTabAsInactive: true,
+      countMutedNoCameraAsInactive: false,
+      notifyTeacherOnInactiveStudents: true,
+      includeInactiveTimeInAttendance: false
+    },
+    bandwidthPolicy: {
+      adaptiveQualityEnabled: true,
+      lowBandwidthModeEnabled: false,
+      maxStudentVideoQuality: 'auto',
+      maxScreenShareQuality: 'auto',
+      disableStudentVideoOnPoorNetwork: false,
+      preferAudioOnPoorNetwork: true,
+      showNetworkWarnings: true
+    },
+    exportControls: {
+      exportControlsEnabled: true,
+      allowAttendanceExport: true,
+      allowChatExport: false,
+      allowQuestionExport: false,
+      allowRecordingDownload: true,
+      includePrivateChatInExports: false,
+      anonymizeStudentExports: false,
+      exportRetentionDays: 365,
+      requireExportAuditLog: true
+    }
+  };
 }

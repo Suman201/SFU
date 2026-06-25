@@ -14,6 +14,7 @@ import type {
   WhiteboardCommandEvent,
   WhiteboardControlEvent,
   WhiteboardCursorEvent,
+  WhiteboardLockEvent,
   WhiteboardPermissionLevel
 } from '@native-sfu/contracts';
 import { buildRoomOwnerRedirectUrl } from '../../../core/services/app-environment';
@@ -209,6 +210,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
   protected readonly whiteboardControlGranted = signal(false);
   protected readonly whiteboardPermissionLevel = signal<WhiteboardPermissionLevel>('view_only');
   protected readonly whiteboardPermittedPageId = signal('');
+  protected readonly whiteboardLocked = signal(false);
   protected readonly whiteboardDrawerOpen = signal(false);
   protected readonly whiteboardControlNotice = signal('');
   protected readonly whiteboardCursors = signal<WhiteboardCursor[]>([]);
@@ -222,7 +224,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
   protected readonly sessionLive = computed(() => this.session()?.status === 'live');
   protected readonly liveSettings = computed(() => this.session()?.resolvedLiveSettings ?? null);
   protected readonly studentWhiteboardReadOnly = computed(
-    () => !this.whiteboardControlGranted() || !this.sessionLive() || this.whiteboardPermissionLevel() === 'view_only'
+    () => !this.whiteboardControlGranted() || !this.sessionLive() || this.whiteboardLocked() || this.whiteboardPermissionLevel() === 'view_only'
   );
   protected readonly studentWhiteboardPermissionLabel = computed(() => this.whiteboardPermissionLabel(this.whiteboardPermissionLevel()));
   protected readonly studentWhiteboardTools = computed<readonly WhiteboardTool[]>(() => {
@@ -552,6 +554,10 @@ export class StudentClassSession implements OnInit, OnDestroy {
     if (!roomId || !this.whiteboardControlGranted() || !this.sessionLive()) {
       return;
     }
+    if (this.whiteboardLocked()) {
+      this.whiteboardControlNotice.set('Teacher locked the whiteboard.');
+      return;
+    }
     const normalizedCommand = this.normalizeWhiteboardCommand(command);
     if (!this.isStudentWhiteboardCommandAllowed(normalizedCommand)) {
       this.whiteboardControlNotice.set('That whiteboard action is not allowed for your current permission.');
@@ -566,7 +572,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
 
   protected handleStudentWhiteboardCursor(cursor: WhiteboardCursor): void {
     const roomId = this.joinedRoomId;
-    if (!roomId || !this.whiteboardControlGranted() || !this.sessionLive()) {
+    if (!roomId || !this.whiteboardControlGranted() || !this.sessionLive() || this.whiteboardLocked()) {
       return;
     }
     void this.socket
@@ -916,6 +922,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
     this.registerSocketHandler('student:media-moderated', (event) => this.handleStudentMediaModerated(event));
     this.registerSocketHandler('whiteboard:control-granted', (event) => this.applyWhiteboardControlEvent(event));
     this.registerSocketHandler('whiteboard:control-revoked', (event) => this.applyWhiteboardControlEvent(event));
+    this.registerSocketHandler('whiteboard:lock-changed', (event) => this.applyWhiteboardLockEvent(event));
     this.registerSocketHandler('whiteboard:command', (event) => this.applyRemoteWhiteboardCommand(event));
     this.registerSocketHandler('whiteboard:cursor', (event) => this.applyRemoteWhiteboardCursor(event));
     this.registerSocketHandler('recording:started', (event) => this.applyRecordingEvent(event));
@@ -1936,6 +1943,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
       this.whiteboardControlGranted.set(true);
       this.whiteboardPermissionLevel.set(permissionLevel);
       this.whiteboardPermittedPageId.set(event.pageId ?? '');
+      this.whiteboardLocked.set(false);
       this.whiteboardDrawerOpen.set(true);
       this.whiteboardControlNotice.set(
         event.message ?? `Teacher allowed ${this.whiteboardPermissionLabel(permissionLevel).toLowerCase()} whiteboard control.`
@@ -1945,6 +1953,25 @@ export class StudentClassSession implements OnInit, OnDestroy {
     }
     if (!event.granted && (targetsLocalStudent || this.whiteboardControlGranted())) {
       this.clearWhiteboardControlState(event.message ?? event.reason ?? 'Whiteboard control was revoked.');
+    }
+  }
+
+  private applyWhiteboardLockEvent(event: WhiteboardLockEvent): void {
+    if (!this.isWhiteboardEventForCurrentRoom(event.roomId)) {
+      return;
+    }
+    this.whiteboardLocked.set(event.locked);
+    if (event.locked) {
+      this.whiteboardControlNotice.set(event.message ?? 'Teacher locked the whiteboard.');
+      this.whiteboardCursors.set([]);
+      for (const timer of this.whiteboardCursorTimers.values()) {
+        clearTimeout(timer);
+      }
+      this.whiteboardCursorTimers.clear();
+      return;
+    }
+    if (this.whiteboardControlGranted()) {
+      this.whiteboardControlNotice.set(event.message ?? 'Teacher unlocked the whiteboard.');
     }
   }
 
@@ -2013,6 +2040,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
     this.whiteboardControlGranted.set(false);
     this.whiteboardPermissionLevel.set('view_only');
     this.whiteboardPermittedPageId.set('');
+    this.whiteboardLocked.set(false);
     this.whiteboardDrawerOpen.set(false);
     this.whiteboardControlNotice.set(message);
     this.pendingWhiteboardCommands = [];

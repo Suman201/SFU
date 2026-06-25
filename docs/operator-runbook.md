@@ -33,6 +33,7 @@ Treat these conditions as rollout blockers:
 - `turn_not_ready`, `turn_localhost_uris`, or `turn_unsupported_transport` in `/api/v1/media/diagnostics/node`
 - `addressing.publicUrlIsLocalOrWildcard=true`, `addressing.nodePublicUrlIsLocalOrWildcard=true`, or `addressing.pipeAdvertiseIpIsLocalOrWildcard=true` in non-local staging
 - `/metrics` still reachable without `X-Operations-Token` when `OPERATIONS_TOKEN` is supposed to be enabled
+- Swagger docs reachable in production without `X-Operations-Token` when `SWAGGER_ENABLED=true`
 - `/api/v1/media/turn-credentials` returning zero URIs or non-UDP TURN URIs during staged validation
 - `sfu_metrics_refresh_status{component="cluster|pipe|media_workers"} != 1`
 - `sfu_media_worker_failed_rooms > 0`
@@ -184,6 +185,171 @@ Delivery behavior notes:
   - `EVENT_LOG_RETENTION_DAYS=30`
   - `WEBHOOK_DELIVERY_RETENTION_DAYS=14`
   - `WEBHOOK_EXHAUSTED_DELIVERY_RETENTION_DAYS=30`
+
+## Live Class Session Incidents
+
+Use this section for teacher/student classroom incidents. Product behavior remains manual-start/manual-end, except the existing teacher reconnect grace timeout can complete a live session after the configured grace window.
+
+Core signals:
+
+- Audit actions: `class_sessions.start`, `class_sessions.end`, `class_sessions.join.admitted`, `class_sessions.join.denied`, `class_sessions.room_join.admitted`, `class_sessions.room_join.denied`, `class_sessions.teacher.disconnected`, `class_sessions.teacher.reconnected`, `class_sessions.teacher_reconnect_grace.started`, `class_sessions.teacher_reconnect_grace.cancelled`, `class_sessions.teacher_reconnect_grace.expired`, `class_sessions.media.publish.failure`, `class_sessions.media.consume.failure`, `class_sessions.chat.send.failure`, `class_sessions.chat.read.failure`, `class_sessions.moderation.*`, `class_sessions.whiteboard_control.*`, `class_sessions.material.*`, `class_sessions.recording.*`
+- Platform events: `room.created`, `room.joined`, `room.left`, `room.closed`, `producer.created`, `producer.paused`, `producer.resumed`, `producer.closed`, `consumer.created`, `consumer.paused`, `consumer.resumed`, `consumer.closed`, `recording.started`, `recording.stopped`, `recording.failed`
+- Metrics: `sfu_class_session_lifecycle_transitions_total`, `sfu_class_session_join_attempts_total`, `sfu_class_session_reconnect_grace_events_total`, `sfu_class_session_reconnect_grace_timers_active`, `sfu_class_session_media_failures_total`, `sfu_class_session_chat_failures_total`, `sfu_class_session_moderation_actions_total`, `sfu_class_session_whiteboard_control_actions_total`, `sfu_class_session_material_actions_total`
+
+### Stuck Live Session
+
+Teacher/student sees: class still appears live after teacher believes it ended, or students cannot re-enter because another session for the batch is live.
+
+Checks:
+
+1. Query the class-session record by `sessionId` and confirm `status`, `roomId`, `startedAt`, `completedAt`, `teacherDisconnectedAt`, and `teacherReconnectDeadlineAt`.
+2. Query audit logs for `class_sessions.start`, `class_sessions.end`, and `class_sessions.teacher_reconnect_grace.*` on the same `sessionId`.
+3. Query room event history for `room.closed` and active participants/producers.
+4. Check `sfu_class_session_reconnect_grace_timers_active` and `sfu_class_session_lifecycle_transitions_total`.
+
+Safe mitigation:
+
+- If the teacher is present, ask them to use End for everyone.
+- If the teacher is gone and the reconnect deadline has passed, manually end through the existing class-session end path or operator close flow; do not edit Mongo by hand unless engineering approves.
+- Capture room incident snapshot before force-closing if media evidence matters.
+
+Escalate when DB status and room state disagree after manual end, or reconnect grace expiry emits no `session:ended` / `room.closed`.
+
+### Teacher Cannot Publish Media
+
+Teacher sees: camera, microphone, screen, or whiteboard share fails to start; students see no host media.
+
+Checks:
+
+1. Confirm browser permission/device state and that another tab/app is not holding the camera or mic.
+2. Confirm teacher has joined the class room as host and session status is `live`.
+3. Check audit actions `class_sessions.media.publish.failure` and metrics `sfu_class_session_media_failures_total{operation="publish"}` by `kind` and `reason`.
+4. Check producer platform events. Absence of `producer.created` after a publish attempt means the failure happened before publication.
+5. Check room protection decisions and worker readiness if the reason starts with `policy_`, `media_worker`, or `service_unavailable`.
+6. For screen/whiteboard, confirm the live settings allow screen/whiteboard sharing and only one screen-like producer is active.
+
+Safe mitigation:
+
+- Have the teacher refresh, rejoin, and republish while keeping the session live.
+- If only screen/whiteboard fails, stop the active screen-like producer and retry.
+- If worker pressure is high, apply room recovery/profile actions before asking all students to reconnect.
+
+Escalate when publish failures increase across rooms, or TURN/ICE checks fail for multiple teachers.
+
+### Students Cannot Consume Media
+
+Student sees: teacher video/screen tile is blank, stuck loading, or audio is silent.
+
+Checks:
+
+1. Verify a live teacher producer exists for the expected kind: `video`, `audio`, or `screen`.
+2. Check `consumer.created` platform events for the student participant and `sfu_class_session_media_failures_total{operation="consume"}`.
+3. Check browser autoplay restrictions for audio. A user gesture may be required before audio starts.
+4. Check distributed room ownership and pipe metrics if producer and consumer are on different nodes.
+5. Compare one affected student with one healthy student to isolate client/browser vs SFU routing.
+
+Safe mitigation:
+
+- Ask the affected student to refresh/rejoin; history and private chat recover from server state.
+- If many students fail together, snapshot the room, inspect worker/pipe health, and avoid closing the class unless the room is unrecoverable.
+
+Escalate when consumers fail for multiple rooms or all failures correlate with one node.
+
+### TURN Relay Failure
+
+Teacher/student sees: local preview works but remote media never connects, often worse across different networks.
+
+Checks:
+
+1. Query `/api/v1/media/diagnostics/node` and `/api/v1/media/turn-credentials`.
+2. Confirm no `localhost`, wildcard, or private-only TURN URIs are advertised in non-local environments.
+3. Confirm Coturn is reachable on the advertised UDP/TCP ports and firewall/security groups expose the relay range.
+4. Use browser WebRTC internals to prove relay candidates are gathered.
+5. Watch `sfu_class_session_media_failures_total`, pipe setup metrics, and worker transport counts.
+
+Safe mitigation:
+
+- Fix TURN config/secret/URI exposure and redeploy only the affected config path.
+- Keep existing live sessions running if direct/srflx media still works; do not mass-end sessions for a TURN-only issue.
+
+Escalate when relay candidates cannot be gathered from a clean browser on a public network.
+
+### Recording Failed
+
+Teacher sees: recording indicator fails, stops unexpectedly, or playback is unavailable.
+
+Checks:
+
+1. Query recording records for `sessionId`, status, `failureReason`, manifest path, size, retention, and tracks.
+2. Check `recording.started`, `recording.stopped`, and `recording.failed` platform events.
+3. Check audit actions `class_sessions.recording.start`, `class_sessions.recording.stop`, and class-session end audit.
+4. Confirm local/S3 storage path, permissions, disk space, and retention policy.
+5. Confirm screen/whiteboard producers are present if the expected recording content is missing.
+
+Safe mitigation:
+
+- If the session is still live and policy allows, stop and start recording through the existing recording controls.
+- If recording failed during session end, do not reopen or mutate the completed session just to recover recording metadata.
+
+Escalate when storage/manifest errors affect more than one session or recording state blocks session end.
+
+### Chat Delivery Issue
+
+Teacher/student sees: private messages not arriving, broadcast not arriving, read states stale, or history missing after refresh.
+
+Checks:
+
+1. Confirm session status is `live` for sending.
+2. Query audit actions `class_sessions.chat.send.failure` and `class_sessions.chat.read.failure`. These records intentionally do not contain raw message bodies.
+3. Confirm private messages have `scope=private`, the expected `recipientId`, and the teacher/student `threadKey`; confirm broadcast has `scope=broadcast`.
+4. Check active socket targets for the sender and recipient. Multi-tab users should receive targeted private events on all active sockets.
+5. Reload history for the relevant thread; missed realtime events should recover from persisted history.
+
+Safe mitigation:
+
+- Have the affected user refresh/rejoin to rebuild socket targets.
+- For teacher broadcast issues, verify the composer was in broadcast mode and not a selected private thread.
+
+Escalate immediately if any student can see another student's private thread.
+
+### Unauthorized Access Report
+
+Teacher/student/admin reports: a user saw a class, room, chat, material, or lifecycle event they should not access.
+
+Checks:
+
+1. Verify enrollment status from the dedicated enrollment source of truth for the batch.
+2. Query audit actions for `class_sessions.join.denied`, `class_sessions.room_join.denied`, material download/share actions, and chat failures around the report time.
+3. Confirm `session:watch`, HTTP metadata, `room:join`, chat history/send, material download, recording download, and whiteboard control all use the same batch/session authorization path.
+4. Check whether the user was admin/super-admin, batch teacher, or actively enrolled at the time.
+5. Assess exposure from persisted records; do not rely only on UI state.
+
+Safe mitigation:
+
+- Remove or suspend incorrect enrollment first.
+- End or lock the live class only if active unauthorized access is still possible.
+- Preserve audit logs and room event history before cleanup.
+
+Escalate if private chat, recordings, materials, or lifecycle watcher rooms leaked to non-enrolled students.
+
+### Mongo/Redis Degraded
+
+Teacher/student sees: join hangs, reconnect state is wrong, chat/history fails, attendance/recording metadata is stale, or lifecycle events are delayed.
+
+Checks:
+
+1. Check `/health/ready` and database/Redis readiness.
+2. Inspect Mongo latency/errors for class sessions, participants, producers, consumers, chat, materials, recordings, audit logs, and attendance snapshots.
+3. Inspect Redis presence and Socket.IO room targeting, especially for multi-tab private chat and reconnect grace.
+4. Watch default Node/process metrics plus `sfu_class_session_*` counters for spikes in denied joins, chat failures, media failures, and reconnect grace expiries.
+
+Safe mitigation:
+
+- Keep live sessions alive when possible; do not manually end sessions just because Redis presence is degraded.
+- After recovery, verify active live sessions, reconnect grace fields, room participants, recording status, and attendance snapshots.
+- Rebuild derived views from persisted Mongo state when Redis missed transient presence.
+
+Escalate when Mongo writes fail for session end, chat persistence, recording status, or attendance snapshots.
 
 ## Room Autopilot Triage
 

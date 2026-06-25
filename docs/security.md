@@ -29,7 +29,7 @@ JWT expiry limits replay windows for REST and WebSocket connection setup. Media 
 
 ## Secrets
 
-Use Kubernetes secrets or an external secret manager for:
+Use Kubernetes secrets or an external secret manager for production secrets. Production startup rejects missing, placeholder, too-short, or reused values for the required shared secrets, so generate each value independently and rotate them on separate schedules.
 
 - `MONGODB_URI`
 - `REDIS_URL`
@@ -37,7 +37,17 @@ Use Kubernetes secrets or an external secret manager for:
 - `JWT_REFRESH_SECRET`
 - `OPERATIONS_TOKEN`
 - `TURN_SECRET`
+- `WEBHOOK_SECRET_ENCRYPTION_KEY`
 - `PIPE_CLUSTER_SECRET`
 - S3 credentials
 
 `infra/k8s/secret.example.yaml` is a placeholder schema, not a deployable production secret. Copy the keys into your secret manager or a private manifest, replace every value, and keep the rendered secret out of version control.
+
+## Production Exposure Checklist
+
+- Keep Swagger disabled in production with `SWAGGER_ENABLED=false`. If it is temporarily enabled for an operational reason, the docs route requires `X-Operations-Token`.
+- Protect `/metrics`, `/api/v1/media/*` diagnostics/control routes, and `/api/v1/events/*` operator routes with `X-Operations-Token`.
+- Keep public health probes limited to status-level readiness/liveness. Use operator-token diagnostics for node, worker, TURN, and incident detail.
+- Set `CORS_ALLOWED_ORIGINS` to explicit `https://` frontend/admin origins. Wildcards, localhost, and path-bearing origins are rejected in production.
+- Leave frontend `/env.js` empty for same-origin ingress, or set real production `apiBaseUrl` / `socketUrl` values for split-host deployments. Non-local browsers ignore accidental localhost runtime overrides.
+- Keep class-session access checks enrollment-backed: unauthorized students must not read, watch, join, chat, load materials, or download recordings for another batch.

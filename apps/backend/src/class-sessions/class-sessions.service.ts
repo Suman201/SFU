@@ -29,10 +29,23 @@ import type {
   ClassSessionMaterial,
   ClassSessionMaterialEvent,
   ClassSessionMaterialKind,
+  CreateWhiteboardMemoryCheckpointRequest,
   CreateClassSessionMaterialLinkRequest,
   ClassSessionLifecycleEvent,
   LiveClassSettings,
-  Recording
+  PreviousWhiteboardMemoryListResponse,
+  RestorePreviousWhiteboardMemoryRequest,
+  RestoreWhiteboardMemoryVersionRequest,
+  Recording,
+  SaveWhiteboardMemoryRequest,
+  WhiteboardMemoryPage,
+  WhiteboardMemoryPageSearchResponse,
+  WhiteboardMemorySaveReason,
+  WhiteboardMemorySnapshot,
+  WhiteboardMemoryState,
+  WhiteboardMemorySummary,
+  WhiteboardMemoryVersion,
+  WhiteboardMemoryVersionListResponse
 } from '@native-sfu/contracts';
 import { Model, type AnyBulkWriteOperation } from 'mongoose';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -47,11 +60,16 @@ import {
   ClassSessionAttendanceSnapshotMongoDocument,
   ClassSessionMaterialDocument,
   ClassSessionMaterialMongoDocument,
+  ClassSessionWhiteboardStateDocument,
+  ClassSessionWhiteboardStateMongoDocument,
+  ClassSessionWhiteboardVersionDocument,
+  ClassSessionWhiteboardVersionMongoDocument,
   ClassSessionMongoDocument,
   ClassSessionStatus,
   UserDocument,
   UserMongoDocument
 } from '../database/schemas';
+import { MetricsService } from '../metrics/metrics.service';
 import { RecordingsService, type RecordingDownload } from '../recordings/recordings.service';
 import {
   RoomsService,
@@ -82,6 +100,11 @@ const CLASS_MATERIAL_ALLOWED_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'text/plain'
 ]);
+const WHITEBOARD_MEMORY_SCHEMA_VERSION = 1;
+const WHITEBOARD_MEMORY_MAX_BYTES = 1_500_000;
+const WHITEBOARD_MEMORY_MAX_PAGES = 80;
+const WHITEBOARD_MEMORY_MAX_ELEMENTS = 2_500;
+const WHITEBOARD_MEMORY_MAX_VERSIONS = 25;
 
 export interface ClassroomParticipantPayload {
   id: string;
@@ -152,13 +175,18 @@ export class ClassSessionsService {
     private readonly attendanceSnapshots: Model<ClassSessionAttendanceSnapshotMongoDocument>,
     @InjectModel(ClassSessionMaterialDocument.name)
     private readonly materials: Model<ClassSessionMaterialMongoDocument>,
+    @InjectModel(ClassSessionWhiteboardStateDocument.name)
+    private readonly whiteboardStates: Model<ClassSessionWhiteboardStateMongoDocument>,
+    @InjectModel(ClassSessionWhiteboardVersionDocument.name)
+    private readonly whiteboardVersions: Model<ClassSessionWhiteboardVersionMongoDocument>,
     private readonly studentEnrollments: StudentEnrollmentsService,
     private readonly rooms: RoomsService,
     private readonly recordings: RecordingsService,
     private readonly profiles: ProfilesService,
     private readonly config: ConfigService,
     @Optional() @InjectModel(UserDocument.name) private readonly users?: Model<UserMongoDocument>,
-    @Optional() private readonly auditLogs?: AuditLogsService
+    @Optional() private readonly auditLogs?: AuditLogsService,
+    @Optional() private readonly metrics?: MetricsService
   ) {}
 
   async listAdminClassSessionReports(
@@ -444,6 +472,7 @@ export class ClassSessionsService {
       metadata: { summary: `Started class session ${payload.title}`, batchId: payload.batchId, roomId: payload.roomId },
       after: { status: payload.status, startedAt: payload.startedAt }
     });
+    this.metrics?.classSessionLifecycleTransitions.labels('started', payload.status).inc();
     return payload;
   }
 
@@ -512,6 +541,7 @@ export class ClassSessionsService {
       metadata: { summary: `Ended class session ${payload.title}`, batchId: payload.batchId, roomId: payload.roomId },
       after: { status: payload.status, completedAt: payload.completedAt }
     });
+    this.metrics?.classSessionLifecycleTransitions.labels('ended', payload.status).inc();
     return payload;
   }
 
@@ -604,19 +634,32 @@ export class ClassSessionsService {
 
   async joinSession(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<ClassroomPayload> {
     const resolution = await this.resolveSession(sessionId, batchId);
-    await this.assertCanReadClassSession(resolution.batch, user);
+    const role = this.classSessionMetricRole(user, resolution.batch);
+    let deniedRecorded = false;
+    try {
+      await this.assertCanReadClassSession(resolution.batch, user);
 
-    if (resolution.persisted?.status !== 'live') {
-      throw new ConflictException(this.joinBlockedMessage(resolution.persisted?.status ?? 'scheduled'));
-    }
-    if (resolution.persisted.roomId) {
-      await this.rooms.assertClassSessionRoomJoinAllowed(resolution.persisted.roomId, resolution.batch.teacherId, {
-        id: user.sub,
-        roles: user.roles
-      });
-    }
+      if (resolution.persisted?.status !== 'live') {
+        deniedRecorded = true;
+        await this.recordClassSessionJoinAudit(resolution, user, 'denied', resolution.persisted?.status ?? 'scheduled', role);
+        throw new ConflictException(this.joinBlockedMessage(resolution.persisted?.status ?? 'scheduled'));
+      }
+      if (resolution.persisted.roomId) {
+        await this.rooms.assertClassSessionRoomJoinAllowed(resolution.persisted.roomId, resolution.batch.teacherId, {
+          id: user.sub,
+          roles: user.roles
+        });
+      }
 
-    return this.toPayload(resolution, user);
+      const payload = await this.toPayload(resolution, user);
+      await this.recordClassSessionJoinAudit(resolution, user, 'admitted', 'live', role);
+      return payload;
+    } catch (error) {
+      if (!deniedRecorded) {
+        await this.recordClassSessionJoinAudit(resolution, user, 'denied', this.auditErrorReason(error), role);
+      }
+      throw error;
+    }
   }
 
   async getChatHistory(
@@ -769,6 +812,9 @@ export class ClassSessionsService {
       });
       created.push(doc);
     }
+    for (const material of created) {
+      await this.recordClassSessionMaterialAudit('upload', resolution, material, user);
+    }
     return created.map((material) => this.toMaterialPayload(material));
   }
 
@@ -803,6 +849,7 @@ export class ClassSessionsService {
       uploadedByUserId: user.sub,
       shared: false
     });
+    await this.recordClassSessionMaterialAudit('link', resolution, doc, user);
     return this.toMaterialPayload(doc);
   }
 
@@ -834,6 +881,7 @@ export class ClassSessionsService {
       throw new NotFoundException('Class material not found.');
     }
     await this.emitMaterialEvent('material:updated', resolution, updated, user, false);
+    await this.recordClassSessionMaterialAudit('delete', resolution, updated, user);
   }
 
   async downloadMaterial(
@@ -862,12 +910,217 @@ export class ClassSessionsService {
     if (!this.canAccessMaterial(material, resolution, role, liveSettings)) {
       throw new NotFoundException('Class material not found.');
     }
+    await this.recordClassSessionMaterialAudit('download', resolution, material, user);
     return {
       stream: createReadStream(material.path),
       fileName: material.fileName,
       mimeType: material.mimeType,
       size: material.size
     };
+  }
+
+  async getWhiteboardMemory(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<WhiteboardMemoryState | null> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    await this.assertCanReadClassSession(resolution.batch, user);
+    const state = await this.whiteboardStates.findOne({ sessionId: resolution.planned.id, batchId: resolution.batch.id });
+    return state ? this.toWhiteboardMemoryState(state) : null;
+  }
+
+  async saveWhiteboardMemory(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    request: SaveWhiteboardMemoryRequest
+  ): Promise<WhiteboardMemoryState> {
+    const resolution = await this.resolveSession(sessionId, batchId ?? request.batchId);
+    this.assertCanManageBatch(resolution.batch, user);
+    const normalized = this.normalizeWhiteboardSnapshot(request.snapshot);
+    const summary = this.whiteboardSnapshotSummary(normalized);
+    const previous = await this.whiteboardStates.findOne({ sessionId: resolution.planned.id, batchId: resolution.batch.id });
+    const snapshotVersion = (previous?.snapshotVersion ?? 0) + 1;
+    const channelIds = classSessionChannelIds(resolution.planned.id);
+    const roomId = resolution.persisted?.roomId ?? channelIds.roomId;
+    const reason = this.normalizeWhiteboardSaveReason(request.reason ?? 'autosave');
+    const pages = summary.pages.map((page) => ({
+      pageId: page.pageId,
+      title: page.title,
+      tags: page.tags,
+      order: page.order,
+      elementCount: page.elementCount
+    }));
+    const update = {
+      $set: {
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        roomId,
+        whiteboardChannelId: resolution.persisted?.whiteboardChannelId ?? channelIds.whiteboardChannelId,
+        schemaVersion: WHITEBOARD_MEMORY_SCHEMA_VERSION,
+        snapshotVersion,
+        currentSnapshot: normalized as unknown as Record<string, unknown>,
+        pages,
+        pageCount: summary.pageCount,
+        elementCount: summary.elementCount,
+        updatedByUserId: user.sub
+      },
+      $setOnInsert: {
+        createdByUserId: user.sub
+      }
+    };
+    const state = await this.whiteboardStates.findOneAndUpdate(
+      { sessionId: resolution.planned.id, batchId: resolution.batch.id },
+      update,
+      { new: true, upsert: true }
+    );
+    if (!state) {
+      throw new ConflictException('Whiteboard state could not be saved.');
+    }
+    if (request.createVersion || reason !== 'autosave') {
+      const version = await this.createWhiteboardVersion(resolution, normalized, summary, snapshotVersion, reason, user.sub, roomId);
+      state.latestVersionId = version.versionId;
+      await state.save();
+      await this.trimWhiteboardVersions(resolution.planned.id);
+    }
+    await this.recordWhiteboardMemoryAudit('save', resolution, user, { reason, snapshotVersion, pageCount: summary.pageCount, elementCount: summary.elementCount });
+    return this.toWhiteboardMemoryState(state);
+  }
+
+  async createWhiteboardCheckpoint(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    request: CreateWhiteboardMemoryCheckpointRequest
+  ): Promise<WhiteboardMemoryVersion> {
+    const state = await this.saveWhiteboardMemory(sessionId, batchId ?? request.batchId, user, {
+      batchId: request.batchId,
+      snapshot: request.snapshot,
+      reason: request.reason ?? 'manual-save',
+      createVersion: true
+    });
+    const versionId = state.latestVersionId;
+    if (!versionId) {
+      throw new ConflictException('Whiteboard checkpoint could not be created.');
+    }
+    const version = await this.whiteboardVersions.findOne({ versionId, sessionId: state.sessionId, batchId: state.batchId });
+    if (!version) {
+      throw new ConflictException('Whiteboard checkpoint could not be loaded.');
+    }
+    return this.toWhiteboardMemoryVersion(version);
+  }
+
+  async listWhiteboardVersions(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<WhiteboardMemoryVersionListResponse> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCanManageBatch(resolution.batch, user);
+    const versions = await this.whiteboardVersions
+      .find({ sessionId: resolution.planned.id, batchId: resolution.batch.id })
+      .sort({ createdAt: -1 })
+      .limit(WHITEBOARD_MEMORY_MAX_VERSIONS)
+      .exec();
+    return { versions: versions.map((version) => this.toWhiteboardMemoryVersion(version)) };
+  }
+
+  async restoreWhiteboardVersion(
+    sessionId: string,
+    versionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    request: RestoreWhiteboardMemoryVersionRequest
+  ): Promise<WhiteboardMemoryState> {
+    const resolution = await this.resolveSession(sessionId, batchId ?? request.batchId);
+    this.assertCanManageBatch(resolution.batch, user);
+    const version = await this.whiteboardVersions.findOne({ versionId, sessionId: resolution.planned.id, batchId: resolution.batch.id });
+    if (!version) {
+      throw new NotFoundException('Whiteboard version not found.');
+    }
+    const snapshot = this.normalizeWhiteboardSnapshot(version.snapshot as unknown as WhiteboardMemorySnapshot);
+    return this.saveWhiteboardMemory(sessionId, batchId ?? request.batchId, user, {
+      batchId: request.batchId,
+      snapshot,
+      reason: 'restore',
+      createVersion: true
+    });
+  }
+
+  async listPreviousWhiteboardMemories(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<PreviousWhiteboardMemoryListResponse> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCanManageBatch(resolution.batch, user);
+    const states = await this.whiteboardStates
+      .find({ batchId: resolution.batch.id, sessionId: { $ne: resolution.planned.id } })
+      .sort({ updatedAt: -1 })
+      .limit(20)
+      .exec();
+    const sessionIds = states.map((state) => state.sessionId);
+    const sessions = await this.classSessions.find({ _id: { $in: sessionIds } }).exec();
+    const sessionById = new Map(sessions.map((session) => [session.id, session]));
+    return {
+      boards: states.map((state) => {
+        const session = sessionById.get(state.sessionId);
+        return {
+          sessionId: state.sessionId,
+          batchId: state.batchId,
+          ...(session?.title ? { title: session.title } : {}),
+          ...(session?.sessionNumber ? { sessionNumber: session.sessionNumber } : {}),
+          ...(session?.scheduledAt ? { scheduledAt: session.scheduledAt.toISOString() } : {}),
+          updatedAt: state.updatedAt.toISOString(),
+          snapshotVersion: state.snapshotVersion,
+          summary: this.whiteboardDocumentSummary(state)
+        };
+      })
+    };
+  }
+
+  async restorePreviousWhiteboardMemory(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    request: RestorePreviousWhiteboardMemoryRequest
+  ): Promise<WhiteboardMemoryState> {
+    const resolution = await this.resolveSession(sessionId, batchId ?? request.batchId);
+    this.assertCanManageBatch(resolution.batch, user);
+    const source = await this.whiteboardStates.findOne({ sessionId: request.sourceSessionId, batchId: resolution.batch.id });
+    if (!source) {
+      throw new NotFoundException('Previous whiteboard state not found.');
+    }
+    const snapshot = this.normalizeWhiteboardSnapshot(source.currentSnapshot as unknown as WhiteboardMemorySnapshot);
+    return this.saveWhiteboardMemory(sessionId, batchId ?? request.batchId, user, {
+      batchId: request.batchId,
+      snapshot,
+      reason: 'restore',
+      createVersion: true
+    });
+  }
+
+  async searchWhiteboardPages(
+    sessionId: string,
+    batchId: string | undefined,
+    query: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<WhiteboardMemoryPageSearchResponse> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    await this.assertCanReadClassSession(resolution.batch, user);
+    const search = this.cleanWhiteboardText(query ?? '', 80).toLowerCase();
+    const states = await this.whiteboardStates.find({ batchId: resolution.batch.id }).sort({ updatedAt: -1 }).limit(50).exec();
+    const results = states.flatMap((state) =>
+      state.pages
+        .filter((page) => !search || page.title.toLowerCase().includes(search) || page.tags.some((tag) => tag.toLowerCase().includes(search)))
+        .map((page) => ({
+          sessionId: state.sessionId,
+          batchId: state.batchId,
+          pageId: page.pageId,
+          title: page.title,
+          tags: page.tags,
+          order: page.order,
+          updatedAt: state.updatedAt.toISOString()
+        }))
+    );
+    return { results: results.slice(0, 100) };
   }
 
   async shareMaterial(sessionId: string, materialId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<ClassSessionMaterial> {
@@ -911,6 +1164,7 @@ export class ClassSessionsService {
       throw new NotFoundException('Class material not found.');
     }
     await this.emitMaterialEvent('material:shared', resolution, material, user, true);
+    await this.recordClassSessionMaterialAudit('share', resolution, material, user);
     return this.toMaterialPayload(material);
   }
 
@@ -937,6 +1191,7 @@ export class ClassSessionsService {
       throw new NotFoundException('Class material not found.');
     }
     await this.emitMaterialEvent('material:unshared', resolution, material, user, false);
+    await this.recordClassSessionMaterialAudit('unshare', resolution, material, user);
     return this.toMaterialPayload(material);
   }
 
@@ -970,18 +1225,25 @@ export class ClassSessionsService {
     if (options.roomId && options.roomId !== roomId) {
       throw new BadRequestException('Chat read room does not match this class session.');
     }
-    return this.rooms.markClassSessionChatRead({
-      sessionId: resolution.planned.id,
-      batchId: resolution.batch.id,
-      roomId,
-      channelId: persisted?.chatChannelId ?? channelIds.chatChannelId,
-      teacherId: resolution.batch.teacherId,
-      requesterUserId: user.sub,
-      requesterRole: this.payloadRole(user, resolution.batch),
-      participantId: options.participantId,
-      scope: options.scope,
-      readAt: options.readAt
-    });
+    try {
+      return await this.rooms.markClassSessionChatRead({
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        roomId,
+        channelId: persisted?.chatChannelId ?? channelIds.chatChannelId,
+        teacherId: resolution.batch.teacherId,
+        requesterUserId: user.sub,
+        requesterRole: this.payloadRole(user, resolution.batch),
+        participantId: options.participantId,
+        scope: options.scope,
+        readAt: options.readAt
+      });
+    } catch (error) {
+      this.metrics?.classSessionChatFailures
+        .labels('read', this.chatMetricScope(options.scope, options.participantId, this.payloadRole(user, resolution.batch)), this.auditErrorReason(error))
+        .inc();
+      throw error;
+    }
   }
 
   async exportAttendanceCsv(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<string> {
@@ -1082,6 +1344,119 @@ export class ClassSessionsService {
       throw new NotFoundException('Batch not found.');
     }
     return batch;
+  }
+
+  private async recordClassSessionJoinAudit(
+    resolution: SessionResolution,
+    user: AuthenticatedUser,
+    result: 'admitted' | 'denied',
+    reason: string,
+    role: string
+  ): Promise<void> {
+    const safeReason = this.safeMetricLabel(reason);
+    this.metrics?.classSessionJoinAttempts.labels(result, safeReason, role).inc();
+    await this.auditLogs?.record({
+      actor: user,
+      action: `class_sessions.join.${result}`,
+      resourceType: 'class_session',
+      resourceId: resolution.planned.id,
+      resourceLabel: resolution.planned.title,
+      metadata: {
+        summary:
+          result === 'admitted'
+            ? `Admitted ${role} to class session ${resolution.planned.title}`
+            : `Denied ${role} class-session join for ${resolution.planned.title}`,
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        roomId: resolution.persisted?.roomId ?? classSessionChannelIds(resolution.planned.id).roomId,
+        actorRole: role,
+        result,
+        reason: safeReason
+      }
+    });
+  }
+
+  private async recordClassSessionMaterialAudit(
+    action: 'upload' | 'link' | 'share' | 'unshare' | 'download' | 'delete',
+    resolution: SessionResolution,
+    material: ClassSessionMaterialMongoDocument,
+    user: AuthenticatedUser
+  ): Promise<void> {
+    const kind = this.safeMetricLabel(material.kind ?? 'unknown');
+    this.metrics?.classSessionMaterialActions.labels(action, 'success', kind).inc();
+    await this.auditLogs?.record({
+      actor: user,
+      action: `class_sessions.material.${action}`,
+      resourceType: 'class_session_material',
+      resourceId: material.materialId,
+      resourceLabel: material.title,
+      metadata: {
+        summary: `${action} class-session material`,
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        roomId: material.roomId,
+        materialId: material.materialId,
+        kind,
+        source: material.source,
+        size: material.size ?? 0
+      }
+    });
+  }
+
+  private classSessionMetricRole(user: AuthenticatedUser, batch: BatchMongoDocument): string {
+    if (this.isAdmin(user)) {
+      return 'admin';
+    }
+    if (user.roles.includes('TEACHER') && batch.teacherId === user.sub) {
+      return 'teacher';
+    }
+    if (user.roles.includes('TEACHER')) {
+      return 'teacher';
+    }
+    if (user.roles.includes('STUDENT')) {
+      return 'student';
+    }
+    return 'other';
+  }
+
+  private chatMetricScope(scope: ChatMessageScope | undefined, participantId: string | undefined, requesterRole: 'teacher' | 'student' | 'admin'): string {
+    if (scope) {
+      return scope;
+    }
+    if (requesterRole === 'student' || participantId) {
+      return 'private';
+    }
+    return 'broadcast';
+  }
+
+  private auditErrorReason(error: unknown): string {
+    const status = typeof (error as { getStatus?: () => number })?.getStatus === 'function'
+      ? (error as { getStatus: () => number }).getStatus()
+      : undefined;
+    if (status === 400) {
+      return 'bad_request';
+    }
+    if (status === 403) {
+      return 'forbidden';
+    }
+    if (status === 404) {
+      return 'not_found';
+    }
+    if (status === 409) {
+      return 'conflict';
+    }
+    if (status === 503) {
+      return 'service_unavailable';
+    }
+    if (error instanceof Error && error.name) {
+      return this.safeMetricLabel(error.name);
+    }
+    return 'unknown';
+  }
+
+  private safeMetricLabel(value: string): string {
+    const normalized = value.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+    return normalized.slice(0, 64) || 'unknown';
   }
 
   private findSchedules(batchId: string): Promise<BatchScheduleMongoDocument[]> {
@@ -1845,6 +2220,259 @@ export class ClassSessionsService {
       return settings.materials.publishMaterialsAfterClass;
     }
     return settings.materials.publishMaterialsBeforeClass;
+  }
+
+  private normalizeWhiteboardSnapshot(snapshot: WhiteboardMemorySnapshot): WhiteboardMemorySnapshot {
+    if (!snapshot || typeof snapshot !== 'object' || snapshot.schemaVersion !== WHITEBOARD_MEMORY_SCHEMA_VERSION || !Array.isArray(snapshot.pages)) {
+      throw new BadRequestException('Whiteboard snapshot is invalid.');
+    }
+    if (!snapshot.pages.length) {
+      throw new BadRequestException('Whiteboard snapshot must include at least one page.');
+    }
+    if (snapshot.pages.length > WHITEBOARD_MEMORY_MAX_PAGES) {
+      throw new BadRequestException(`Whiteboard snapshot cannot exceed ${WHITEBOARD_MEMORY_MAX_PAGES} pages.`);
+    }
+    const normalizedPages: WhiteboardMemoryPage[] = snapshot.pages.map((page, index) => this.normalizeWhiteboardPage(page, index));
+    const activePageId =
+      typeof snapshot.activePageId === 'string' && normalizedPages.some((page) => page.id === snapshot.activePageId)
+        ? snapshot.activePageId
+        : normalizedPages[0]!.id;
+    const normalized: WhiteboardMemorySnapshot = {
+      schemaVersion: WHITEBOARD_MEMORY_SCHEMA_VERSION,
+      activePageId,
+      pages: normalizedPages
+    };
+    const summary = this.whiteboardSnapshotSummary(normalized);
+    if (summary.elementCount > WHITEBOARD_MEMORY_MAX_ELEMENTS) {
+      throw new BadRequestException(`Whiteboard snapshot cannot exceed ${WHITEBOARD_MEMORY_MAX_ELEMENTS} elements.`);
+    }
+    const bytes = Buffer.byteLength(JSON.stringify(normalized), 'utf8');
+    if (bytes > WHITEBOARD_MEMORY_MAX_BYTES) {
+      throw new BadRequestException('Whiteboard snapshot is too large.');
+    }
+    return normalized;
+  }
+
+  private normalizeWhiteboardPage(page: WhiteboardMemoryPage, index: number): WhiteboardMemoryPage {
+    if (!page || typeof page !== 'object') {
+      throw new BadRequestException('Whiteboard page is invalid.');
+    }
+    const id = this.cleanWhiteboardText(page.id, 128);
+    if (!id) {
+      throw new BadRequestException('Whiteboard page id is required.');
+    }
+    if (!Array.isArray(page.elements)) {
+      throw new BadRequestException('Whiteboard page elements are invalid.');
+    }
+    const elements = page.elements.map((element) => this.normalizeWhiteboardElement(element));
+    return {
+      id,
+      title: this.cleanWhiteboardText(page.title, 180) || `Board ${index + 1}`,
+      tags: this.normalizeWhiteboardTags(page.tags),
+      order: Number.isFinite(Number(page.order)) ? Math.max(0, Math.floor(Number(page.order))) : index,
+      ...(typeof page.template === 'string' ? { template: this.cleanWhiteboardText(page.template, 64) } : {}),
+      ...(this.isPlainRecord(page.view) ? { view: this.safeWhiteboardPayload(page.view) } : {}),
+      ...(page.background === null
+        ? { background: null }
+        : this.isPlainRecord(page.background)
+          ? { background: this.safeWhiteboardPayload(page.background) }
+          : {}),
+      elements
+    };
+  }
+
+  private normalizeWhiteboardElement(element: Record<string, unknown>): Record<string, unknown> {
+    if (!this.isPlainRecord(element)) {
+      throw new BadRequestException('Whiteboard element is invalid.');
+    }
+    if (typeof element.id !== 'string' || typeof element.type !== 'string' || !element.id.trim() || !element.type.trim()) {
+      throw new BadRequestException('Whiteboard element id and type are required.');
+    }
+    return this.safeWhiteboardPayload(element);
+  }
+
+  private normalizeWhiteboardTags(tags: unknown): string[] {
+    if (!Array.isArray(tags)) {
+      return [];
+    }
+    return [
+      ...new Set(
+        tags
+          .map((tag) => (typeof tag === 'string' ? this.cleanWhiteboardText(tag, 40).toLowerCase() : ''))
+          .filter(Boolean)
+      )
+    ].slice(0, 12);
+  }
+
+  private whiteboardSnapshotSummary(snapshot: WhiteboardMemorySnapshot): WhiteboardMemorySummary {
+    const pages = snapshot.pages
+      .map((page, index) => ({
+        pageId: page.id,
+        title: page.title,
+        tags: page.tags,
+        order: Number.isFinite(page.order) ? page.order : index,
+        elementCount: page.elements.length
+      }))
+      .sort((left, right) => left.order - right.order);
+    return {
+      pageCount: pages.length,
+      elementCount: pages.reduce((total, page) => total + page.elementCount, 0),
+      pages
+    };
+  }
+
+  private whiteboardDocumentSummary(
+    doc: Pick<ClassSessionWhiteboardStateMongoDocument | ClassSessionWhiteboardVersionMongoDocument, 'pageCount' | 'elementCount' | 'pages'>
+  ): WhiteboardMemorySummary {
+    const pages = doc.pages
+      .map((page) => ({
+        pageId: page.pageId,
+        title: page.title,
+        tags: page.tags ?? [],
+        order: page.order,
+        elementCount: page.elementCount
+      }))
+      .sort((left, right) => left.order - right.order);
+    return {
+      pageCount: doc.pageCount ?? pages.length,
+      elementCount: doc.elementCount ?? pages.reduce((total, page) => total + page.elementCount, 0),
+      pages
+    };
+  }
+
+  private async createWhiteboardVersion(
+    resolution: SessionResolution,
+    snapshot: WhiteboardMemorySnapshot,
+    summary: WhiteboardMemorySummary,
+    snapshotVersion: number,
+    reason: WhiteboardMemorySaveReason,
+    createdByUserId: string,
+    roomId: string
+  ): Promise<ClassSessionWhiteboardVersionMongoDocument> {
+    const channelIds = classSessionChannelIds(resolution.planned.id);
+    return this.whiteboardVersions.create({
+      versionId: randomUUID(),
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId,
+      whiteboardChannelId: resolution.persisted?.whiteboardChannelId ?? channelIds.whiteboardChannelId,
+      reason,
+      schemaVersion: WHITEBOARD_MEMORY_SCHEMA_VERSION,
+      snapshotVersion,
+      snapshot: snapshot as unknown as Record<string, unknown>,
+      pages: summary.pages.map((page) => ({
+        pageId: page.pageId,
+        title: page.title,
+        tags: page.tags,
+        order: page.order,
+        elementCount: page.elementCount
+      })),
+      pageCount: summary.pageCount,
+      elementCount: summary.elementCount,
+      createdByUserId
+    });
+  }
+
+  private async trimWhiteboardVersions(sessionId: string): Promise<void> {
+    const excess = await this.whiteboardVersions
+      .find({ sessionId })
+      .sort({ createdAt: -1 })
+      .skip(WHITEBOARD_MEMORY_MAX_VERSIONS)
+      .select({ versionId: 1 })
+      .lean()
+      .exec();
+    const versionIds = excess.map((version) => version.versionId).filter(Boolean);
+    if (versionIds.length) {
+      await this.whiteboardVersions.deleteMany({ versionId: { $in: versionIds } });
+    }
+  }
+
+  private toWhiteboardMemoryState(state: ClassSessionWhiteboardStateMongoDocument): WhiteboardMemoryState {
+    return {
+      sessionId: state.sessionId,
+      batchId: state.batchId,
+      ...(state.roomId ? { roomId: state.roomId } : {}),
+      whiteboardChannelId: state.whiteboardChannelId,
+      schemaVersion: WHITEBOARD_MEMORY_SCHEMA_VERSION,
+      snapshotVersion: state.snapshotVersion,
+      snapshot: state.currentSnapshot as unknown as WhiteboardMemorySnapshot,
+      summary: this.whiteboardDocumentSummary(state),
+      ...(state.latestVersionId ? { latestVersionId: state.latestVersionId } : {}),
+      ...(state.createdByUserId ? { createdByUserId: state.createdByUserId } : {}),
+      ...(state.updatedByUserId ? { updatedByUserId: state.updatedByUserId } : {}),
+      createdAt: state.createdAt.toISOString(),
+      updatedAt: state.updatedAt.toISOString()
+    };
+  }
+
+  private toWhiteboardMemoryVersion(version: ClassSessionWhiteboardVersionMongoDocument): WhiteboardMemoryVersion {
+    return {
+      versionId: version.versionId,
+      sessionId: version.sessionId,
+      batchId: version.batchId,
+      createdAt: version.createdAt.toISOString(),
+      ...(version.createdByUserId ? { createdByUserId: version.createdByUserId } : {}),
+      reason: this.normalizeWhiteboardSaveReason(version.reason),
+      snapshotVersion: version.snapshotVersion,
+      summary: this.whiteboardDocumentSummary(version)
+    };
+  }
+
+  private normalizeWhiteboardSaveReason(reason: string): WhiteboardMemorySaveReason {
+    if (reason === 'manual-save' || reason === 'export' || reason === 'restore' || reason === 'session-end') {
+      return reason;
+    }
+    return 'autosave';
+  }
+
+  private cleanWhiteboardText(value: string, maxLength: number): string {
+    return value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
+  }
+
+  private safeWhiteboardPayload<T extends Record<string, unknown>>(value: T): T {
+    return this.scrubWhiteboardPayload(JSON.parse(JSON.stringify(value))) as T;
+  }
+
+  private scrubWhiteboardPayload(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.scrubWhiteboardPayload(item));
+    }
+    if (!this.isPlainRecord(value)) {
+      return value;
+    }
+    const next: Record<string, unknown> = {};
+    for (const [key, raw] of Object.entries(value)) {
+      if (typeof raw === 'string' && key.toLowerCase().includes('url') && /x-amz-signature|signature=|token=/i.test(raw)) {
+        continue;
+      }
+      next[key] = this.scrubWhiteboardPayload(raw);
+    }
+    return next;
+  }
+
+  private isPlainRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+  }
+
+  private async recordWhiteboardMemoryAudit(
+    action: 'save' | 'restore',
+    resolution: SessionResolution,
+    user: AuthenticatedUser,
+    metadata: Record<string, unknown>
+  ): Promise<void> {
+    await this.auditLogs?.record({
+      actor: user,
+      action: `class_sessions.whiteboard_memory.${action}`,
+      resourceType: 'class_session',
+      resourceId: resolution.planned.id,
+      resourceLabel: resolution.planned.title,
+      metadata: {
+        summary: `${action} class-session whiteboard memory`,
+        batchId: resolution.batch.id,
+        roomId: resolution.persisted?.roomId,
+        ...metadata
+      }
+    });
   }
 
   private async emitMaterialEvent(

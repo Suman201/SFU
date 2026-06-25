@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, OnInit, computed, effect, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormField, FormRoot, form as signalForm } from '@angular/forms/signals';
 import type {
   ChatAttachment,
@@ -83,6 +83,9 @@ export class SessionChat {
   private loadedSummaryContextKey = '';
   private lastMarkedReadKeys = new Set<string>();
   private viewportFrame = 0;
+  private linkDialogReturnFocus: HTMLElement | null = null;
+
+  @ViewChild('linkUrlInput') private readonly linkUrlInput?: ElementRef<HTMLInputElement>;
 
   readonly currentUser = input('Teacher');
   readonly currentRole = input<'Teacher' | 'Student'>('Teacher');
@@ -113,6 +116,9 @@ export class SessionChat {
   protected readonly uploadingAttachments = signal(0);
   protected readonly socketConnected = signal(this.realtimeSocket.connected);
   protected readonly chatError = signal('');
+  protected readonly linkDialogOpen = signal(false);
+  protected readonly linkDraft = signal('');
+  protected readonly linkDialogError = signal('');
   protected readonly nextBefore = signal<string | null>(null);
   protected readonly chatMode = signal<ChatMessageScope>('private');
   protected readonly selectedThreadParticipantId = signal('');
@@ -246,6 +252,16 @@ export class SessionChat {
     if (this.viewportFrame) {
       window.cancelAnimationFrame(this.viewportFrame);
     }
+  }
+
+  @HostListener('document:keydown.escape', ['$event'])
+  protected closeLinkDialogOnEscape(event: Event): void {
+    if (!this.linkDialogOpen()) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.cancelLinkAttachment();
   }
 
   protected toggleCollapsed(event?: Event): void {
@@ -395,19 +411,46 @@ export class SessionChat {
       this.chatError.set('Chat attachments are disabled for this class.');
       return;
     }
-    const rawUrl = globalThis.prompt('Paste a link to attach');
-    if (!rawUrl?.trim()) {
+    if (!this.canAddAttachment()) {
+      return;
+    }
+    this.linkDialogReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    this.linkDraft.set('');
+    this.linkDialogError.set('');
+    this.linkDialogOpen.set(true);
+    window.setTimeout(() => this.linkUrlInput?.nativeElement.focus());
+  }
+
+  protected updateLinkDraft(event: Event): void {
+    this.linkDraft.set((event.target as HTMLInputElement | null)?.value ?? '');
+  }
+
+  protected cancelLinkAttachment(): void {
+    this.linkDialogOpen.set(false);
+    this.linkDraft.set('');
+    this.linkDialogError.set('');
+    this.restoreLinkDialogFocus();
+  }
+
+  protected confirmLinkAttachment(event?: Event): void {
+    event?.preventDefault();
+    if (!this.linkDialogOpen()) {
+      return;
+    }
+    const rawUrl = this.linkDraft().trim();
+    if (!rawUrl) {
+      this.linkDialogError.set('Enter a link to attach.');
       return;
     }
     let url: URL;
     try {
-      url = new URL(rawUrl.trim());
+      url = new URL(rawUrl);
     } catch {
-      this.chatError.set('Enter a valid link.');
+      this.linkDialogError.set('Enter a valid link.');
       return;
     }
     if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-      this.chatError.set('Links must use http or https.');
+      this.linkDialogError.set('Links must use http or https.');
       return;
     }
     if (!this.canAddAttachment()) {
@@ -423,6 +466,7 @@ export class SessionChat {
       }
     ]);
     this.chatError.set('');
+    this.cancelLinkAttachment();
   }
 
   protected removePendingAttachment(id: string): void {
@@ -605,6 +649,16 @@ export class SessionChat {
       return false;
     }
     return true;
+  }
+
+  private restoreLinkDialogFocus(): void {
+    const target = this.linkDialogReturnFocus;
+    this.linkDialogReturnFocus = null;
+    window.setTimeout(() => {
+      if (target?.isConnected) {
+        target.focus();
+      }
+    });
   }
 
   private pendingAttachmentToRequest(attachment: PendingChatAttachment): SendChatAttachment {

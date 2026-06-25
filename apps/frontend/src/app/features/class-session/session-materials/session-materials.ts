@@ -79,6 +79,10 @@ export class SessionMaterials implements OnDestroy {
     }
   }
 
+  reload(): Promise<void> {
+    return this.loadMaterials();
+  }
+
   protected async loadMaterials(): Promise<void> {
     const sessionId = this.sessionId();
     if (!sessionId) {

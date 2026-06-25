@@ -1,6 +1,7 @@
 :host {
   display: block;
   min-height: 0;
+  overflow: hidden;
 }
 
 .materials-panel {
@@ -17,6 +18,17 @@
 .materials-panel.compact {
   max-height: min(42dvh, 340px);
   overflow: hidden;
+}
+
+:host-context(.student-materials-drawer) .materials-panel {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:host-context(.student-materials-drawer) .materials-list {
+  min-height: 0;
+  max-height: none;
 }
 
 .materials-header,

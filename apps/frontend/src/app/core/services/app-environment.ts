@@ -19,9 +19,8 @@ declare global {
 const browserOrigin = typeof window !== 'undefined' ? window.location.origin : undefined;
 const isLocalBrowserOrigin = Boolean(browserOrigin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(browserOrigin));
 const runtimeEnvironment = typeof window !== 'undefined' ? resolveRuntimeEnvironment(window, isLocalBrowserOrigin) : undefined;
-const defaultOrigin = browserOrigin ?? 'http://localhost:3000';
-const defaultApiBaseUrl = `${defaultOrigin}/api/v1`;
-const defaultSocketUrl = `${defaultOrigin}/sfu`;
+const defaultApiBaseUrl = browserOrigin ? `${browserOrigin}/api/v1` : '/api/v1';
+const defaultSocketUrl = browserOrigin ? `${browserOrigin}/sfu` : '/sfu';
 
 export const API_BASE_URL = normalizeUrl(runtimeEnvironment?.apiBaseUrl ?? defaultApiBaseUrl);
 export const SOCKET_URL = normalizeUrl(runtimeEnvironment?.socketUrl ?? defaultSocketUrl);
@@ -61,7 +60,7 @@ function normalizeUrl(value: string): string {
 }
 
 function resolveRuntimeEnvironment(currentWindow: Window, allowLocalOverrides: boolean): RuntimeEnvironment | undefined {
-  const configured = currentWindow.__SFU_ENV__ ?? {};
+  const configured = sanitizeRuntimeEnvironment(currentWindow.__SFU_ENV__ ?? {}, currentWindow, allowLocalOverrides);
   if (!allowLocalOverrides) {
     return configured;
   }
@@ -75,6 +74,32 @@ function resolveRuntimeEnvironment(currentWindow: Window, allowLocalOverrides: b
   };
 
   return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function sanitizeRuntimeEnvironment(
+  configured: RuntimeEnvironment,
+  currentWindow: Window,
+  allowLocalOrigins: boolean
+): RuntimeEnvironment {
+  if (allowLocalOrigins) {
+    return configured;
+  }
+  return {
+    ...(configured.apiBaseUrl && !isLocalRuntimeUrl(configured.apiBaseUrl, currentWindow) ? { apiBaseUrl: configured.apiBaseUrl } : {}),
+    ...(configured.socketUrl && !isLocalRuntimeUrl(configured.socketUrl, currentWindow) ? { socketUrl: configured.socketUrl } : {})
+  };
+}
+
+function isLocalRuntimeUrl(value: string | undefined, currentWindow: Window): boolean {
+  if (!value) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value, currentWindow.location.origin);
+    return /^https?:$/.test(parsed.protocol) && /^(localhost|127\.0\.0\.1)$/i.test(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function readStoredOverrides(currentWindow: Window): RuntimeEnvironment {

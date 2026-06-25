@@ -20,6 +20,7 @@ import { HealthModule } from './health/health.module';
 import { MediaApiModule } from './media/media-api.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { MetricsService } from './metrics/metrics.service';
+import { NotificationsModule } from './notifications/notifications.module';
 import { RedisModule } from './redis/redis.module';
 import { RecordingsModule } from './recordings/recordings.module';
 import { RoomsModule } from './rooms/rooms.module';
@@ -160,6 +161,7 @@ import { UsersModule } from './users/users.module';
     SessionsModule,
     RecordingsModule,
     ProfilesModule,
+    NotificationsModule,
     RoomsModule,
     MediaApiModule,
     HealthModule

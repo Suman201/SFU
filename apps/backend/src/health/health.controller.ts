@@ -83,12 +83,12 @@ export class HealthController {
     const result: HealthIndicatorResult = {
       cluster: {
         status: isHealthy ? 'up' : 'down',
-        localNode: snapshot.localNode,
+        localNodeHealth: snapshot.localNode.health,
+        localNodeDraining: snapshot.localNode.draining,
         registeredNodes: snapshot.nodes.length,
         healthyNodes: snapshot.nodes.filter((node) => node.health === 'healthy').length,
         drainingNodes: snapshot.nodes.filter((node) => node.draining).length,
-        ownedRoomCount: snapshot.ownedRoomCount,
-        nodes: snapshot.nodes
+        ownedRoomCount: snapshot.ownedRoomCount
       }
     };
     if (!isHealthy) {
@@ -113,33 +113,7 @@ export class HealthController {
         drainingWorkers: snapshot.drainingWorkers,
         overloadedWorkers: snapshot.overloadedWorkers,
         activeRooms: snapshot.activeRooms,
-        failedRooms: snapshot.failedRooms,
-        failures: snapshot.failures,
-        workers: snapshot.workers.map((worker) => ({
-          workerId: worker.workerId,
-          pid: worker.pid,
-          status: worker.status,
-          healthy: worker.healthy,
-          ready: worker.ready,
-          draining: worker.draining,
-          overloaded: worker.overloaded,
-          capacityScore: worker.capacityScore,
-          activeRooms: worker.activeRooms,
-          activeTransports: worker.activeTransports,
-          activeProducers: worker.activeProducers,
-          activeConsumers: worker.activeConsumers,
-          inflightRequests: worker.inflightRequests,
-          queueDepth: worker.queueDepth,
-          averageIpcLatencyMs: worker.averageIpcLatencyMs,
-          ipcTimeouts: worker.ipcTimeouts,
-          uptimeMs: worker.uptimeMs,
-          rtpPacketRate: worker.rtpPacketRate,
-          rtcpPacketRate: worker.rtcpPacketRate,
-          memory: worker.memory,
-          cpu: worker.cpu,
-          lastHeartbeatAt: worker.lastHeartbeatAt,
-          lastError: worker.lastError
-        }))
+        failedRoomCount: snapshot.failedRooms.length
       }
     };
     if (!isHealthy) {
@@ -185,9 +159,7 @@ export class HealthController {
       readiness: {
         status: acceptingTraffic ? 'up' : 'down',
         acceptingTraffic,
-        nodeId: snapshot.localNode.nodeId,
-        reason,
-        capacityScore: snapshot.localNode.capacity.capacityScore
+        reason
       }
     };
     if (!acceptingTraffic) {

@@ -384,6 +384,50 @@ export class MetricsService implements OnModuleInit {
     help: 'Room admission or media allocation rejections',
     labelNames: ['reason']
   });
+  readonly classSessionLifecycleTransitions = new Counter({
+    name: 'sfu_class_session_lifecycle_transitions_total',
+    help: 'Class-session lifecycle transitions by event and status',
+    labelNames: ['event', 'status']
+  });
+  readonly classSessionJoinAttempts = new Counter({
+    name: 'sfu_class_session_join_attempts_total',
+    help: 'Class-session join attempts by result, reason, and role',
+    labelNames: ['result', 'reason', 'role']
+  });
+  readonly classSessionReconnectGraceEvents = new Counter({
+    name: 'sfu_class_session_reconnect_grace_events_total',
+    help: 'Teacher reconnect grace lifecycle events',
+    labelNames: ['event']
+  });
+  readonly activeClassSessionReconnectGraceTimers = new Gauge({
+    name: 'sfu_class_session_reconnect_grace_timers_active',
+    help: 'Active teacher reconnect grace timers'
+  });
+  readonly classSessionMediaFailures = new Counter({
+    name: 'sfu_class_session_media_failures_total',
+    help: 'Class-session media publish or consume failures by operation, kind, and reason',
+    labelNames: ['operation', 'kind', 'reason']
+  });
+  readonly classSessionChatFailures = new Counter({
+    name: 'sfu_class_session_chat_failures_total',
+    help: 'Class-session chat send or read failures by operation, scope, and reason',
+    labelNames: ['operation', 'scope', 'reason']
+  });
+  readonly classSessionModerationActions = new Counter({
+    name: 'sfu_class_session_moderation_actions_total',
+    help: 'Class-session moderation actions by action and result',
+    labelNames: ['action', 'result']
+  });
+  readonly classSessionWhiteboardControlActions = new Counter({
+    name: 'sfu_class_session_whiteboard_control_actions_total',
+    help: 'Class-session whiteboard control actions by action and result',
+    labelNames: ['action', 'result']
+  });
+  readonly classSessionMaterialActions = new Counter({
+    name: 'sfu_class_session_material_actions_total',
+    help: 'Class-session material actions by action, result, and material kind',
+    labelNames: ['action', 'result', 'kind']
+  });
   readonly roomProfileDistribution = new Gauge({
     name: 'sfu_room_profile_distribution',
     help: 'Active rooms by media profile',
@@ -950,6 +994,15 @@ export class MetricsService implements OnModuleInit {
       this.mediaWorkerDroppedRtpReasons,
       this.mediaWorkerHeartbeatAgeMs,
       this.roomAdmissionRejections,
+      this.classSessionLifecycleTransitions,
+      this.classSessionJoinAttempts,
+      this.classSessionReconnectGraceEvents,
+      this.activeClassSessionReconnectGraceTimers,
+      this.classSessionMediaFailures,
+      this.classSessionChatFailures,
+      this.classSessionModerationActions,
+      this.classSessionWhiteboardControlActions,
+      this.classSessionMaterialActions,
       this.roomProfileDistribution,
       this.roomProfileChanges,
       this.roomProtectionDecisions,

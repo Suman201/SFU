@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import type { WhiteboardMemorySnapshot } from '@native-sfu/contracts';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ClassSessionsService } from './class-sessions.service';
 
@@ -23,7 +24,7 @@ describe('ClassSessionsService', () => {
   };
 
   it('returns and emits a live payload when a teacher manually starts a session', async () => {
-    const { service, classSessions, rooms } = createService();
+    const { service, classSessions, rooms, auditLogs, metrics } = createService();
     const startedAt = new Date('2026-06-22T10:01:00.000Z');
 
     classSessions.findById.mockResolvedValue(
@@ -61,6 +62,11 @@ describe('ClassSessionsService', () => {
       status: 'live',
       startedAt: startedAt.toISOString()
     });
+    const startAudit = auditLogs.record.mock.calls.find(([input]) => input.action === 'class_sessions.start')?.[0];
+    expect(startAudit?.resourceId).toBe(sessionId);
+    expect(startAudit?.metadata.batchId).toBe('batch-1');
+    expect(startAudit?.metadata.roomId).toBe('room-1');
+    expect(metrics.classSessionLifecycleTransitions.labels).toHaveBeenCalledWith('started', 'live');
   });
 
   it('returns the existing live session when the same session is started twice', async () => {
@@ -165,7 +171,7 @@ describe('ClassSessionsService', () => {
   });
 
   it('returns and emits a completed payload when a teacher manually ends a session', async () => {
-    const { service, classSessions, rooms } = createService();
+    const { service, classSessions, rooms, auditLogs, metrics } = createService();
     const startedAt = new Date('2026-06-22T10:01:00.000Z');
     const completedAt = new Date('2026-06-22T11:01:00.000Z');
     const live = persistedSession({
@@ -217,6 +223,11 @@ describe('ClassSessionsService', () => {
       teacherReconnectDeadlineAt: ''
     });
     expect(classSessions.findOneAndUpdate.mock.calls[0]?.[2]).toEqual({ new: true });
+    const endAudit = auditLogs.record.mock.calls.find(([input]) => input.action === 'class_sessions.end')?.[0];
+    expect(endAudit?.resourceId).toBe(sessionId);
+    expect(endAudit?.metadata.batchId).toBe('batch-1');
+    expect(endAudit?.metadata.roomId).toBe('room-1');
+    expect(metrics.classSessionLifecycleTransitions.labels).toHaveBeenCalledWith('ended', 'completed');
   });
 
   it('snapshots attendance rows when a live session is manually ended', async () => {
@@ -439,7 +450,7 @@ describe('ClassSessionsService', () => {
   });
 
   it('blocks joining before a session is live', async () => {
-    const { service, classSessions } = createService();
+    const { service, classSessions, auditLogs, metrics } = createService();
     classSessions.findById.mockResolvedValue(
       persistedSession({
         status: 'scheduled',
@@ -455,6 +466,12 @@ describe('ClassSessionsService', () => {
     }
 
     expect(thrown).toBeInstanceOf(ConflictException);
+    const deniedAudit = auditLogs.record.mock.calls.find(([input]) => input.action === 'class_sessions.join.denied')?.[0];
+    expect(deniedAudit?.metadata.sessionId).toBe(sessionId);
+    expect(deniedAudit?.metadata.batchId).toBe('batch-1');
+    expect(deniedAudit?.metadata.result).toBe('denied');
+    expect(deniedAudit?.metadata.reason).toBe('scheduled');
+    expect(metrics.classSessionJoinAttempts.labels).toHaveBeenCalledWith('denied', 'scheduled', 'student');
   });
 
   it('blocks joining after a session is completed', async () => {
@@ -479,7 +496,7 @@ describe('ClassSessionsService', () => {
   });
 
   it('lets an enrolled student join a live session', async () => {
-    const { service, classSessions, studentEnrollments, rooms } = createService();
+    const { service, classSessions, studentEnrollments, rooms, auditLogs, metrics } = createService();
     classSessions.findById.mockResolvedValue(
       persistedSession({
         status: 'live',
@@ -498,6 +515,13 @@ describe('ClassSessionsService', () => {
       id: 'student-1',
       roles: ['STUDENT']
     });
+    const admittedAudit = auditLogs.record.mock.calls.find(([input]) => input.action === 'class_sessions.join.admitted')?.[0];
+    expect(admittedAudit?.metadata.sessionId).toBe(sessionId);
+    expect(admittedAudit?.metadata.batchId).toBe('batch-1');
+    expect(admittedAudit?.metadata.roomId).toBe('room-1');
+    expect(admittedAudit?.metadata.result).toBe('admitted');
+    expect(admittedAudit?.metadata.reason).toBe('live');
+    expect(metrics.classSessionJoinAttempts.labels).toHaveBeenCalledWith('admitted', 'live', 'student');
   });
 
   it('blocks new student joins when the live class room is locked', async () => {
@@ -527,7 +551,7 @@ describe('ClassSessionsService', () => {
   });
 
   it('blocks non-enrolled students from joining a live session', async () => {
-    const { service, classSessions, studentEnrollments } = createService();
+    const { service, classSessions, studentEnrollments, auditLogs, metrics } = createService();
     classSessions.findById.mockResolvedValue(
       persistedSession({
         status: 'live',
@@ -545,6 +569,12 @@ describe('ClassSessionsService', () => {
     }
 
     expect(thrown).toBeInstanceOf(ForbiddenException);
+    const deniedAudit = auditLogs.record.mock.calls.find(([input]) => input.action === 'class_sessions.join.denied')?.[0];
+    expect(deniedAudit?.metadata.sessionId).toBe(sessionId);
+    expect(deniedAudit?.metadata.batchId).toBe('batch-1');
+    expect(deniedAudit?.metadata.result).toBe('denied');
+    expect(deniedAudit?.metadata.reason).toBe('forbidden');
+    expect(metrics.classSessionJoinAttempts.labels).toHaveBeenCalledWith('denied', 'forbidden', 'student');
   });
 
   it('blocks non-enrolled students from chat history', async () => {
@@ -868,6 +898,61 @@ describe('ClassSessionsService', () => {
     expect(rooms.exportClassSessionAttendanceCsv).not.toHaveBeenCalled();
   });
 
+  it('saves and reloads teacher whiteboard memory for a class session', async () => {
+    const { service, classSessions, whiteboardStates, whiteboardVersions } = createService();
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'live', roomId: 'room-1' }));
+    let savedState: ReturnType<typeof whiteboardStateDoc> | null = null;
+    whiteboardStates.findOne.mockImplementation(async () => savedState);
+    whiteboardStates.findOneAndUpdate.mockImplementation(async (_query, update) => {
+      savedState = whiteboardStateDoc({
+        roomId: update.$set.roomId,
+        whiteboardChannelId: update.$set.whiteboardChannelId,
+        snapshotVersion: update.$set.snapshotVersion,
+        currentSnapshot: update.$set.currentSnapshot,
+        pages: update.$set.pages,
+        pageCount: update.$set.pageCount,
+        elementCount: update.$set.elementCount,
+        updatedByUserId: update.$set.updatedByUserId
+      });
+      return savedState;
+    });
+
+    const state = await service.saveWhiteboardMemory(sessionId, 'batch-1', teacher, {
+      batchId: 'batch-1',
+      snapshot: whiteboardSnapshot(),
+      reason: 'autosave'
+    });
+    const loaded = await service.getWhiteboardMemory(sessionId, 'batch-1', teacher);
+
+    expect(state.snapshotVersion).toBe(1);
+    expect(state.summary.pageCount).toBe(1);
+    expect(state.summary.elementCount).toBe(1);
+    expect(loaded?.snapshot.pages[0]?.title).toBe('Limits warmup');
+    expect(whiteboardVersions.create).not.toHaveBeenCalled();
+  });
+
+  it('creates a bounded whiteboard checkpoint version for the batch teacher', async () => {
+    const { service, classSessions, whiteboardStates, whiteboardVersions } = createService();
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'live', roomId: 'room-1' }));
+    const stateDoc = whiteboardStateDoc();
+    const versionDoc = whiteboardVersionDoc();
+    whiteboardStates.findOne.mockResolvedValue(null);
+    whiteboardStates.findOneAndUpdate.mockResolvedValue(stateDoc);
+    whiteboardVersions.create.mockResolvedValue(versionDoc);
+    whiteboardVersions.findOne.mockResolvedValue(versionDoc);
+
+    const version = await service.createWhiteboardCheckpoint(sessionId, 'batch-1', teacher, {
+      batchId: 'batch-1',
+      snapshot: whiteboardSnapshot(),
+      reason: 'manual-save'
+    });
+
+    expect(version.reason).toBe('manual-save');
+    expect(version.summary.pageCount).toBe(1);
+    expect(stateDoc.save).toHaveBeenCalled();
+    expect(whiteboardVersions.find).toHaveBeenCalledWith({ sessionId });
+  });
+
   it('lists admin class session reports with attendance and teacher enrichment', async () => {
     const { service, classSessions, rooms } = createService();
     const completedAt = new Date('2026-06-22T11:00:00.000Z');
@@ -1129,6 +1214,17 @@ describe('ClassSessionsService', () => {
       findOneAndUpdate: jest.Mock;
       updateMany: jest.Mock;
     };
+    whiteboardStates: {
+      findOne: jest.Mock;
+      findOneAndUpdate: jest.Mock;
+      find: jest.Mock;
+    };
+    whiteboardVersions: {
+      findOne: jest.Mock;
+      create: jest.Mock;
+      find: jest.Mock;
+      deleteMany: jest.Mock;
+    };
     studentEnrollments: {
       isStudentEnrolledInBatch: jest.Mock;
       listBatchRoster: jest.Mock;
@@ -1153,6 +1249,15 @@ describe('ClassSessionsService', () => {
       stopClassSessionRecording: jest.Mock;
       listClassSessionRecordings: jest.Mock;
       readClassSessionRecordingDownload: jest.Mock;
+    };
+    auditLogs: {
+      record: jest.Mock;
+    };
+    metrics: {
+      classSessionLifecycleTransitions: { labels: jest.Mock };
+      classSessionJoinAttempts: { labels: jest.Mock };
+      classSessionChatFailures: { labels: jest.Mock };
+      classSessionMaterialActions: { labels: jest.Mock };
     };
   } {
     const batches = {
@@ -1199,6 +1304,35 @@ describe('ClassSessionsService', () => {
       findOne: jest.fn(async () => null),
       findOneAndUpdate: jest.fn(async () => null),
       updateMany: jest.fn(async () => ({ modifiedCount: 0 }))
+    };
+    const whiteboardStates = {
+      findOne: jest.fn(async () => null),
+      findOneAndUpdate: jest.fn(async () => null),
+      find: jest.fn(() => ({
+        sort: jest.fn(() => ({
+          limit: jest.fn(() => execResult([]))
+        }))
+      }))
+    };
+    const whiteboardVersions = {
+      findOne: jest.fn(async () => null),
+      create: jest.fn(async (payload: Record<string, unknown>) => ({
+        id: payload.versionId,
+        ...payload,
+        createdAt: new Date('2026-06-22T10:00:00.000Z'),
+        updatedAt: new Date('2026-06-22T10:00:00.000Z')
+      })),
+      find: jest.fn(() => ({
+        sort: jest.fn(() => ({
+          limit: jest.fn(() => execResult([])),
+          skip: jest.fn(() => ({
+            select: jest.fn(() => ({
+              lean: jest.fn(() => execResult([]))
+            }))
+          }))
+        }))
+      })),
+      deleteMany: jest.fn(async () => ({ deletedCount: 0 }))
     };
     const studentEnrollments = {
       isStudentEnrolledInBatch: jest.fn(async () => true),
@@ -1300,6 +1434,24 @@ describe('ClassSessionsService', () => {
     const config = {
       get: jest.fn((key: string, fallback?: unknown) => fallback)
     };
+    const classSessionMetric = { inc: jest.fn() };
+    const metrics = {
+      classSessionLifecycleTransitions: {
+        labels: jest.fn(() => classSessionMetric)
+      },
+      classSessionJoinAttempts: {
+        labels: jest.fn(() => classSessionMetric)
+      },
+      classSessionChatFailures: {
+        labels: jest.fn(() => classSessionMetric)
+      },
+      classSessionMaterialActions: {
+        labels: jest.fn(() => classSessionMetric)
+      }
+    };
+    const auditLogs = {
+      record: jest.fn(async () => undefined)
+    };
 
     return {
       service: new ClassSessionsService(
@@ -1308,19 +1460,27 @@ describe('ClassSessionsService', () => {
         classSessions as never,
         attendanceSnapshots as never,
         materials as never,
+        whiteboardStates as never,
+        whiteboardVersions as never,
         studentEnrollments as never,
         rooms as never,
         recordings as never,
         profiles as never,
         config as never,
-        users as never
+        users as never,
+        auditLogs as never,
+        metrics as never
       ),
       classSessions,
       attendanceSnapshots,
       materials,
+      whiteboardStates,
+      whiteboardVersions,
       studentEnrollments,
       rooms,
-      recordings
+      recordings,
+      auditLogs,
+      metrics
     };
   }
 
@@ -1360,6 +1520,94 @@ describe('ClassSessionsService', () => {
       shared: false,
       createdAt: new Date('2026-06-22T10:00:00.000Z'),
       updatedAt: new Date('2026-06-22T10:00:00.000Z'),
+      ...overrides
+    };
+  }
+
+  function whiteboardSnapshot(): WhiteboardMemorySnapshot {
+    return {
+      schemaVersion: 1,
+      activePageId: 'page-1',
+      pages: [
+        {
+          id: 'page-1',
+          title: 'Limits warmup',
+          tags: ['calculus', 'limits'],
+          order: 0,
+          template: 'graph',
+          view: { zoom: 1, panX: 0, panY: 0 },
+          background: null,
+          elements: [
+            {
+              id: 'element-1',
+              type: 'text',
+              text: 'lim x -> 0',
+              position: { x: 100, y: 120 },
+              color: '#111827',
+              fontSize: 22
+            }
+          ]
+        }
+      ]
+    };
+  }
+
+  function whiteboardStateDoc(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> & { save: jest.Mock } {
+    return {
+      id: 'whiteboard-state-1',
+      sessionId,
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      whiteboardChannelId: `classroom:${sessionId}:whiteboard`,
+      schemaVersion: 1,
+      snapshotVersion: 1,
+      currentSnapshot: whiteboardSnapshot(),
+      pages: [
+        {
+          pageId: 'page-1',
+          title: 'Limits warmup',
+          tags: ['calculus', 'limits'],
+          order: 0,
+          elementCount: 1
+        }
+      ],
+      pageCount: 1,
+      elementCount: 1,
+      createdByUserId: 'teacher-1',
+      updatedByUserId: 'teacher-1',
+      createdAt: new Date('2026-06-22T10:00:00.000Z'),
+      updatedAt: new Date('2026-06-22T10:05:00.000Z'),
+      save: jest.fn(async () => undefined),
+      ...overrides
+    };
+  }
+
+  function whiteboardVersionDoc(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+    return {
+      id: 'whiteboard-version-1',
+      versionId: 'whiteboard-version-1',
+      sessionId,
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      whiteboardChannelId: `classroom:${sessionId}:whiteboard`,
+      reason: 'manual-save',
+      schemaVersion: 1,
+      snapshotVersion: 1,
+      snapshot: whiteboardSnapshot(),
+      pages: [
+        {
+          pageId: 'page-1',
+          title: 'Limits warmup',
+          tags: ['calculus', 'limits'],
+          order: 0,
+          elementCount: 1
+        }
+      ],
+      pageCount: 1,
+      elementCount: 1,
+      createdByUserId: 'teacher-1',
+      createdAt: new Date('2026-06-22T10:06:00.000Z'),
+      updatedAt: new Date('2026-06-22T10:06:00.000Z'),
       ...overrides
     };
   }

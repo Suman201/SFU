@@ -20,6 +20,10 @@ import {
   ClassSessionAttendanceSnapshotSchema,
   ClassSessionMaterialDocument,
   ClassSessionMaterialSchema,
+  ClassSessionWhiteboardStateDocument,
+  ClassSessionWhiteboardStateSchema,
+  ClassSessionWhiteboardVersionDocument,
+  ClassSessionWhiteboardVersionSchema,
   ClassSessionSchema,
   ConsumerDocument,
   ConsumerSchema,
@@ -37,6 +41,8 @@ import {
   PermissionSchema,
   ProducerDocument,
   ProducerSchema,
+  PushSubscriptionDocument,
+  PushSubscriptionSchema,
   RedisStreamEndpointDocument,
   RedisStreamEndpointSchema,
   RecordingDocument,
@@ -75,6 +81,8 @@ import {
       { name: ClassSessionDocument.name, schema: ClassSessionSchema },
       { name: ClassSessionAttendanceSnapshotDocument.name, schema: ClassSessionAttendanceSnapshotSchema },
       { name: ClassSessionMaterialDocument.name, schema: ClassSessionMaterialSchema },
+      { name: ClassSessionWhiteboardStateDocument.name, schema: ClassSessionWhiteboardStateSchema },
+      { name: ClassSessionWhiteboardVersionDocument.name, schema: ClassSessionWhiteboardVersionSchema },
       { name: RoleDocument.name, schema: RoleSchema },
       { name: AccessPermissionDocument.name, schema: AccessPermissionSchema },
       { name: RolePermissionDocument.name, schema: RolePermissionSchema },
@@ -98,7 +106,8 @@ import {
       { name: ChatAttachmentFileDocument.name, schema: ChatAttachmentFileSchema },
       { name: ChatMessageDocument.name, schema: ChatMessageSchema },
       { name: ChatReadStateDocument.name, schema: ChatReadStateSchema },
-      { name: RecordingDocument.name, schema: RecordingSchema }
+      { name: RecordingDocument.name, schema: RecordingSchema },
+      { name: PushSubscriptionDocument.name, schema: PushSubscriptionSchema }
     ])
   ],
   exports: [MongooseModule]

@@ -203,6 +203,38 @@ describe('SessionChat delivery state', () => {
     expect(attachments[1]?.textContent).toContain('Reference');
   });
 
+  it('uses an app-native link dialog instead of a browser prompt', () => {
+    const promptSpy = spyOn(globalThis, 'prompt').and.returnValue('https://example.test/reference');
+    const component = fixture.componentInstance as unknown as {
+      addLinkAttachment(): void;
+      confirmLinkAttachment(event?: Event): void;
+      pendingAttachments: () => Array<{ type: string; title?: string; url?: string }>;
+    };
+
+    component.addLinkAttachment();
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement as HTMLElement;
+    const input = root.querySelector('.link-dialog input') as HTMLInputElement | null;
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(root.querySelector('.link-dialog-backdrop[role="dialog"]')).not.toBeNull();
+    expect(input).not.toBeNull();
+
+    input!.value = 'https://example.test/reference';
+    input!.dispatchEvent(new Event('input'));
+    component.confirmLinkAttachment(new Event('submit'));
+    fixture.detectChanges();
+
+    expect(component.pendingAttachments()[0]).toEqual(
+      jasmine.objectContaining({
+        type: 'link',
+        title: 'example.test',
+        url: 'https://example.test/reference'
+      })
+    );
+    expect(root.querySelector('.link-dialog-backdrop')).toBeNull();
+  });
+
   it('uploads file attachments before sending chat with attachment ids only', async () => {
     classSessions.uploadChatAttachments.and.returnValue(
       of([

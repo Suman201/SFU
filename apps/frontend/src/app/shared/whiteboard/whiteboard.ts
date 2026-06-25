@@ -11,6 +11,7 @@ import {
   output,
   signal
 } from '@angular/core';
+import type { WhiteboardMemoryPage, WhiteboardMemorySnapshot } from '@native-sfu/contracts';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 
 export type WhiteboardTool =
@@ -26,6 +27,8 @@ export type WhiteboardTool =
   | 'equation'
   | 'graph'
   | 'segment'
+  | 'ruler'
+  | 'protractor'
   | 'angle'
   | 'circle'
   | 'arc'
@@ -34,19 +37,46 @@ export type WhiteboardTool =
   | 'midpoint'
   | 'point'
   | 'vector'
+  | 'polygon'
   | 'venn'
   | 'node-edge'
   | 'tree'
   | 'flow'
   | 'probability-tree'
+  | 'coordinate-axes'
+  | 'number-line-template'
+  | 'table-layout'
+  | 'fraction-bars'
   | 'laser'
   | 'pan';
 export type WhiteboardShapeTool = 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'star';
-export type WhiteboardGeometryTool = 'segment' | 'angle' | 'circle' | 'arc' | 'perpendicular' | 'parallel' | 'midpoint' | 'point' | 'vector';
-export type WhiteboardDiagramTool = 'venn' | 'node-edge' | 'tree' | 'flow' | 'probability-tree';
+export type WhiteboardGeometryTool =
+  | 'segment'
+  | 'ruler'
+  | 'protractor'
+  | 'angle'
+  | 'circle'
+  | 'arc'
+  | 'perpendicular'
+  | 'parallel'
+  | 'midpoint'
+  | 'point'
+  | 'vector'
+  | 'polygon';
+export type WhiteboardDiagramTool =
+  | 'venn'
+  | 'node-edge'
+  | 'tree'
+  | 'flow'
+  | 'probability-tree'
+  | 'coordinate-axes'
+  | 'number-line-template'
+  | 'table-layout'
+  | 'fraction-bars';
 export type WhiteboardFileKind = 'image' | 'document';
 export type WhiteboardAssetFit = 'contain' | 'cover' | 'stretch';
 export type WhiteboardTemplateId = 'blank' | 'ruled' | 'grid' | 'graph' | 'coordinate' | 'number-line' | 'geometry' | 'table' | 'fraction';
+export type WhiteboardTextAlignment = 'left' | 'center' | 'right';
 
 export interface WhiteboardPoint {
   x: number;
@@ -83,6 +113,9 @@ export interface WhiteboardTextElement extends WhiteboardElementBase {
   fontSize: number;
   position: WhiteboardPoint;
   text: string;
+  width?: number;
+  height?: number;
+  align?: WhiteboardTextAlignment;
 }
 
 export interface WhiteboardEquationElement extends WhiteboardElementBase {
@@ -94,6 +127,7 @@ export interface WhiteboardEquationElement extends WhiteboardElementBase {
   raw: string;
   width: number;
   height: number;
+  align?: WhiteboardTextAlignment;
 }
 
 export interface WhiteboardGraphFunction {
@@ -111,6 +145,38 @@ export interface WhiteboardGraphHelpers {
   showIntercepts?: boolean;
 }
 
+export interface WhiteboardGraphParametricPlot {
+  xExpression: string;
+  yExpression: string;
+  tMin: number;
+  tMax: number;
+  color: string;
+  width: number;
+}
+
+export interface WhiteboardGraphPolarPlot {
+  expression: string;
+  thetaMin: number;
+  thetaMax: number;
+  color: string;
+  width: number;
+}
+
+export interface WhiteboardGraphLabel {
+  x: number;
+  y: number;
+  text: string;
+  color?: string;
+}
+
+export interface WhiteboardGraphStats {
+  histogramData?: string;
+  histogramBins?: number;
+  showRegression?: boolean;
+  normalMean?: number | null;
+  normalStdDev?: number | null;
+}
+
 export interface WhiteboardGraphElement extends WhiteboardElementBase {
   type: 'graph';
   position: WhiteboardPoint;
@@ -124,9 +190,15 @@ export interface WhiteboardGraphElement extends WhiteboardElementBase {
   showGrid: boolean;
   showAxes: boolean;
   showTicks: boolean;
+  tickStep?: number | null;
   functions: WhiteboardGraphFunction[];
+  inequality?: string;
+  parametric?: WhiteboardGraphParametricPlot | null;
+  polar?: WhiteboardGraphPolarPlot | null;
   scatterPoints?: string;
   scatterColor?: string;
+  labels?: WhiteboardGraphLabel[];
+  stats?: WhiteboardGraphStats;
   helpers?: WhiteboardGraphHelpers;
 }
 
@@ -167,7 +239,12 @@ export interface WhiteboardFileElement extends WhiteboardElementBase {
 
 export interface WhiteboardPageBackground {
   kind: 'image';
+  sourceType?: 'image' | 'pdf-page' | 'slide-image';
   fileName: string;
+  mimeType?: string;
+  pageNumber?: number;
+  materialId?: string;
+  attachmentId?: string;
   dataUrl: string;
   naturalWidth: number;
   naturalHeight: number;
@@ -188,6 +265,7 @@ export type WhiteboardElement =
 export interface WhiteboardPage {
   id: string;
   title: string;
+  tags?: string[];
   template: WhiteboardTemplateId;
   view: WhiteboardPageView;
   background?: WhiteboardPageBackground | null;
@@ -226,6 +304,11 @@ export interface WhiteboardClearCommand {
 
 export type WhiteboardCommand = WhiteboardUpsertCommand | WhiteboardDeleteCommand | WhiteboardClearCommand;
 
+export interface WhiteboardElementRef {
+  elementId: string;
+  pageId?: string;
+}
+
 interface PanStart {
   clientX: number;
   clientY: number;
@@ -241,6 +324,7 @@ interface TextDraft {
   elementId?: string;
   width?: number;
   height?: number;
+  align?: WhiteboardTextAlignment;
 }
 
 interface GraphDraft {
@@ -258,6 +342,7 @@ interface GraphDraft {
   showGrid: boolean;
   showAxes: boolean;
   showTicks: boolean;
+  tickStep: string;
   curveColor: string;
   lineWidth: number;
   pointX: string;
@@ -265,12 +350,28 @@ interface GraphDraft {
   shadeFrom: string;
   shadeTo: string;
   showIntercepts: boolean;
+  inequality: string;
+  parametricX: string;
+  parametricY: string;
+  parametricTMin: string;
+  parametricTMax: string;
+  polarExpression: string;
+  polarThetaMin: string;
+  polarThetaMax: string;
   scatterPoints: string;
+  histogramData: string;
+  histogramBins: string;
+  showRegression: boolean;
+  normalMean: string;
+  normalStdDev: string;
+  labels: string;
   error?: string | null;
 }
 
 type TransformHandle = 'nw' | 'ne' | 'sw' | 'se';
 type FlipDirection = 'horizontal' | 'vertical' | 'left' | 'right';
+type MathToolsTab = 'equation' | 'templates' | 'snippets' | 'graph' | 'geometry';
+type WhiteboardEraserMode = 'partial' | 'stroke' | 'area';
 
 interface ElementBounds {
   x: number;
@@ -324,6 +425,11 @@ interface MathSnippet {
   value: string;
 }
 
+interface MathShortcutGroup {
+  label: string;
+  shortcuts: MathSnippet[];
+}
+
 interface MathRunMetrics {
   width: number;
   height: number;
@@ -369,9 +475,44 @@ interface GeometryToolOption {
   label: string;
 }
 
+interface GeometryToolGroup {
+  label: string;
+  tools: GeometryToolOption[];
+}
+
 interface DiagramToolOption {
   id: WhiteboardDiagramTool;
   label: string;
+}
+
+interface MathToolsTabOption {
+  id: MathToolsTab;
+  label: string;
+}
+
+interface EraserModeOption {
+  id: WhiteboardEraserMode;
+  label: string;
+  description: string;
+}
+
+interface InsertTemplateOption {
+  kind: WhiteboardDiagramTool;
+  label: string;
+  description: string;
+}
+
+interface MathPopoverPosition {
+  x: number;
+  y: number;
+}
+
+interface MathPopoverDragState {
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
 }
 
 interface AssetImportStatus {
@@ -379,7 +520,8 @@ interface AssetImportStatus {
   message: string;
 }
 
-type AssetImportMode = 'element' | 'background' | 'pdf-pages';
+type AssetImportMode = 'element' | 'background' | 'pdf-pages' | 'slide-pages';
+type AssetPageSourceType = 'image' | 'slide-image';
 type PdfJsModule = typeof import('pdfjs-dist');
 
 const GRID_SIZE = 24;
@@ -387,6 +529,7 @@ const ALIGNMENT_TOLERANCE = 6;
 const MAX_IMAGE_ASSET_BYTES = 12 * 1024 * 1024;
 const MAX_PDF_ASSET_BYTES = 25 * 1024 * 1024;
 const MAX_PDF_IMPORT_PAGES = 30;
+const MAX_SLIDE_IMAGE_IMPORT_PAGES = 40;
 const PDF_RENDER_MAX_DIMENSION = 1800;
 const IMAGE_ASSET_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const PDFJS_WORKER_SRC = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
@@ -403,16 +546,57 @@ const TEMPLATE_OPTIONS: WhiteboardTemplateOption[] = [
   { id: 'table', label: 'Table layout', description: 'Rows and columns' },
   { id: 'fraction', label: 'Fraction bars', description: 'Fraction comparison bars' }
 ];
+const TEXT_ALIGNMENT_OPTIONS: WhiteboardTextAlignment[] = ['left', 'center', 'right'];
+const MATH_SHORTCUT_GROUPS: MathShortcutGroup[] = [
+  {
+    label: 'Structure',
+    shortcuts: [
+      { label: 'Fraction', value: '\\frac{a}{b}' },
+      { label: 'Power', value: 'x^{2}' },
+      { label: 'Subscript', value: 'a_{n}' },
+      { label: 'Root', value: '\\sqrt{x}' }
+    ]
+  },
+  {
+    label: 'Greek',
+    shortcuts: [
+      { label: 'α', value: '\\alpha' },
+      { label: 'β', value: '\\beta' },
+      { label: 'γ', value: '\\gamma' },
+      { label: 'θ', value: '\\theta' },
+      { label: 'π', value: '\\pi' },
+      { label: 'σ', value: '\\sigma' },
+      { label: 'ω', value: '\\omega' }
+    ]
+  },
+  {
+    label: 'Operators',
+    shortcuts: [
+      { label: 'Integral', value: '\\int ' },
+      { label: 'Sum', value: '\\sum ' },
+      { label: 'Limit', value: '\\lim_{x \\to 0}' },
+      { label: 'Vector', value: '\\vec{v}' },
+      { label: 'Angle', value: '\\angle ABC' }
+    ]
+  },
+  {
+    label: 'Matrices',
+    shortcuts: [
+      { label: '2 x 2', value: '\\begin{matrix} a & b \\\\ c & d \\end{matrix}' },
+      { label: '3 x 3', value: '\\begin{matrix} a & b & c \\\\ d & e & f \\\\ g & h & i \\end{matrix}' }
+    ]
+  }
+];
 const MATH_SNIPPETS: MathSnippet[] = [
-  { label: 'Fraction', value: '\\frac{}{}' },
-  { label: 'Root', value: '\\sqrt{}' },
-  { label: 'Power', value: '^{}' },
-  { label: 'Integral', value: '\\int ' },
-  { label: 'Sum', value: '\\sum ' },
-  { label: 'Limit', value: '\\lim ' },
-  { label: 'Theta', value: '\\theta' },
-  { label: 'Pi', value: '\\pi' },
-  { label: 'Matrix', value: '\\begin{matrix} a & b \\\\ c & d \\end{matrix}' }
+  ...MATH_SHORTCUT_GROUPS.flatMap((group) => group.shortcuts),
+  { label: 'Quadratic', value: 'x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}' },
+  { label: 'Circle', value: '(x-h)^2+(y-k)^2=r^2' },
+  { label: 'Slope', value: 'm=\\frac{y_2-y_1}{x_2-x_1}' },
+  { label: 'Distance', value: 'd=\\sqrt{(x_2-x_1)^2+(y_2-y_1)^2}' },
+  { label: 'Pythagorean', value: 'a^2+b^2=c^2' },
+  { label: 'Area circle', value: 'A=\\pi r^2' },
+  { label: 'Trig identity', value: '\\sin^2\\theta+\\cos^2\\theta=1' },
+  { label: 'Proof frame', value: 'Given:\\nTo prove:\\nConstruction:\\nProof:' }
 ];
 const MATH_COMMAND_REPLACEMENTS: Record<string, string> = {
   alpha: 'α',
@@ -431,30 +615,53 @@ const MATH_COMMAND_REPLACEMENTS: Record<string, string> = {
   int: '∫',
   sum: 'Σ',
   lim: 'lim',
+  angle: '∠',
   infty: '∞',
   infinity: '∞',
   le: '≤',
   ge: '≥',
+  approx: '≈',
   neq: '≠',
   times: '×',
   div: '÷',
   pm: '±',
   cdot: '·',
+  ldots: '…',
+  cdots: '⋯',
   to: '→',
   rightarrow: '→',
   leftarrow: '←'
 };
-const GEOMETRY_TOOL_OPTIONS: GeometryToolOption[] = [
-  { id: 'segment', label: 'Segment' },
-  { id: 'angle', label: 'Angle' },
-  { id: 'circle', label: 'Compass' },
-  { id: 'arc', label: 'Arc' },
-  { id: 'perpendicular', label: 'Perpendicular' },
-  { id: 'parallel', label: 'Parallel' },
-  { id: 'midpoint', label: 'Midpoint' },
-  { id: 'point', label: 'Point' },
-  { id: 'vector', label: 'Vector' }
+const GEOMETRY_TOOL_GROUPS: GeometryToolGroup[] = [
+  {
+    label: 'Precision',
+    tools: [
+      { id: 'ruler', label: 'Ruler' },
+      { id: 'protractor', label: 'Protractor' },
+      { id: 'circle', label: 'Compass' },
+      { id: 'angle', label: 'Angle' }
+    ]
+  },
+  {
+    label: 'Construction',
+    tools: [
+      { id: 'segment', label: 'Straightedge' },
+      { id: 'parallel', label: 'Parallel' },
+      { id: 'perpendicular', label: 'Perpendicular' },
+      { id: 'midpoint', label: 'Midpoint' },
+      { id: 'point', label: 'Point' }
+    ]
+  },
+  {
+    label: 'Shapes',
+    tools: [
+      { id: 'vector', label: 'Vector' },
+      { id: 'polygon', label: 'Polygon' },
+      { id: 'arc', label: 'Arc' }
+    ]
+  }
 ];
+const GEOMETRY_TOOL_OPTIONS: GeometryToolOption[] = GEOMETRY_TOOL_GROUPS.flatMap((group) => group.tools);
 const DIAGRAM_TOOL_OPTIONS: DiagramToolOption[] = [
   { id: 'venn', label: 'Venn' },
   { id: 'node-edge', label: 'Nodes' },
@@ -462,7 +669,30 @@ const DIAGRAM_TOOL_OPTIONS: DiagramToolOption[] = [
   { id: 'flow', label: 'Flow' },
   { id: 'probability-tree', label: 'Probability' }
 ];
+const MATH_TOOLS_TABS: MathToolsTabOption[] = [
+  { id: 'equation', label: 'Equation' },
+  { id: 'templates', label: 'Templates' },
+  { id: 'snippets', label: 'Snippets' },
+  { id: 'graph', label: 'Graph' },
+  { id: 'geometry', label: 'Geometry' }
+];
+const ERASER_MODE_OPTIONS: EraserModeOption[] = [
+  { id: 'partial', label: 'Partial', description: 'Trim pen strokes under the eraser.' },
+  { id: 'stroke', label: 'Stroke', description: 'Remove the whole stroke or object.' },
+  { id: 'area', label: 'Area', description: 'Use a larger classroom eraser radius.' }
+];
+const INSERT_TEMPLATE_OPTIONS: InsertTemplateOption[] = [
+  { kind: 'coordinate-axes', label: 'Coordinate axes', description: 'Movable x/y axes with ticks and origin.' },
+  { kind: 'number-line-template', label: 'Number line', description: 'Movable signed number line with ticks.' },
+  { kind: 'table-layout', label: 'Table layout', description: 'Editable 4 x 5 classroom table starter.' },
+  { kind: 'fraction-bars', label: 'Fraction bars', description: 'Halves, thirds, fourths, fifths, and eighths.' },
+  { kind: 'venn', label: 'Venn diagram', description: 'Editable two-set comparison starter.' },
+  { kind: 'flow', label: 'Flowchart', description: 'Editable process / worked-example steps.' },
+  { kind: 'tree', label: 'Tree', description: 'Branching proof or decision layout.' },
+  { kind: 'probability-tree', label: 'Probability tree', description: 'Probability branches with p / 1-p labels.' }
+];
 const ANGLE_SNAP_OPTIONS = [0, 15, 30, 45, 90];
+const RECENT_COLOR_LIMIT = 8;
 const TOOL_LABELS: Record<WhiteboardTool, string> = {
   select: 'Select',
   pen: 'Pen',
@@ -476,6 +706,8 @@ const TOOL_LABELS: Record<WhiteboardTool, string> = {
   equation: 'Equation',
   graph: 'Graph',
   segment: 'Segment',
+  ruler: 'Ruler',
+  protractor: 'Protractor',
   angle: 'Angle',
   circle: 'Circle',
   arc: 'Arc',
@@ -484,11 +716,16 @@ const TOOL_LABELS: Record<WhiteboardTool, string> = {
   midpoint: 'Midpoint',
   point: 'Point',
   vector: 'Vector',
+  polygon: 'Polygon',
   venn: 'Venn',
   'node-edge': 'Nodes',
   tree: 'Tree',
   flow: 'Flow',
   'probability-tree': 'Probability',
+  'coordinate-axes': 'Axes',
+  'number-line-template': 'Number line',
+  'table-layout': 'Table',
+  'fraction-bars': 'Fractions',
   laser: 'Laser',
   pan: 'Pan'
 };
@@ -513,11 +750,14 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   readonly cursors = input<WhiteboardCursor[]>([]);
   readonly commandCommitted = output<WhiteboardCommand>();
   readonly cursorMoved = output<WhiteboardCursor>();
+  readonly stateChanged = output<void>();
   readonly endSession = output<void>();
 
   @ViewChild('whiteboardSurface') private readonly whiteboardSurface?: ElementRef<HTMLDivElement>;
   @ViewChild('whiteboardCanvas') private readonly whiteboardCanvas?: ElementRef<HTMLCanvasElement>;
   @ViewChild('textEditor') private readonly textEditor?: ElementRef<HTMLTextAreaElement>;
+  @ViewChild('mathEquationInput') private readonly mathEquationInput?: ElementRef<HTMLTextAreaElement>;
+  @ViewChild('mathToolsPopover') private readonly mathToolsPopover?: ElementRef<HTMLElement>;
   @ViewChild('fileInput') private readonly fileInput?: ElementRef<HTMLInputElement>;
 
   protected readonly activeTool = signal<WhiteboardTool>('select');
@@ -535,24 +775,62 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly fillColor = signal('#FFD150');
   protected readonly fillEnabled = signal(false);
   protected readonly strokeWidth = signal(4);
+  protected readonly eraserMode = signal<WhiteboardEraserMode>('partial');
+  protected readonly eraserSize = signal(18);
   protected readonly fontSize = signal(28);
   protected readonly colors = ['#071c41', '#458B73', '#F26076', '#FF9760', '#FFD150'];
+  protected readonly recentColors = signal<string[]>([]);
+  protected readonly customRecentColors = computed(() =>
+    this.recentColors().filter((color) => !this.colors.some((preset) => preset.toLowerCase() === color.toLowerCase()))
+  );
   protected readonly brushSizes = [3, 6, 10, 14];
+  protected readonly eraserSizes = [12, 18, 28, 40];
+  protected readonly eraserModeOptions = ERASER_MODE_OPTIONS;
   protected readonly mathSnippets = MATH_SNIPPETS;
+  protected readonly mathShortcutGroups = MATH_SHORTCUT_GROUPS;
+  protected readonly mathTabs = MATH_TOOLS_TABS;
+  protected readonly textAlignmentOptions = TEXT_ALIGNMENT_OPTIONS;
+  protected readonly geometryToolGroups = GEOMETRY_TOOL_GROUPS;
   protected readonly geometryToolOptions = GEOMETRY_TOOL_OPTIONS;
   protected readonly diagramToolOptions = DIAGRAM_TOOL_OPTIONS;
+  protected readonly insertTemplateOptions = INSERT_TEMPLATE_OPTIONS;
   protected readonly angleSnapOptions = ANGLE_SNAP_OPTIONS;
+  protected readonly mathPopoverOpen = signal(false);
+  protected readonly activeMathTab = signal<MathToolsTab>('equation');
+  protected readonly mathPopoverPosition = signal<MathPopoverPosition>({ x: 72, y: 72 });
+  protected readonly mathEquationDraft = signal('\\frac{a}{b}');
+  protected readonly mathEquationFontSize = signal(32);
+  protected readonly mathEquationAlignment = signal<WhiteboardTextAlignment>('left');
+  protected readonly mathPopoverTransform = computed(() => {
+    const position = this.mathPopoverPosition();
+    return `translate3d(${position.x}px, ${position.y}px, 0)`;
+  });
+  protected readonly mathEquationPreview = computed(() => this.renderEquationPreview(this.mathEquationDraft(), this.mathEquationFontSize(), this.strokeColor()));
+  protected readonly mathEquationError = computed(() => this.validateMathSource(this.mathEquationDraft()));
   protected readonly zoom = signal(1);
   protected readonly panX = signal(0);
   protected readonly panY = signal(0);
   protected readonly selectedElementIds = signal<string[]>([]);
+  protected readonly selectedEquationForPopover = computed(() => this.singleSelectedEquation());
+  protected readonly selectedTextForPopover = computed(() => this.singleSelectedText());
+  protected readonly mathEquationActionLabel = computed(() => {
+    if (this.selectedEquationForPopover()) {
+      return 'Update equation';
+    }
+    if (this.selectedTextForPopover()) {
+      return 'Convert text to equation';
+    }
+    return 'Insert equation';
+  });
   protected readonly textDraft = signal<TextDraft | null>(null);
   protected readonly graphDraft = signal<GraphDraft | null>(null);
   protected readonly contextMenu = signal<ContextMenuState | null>(null);
   protected readonly laserPoint = signal<WhiteboardPoint | null>(null);
+  protected readonly eraserCursor = signal<WhiteboardPoint | null>(null);
   protected readonly alignmentGuides = signal<AlignmentGuide[]>([]);
   protected readonly selectionMarquee = signal<SelectionMarquee | null>(null);
   protected readonly snapToGrid = signal(false);
+  protected readonly snapToPoints = signal(false);
   protected readonly snapIndicator = signal<WhiteboardPoint | null>(null);
   protected readonly angleSnapDegrees = signal(15);
   protected readonly showMeasurements = signal(true);
@@ -562,26 +840,49 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly assetInputAccept = computed(() =>
     this.assetImportMode() === 'pdf-pages'
       ? '.pdf,application/pdf'
-      : this.assetImportMode() === 'background'
+      : this.assetImportMode() === 'slide-pages' || this.assetImportMode() === 'background'
         ? 'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp'
         : 'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp,.pdf,application/pdf'
   );
+  protected readonly assetInputMultiple = computed(() => this.assetImportMode() === 'slide-pages');
   protected readonly templateOptions = TEMPLATE_OPTIONS;
   protected readonly pages = signal<WhiteboardPage[]>([this.createPage('Board 1')]);
   protected readonly activePageId = signal(this.pages()[0]!.id);
+  protected readonly pageSearchQuery = signal('');
+  protected readonly selectedExportPageIds = signal<string[]>([]);
   protected readonly historyVersion = signal(0);
   protected readonly activePage = computed(() => this.pages().find((page) => page.id === this.activePageId()) ?? this.pages()[0]!);
   protected readonly activeTemplate = computed(() => this.activePage().template ?? DEFAULT_TEMPLATE_ID);
   protected readonly activeTemplateLabel = computed(
     () => this.templateOptions.find((option) => option.id === this.activeTemplate())?.label ?? 'Grid'
   );
+  protected readonly activePageTagsText = computed(() => (this.activePage().tags ?? []).join(', '));
+  protected readonly filteredPages = computed(() => {
+    const query = this.pageSearchQuery().trim().toLowerCase();
+    if (!query) {
+      return this.pages();
+    }
+    return this.pages().filter((page) =>
+      page.title.toLowerCase().includes(query) || (page.tags ?? []).some((tag) => tag.toLowerCase().includes(query))
+    );
+  });
+  protected readonly selectedExportPages = computed(() => {
+    const selectedIds = new Set(this.selectedExportPageIds());
+    return this.pages().filter((page) => selectedIds.has(page.id));
+  });
+  protected readonly canExportSelectedPages = computed(() => this.canExportBoard() && this.selectedExportPages().length > 0);
   protected readonly canManagePages = computed(() => !this.readOnly() && this.allowPageManagement());
   protected readonly canImportAssets = computed(() => !this.readOnly() && this.allowAssetImport());
   protected readonly canExportBoard = computed(() => this.allowExport());
   protected readonly canClearBoard = computed(() => !this.readOnly() && this.allowClear());
   protected readonly boardTransform = computed(() => `translate(${this.panX()}px, ${this.panY()}px) scale(${this.zoom()})`);
   protected readonly zoomPercent = computed(() => `${Math.round(this.zoom() * 100)}%`);
-  protected readonly activeToolLabel = computed(() => TOOL_LABELS[this.activeTool()]);
+  protected readonly activeToolLabel = computed(() => {
+    if (this.activeTool() === 'eraser') {
+      return `Erase · ${this.eraserModeOptions.find((mode) => mode.id === this.eraserMode())?.label ?? 'Partial'}`;
+    }
+    return TOOL_LABELS[this.activeTool()];
+  });
   protected readonly elementCount = computed(() => this.activePage().elements.length);
   protected readonly canUndo = computed(() => this.historyVersion() >= 0 && this.historyPast.length > 0);
   protected readonly canRedo = computed(() => this.historyVersion() >= 0 && this.historyFuture.length > 0);
@@ -609,6 +910,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   private activeCaptureStream: MediaStream | null = null;
   private pdfWorkerConfigured = false;
   private pdfJsModule: PdfJsModule | null = null;
+  private mathPopoverDrag: MathPopoverDragState | null = null;
 
   private get elements(): WhiteboardElement[] {
     return this.activePage().elements;
@@ -627,6 +929,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.closeMathTools();
     this.stopMediaCapture();
     this.resizeObserver?.disconnect();
     if (this.resizeFrame) {
@@ -706,13 +1009,17 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected handleKeyboardShortcut(event: KeyboardEvent): void {
     const editableTarget = this.isEditableShortcutTarget(event.target);
 
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      this.cancelKeyboardState();
+    if (editableTarget) {
       return;
     }
 
-    if (editableTarget) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (this.mathPopoverOpen()) {
+        this.closeMathTools();
+        return;
+      }
+      this.cancelKeyboardState();
       return;
     }
 
@@ -768,6 +1075,14 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!this.readOnly() && (event.key === 'Delete' || event.key === 'Backspace') && this.selectedElementIds().length) {
       event.preventDefault();
       this.deleteSelected();
+      return;
+    }
+
+    if (!this.readOnly() && event.key.startsWith('Arrow') && this.selectedElementIds().length) {
+      event.preventDefault();
+      const distance = event.shiftKey ? 10 : 1;
+      const delta = this.arrowKeyDelta(event.key, distance);
+      this.nudgeSelected(delta.x, delta.y);
     }
   }
 
@@ -780,11 +1095,81 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.resizeFrame = window.requestAnimationFrame(() => {
       this.resizeFrame = 0;
       this.resizeWhiteboard();
+      this.clampMathPopoverToViewport();
     });
+  }
+
+  @HostListener('window:pointermove', ['$event'])
+  protected dragMathPopover(event: PointerEvent): void {
+    const drag = this.mathPopoverDrag;
+    if (!drag || event.pointerId !== drag.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    this.mathPopoverPosition.set(
+      this.clampMathPopoverPosition(
+        {
+          x: event.clientX - drag.offsetX,
+          y: event.clientY - drag.offsetY
+        },
+        drag.width,
+        drag.height
+      )
+    );
+  }
+
+  @HostListener('window:pointerup', ['$event'])
+  @HostListener('window:pointercancel', ['$event'])
+  protected stopDraggingMathPopover(event: PointerEvent): void {
+    if (this.mathPopoverDrag?.pointerId === event.pointerId) {
+      this.mathPopoverDrag = null;
+    }
   }
 
   currentPageId(): string {
     return this.activePageId();
+  }
+
+  exportBoardState(): WhiteboardMemorySnapshot {
+    this.persistActivePageView();
+    return {
+      schemaVersion: 1,
+      activePageId: this.activePageId(),
+      pages: this.pages().map((page, index): WhiteboardMemoryPage => ({
+        id: page.id,
+        title: page.title,
+        tags: page.tags ?? [],
+        order: index,
+        template: page.template ?? DEFAULT_TEMPLATE_ID,
+        view: { ...(page.view ?? DEFAULT_PAGE_VIEW) },
+        background: page.background ? (structuredClone(page.background) as unknown as Record<string, unknown>) : null,
+        elements: page.elements.map((element) => structuredClone(element) as unknown as Record<string, unknown>)
+      }))
+    };
+  }
+
+  importBoardState(snapshot: WhiteboardMemorySnapshot): void {
+    if (!snapshot?.pages?.length) {
+      return;
+    }
+    const pages = snapshot.pages.map((page, index): WhiteboardPage => ({
+      id: page.id || this.createElementId(),
+      title: page.title || `Board ${index + 1}`,
+      tags: this.normalizePageTags(page.tags),
+      template: this.normalizeTemplateId(page.template),
+      view: this.normalizePageView(page.view),
+      background: this.normalizePageBackground(page.background),
+      elements: Array.isArray(page.elements) ? page.elements.map((element) => structuredClone(element) as unknown as WhiteboardElement) : []
+    }));
+    this.pages.set(pages);
+    this.activePageId.set(snapshot.activePageId && pages.some((page) => page.id === snapshot.activePageId) ? snapshot.activePageId : pages[0]!.id);
+    this.historyPast = [];
+    this.historyFuture = [];
+    this.ensureActivePage();
+    this.applyPageView(this.activePage());
+    this.selectedElementIds.set([]);
+    this.pruneImageCache();
+    this.render();
   }
 
   protected canUseTool(tool: WhiteboardTool): boolean {
@@ -851,6 +1236,44 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         pageId
       }))
     ];
+  }
+
+  elementRefs(): WhiteboardElementRef[] {
+    return this.pages().flatMap((page) => page.elements.map((element) => ({ pageId: page.id, elementId: element.id })));
+  }
+
+  removeElementsByRefs(refs: readonly WhiteboardElementRef[]): number {
+    if (this.readOnly() || !refs.length) {
+      return 0;
+    }
+
+    const exactRefs = new Set(refs.filter((ref) => ref.elementId && ref.pageId).map((ref) => `${ref.pageId}:${ref.elementId}`));
+    const globalRefs = new Set(refs.filter((ref) => ref.elementId && !ref.pageId).map((ref) => ref.elementId));
+    const deleteCommands: WhiteboardDeleteCommand[] = [];
+    const nextPages = this.pages().map((page) => {
+      const nextElements = page.elements.filter((element) => {
+        const shouldRemove = exactRefs.has(`${page.id}:${element.id}`) || globalRefs.has(element.id);
+        if (shouldRemove) {
+          deleteCommands.push({ type: 'delete', elementId: element.id, pageId: page.id });
+        }
+        return !shouldRemove;
+      });
+      return nextElements.length === page.elements.length ? page : { ...page, elements: nextElements };
+    });
+
+    if (!deleteCommands.length) {
+      return 0;
+    }
+
+    this.pushHistory();
+    this.pages.set(nextPages);
+    this.selectedElementIds.update((ids) => ids.filter((id) => !deleteCommands.some((command) => command.elementId === id)));
+    this.pruneImageCache();
+    this.render();
+    for (const command of deleteCommands) {
+      this.commandCommitted.emit(command);
+    }
+    return deleteCommands.length;
   }
 
   exportImage(): string {
@@ -923,9 +1346,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (this.readOnly()) {
       return;
     }
-    this.strokeColor.set(color);
+    const normalizedColor = this.normalizeColor(color);
+    this.strokeColor.set(normalizedColor);
+    this.rememberColor(normalizedColor);
     this.colorMenuOpen.set(false);
-    this.applyStrokeToSelection(color);
+    this.applyStrokeToSelection(normalizedColor);
   }
 
   protected setCustomStrokeColor(event: Event): void {
@@ -952,10 +1377,12 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (this.readOnly() || !this.canUseTool('select')) {
       return;
     }
-    this.fillColor.set(color);
+    const normalizedColor = this.normalizeColor(color);
+    this.fillColor.set(normalizedColor);
+    this.rememberColor(normalizedColor);
     this.fillEnabled.set(true);
     this.fillColorMenuOpen.set(false);
-    this.applyFillToSelection(color);
+    this.applyFillToSelection(normalizedColor);
   }
 
   protected setCustomFillColor(event: Event): void {
@@ -973,6 +1400,171 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.menuOpen.update((open) => !open);
   }
 
+  protected openMathTools(tab: MathToolsTab = 'equation'): void {
+    if (this.readOnly()) {
+      return;
+    }
+    if (tab === 'equation') {
+      this.loadSelectedEquationIntoMathPopover();
+    }
+    this.activeMathTab.set(tab);
+    this.menuOpen.set(false);
+    this.shapeMenuOpen.set(false);
+    this.geometryMenuOpen.set(false);
+    this.diagramMenuOpen.set(false);
+    this.colorMenuOpen.set(false);
+    this.fillColorMenuOpen.set(false);
+    this.brushMenuOpen.set(false);
+    this.mathPopoverOpen.set(true);
+    this.clampMathPopoverToViewport();
+    if (tab === 'equation') {
+      window.setTimeout(() => this.mathEquationInput?.nativeElement.focus());
+    }
+  }
+
+  protected closeMathTools(): void {
+    this.mathPopoverDrag = null;
+    this.mathPopoverOpen.set(false);
+  }
+
+  protected selectMathTab(tab: MathToolsTab): void {
+    this.activeMathTab.set(tab);
+    if (tab === 'equation') {
+      window.setTimeout(() => this.mathEquationInput?.nativeElement.focus());
+    }
+  }
+
+  protected startMathPopoverDrag(event: PointerEvent): void {
+    if (event.button !== 0 && event.pointerType === 'mouse') {
+      return;
+    }
+    const popover = (event.currentTarget as HTMLElement | null)?.closest('.math-tools-popover') as HTMLElement | null;
+    if (!popover) {
+      return;
+    }
+    event.preventDefault();
+    const bounds = popover.getBoundingClientRect();
+    this.mathPopoverDrag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - bounds.left,
+      offsetY: event.clientY - bounds.top,
+      width: bounds.width,
+      height: bounds.height
+    };
+  }
+
+  protected updateMathEquationDraft(event: Event): void {
+    const inputElement = event.target as HTMLTextAreaElement;
+    this.mathEquationDraft.set(inputElement.value);
+  }
+
+  protected setMathEquationFontSize(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    this.mathEquationFontSize.set(Number(inputElement.value));
+  }
+
+  protected setMathEquationAlignment(alignment: WhiteboardTextAlignment): void {
+    this.mathEquationAlignment.set(alignment);
+  }
+
+  protected setMathEquationColor(color: string): void {
+    if (this.readOnly()) {
+      return;
+    }
+    const normalizedColor = this.normalizeColor(color);
+    this.strokeColor.set(normalizedColor);
+    this.rememberColor(normalizedColor);
+    this.applyStrokeToSelection(normalizedColor);
+  }
+
+  protected insertMathSnippetIntoPopover(snippet: string): void {
+    const input = this.mathEquationInput?.nativeElement;
+    const currentValue = this.mathEquationDraft();
+    const start = input?.selectionStart ?? currentValue.length;
+    const end = input?.selectionEnd ?? start;
+    const nextValue = `${currentValue.slice(0, start)}${snippet}${currentValue.slice(end)}`;
+    const nextCursor = this.cursorAfterSnippet(snippet, start);
+    this.mathEquationDraft.set(nextValue);
+    window.setTimeout(() => {
+      input?.focus();
+      input?.setSelectionRange(nextCursor, nextCursor);
+    });
+  }
+
+  protected insertEquationFromPopover(): void {
+    if (!this.canUseTool('equation')) {
+      return;
+    }
+    const raw = this.mathEquationDraft().trim();
+    if (!raw || this.mathEquationError()) {
+      this.mathEquationInput?.nativeElement.focus();
+      return;
+    }
+    this.fontSize.set(this.mathEquationFontSize());
+    const selectedEquation = this.singleSelectedEquation();
+    const selectedText = selectedEquation ? null : this.singleSelectedText();
+    const selectedElement = selectedEquation ?? selectedText;
+    const selectedBounds = selectedElement ? this.boundsForElement(selectedElement) : null;
+    const position = selectedElement?.position ?? this.defaultInsertPoint(320, 112);
+    const draft: TextDraft = {
+      x: position.x,
+      y: position.y,
+      value: raw,
+      mode: 'equation',
+      elementId: selectedElement?.id,
+      width: selectedEquation?.width ?? Math.max(320, selectedBounds?.width ?? 0),
+      height: selectedEquation?.height ?? Math.max(112, selectedBounds?.height ?? 0),
+      align: this.mathEquationAlignment()
+    };
+    if (selectedElement) {
+      this.strokeColor.set(selectedElement.color);
+      this.fillEnabled.set(!!selectedElement.fillColor);
+      if (selectedElement.fillColor) {
+        this.fillColor.set(selectedElement.fillColor);
+      }
+    }
+    const element = this.createEquationElement(draft, raw);
+    this.pushHistory();
+    if (selectedElement) {
+      this.elements = this.elements.map((item) => (item.id === selectedElement.id ? element : item));
+      this.setSelection([selectedElement.id]);
+      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.render();
+    } else {
+      this.addElement(element);
+    }
+    this.activeTool.set('select');
+  }
+
+  protected applyMathTemplate(template: WhiteboardTemplateId): void {
+    this.selectTemplate(template);
+  }
+
+  protected insertBoardTemplate(kind: WhiteboardDiagramTool): void {
+    if (!this.canUseTool(kind)) {
+      return;
+    }
+    const position = this.defaultInsertPoint(360, 240);
+    this.pushHistory();
+    const element = this.createDiagramElement(kind, position);
+    this.addElement(element);
+    this.activeTool.set('select');
+    this.setSelection([element.id]);
+  }
+
+  protected openGraphFromMathTools(): void {
+    if (!this.canUseTool('graph')) {
+      return;
+    }
+    const position = this.defaultInsertPoint(460, 320);
+    this.activeTool.set('graph');
+    this.graphDraft.set(this.createGraphDraft(position));
+  }
+
+  protected selectGeometryToolFromMathTools(tool: WhiteboardGeometryTool): void {
+    this.selectGeometryTool(tool);
+  }
+
   protected toggleFill(): void {
     if (this.readOnly() || !this.canUseTool('select')) {
       return;
@@ -984,6 +1576,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   protected toggleSnapToGrid(): void {
     this.snapToGrid.update((enabled) => !enabled);
+    this.snapIndicator.set(null);
+  }
+
+  protected toggleSnapToPoints(): void {
+    this.snapToPoints.update((enabled) => !enabled);
     this.snapIndicator.set(null);
   }
 
@@ -1009,6 +1606,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     const activePageId = this.activePageId();
     this.pages.update((pages) => pages.map((page) => (page.id === activePageId ? { ...page, template } : page)));
     this.render();
+    this.stateChanged.emit();
   }
 
   protected setStrokeWidth(event: Event): void {
@@ -1027,6 +1625,27 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
     this.strokeWidth.set(size);
     this.activeTool.set('pen');
+  }
+
+  protected selectEraserMode(mode: WhiteboardEraserMode): void {
+    if (!this.canUseTool('eraser')) {
+      return;
+    }
+    this.eraserMode.set(mode);
+    this.activeTool.set('eraser');
+  }
+
+  protected selectEraserSize(size: number): void {
+    if (!this.canUseTool('eraser')) {
+      return;
+    }
+    this.eraserSize.set(size);
+    this.activeTool.set('eraser');
+  }
+
+  protected setEraserSize(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    this.selectEraserSize(Number(inputElement.value));
   }
 
   protected zoomOut(): void {
@@ -1058,6 +1677,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.bumpHistoryVersion();
     this.pruneImageCache();
     this.render();
+    this.stateChanged.emit();
   }
 
   protected redo(): void {
@@ -1073,6 +1693,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.bumpHistoryVersion();
     this.pruneImageCache();
     this.render();
+    this.stateChanged.emit();
   }
 
   protected addPage(): void {
@@ -1086,6 +1707,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.applyPageView(page);
     this.selectedElementIds.set([]);
     this.render();
+    this.stateChanged.emit();
+  }
+
+  protected addPageBefore(): void {
+    this.insertBlankPageRelativeToActive('before');
+  }
+
+  protected addPageAfter(): void {
+    this.insertBlankPageRelativeToActive('after');
   }
 
   protected selectPage(pageId: string): void {
@@ -1118,6 +1748,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.selectedElementIds.set([]);
     this.pruneImageCache();
     this.render();
+    this.stateChanged.emit();
   }
 
   protected duplicateActivePage(): void {
@@ -1142,6 +1773,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.applyPageView(duplicate);
     this.selectedElementIds.set([]);
     this.render();
+    this.stateChanged.emit();
   }
 
   protected renameActivePage(event: Event): void {
@@ -1157,6 +1789,29 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.pushHistory();
     const activePageId = this.activePageId();
     this.pages.update((pages) => pages.map((page) => (page.id === activePageId ? { ...page, title } : page)));
+    this.stateChanged.emit();
+  }
+
+  protected setPageSearchQuery(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    this.pageSearchQuery.set(inputElement.value);
+  }
+
+  protected updateActivePageTags(event: Event): void {
+    if (!this.canManagePages()) {
+      return;
+    }
+    const inputElement = event.target as HTMLInputElement;
+    const tags = this.normalizePageTags(inputElement.value);
+    inputElement.value = tags.join(', ');
+    const currentTags = this.activePage().tags ?? [];
+    if (tags.length === currentTags.length && tags.every((tag, index) => tag === currentTags[index])) {
+      return;
+    }
+    this.pushHistory();
+    const activePageId = this.activePageId();
+    this.pages.update((pages) => pages.map((page) => (page.id === activePageId ? { ...page, tags } : page)));
+    this.stateChanged.emit();
   }
 
   protected requestEndSession(): void {
@@ -1203,14 +1858,28 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.fileInput?.nativeElement.click();
   }
 
-  protected importFile(event: Event): void {
-    const inputElement = event.target as HTMLInputElement;
-    const file = inputElement.files?.[0];
-    inputElement.value = '';
-    if (!file || !this.canImportAssets() || this.assetImporting()) {
+  protected triggerSlideImageImport(): void {
+    if (!this.canImportAssets() || this.assetImporting()) {
       return;
     }
-    void this.importAssetFile(file, this.assetImportMode());
+    this.assetImportMode.set('slide-pages');
+    this.assetImportStatus.set(null);
+    this.fileInput?.nativeElement.click();
+  }
+
+  protected importFile(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    const files = Array.from(inputElement.files ?? []);
+    inputElement.value = '';
+    if (!files.length || !this.canImportAssets() || this.assetImporting()) {
+      return;
+    }
+    const mode = this.assetImportMode();
+    if (mode === 'slide-pages') {
+      void this.importSlideImageFiles(files);
+      return;
+    }
+    void this.importAssetFile(files[0]!, mode);
   }
 
   protected resetPageBackground(): void {
@@ -1286,17 +1955,64 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!this.canExportBoard()) {
       return;
     }
-    const canvas = this.whiteboardCanvas?.nativeElement;
-    if (!canvas) {
+    const exported = this.exportAllPagesPdfBlob();
+    if (!exported) {
       return;
     }
-    const pages = this.pages().map((page) => ({
+    this.downloadBlob(exported.blob, exported.fileName);
+  }
+
+  protected exportSelectedPagesPdf(): void {
+    if (!this.canExportSelectedPages()) {
+      return;
+    }
+    const exported = this.exportSelectedPagesPdfBlob(this.selectedExportPageIds(), `${this.title()} selected pages`);
+    if (!exported) {
+      return;
+    }
+    this.downloadBlob(exported.blob, exported.fileName);
+  }
+
+  protected toggleExportPage(pageId: string): void {
+    this.selectedExportPageIds.update((pageIds) =>
+      pageIds.includes(pageId) ? pageIds.filter((id) => id !== pageId) : [...pageIds, pageId]
+    );
+  }
+
+  protected selectAllExportPages(): void {
+    this.selectedExportPageIds.set(this.pages().map((page) => page.id));
+  }
+
+  protected clearExportPageSelection(): void {
+    this.selectedExportPageIds.set([]);
+  }
+
+  exportAllPagesPdfBlob(fileBaseName = this.title()): { blob: Blob; fileName: string } | null {
+    return this.exportSelectedPagesPdfBlob(this.pages().map((page) => page.id), `${fileBaseName}-pages`);
+  }
+
+  exportSelectedPagesPdfBlob(pageIds: string[], fileBaseName = this.title()): { blob: Blob; fileName: string } | null {
+    if (!this.canExportBoard()) {
+      return null;
+    }
+    const canvas = this.whiteboardCanvas?.nativeElement;
+    if (!canvas) {
+      return null;
+    }
+    const selectedIds = new Set(pageIds);
+    const selectedPages = this.pages().filter((page) => selectedIds.has(page.id));
+    if (!selectedPages.length) {
+      return null;
+    }
+    const pages = selectedPages.map((page) => ({
       jpegDataUrl: this.renderPageImage(page.id, 'image/jpeg', 0.92),
       width: canvas.width,
       height: canvas.height
     }));
-    const blob = this.createPdfBlob(pages);
-    this.downloadBlob(blob, `${this.safeFileName(this.title()) || 'whiteboard'}-pages.pdf`);
+    return {
+      blob: this.createPdfBlob(pages),
+      fileName: `${this.safeFileName(fileBaseName) || 'whiteboard'}${fileBaseName.endsWith('-pages') ? '' : '-pages'}.pdf`
+    };
   }
 
   protected updateTextDraft(event: Event): void {
@@ -1337,17 +2053,32 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     const start = editor?.selectionStart ?? draft.value.length;
     const end = editor?.selectionEnd ?? start;
     const nextValue = `${draft.value.slice(0, start)}${snippet}${draft.value.slice(end)}`;
-    const cursor = start + snippet.indexOf('{}') + 1;
     this.textDraft.set({ ...draft, value: nextValue });
     window.setTimeout(() => {
       editor?.focus();
-      const nextCursor = snippet.includes('{}') ? cursor : start + snippet.length;
+      const nextCursor = this.cursorAfterSnippet(snippet, start);
       editor?.setSelectionRange(nextCursor, nextCursor);
     });
   }
 
   protected canEditSelectedTextBlock(): boolean {
     return !!this.editableSelectedElement();
+  }
+
+  protected canConvertSelectedTextToEquation(): boolean {
+    return !!this.singleSelectedText();
+  }
+
+  protected canAlignTextSelection(): boolean {
+    return this.selectedElements().some((element) => element.type === 'text' || element.type === 'equation');
+  }
+
+  protected canAlignSelectedObjects(): boolean {
+    return this.selectedElementIds().length > 1;
+  }
+
+  protected canDistributeSelectedVertically(): boolean {
+    return this.selectedElementIds().length > 2;
   }
 
   protected canEditSelectedGraph(): boolean {
@@ -1361,6 +2092,134 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
     this.openTextDraftForElement(element);
     this.closeContextMenu();
+  }
+
+  protected convertSelectedTextToEquation(): void {
+    const text = this.singleSelectedText();
+    if (!text) {
+      return;
+    }
+    const raw = text.text.trim();
+    this.mathEquationDraft.set(raw);
+    this.mathEquationFontSize.set(text.fontSize);
+    this.mathEquationAlignment.set(text.align ?? 'left');
+    this.strokeColor.set(text.color);
+    if (text.fillColor) {
+      this.fillColor.set(text.fillColor);
+      this.fillEnabled.set(true);
+    } else {
+      this.fillEnabled.set(false);
+    }
+    const error = this.validateMathSource(raw);
+    if (!raw || error) {
+      this.openMathTools('equation');
+      return;
+    }
+    const bounds = this.boundsForElement(text);
+    const draft: TextDraft = {
+      x: text.position.x,
+      y: text.position.y,
+      value: raw,
+      mode: 'equation',
+      elementId: text.id,
+      width: Math.max(320, bounds.width),
+      height: Math.max(112, bounds.height),
+      align: text.align ?? 'left'
+    };
+    const equation = this.createEquationElement(draft, raw);
+    this.pushHistory();
+    this.elements = this.elements.map((element) => (element.id === text.id ? equation : element));
+    this.setSelection([text.id]);
+    this.closeContextMenu();
+    this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(equation), pageId: this.activePageId() });
+    this.render();
+  }
+
+  protected setSelectedTextAlignment(alignment: WhiteboardTextAlignment): void {
+    const selectedIds = this.selectedElementIds();
+    if (!selectedIds.length) {
+      return;
+    }
+    const changed: WhiteboardElement[] = [];
+    const nextElements = this.elements.map((element) => {
+      if (!selectedIds.includes(element.id) || (element.type !== 'text' && element.type !== 'equation')) {
+        return element;
+      }
+      if ((element.align ?? 'left') === alignment) {
+        return element;
+      }
+      const next = { ...element, align: alignment } as WhiteboardElement;
+      changed.push(next);
+      return next;
+    });
+    if (!changed.length) {
+      this.closeContextMenu();
+      return;
+    }
+    this.pushHistory();
+    this.elements = nextElements;
+    this.closeContextMenu();
+    for (const element of changed) {
+      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+    }
+    this.render();
+  }
+
+  protected alignSelectedObjects(alignment: WhiteboardTextAlignment): void {
+    const selectedIds = this.selectedElementIds();
+    if (selectedIds.length < 2) {
+      return;
+    }
+    const groupBounds = this.boundsForElements(selectedIds);
+    this.pushHistory();
+    this.elements = this.elements.map((element) => {
+      if (!selectedIds.includes(element.id)) {
+        return element;
+      }
+      const bounds = this.boundsForElement(element);
+      const targetX =
+        alignment === 'left'
+          ? groupBounds.x
+          : alignment === 'center'
+            ? groupBounds.x + groupBounds.width / 2 - bounds.width / 2
+            : groupBounds.x + groupBounds.width - bounds.width;
+      return this.translateElement(this.cloneElement(element), targetX - bounds.x, 0);
+    });
+    this.closeContextMenu();
+    this.emitSelectionUpserts();
+    this.render();
+  }
+
+  protected distributeSelectedVertically(): void {
+    const selectedIds = this.selectedElementIds();
+    if (selectedIds.length < 3) {
+      return;
+    }
+    const selected = this.elements
+      .filter((element) => selectedIds.includes(element.id))
+      .map((element) => ({ element, bounds: this.boundsForElement(element) }))
+      .sort((a, b) => a.bounds.y - b.bounds.y);
+    const groupBounds = this.boundsForElements(selectedIds);
+    const totalHeight = selected.reduce((sum, item) => sum + item.bounds.height, 0);
+    const gap = Math.max(0, (groupBounds.height - totalHeight) / Math.max(1, selected.length - 1));
+    const targetTops = new Map<string, number>();
+    let cursorY = groupBounds.y;
+    for (const item of selected) {
+      targetTops.set(item.element.id, cursorY);
+      cursorY += item.bounds.height + gap;
+    }
+    this.pushHistory();
+    this.elements = this.elements.map((element) => {
+      if (!selectedIds.includes(element.id)) {
+        return element;
+      }
+      const bounds = this.boundsForElement(element);
+      const targetY = targetTops.get(element.id) ?? bounds.y;
+      return this.translateElement(this.cloneElement(element), 0, targetY - bounds.y);
+    });
+    this.closeContextMenu();
+    this.emitSelectionUpserts();
+    this.render();
   }
 
   protected editSelectedGraph(): void {
@@ -1475,6 +2334,113 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   private isZoomOutShortcut(event: KeyboardEvent): boolean {
     return event.key === '-' || event.key === '_' || event.code === 'NumpadSubtract';
+  }
+
+  private arrowKeyDelta(key: string, distance: number): WhiteboardPoint {
+    if (key === 'ArrowLeft') {
+      return { x: -distance, y: 0 };
+    }
+    if (key === 'ArrowRight') {
+      return { x: distance, y: 0 };
+    }
+    if (key === 'ArrowUp') {
+      return { x: 0, y: -distance };
+    }
+    return { x: 0, y: distance };
+  }
+
+  private nudgeSelected(deltaX: number, deltaY: number): void {
+    if (!this.selectedElementIds().length || (!deltaX && !deltaY)) {
+      return;
+    }
+    this.pushHistory();
+    this.moveSelected(deltaX, deltaY);
+    this.emitSelectionUpserts();
+    this.render();
+  }
+
+  private clampMathPopoverToViewport(): void {
+    if (!this.mathPopoverOpen()) {
+      return;
+    }
+    const bounds = this.mathToolsPopover?.nativeElement.getBoundingClientRect();
+    this.mathPopoverPosition.update((position) => this.clampMathPopoverPosition(position, bounds?.width, bounds?.height));
+  }
+
+  private clampMathPopoverPosition(position: MathPopoverPosition, width = 380, height = 540): MathPopoverPosition {
+    if (typeof window === 'undefined') {
+      return position;
+    }
+    const margin = 12;
+    const maxX = Math.max(margin, window.innerWidth - width - margin);
+    const maxY = Math.max(margin, window.innerHeight - height - margin);
+    return {
+      x: Math.min(Math.max(position.x, margin), maxX),
+      y: Math.min(Math.max(position.y, margin), maxY)
+    };
+  }
+
+  private defaultInsertPoint(width: number, height: number): WhiteboardPoint {
+    const canvas = this.whiteboardCanvas?.nativeElement;
+    const surface = this.whiteboardSurface?.nativeElement;
+    const viewWidth = surface?.clientWidth ?? canvas?.clientWidth ?? 900;
+    const viewHeight = surface?.clientHeight ?? canvas?.clientHeight ?? 620;
+    const canvasWidth = canvas?.clientWidth ?? viewWidth;
+    const canvasHeight = canvas?.clientHeight ?? viewHeight;
+    const x = (viewWidth / 2 - this.panX()) / this.zoom() - width / 2;
+    const y = (viewHeight / 2 - this.panY()) / this.zoom() - height / 2;
+    return this.snapPoint({
+      x: Math.min(Math.max(16, x), Math.max(16, canvasWidth - width - 16)),
+      y: Math.min(Math.max(16, y), Math.max(16, canvasHeight - height - 16))
+    });
+  }
+
+  private renderEquationPreview(raw: string, fontSize: number, color: string): string | null {
+    if (typeof document === 'undefined') {
+      return null;
+    }
+    if (this.validateMathSource(raw)) {
+      return null;
+    }
+    const value = raw.trim() || '\\frac{a}{b}';
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return null;
+    }
+    const padding = this.equationPadding(fontSize);
+    const metrics = this.drawMathBlock(context, value, padding, padding, fontSize, false);
+    const width = Math.min(720, Math.ceil(Math.max(180, metrics.width + padding * 2)));
+    const height = Math.min(280, Math.ceil(Math.max(fontSize * 2.25, metrics.height + padding * 2)));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.ceil(width * dpr);
+    canvas.height = Math.ceil(height * dpr);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    context.scale(dpr, dpr);
+    context.fillStyle = color;
+    context.strokeStyle = color;
+    this.drawMathBlock(context, value, padding, padding, fontSize, true);
+    return canvas.toDataURL('image/png');
+  }
+
+  private loadSelectedEquationIntoMathPopover(): void {
+    const equation = this.singleSelectedEquation();
+    const text = equation ? null : this.singleSelectedText();
+    if (!equation && !text) {
+      return;
+    }
+    const source = equation ?? text!;
+    this.mathEquationDraft.set(equation?.raw ?? text!.text);
+    this.mathEquationFontSize.set(source.fontSize);
+    this.mathEquationAlignment.set(source.align ?? 'left');
+    this.strokeColor.set(source.color);
+    if (source.fillColor) {
+      this.fillColor.set(source.fillColor);
+      this.fillEnabled.set(true);
+    } else {
+      this.fillEnabled.set(false);
+    }
   }
 
   protected activateTransform(): void {
@@ -1675,6 +2641,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (this.activeTool() === 'eraser') {
       this.erasing = true;
       this.lastPoint = point;
+      this.eraserCursor.set(point);
       this.eraseAlongPath(point, point);
       this.render();
       return;
@@ -1692,7 +2659,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         value: this.activeTool() === 'equation' ? '\\frac{a}{b}' : '',
         mode: this.activeTool() === 'equation' ? 'equation' : 'text',
         width: this.activeTool() === 'equation' ? 320 : 240,
-        height: this.activeTool() === 'equation' ? 112 : 56
+        height: this.activeTool() === 'equation' ? 112 : 56,
+        align: this.activeTool() === 'equation' ? this.mathEquationAlignment() : 'left'
       });
       setTimeout(() => this.textEditor?.nativeElement.focus());
       return;
@@ -1745,6 +2713,13 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
     const point = this.getCanvasPoint(event);
     this.emitCursor(point);
+
+    if (this.activeTool() === 'eraser') {
+      this.eraserCursor.set(point);
+      if (!this.erasing) {
+        this.render();
+      }
+    }
 
     if (this.activeTool() === 'laser' && !this.readOnly()) {
       event.preventDefault();
@@ -1828,6 +2803,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.panStart = null;
     this.erasing = false;
     this.eraseHistoryPushed = false;
+    this.eraserCursor.set(null);
     this.selectionMarquee.set(null);
     this.snapIndicator.set(null);
     this.movingSelection = false;
@@ -1903,6 +2879,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       this.drawSnapIndicator();
       this.drawSelection();
       this.drawSelectionMarquee();
+      this.drawEraserCursor();
     }
     if (this.captureStreamActive) {
       this.requestCaptureFrame(this.activeCaptureStream);
@@ -2249,6 +3226,39 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
   }
 
+  private async importSlideImageFiles(files: File[]): Promise<void> {
+    this.assetImporting.set(true);
+    try {
+      const slideFiles = files.slice(0, MAX_SLIDE_IMAGE_IMPORT_PAGES);
+      if (files.length > MAX_SLIDE_IMAGE_IMPORT_PAGES) {
+        throw new Error(`Import up to ${MAX_SLIDE_IMAGE_IMPORT_PAGES} slide images at a time.`);
+      }
+      const pages: WhiteboardPage[] = [];
+      for (let index = 0; index < slideFiles.length; index += 1) {
+        const file = slideFiles[index]!;
+        this.assetImportStatus.set({ type: 'info', message: `Importing slide ${index + 1} of ${slideFiles.length}...` });
+        this.validateImageFile(file);
+        const dataUrl = await this.readFileAsDataUrl(file);
+        const image = await this.decodeImage(dataUrl);
+        this.imageCache.set(dataUrl, image);
+        pages.push(this.createImportedImagePage(file, dataUrl, image, 'slide-image', index + 1));
+      }
+      this.insertImportedPages(pages);
+      this.assetImportStatus.set({
+        type: 'success',
+        message: `Imported ${pages.length} slide image${pages.length === 1 ? '' : 's'} as annotatable pages.`
+      });
+    } catch (error) {
+      this.assetImportStatus.set({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Slide image import failed.'
+      });
+    } finally {
+      this.assetImportMode.set('element');
+      this.assetImporting.set(false);
+    }
+  }
+
   private validateImageFile(file: File): void {
     if (!IMAGE_ASSET_MIME_TYPES.has(file.type)) {
       throw new Error('Use a PNG, JPG, JPEG, or WebP image.');
@@ -2346,7 +3356,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       const whiteboardPage = this.createPage(pageTitle, 'blank');
       whiteboardPage.background = {
         kind: 'image',
+        sourceType: 'pdf-page',
         fileName: `${fileName} · page ${pageNumber}`,
+        mimeType: 'application/pdf',
+        pageNumber,
         dataUrl,
         naturalWidth: canvas.width,
         naturalHeight: canvas.height,
@@ -2361,6 +3374,31 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
   }
 
+  private createImportedImagePage(
+    file: File,
+    dataUrl: string,
+    image: HTMLImageElement,
+    sourceType: AssetPageSourceType,
+    pageNumber?: number
+  ): WhiteboardPage {
+    const titlePrefix = sourceType === 'slide-image' ? 'Slide' : 'Image';
+    const cleanName = this.safeFileName(file.name.replace(/\.[^.]+$/, '')) || titlePrefix;
+    const page = this.createPage(pageNumber ? `${cleanName} ${pageNumber}` : cleanName, 'blank');
+    page.background = {
+      kind: 'image',
+      sourceType,
+      fileName: file.name,
+      mimeType: file.type || 'image',
+      ...(pageNumber ? { pageNumber } : {}),
+      dataUrl,
+      naturalWidth: image.naturalWidth,
+      naturalHeight: image.naturalHeight,
+      fit: 'contain',
+      importedAt: new Date().toISOString()
+    };
+    return page;
+  }
+
   private insertImportedPages(importedPages: WhiteboardPage[]): void {
     if (!importedPages.length) {
       return;
@@ -2372,6 +3410,22 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.pages.update((pages) => [...pages.slice(0, insertIndex), ...importedPages, ...pages.slice(insertIndex)]);
     this.activePageId.set(importedPages[0]!.id);
     this.applyPageView(importedPages[0]!);
+    this.selectedElementIds.set([]);
+    this.render();
+  }
+
+  private insertBlankPageRelativeToActive(position: 'before' | 'after'): void {
+    if (!this.canManagePages()) {
+      return;
+    }
+    this.pushHistory();
+    const activePageId = this.activePageId();
+    const activeIndex = this.pages().findIndex((page) => page.id === activePageId);
+    const insertIndex = activeIndex >= 0 ? activeIndex + (position === 'after' ? 1 : 0) : this.pages().length;
+    const page = this.createPage(`Board ${this.pages().length + 1}`, 'blank');
+    this.pages.update((pages) => [...pages.slice(0, insertIndex), page, ...pages.slice(insertIndex)]);
+    this.activePageId.set(page.id);
+    this.applyPageView(page);
     this.selectedElementIds.set([]);
     this.render();
   }
@@ -2428,7 +3482,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.pushHistory();
     const background: WhiteboardPageBackground = {
       kind: 'image',
+      sourceType: 'image',
       fileName: file.name,
+      mimeType: file.type || 'image',
       dataUrl,
       naturalWidth: image.naturalWidth,
       naturalHeight: image.naturalHeight,
@@ -2607,7 +3663,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     context.textBaseline = 'top';
     const lineHeight = element.fontSize * 1.25;
     for (const [index, line] of element.text.split('\n').entries()) {
-      context.fillText(line, element.position.x, element.position.y + index * lineHeight);
+      const lineWidth = context.measureText(line).width;
+      const x = this.alignedInlineX(lineWidth, bounds.x, bounds.width, element.align ?? 'left');
+      context.fillText(line, x, element.position.y + index * lineHeight);
     }
     context.restore();
   }
@@ -2624,7 +3682,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     context.fillStyle = element.color;
     context.strokeStyle = element.color;
     const padding = this.equationPadding(element.fontSize);
-    this.drawMathBlock(context, element.raw, element.position.x + padding, element.position.y + padding, element.fontSize, true);
+    const metrics = this.drawMathBlock(context, element.raw, 0, 0, element.fontSize, false);
+    const contentX = element.position.x + padding;
+    const contentWidth = Math.max(1, element.width - padding * 2);
+    const x = this.alignedInlineX(metrics.width, contentX, contentWidth, element.align ?? 'left');
+    this.drawMathBlock(context, element.raw, x, element.position.y + padding, element.fontSize, true);
     context.restore();
   }
 
@@ -2657,14 +3719,20 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     context.fillStyle = this.cssVariable('--canvas-graph-bg', '#ffffff');
     context.fillRect(viewport.left, viewport.top, viewport.width, viewport.height);
     if (element.showGrid) {
-      this.drawGraphGrid(context, viewport);
+      this.drawGraphGrid(context, viewport, element.tickStep ?? null);
     }
     if (element.showAxes) {
-      this.drawGraphAxes(context, viewport, element.showTicks);
+      this.drawGraphAxes(context, viewport, element.showTicks, element.tickStep ?? null);
     }
 
     const parsedFunctions = element.functions.map((fn) => ({ fn, parser: this.parseGraphExpression(fn.expression) }));
+    const graphErrors = parsedFunctions.flatMap((item) => (item.parser.error ? [item.parser.error] : []));
     const primary = parsedFunctions.find((item) => !item.parser.error);
+    const inequalityError = element.inequality?.trim() ? this.drawGraphInequality(context, viewport, element.inequality, '#FFD150') : null;
+    if (inequalityError) {
+      graphErrors.push(inequalityError);
+    }
+    this.drawGraphHistogram(context, viewport, element);
     if (primary && this.hasFiniteNumber(element.helpers?.shadeFrom) && this.hasFiniteNumber(element.helpers?.shadeTo)) {
       this.drawGraphArea(context, viewport, primary.parser.evaluate, Number(element.helpers?.shadeFrom), Number(element.helpers?.shadeTo), primary.fn.color);
     }
@@ -2686,12 +3754,25 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         this.drawGraphIntercepts(context, viewport, primary.parser.evaluate, primary.fn.color);
       }
     }
+    const parametricError = this.drawGraphParametric(context, viewport, element.parametric ?? null);
+    const polarError = this.drawGraphPolar(context, viewport, element.polar ?? null);
+    if (parametricError) {
+      graphErrors.push(parametricError);
+    }
+    if (polarError) {
+      graphErrors.push(polarError);
+    }
+    this.drawNormalCurve(context, viewport, element);
     this.drawScatterPoints(context, viewport, element);
+    if (element.stats?.showRegression) {
+      this.drawRegressionLine(context, viewport, element);
+    }
+    this.drawGraphLabels(context, viewport, element.labels ?? []);
     context.restore();
 
     context.strokeStyle = this.cssVariable('--canvas-grid-strong', '#c8d8eb');
     context.strokeRect(viewport.left, viewport.top, viewport.width, viewport.height);
-    const error = parsedFunctions.find((item) => item.parser.error)?.parser.error;
+    const error = graphErrors[0];
     if (error) {
       context.fillStyle = this.cssVariable('--danger', '#dc2626');
       context.font = '700 12px Inter, ui-sans-serif, system-ui, sans-serif';
@@ -2748,6 +3829,24 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       const deltaX = Math.round(to.x - from.x);
       const deltaY = Math.round(to.y - from.y);
       this.drawMeasurementLabel(context, element.showMeasurement ? `${label} = <${deltaX}, ${deltaY}>` : label, midpoint.x, midpoint.y - 14, color);
+      context.restore();
+      return;
+    }
+
+    if (element.kind === 'ruler') {
+      this.drawRulerGeometry(context, element, from, to, color);
+      context.restore();
+      return;
+    }
+
+    if (element.kind === 'protractor') {
+      this.drawProtractorGeometry(context, element, from, to, color);
+      context.restore();
+      return;
+    }
+
+    if (element.kind === 'polygon') {
+      this.drawPolygonGeometry(context, element, from, to, color);
       context.restore();
       return;
     }
@@ -2869,6 +3968,132 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     context.restore();
   }
 
+  private drawRulerGeometry(
+    context: CanvasRenderingContext2D,
+    element: WhiteboardGeometryElement,
+    from: WhiteboardPoint,
+    to: WhiteboardPoint,
+    color: string
+  ): void {
+    const length = Math.max(80, this.distance(from, to));
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    context.save();
+    context.translate(from.x, from.y);
+    context.rotate(angle);
+    context.setLineDash([]);
+    this.roundedRectPath(context, 0, -18, length, 36, 6);
+    context.fillStyle = element.fillColor ?? 'rgba(255, 209, 80, 0.22)';
+    context.strokeStyle = color;
+    context.globalAlpha = 0.88;
+    context.fill();
+    context.globalAlpha = 1;
+    context.stroke();
+    context.font = '700 9px Inter, ui-sans-serif, system-ui, sans-serif';
+    context.fillStyle = color;
+    context.textAlign = 'center';
+    context.textBaseline = 'top';
+    const step = 16;
+    for (let x = 0; x <= length; x += step) {
+      const major = Math.round(x / step) % 4 === 0;
+      context.beginPath();
+      context.moveTo(x, 18);
+      context.lineTo(x, major ? 1 : 9);
+      context.stroke();
+      if (major && x > 0) {
+        context.fillText(String(Math.round(x)), x, -15);
+      }
+    }
+    context.restore();
+    if (element.showMeasurement) {
+      const midpoint = this.midpoint(from, to);
+      this.drawMeasurementLabel(context, this.formatDistance(length), midpoint.x, midpoint.y - 28, color);
+    }
+  }
+
+  private drawProtractorGeometry(
+    context: CanvasRenderingContext2D,
+    element: WhiteboardGeometryElement,
+    from: WhiteboardPoint,
+    to: WhiteboardPoint,
+    color: string
+  ): void {
+    const radius = Math.max(64, this.distance(from, to));
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    context.save();
+    context.translate(from.x, from.y);
+    context.rotate(angle);
+    context.setLineDash([]);
+    context.fillStyle = element.fillColor ?? 'rgba(255, 151, 96, 0.14)';
+    context.strokeStyle = color;
+    context.globalAlpha = 0.82;
+    context.beginPath();
+    context.moveTo(-radius, 0);
+    context.arc(0, 0, radius, Math.PI, 0);
+    context.closePath();
+    context.fill();
+    context.globalAlpha = 1;
+    context.stroke();
+    context.beginPath();
+    context.arc(0, 0, radius * 0.62, Math.PI, 0);
+    context.stroke();
+    context.font = '700 9px Inter, ui-sans-serif, system-ui, sans-serif';
+    context.fillStyle = color;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    for (let degree = 0; degree <= 180; degree += 5) {
+      const theta = Math.PI - (degree * Math.PI) / 180;
+      const major = degree % 30 === 0;
+      const outer = radius;
+      const inner = radius - (major ? 15 : 8);
+      context.beginPath();
+      context.moveTo(Math.cos(theta) * outer, Math.sin(theta) * outer);
+      context.lineTo(Math.cos(theta) * inner, Math.sin(theta) * inner);
+      context.stroke();
+      if (major) {
+        context.fillText(String(degree), Math.cos(theta) * (radius - 28), Math.sin(theta) * (radius - 28));
+      }
+    }
+    context.restore();
+    this.drawGeometryEndpoint(context, from, color, 4);
+    this.drawGeometryEndpoint(context, to, color, 4);
+  }
+
+  private drawPolygonGeometry(
+    context: CanvasRenderingContext2D,
+    element: WhiteboardGeometryElement,
+    from: WhiteboardPoint,
+    to: WhiteboardPoint,
+    color: string
+  ): void {
+    const vertices = this.regularPolygonVertices(from, to, 6);
+    context.save();
+    context.setLineDash([]);
+    context.beginPath();
+    vertices.forEach((point, index) => {
+      if (index === 0) {
+        context.moveTo(point.x, point.y);
+      } else {
+        context.lineTo(point.x, point.y);
+      }
+    });
+    context.closePath();
+    if (element.fillColor) {
+      context.globalAlpha = 0.22;
+      context.fillStyle = element.fillColor;
+      context.fill();
+      context.globalAlpha = 1;
+    }
+    context.strokeStyle = color;
+    context.stroke();
+    for (const vertex of vertices) {
+      this.drawGeometryEndpoint(context, vertex, color, 3.2);
+    }
+    if (element.showMeasurement) {
+      this.drawMeasurementLabel(context, 'regular hexagon', from.x, from.y - this.distance(from, to) - 12, color);
+    }
+    context.restore();
+  }
+
   private drawDiagram(element: WhiteboardDiagramElement): void {
     const context = this.context;
     if (!context) {
@@ -2883,6 +4108,30 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     context.lineWidth = Math.max(1, element.lineWidth);
     context.strokeStyle = accent;
     context.fillStyle = fill;
+
+    if (element.kind === 'coordinate-axes') {
+      this.drawCoordinateAxesDiagram(context, bounds, accent, fill);
+      context.restore();
+      return;
+    }
+
+    if (element.kind === 'number-line-template') {
+      this.drawNumberLineDiagram(context, bounds, accent, fill);
+      context.restore();
+      return;
+    }
+
+    if (element.kind === 'table-layout') {
+      this.drawTableLayoutDiagram(context, bounds, accent, fill);
+      context.restore();
+      return;
+    }
+
+    if (element.kind === 'fraction-bars') {
+      this.drawFractionBarsDiagram(context, bounds, accent, fill);
+      context.restore();
+      return;
+    }
 
     if (element.kind === 'venn') {
       const radius = Math.min(bounds.width, bounds.height) * 0.28;
@@ -2961,6 +4210,192 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
     this.drawDiagramArrow(context, { x: boxes[0]!.x + boxes[0]!.width, y: boxes[0]!.y + boxes[0]!.height / 2 }, { x: boxes[1]!.x, y: boxes[1]!.y + boxes[1]!.height / 2 }, accent);
     this.drawDiagramArrow(context, { x: boxes[1]!.x + boxes[1]!.width, y: boxes[1]!.y + boxes[1]!.height / 2 }, { x: boxes[2]!.x, y: boxes[2]!.y + boxes[2]!.height / 2 }, accent);
+    context.restore();
+  }
+
+  private drawCoordinateAxesDiagram(context: CanvasRenderingContext2D, bounds: ElementBounds, accent: string, fill: string): void {
+    const inset = Math.max(18, Math.min(34, bounds.width * 0.07));
+    const left = bounds.x + inset;
+    const right = bounds.x + bounds.width - inset;
+    const top = bounds.y + inset;
+    const bottom = bounds.y + bounds.height - inset;
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
+    const gridStep = Math.max(22, Math.min(38, bounds.width / 10));
+    this.drawTemplateCard(context, bounds, fill, accent);
+    context.save();
+    context.strokeStyle = this.cssVariable('--canvas-grid', '#d7e3f4');
+    context.lineWidth = 1;
+    context.beginPath();
+    for (let x = centerX; x <= right; x += gridStep) {
+      context.moveTo(x, top);
+      context.lineTo(x, bottom);
+    }
+    for (let x = centerX - gridStep; x >= left; x -= gridStep) {
+      context.moveTo(x, top);
+      context.lineTo(x, bottom);
+    }
+    for (let y = centerY; y <= bottom; y += gridStep) {
+      context.moveTo(left, y);
+      context.lineTo(right, y);
+    }
+    for (let y = centerY - gridStep; y >= top; y -= gridStep) {
+      context.moveTo(left, y);
+      context.lineTo(right, y);
+    }
+    context.stroke();
+    context.strokeStyle = accent;
+    context.fillStyle = accent;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(left, centerY);
+    context.lineTo(right, centerY);
+    context.moveTo(centerX, bottom);
+    context.lineTo(centerX, top);
+    context.stroke();
+    this.drawArrowHead(context, { x: right, y: centerY }, 0, 8);
+    this.drawArrowHead(context, { x: centerX, y: top }, -Math.PI / 2, 8);
+    context.lineWidth = 1;
+    context.font = '700 11px Inter, ui-sans-serif, system-ui, sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'top';
+    for (let index = -4; index <= 4; index += 1) {
+      if (index === 0) {
+        continue;
+      }
+      const tickX = centerX + index * gridStep;
+      if (tickX > left && tickX < right) {
+        this.drawAxisTick(context, tickX, centerY, true, 10);
+      }
+      const tickY = centerY - index * gridStep;
+      if (tickY > top && tickY < bottom) {
+        this.drawAxisTick(context, centerX, tickY, false, 10);
+      }
+    }
+    context.fillText('x', right - 8, centerY + 10);
+    context.fillText('0', centerX - 12, centerY + 8);
+    context.textAlign = 'left';
+    context.textBaseline = 'middle';
+    context.fillText('y', centerX + 10, top + 8);
+    context.restore();
+  }
+
+  private drawNumberLineDiagram(context: CanvasRenderingContext2D, bounds: ElementBounds, accent: string, fill: string): void {
+    const left = bounds.x + Math.max(26, bounds.width * 0.08);
+    const right = bounds.x + bounds.width - Math.max(26, bounds.width * 0.08);
+    const centerY = bounds.y + bounds.height / 2;
+    const step = (right - left) / 10;
+    this.drawTemplateCard(context, bounds, fill, accent);
+    context.save();
+    context.strokeStyle = accent;
+    context.fillStyle = accent;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(left, centerY);
+    context.lineTo(right, centerY);
+    context.stroke();
+    this.drawArrowHead(context, { x: right, y: centerY }, 0, 8);
+    this.drawArrowHead(context, { x: left, y: centerY }, Math.PI, 8);
+    context.font = '700 12px Inter, ui-sans-serif, system-ui, sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'top';
+    for (let value = -5; value <= 5; value += 1) {
+      const x = left + (value + 5) * step;
+      this.drawAxisTick(context, x, centerY, true, value === 0 ? 20 : 14);
+      context.fillText(String(value), x, centerY + 18);
+    }
+    context.restore();
+  }
+
+  private drawTableLayoutDiagram(context: CanvasRenderingContext2D, bounds: ElementBounds, accent: string, fill: string): void {
+    const columns = 4;
+    const rows = 5;
+    const inset = 18;
+    const left = bounds.x + inset;
+    const top = bounds.y + inset;
+    const width = bounds.width - inset * 2;
+    const height = bounds.height - inset * 2;
+    const cellWidth = width / columns;
+    const cellHeight = height / rows;
+    this.drawTemplateCard(context, bounds, fill, accent);
+    context.save();
+    context.fillStyle = fill;
+    context.globalAlpha = 0.18;
+    context.fillRect(left, top, width, cellHeight);
+    context.globalAlpha = 1;
+    context.strokeStyle = accent;
+    context.lineWidth = 1.4;
+    context.beginPath();
+    for (let column = 0; column <= columns; column += 1) {
+      const x = left + column * cellWidth;
+      context.moveTo(x, top);
+      context.lineTo(x, top + height);
+    }
+    for (let row = 0; row <= rows; row += 1) {
+      const y = top + row * cellHeight;
+      context.moveTo(left, y);
+      context.lineTo(left + width, y);
+    }
+    context.stroke();
+    context.fillStyle = accent;
+    context.font = '700 11px Inter, ui-sans-serif, system-ui, sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    for (let column = 0; column < columns; column += 1) {
+      context.fillText(`Col ${column + 1}`, left + column * cellWidth + cellWidth / 2, top + cellHeight / 2);
+    }
+    context.restore();
+  }
+
+  private drawFractionBarsDiagram(context: CanvasRenderingContext2D, bounds: ElementBounds, accent: string, fill: string): void {
+    const denominators = [2, 3, 4, 5, 8];
+    const leftLabel = bounds.x + Math.max(34, bounds.width * 0.11);
+    const barLeft = leftLabel + 18;
+    const barRight = bounds.x + bounds.width - Math.max(24, bounds.width * 0.08);
+    const rowGap = Math.max(28, (bounds.height - 48) / denominators.length);
+    const barHeight = Math.max(16, Math.min(28, rowGap * 0.48));
+    const startY = bounds.y + 28;
+    this.drawTemplateCard(context, bounds, fill, accent);
+    context.save();
+    context.strokeStyle = accent;
+    context.fillStyle = accent;
+    context.lineWidth = 1.4;
+    context.font = '700 11px Inter, ui-sans-serif, system-ui, sans-serif';
+    context.textAlign = 'right';
+    context.textBaseline = 'middle';
+    denominators.forEach((denominator, row) => {
+      const y = startY + row * rowGap;
+      const labelY = y + barHeight / 2;
+      context.fillText(`1/${denominator}`, leftLabel, labelY);
+      context.strokeRect(barLeft, y, barRight - barLeft, barHeight);
+      context.save();
+      context.globalAlpha = 0.14;
+      context.fillStyle = fill;
+      context.fillRect(barLeft, y, (barRight - barLeft) / denominator, barHeight);
+      context.restore();
+      for (let index = 1; index < denominator; index += 1) {
+        const x = barLeft + ((barRight - barLeft) / denominator) * index;
+        context.beginPath();
+        context.moveTo(x, y);
+        context.lineTo(x, y + barHeight);
+        context.stroke();
+      }
+    });
+    context.restore();
+  }
+
+  private drawTemplateCard(context: CanvasRenderingContext2D, bounds: ElementBounds, fill: string, accent: string): void {
+    context.save();
+    this.roundedRectPath(context, bounds.x, bounds.y, bounds.width, bounds.height, 12);
+    context.fillStyle = this.cssVariable('--canvas-bg', '#f8fbff');
+    context.fill();
+    context.globalAlpha = 0.12;
+    context.fillStyle = fill;
+    context.fill();
+    context.globalAlpha = 1;
+    context.strokeStyle = accent;
+    context.lineWidth = 1.4;
+    context.stroke();
     context.restore();
   }
 
@@ -3077,6 +4512,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
   }
 
+  private regularPolygonVertices(center: WhiteboardPoint, radiusPoint: WhiteboardPoint, sides: number): WhiteboardPoint[] {
+    const radius = Math.max(12, this.distance(center, radiusPoint));
+    const startAngle = Math.atan2(radiusPoint.y - center.y, radiusPoint.x - center.x);
+    return Array.from({ length: Math.max(3, sides) }, (_item, index) => {
+      const angle = startAngle + (index * Math.PI * 2) / Math.max(3, sides);
+      return { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius };
+    });
+  }
+
   private formatDistance(distance: number): string {
     if (distance >= 1000) {
       return `${(distance / 1000).toFixed(2)}k px`;
@@ -3100,17 +4544,17 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     };
   }
 
-  private drawGraphGrid(context: CanvasRenderingContext2D, viewport: GraphViewport): void {
+  private drawGraphGrid(context: CanvasRenderingContext2D, viewport: GraphViewport, tickStep?: number | null): void {
     context.save();
     context.strokeStyle = this.cssVariable('--canvas-grid', '#d7e3f4');
     context.lineWidth = 1;
     context.beginPath();
-    for (const x of this.graphTicks(viewport.xMin, viewport.xMax)) {
+    for (const x of this.graphTicks(viewport.xMin, viewport.xMax, tickStep)) {
       const pixel = this.graphXToPixel(viewport, x);
       context.moveTo(pixel + 0.5, viewport.top);
       context.lineTo(pixel + 0.5, viewport.top + viewport.height);
     }
-    for (const y of this.graphTicks(viewport.yMin, viewport.yMax)) {
+    for (const y of this.graphTicks(viewport.yMin, viewport.yMax, tickStep)) {
       const pixel = this.graphYToPixel(viewport, y);
       context.moveTo(viewport.left, pixel + 0.5);
       context.lineTo(viewport.left + viewport.width, pixel + 0.5);
@@ -3119,7 +4563,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     context.restore();
   }
 
-  private drawGraphAxes(context: CanvasRenderingContext2D, viewport: GraphViewport, showTicks: boolean): void {
+  private drawGraphAxes(context: CanvasRenderingContext2D, viewport: GraphViewport, showTicks: boolean, tickStep?: number | null): void {
     context.save();
     context.strokeStyle = this.cssVariable('--canvas-axis', '#458B73');
     context.fillStyle = this.cssVariable('--canvas-template-muted', '#6d7890');
@@ -3140,13 +4584,13 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       context.font = '10px Inter, ui-sans-serif, system-ui, sans-serif';
       context.textAlign = 'center';
       context.textBaseline = 'top';
-      for (const x of this.graphTicks(viewport.xMin, viewport.xMax)) {
+      for (const x of this.graphTicks(viewport.xMin, viewport.xMax, tickStep)) {
         const pixel = this.graphXToPixel(viewport, x);
         context.fillText(this.formatGraphTick(x), pixel, Math.min(viewport.top + viewport.height - 12, Math.max(viewport.top + 2, zeroY + 4)));
       }
       context.textAlign = 'right';
       context.textBaseline = 'middle';
-      for (const y of this.graphTicks(viewport.yMin, viewport.yMax)) {
+      for (const y of this.graphTicks(viewport.yMin, viewport.yMax, tickStep)) {
         if (Math.abs(y) < 1e-9) {
           continue;
         }
@@ -3324,6 +4768,231 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     context.restore();
   }
 
+  private drawGraphInequality(context: CanvasRenderingContext2D, viewport: GraphViewport, source: string, color: string): string | null {
+    const parsed = this.parseInequalitySource(source);
+    if (typeof parsed === 'string') {
+      return parsed;
+    }
+    context.save();
+    context.fillStyle = color;
+    context.strokeStyle = color;
+    context.globalAlpha = 0.16;
+    if (parsed.axis === 'x') {
+      const x = this.graphXToPixel(viewport, parsed.boundary);
+      const shadeRight = parsed.operator === '>' || parsed.operator === '>=';
+      const left = shadeRight ? x : viewport.left;
+      const width = shadeRight ? viewport.left + viewport.width - x : x - viewport.left;
+      context.fillRect(left, viewport.top, width, viewport.height);
+      context.globalAlpha = 0.62;
+      if (parsed.operator === '>' || parsed.operator === '<') {
+        context.setLineDash([6, 5]);
+      }
+      context.beginPath();
+      context.moveTo(x, viewport.top);
+      context.lineTo(x, viewport.top + viewport.height);
+      context.stroke();
+      context.restore();
+      return null;
+    }
+    const expression = this.parseGraphExpression(parsed.expression);
+    if (expression.error) {
+      context.restore();
+      return expression.error;
+    }
+    const samples = Math.max(80, Math.min(260, Math.round(viewport.width)));
+    const shadeAbove = parsed.operator === '>' || parsed.operator === '>=';
+    const edgeY = shadeAbove ? viewport.top : viewport.top + viewport.height;
+    const points: WhiteboardPoint[] = [];
+    for (let index = 0; index <= samples; index += 1) {
+      const x = viewport.xMin + (index / samples) * (viewport.xMax - viewport.xMin);
+      const y = expression.evaluate(x);
+      if (!Number.isFinite(y)) {
+        continue;
+      }
+      points.push({ x: this.graphXToPixel(viewport, x), y: this.graphYToPixel(viewport, y) });
+    }
+    if (points.length > 1) {
+      context.beginPath();
+      context.moveTo(points[0]!.x, edgeY);
+      for (const point of points) {
+        context.lineTo(point.x, point.y);
+      }
+      context.lineTo(points[points.length - 1]!.x, edgeY);
+      context.closePath();
+      context.fill();
+      context.globalAlpha = 0.74;
+      if (parsed.operator === '>' || parsed.operator === '<') {
+        context.setLineDash([6, 5]);
+      }
+      context.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) {
+          context.moveTo(point.x, point.y);
+        } else {
+          context.lineTo(point.x, point.y);
+        }
+      });
+      context.stroke();
+    }
+    context.restore();
+    return null;
+  }
+
+  private drawGraphParametric(context: CanvasRenderingContext2D, viewport: GraphViewport, plot: WhiteboardGraphParametricPlot | null): string | null {
+    if (!plot?.xExpression.trim() || !plot.yExpression.trim()) {
+      return null;
+    }
+    const parsedX = this.parseGraphExpression(plot.xExpression, 't');
+    const parsedY = this.parseGraphExpression(plot.yExpression, 't');
+    if (parsedX.error || parsedY.error) {
+      return parsedX.error ?? parsedY.error ?? 'Invalid parametric curve.';
+    }
+    const samples = 360;
+    const points: WhiteboardPoint[] = [];
+    for (let index = 0; index <= samples; index += 1) {
+      const t = plot.tMin + (index / samples) * (plot.tMax - plot.tMin);
+      const x = parsedX.evaluate(t);
+      const y = parsedY.evaluate(t);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        points.push({ x: this.graphXToPixel(viewport, x), y: this.graphYToPixel(viewport, y) });
+      }
+    }
+    this.drawGraphPolyline(context, points, plot.color, plot.width, []);
+    return null;
+  }
+
+  private drawGraphPolar(context: CanvasRenderingContext2D, viewport: GraphViewport, plot: WhiteboardGraphPolarPlot | null): string | null {
+    if (!plot?.expression.trim()) {
+      return null;
+    }
+    const parsed = this.parseGraphExpression(plot.expression, 'theta');
+    if (parsed.error) {
+      return parsed.error;
+    }
+    const samples = 360;
+    const points: WhiteboardPoint[] = [];
+    for (let index = 0; index <= samples; index += 1) {
+      const theta = plot.thetaMin + (index / samples) * (plot.thetaMax - plot.thetaMin);
+      const radius = parsed.evaluate(theta);
+      if (!Number.isFinite(radius)) {
+        continue;
+      }
+      const x = radius * Math.cos(theta);
+      const y = radius * Math.sin(theta);
+      points.push({ x: this.graphXToPixel(viewport, x), y: this.graphYToPixel(viewport, y) });
+    }
+    this.drawGraphPolyline(context, points, plot.color, plot.width, []);
+    return null;
+  }
+
+  private drawGraphPolyline(context: CanvasRenderingContext2D, points: WhiteboardPoint[], color: string, width: number, dash: number[]): void {
+    if (points.length < 2) {
+      return;
+    }
+    context.save();
+    context.strokeStyle = color;
+    context.lineWidth = Math.max(1, width);
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
+    context.setLineDash(dash);
+    context.beginPath();
+    points.forEach((point, index) => {
+      if (index === 0) {
+        context.moveTo(point.x, point.y);
+      } else {
+        context.lineTo(point.x, point.y);
+      }
+    });
+    context.stroke();
+    context.restore();
+  }
+
+  private drawGraphHistogram(context: CanvasRenderingContext2D, viewport: GraphViewport, element: WhiteboardGraphElement): void {
+    const values = this.parseNumberList(element.stats?.histogramData ?? '');
+    if (!values.length) {
+      return;
+    }
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    if (min === max) {
+      return;
+    }
+    const binCount = Math.max(2, Math.min(24, element.stats?.histogramBins ?? Math.ceil(Math.sqrt(values.length))));
+    const binWidth = (max - min) / binCount;
+    const counts = Array.from({ length: binCount }, () => 0);
+    for (const value of values) {
+      const index = Math.min(binCount - 1, Math.max(0, Math.floor((value - min) / binWidth)));
+      counts[index]! += 1;
+    }
+    context.save();
+    context.fillStyle = '#458B73';
+    context.strokeStyle = '#ffffff';
+    context.lineWidth = 1;
+    context.globalAlpha = 0.35;
+    counts.forEach((count, index) => {
+      const x0 = min + index * binWidth;
+      const x1 = x0 + binWidth;
+      const left = this.graphXToPixel(viewport, x0);
+      const right = this.graphXToPixel(viewport, x1);
+      const top = this.graphYToPixel(viewport, Math.min(viewport.yMax, count));
+      const bottom = this.graphYToPixel(viewport, 0);
+      context.fillRect(left, top, right - left, bottom - top);
+      context.strokeRect(left, top, right - left, bottom - top);
+    });
+    context.restore();
+  }
+
+  private drawRegressionLine(context: CanvasRenderingContext2D, viewport: GraphViewport, element: WhiteboardGraphElement): void {
+    const regression = this.linearRegression(this.parseScatterPoints(element.scatterPoints ?? ''));
+    if (!regression) {
+      return;
+    }
+    const evaluate = (x: number) => regression.slope * x + regression.intercept;
+    this.drawGraphFunction(context, viewport, evaluate, '#F26076', 1.8);
+    context.save();
+    context.fillStyle = '#F26076';
+    context.font = '700 11px Inter, ui-sans-serif, system-ui, sans-serif';
+    context.textBaseline = 'top';
+    context.fillText(`y=${this.formatGraphTick(regression.slope)}x+${this.formatGraphTick(regression.intercept)}  R2=${regression.rSquared.toFixed(2)}`, viewport.left + 8, viewport.top + 8);
+    context.restore();
+  }
+
+  private drawNormalCurve(context: CanvasRenderingContext2D, viewport: GraphViewport, element: WhiteboardGraphElement): void {
+    const mean = element.stats?.normalMean;
+    const stdDev = element.stats?.normalStdDev;
+    if (!this.hasFiniteNumber(mean) || !this.hasFiniteNumber(stdDev) || stdDev <= 0) {
+      return;
+    }
+    const scale = Math.max(1, viewport.yMax - viewport.yMin);
+    const evaluate = (x: number) => (1 / (stdDev * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - mean) / stdDev) ** 2) * scale;
+    this.drawGraphFunction(context, viewport, evaluate, '#7c3aed', 1.8);
+  }
+
+  private drawGraphLabels(context: CanvasRenderingContext2D, viewport: GraphViewport, labels: WhiteboardGraphLabel[]): void {
+    if (!labels.length) {
+      return;
+    }
+    context.save();
+    context.font = '700 11px Inter, ui-sans-serif, system-ui, sans-serif';
+    context.textBaseline = 'middle';
+    for (const label of labels.slice(0, 24)) {
+      if (label.x < viewport.xMin || label.x > viewport.xMax || label.y < viewport.yMin || label.y > viewport.yMax) {
+        continue;
+      }
+      const x = this.graphXToPixel(viewport, label.x);
+      const y = this.graphYToPixel(viewport, label.y);
+      context.fillStyle = label.color ?? '#071c41';
+      context.strokeStyle = '#ffffff';
+      context.lineWidth = 3;
+      context.strokeText(label.text.slice(0, 36), x + 7, y - 7);
+      context.fillText(label.text.slice(0, 36), x + 7, y - 7);
+      context.beginPath();
+      context.arc(x, y, 3, 0, Math.PI * 2);
+      context.fill();
+    }
+    context.restore();
+  }
+
   private roundedRectPath(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
     context.beginPath();
     context.moveTo(x + radius, y);
@@ -3346,12 +5015,16 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return viewport.top + viewport.height - ((y - viewport.yMin) / (viewport.yMax - viewport.yMin)) * viewport.height;
   }
 
-  private graphTicks(min: number, max: number): number[] {
+  private graphTicks(min: number, max: number, preferredStep?: number | null): number[] {
     const span = max - min;
     const rawStep = span / 8;
-    const magnitude = 10 ** Math.floor(Math.log10(Math.max(rawStep, 0.000001)));
-    const normalized = rawStep / magnitude;
-    const step = (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * magnitude;
+    const step = preferredStep && preferredStep > 0
+      ? preferredStep
+      : (() => {
+          const magnitude = 10 ** Math.floor(Math.log10(Math.max(rawStep, 0.000001)));
+          const normalized = rawStep / magnitude;
+          return (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * magnitude;
+        })();
     const ticks: number[] = [];
     const start = Math.ceil(min / step) * step;
     for (let value = start; value <= max + step * 0.25 && ticks.length < 32; value += step) {
@@ -3370,6 +5043,42 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return Number(value.toFixed(2)).toString();
   }
 
+  private parseGraphFunctionList(value: string): string[] {
+    return value
+      .split(/[\n;]/)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .slice(0, 6);
+  }
+
+  private parseNumberList(value: string): number[] {
+    return value
+      .split(/[,\s;\n]+/)
+      .map((entry) => Number(entry.trim()))
+      .filter(Number.isFinite)
+      .slice(0, 500);
+  }
+
+  private parseGraphLabels(value: string): WhiteboardGraphLabel[] {
+    return value
+      .split(/\n|;/)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const [xText, yText, ...labelParts] = entry.split(',').map((part) => part.trim());
+        const x = Number(xText);
+        const y = Number(yText);
+        const text = labelParts.join(',').trim();
+        return Number.isFinite(x) && Number.isFinite(y) && text ? { x, y, text } : null;
+      })
+      .filter((label): label is WhiteboardGraphLabel => !!label)
+      .slice(0, 24);
+  }
+
+  private serializeGraphLabels(labels: WhiteboardGraphLabel[]): string {
+    return labels.map((label) => `${label.x},${label.y},${label.text}`).join('\n');
+  }
+
   private parseScatterPoints(value: string): WhiteboardPoint[] {
     return value
       .split(/[;\n]/)
@@ -3383,17 +5092,71 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       .slice(0, 160);
   }
 
-  private parseGraphExpression(source: string): GraphParseResult {
-    const expression = source.replace(/^\s*y\s*=/i, '').trim();
+  private linearRegression(points: WhiteboardPoint[]): { slope: number; intercept: number; rSquared: number } | null {
+    if (points.length < 2) {
+      return null;
+    }
+    const n = points.length;
+    const sumX = points.reduce((sum, point) => sum + point.x, 0);
+    const sumY = points.reduce((sum, point) => sum + point.y, 0);
+    const meanX = sumX / n;
+    const meanY = sumY / n;
+    const sxx = points.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
+    const syy = points.reduce((sum, point) => sum + (point.y - meanY) ** 2, 0);
+    const sxy = points.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0);
+    if (Math.abs(sxx) < 1e-10 || Math.abs(syy) < 1e-10) {
+      return null;
+    }
+    const slope = sxy / sxx;
+    const intercept = meanY - slope * meanX;
+    return { slope, intercept, rSquared: Math.max(0, Math.min(1, (sxy * sxy) / (sxx * syy))) };
+  }
+
+  private parseInequalitySource(source: string): { axis: 'x'; operator: '<' | '<=' | '>' | '>='; boundary: number } | { axis: 'y'; operator: '<' | '<=' | '>' | '>='; expression: string } | string {
+    const trimmed = source.trim();
+    const xMatch = trimmed.match(/^x\s*(<=|>=|<|>)\s*(-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)$/i);
+    if (xMatch) {
+      return { axis: 'x', operator: xMatch[1] as '<' | '<=' | '>' | '>=', boundary: Number(xMatch[2]) };
+    }
+    const yMatch = trimmed.match(/^y\s*(<=|>=|<|>)\s*(.+)$/i);
+    if (yMatch) {
+      return { axis: 'y', operator: yMatch[1] as '<' | '<=' | '>' | '>=', expression: yMatch[2]!.trim() };
+    }
+    return 'Use simple inequalities like y > x + 2 or x >= 0.';
+  }
+
+  private validateInequalitySource(source: string): string | null {
+    const parsed = this.parseInequalitySource(source);
+    if (typeof parsed === 'string') {
+      return parsed;
+    }
+    if (parsed.axis === 'y') {
+      const expression = this.parseGraphExpression(parsed.expression);
+      if (expression.error) {
+        return expression.error;
+      }
+    }
+    return null;
+  }
+
+  private parseGraphExpression(source: string, variableName: 'x' | 't' | 'theta' = 'x'): GraphParseResult {
+    let expression = source.trim();
+    if (variableName === 'x') {
+      expression = expression.replace(/^\s*y\s*=/i, '').trim();
+    } else if (variableName === 't') {
+      expression = expression.replace(/^\s*[xy]\s*\(\s*t\s*\)\s*=/i, '').trim();
+    } else {
+      expression = expression.replace(/^\s*r\s*(?:\(\s*(?:theta|t)\s*\))?\s*=/i, '').trim();
+    }
     if (!expression) {
       return { evaluate: () => Number.NaN, error: 'Function is empty.' };
     }
     try {
-      const parser = new GraphExpressionParser(this.tokenizeGraphExpression(expression));
+      const parser = new GraphExpressionParser(this.tokenizeGraphExpression(expression), variableName);
       const ast = parser.parse();
       return {
-        evaluate: (x: number) => {
-          const value = this.evaluateGraphAst(ast, x);
+        evaluate: (valueAtVariable: number) => {
+          const value = this.evaluateGraphAst(ast, valueAtVariable);
           return Number.isFinite(value) && Math.abs(value) <= 1e12 ? value : Number.NaN;
         }
       };
@@ -3500,6 +5263,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (node.name === 'tan') {
       return Math.abs(Math.cos(argument)) < 0.025 ? Number.NaN : Math.tan(argument);
     }
+    if (node.name === 'asin') {
+      return Math.abs(argument) > 1 ? Number.NaN : Math.asin(argument);
+    }
+    if (node.name === 'acos') {
+      return Math.abs(argument) > 1 ? Number.NaN : Math.acos(argument);
+    }
+    if (node.name === 'atan') {
+      return Math.atan(argument);
+    }
     if (node.name === 'exp') {
       return argument > 24 ? Number.NaN : Math.exp(argument);
     }
@@ -3522,6 +5294,14 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
     const next = Number(trimmed);
     return Number.isFinite(next) ? next : null;
+  }
+
+  private optionalPositiveInteger(value: string): number | undefined {
+    const next = this.optionalNumber(value);
+    if (!next || next <= 0) {
+      return undefined;
+    }
+    return Math.max(1, Math.round(next));
   }
 
   private optionalNumberText(value: number | null | undefined): string {
@@ -3785,8 +5565,50 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   private extractMatrix(raw: string): string | null {
-    const match = raw.match(/\\begin\{matrix\}([\s\S]*?)\\end\{matrix\}/);
+    const match = raw.match(/\\begin\{[bp]?matrix\}([\s\S]*?)\\end\{[bp]?matrix\}/);
     return match?.[1]?.trim() || null;
+  }
+
+  private validateMathSource(raw: string): string | null {
+    const value = raw.trim();
+    if (!value) {
+      return null;
+    }
+    let depth = 0;
+    for (let index = 0; index < value.length; index += 1) {
+      const char = value[index]!;
+      if (char === '\\') {
+        index += 1;
+        continue;
+      }
+      if (char === '{') {
+        depth += 1;
+      } else if (char === '}') {
+        depth -= 1;
+        if (depth < 0) {
+          return 'There is an extra closing brace in this equation.';
+        }
+      }
+    }
+    if (depth > 0) {
+      return 'Close all braces before inserting this equation.';
+    }
+    const environments = Array.from(value.matchAll(/\\(begin|end)\{([^}]+)\}/g));
+    const supportedEnvironments = new Set(['matrix', 'bmatrix', 'pmatrix']);
+    const stack: string[] = [];
+    for (const match of environments) {
+      const action = match[1];
+      const environment = match[2] ?? '';
+      if (!supportedEnvironments.has(environment)) {
+        return `Unsupported environment "${environment}". Use matrix, bmatrix, or pmatrix.`;
+      }
+      if (action === 'begin') {
+        stack.push(environment);
+      } else if (stack.pop() !== environment) {
+        return `The ${environment} matrix environment is not closed correctly.`;
+      }
+    }
+    return stack.length ? 'Close the matrix environment before inserting.' : null;
   }
 
   private readCommand(source: string, index: number): { name: string; endIndex: number } {
@@ -3839,6 +5661,28 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       .replace(/\\([A-Za-z]+)/g, (_match, command: string) => MATH_COMMAND_REPLACEMENTS[command] ?? `\\${command}`)
       .replace(/-->/g, '→')
       .replace(/<-/g, '←');
+  }
+
+  private cursorAfterSnippet(snippet: string, start: number): number {
+    const emptyPlaceholderIndex = snippet.indexOf('{}');
+    if (emptyPlaceholderIndex >= 0) {
+      return start + emptyPlaceholderIndex + 1;
+    }
+    const firstGroup = snippet.match(/\{[^{}]*\}/);
+    if (firstGroup?.index !== undefined) {
+      return start + firstGroup.index + 1;
+    }
+    return start + snippet.length;
+  }
+
+  private alignedInlineX(contentWidth: number, left: number, availableWidth: number, alignment: WhiteboardTextAlignment): number {
+    if (alignment === 'center') {
+      return left + Math.max(0, availableWidth - contentWidth) / 2;
+    }
+    if (alignment === 'right') {
+      return left + Math.max(0, availableWidth - contentWidth);
+    }
+    return left;
   }
 
   private equationPadding(fontSize: number): number {
@@ -3960,26 +5804,25 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       type: 'geometry',
       kind,
       strokeColor: this.strokeColor(),
-      fillColor: this.fillEnabled() && (kind === 'circle' || kind === 'arc' || kind === 'angle') ? this.fillColor() : null,
+      fillColor: this.fillEnabled() && (kind === 'circle' || kind === 'arc' || kind === 'angle' || kind === 'polygon') ? this.fillColor() : null,
       width: this.strokeWidth(),
       from,
       to,
-      label: kind === 'point' ? 'P' : kind === 'vector' ? 'v' : undefined,
+      label: kind === 'point' ? 'P' : kind === 'vector' ? 'v' : kind === 'polygon' ? 'hexagon' : undefined,
       showMeasurement: this.showMeasurements(),
       dashed: kind === 'perpendicular' || kind === 'parallel'
     };
   }
 
   private createDiagramElement(kind: WhiteboardDiagramTool, position: WhiteboardPoint): WhiteboardDiagramElement {
-    const width = kind === 'flow' ? 420 : 360;
-    const height = kind === 'venn' ? 250 : 280;
+    const dimensions = this.defaultDiagramDimensions(kind);
     return {
       id: this.createElementId(),
       type: 'diagram',
       kind,
       position,
-      width,
-      height,
+      width: dimensions.width,
+      height: dimensions.height,
       strokeColor: this.strokeColor(),
       fillColor: this.fillEnabled() ? this.fillColor() : '#FFD150',
       lineWidth: Math.max(2, this.strokeWidth()),
@@ -3987,7 +5830,41 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     };
   }
 
+  private defaultDiagramDimensions(kind: WhiteboardDiagramTool): { width: number; height: number } {
+    if (kind === 'coordinate-axes') {
+      return { width: 460, height: 320 };
+    }
+    if (kind === 'number-line-template') {
+      return { width: 460, height: 150 };
+    }
+    if (kind === 'table-layout') {
+      return { width: 420, height: 260 };
+    }
+    if (kind === 'fraction-bars') {
+      return { width: 440, height: 300 };
+    }
+    if (kind === 'flow') {
+      return { width: 420, height: 280 };
+    }
+    if (kind === 'venn') {
+      return { width: 360, height: 250 };
+    }
+    return { width: 360, height: 280 };
+  }
+
   private defaultDiagramLabels(kind: WhiteboardDiagramTool): string[] {
+    if (kind === 'coordinate-axes') {
+      return ['x', 'y', '0'];
+    }
+    if (kind === 'number-line-template') {
+      return ['-5', '-4', '-3', '-2', '-1', '0', '1', '2', '3', '4', '5'];
+    }
+    if (kind === 'table-layout') {
+      return ['Col 1', 'Col 2', 'Col 3', 'Col 4'];
+    }
+    if (kind === 'fraction-bars') {
+      return ['1/2', '1/3', '1/4', '1/5', '1/8'];
+    }
     if (kind === 'venn') {
       return ['A', 'B', 'A ∩ B'];
     }
@@ -4011,7 +5888,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       fillColor: this.fillEnabled() ? this.fillColor() : null,
       fontSize: this.fontSize(),
       position: { x: draft.x, y: draft.y },
-      text
+      text,
+      width: draft.width,
+      height: draft.height,
+      align: draft.align ?? 'left'
     };
   }
 
@@ -4026,7 +5906,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       position: { x: draft.x, y: draft.y },
       raw,
       width: Math.max(draft.width ?? 0, size.width),
-      height: Math.max(draft.height ?? 0, size.height)
+      height: Math.max(draft.height ?? 0, size.height),
+      align: draft.align ?? 'left'
     };
   }
 
@@ -4045,6 +5926,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       showGrid: true,
       showAxes: true,
       showTicks: true,
+      tickStep: '',
       curveColor: this.strokeColor(),
       lineWidth: Math.max(2, this.strokeWidth()),
       pointX: '',
@@ -4052,11 +5934,28 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       shadeFrom: '',
       shadeTo: '',
       showIntercepts: false,
-      scatterPoints: ''
+      inequality: '',
+      parametricX: '',
+      parametricY: '',
+      parametricTMin: '0',
+      parametricTMax: String(Number((Math.PI * 2).toFixed(4))),
+      polarExpression: '',
+      polarThetaMin: '0',
+      polarThetaMax: String(Number((Math.PI * 2).toFixed(4))),
+      scatterPoints: '',
+      histogramData: '',
+      histogramBins: '',
+      showRegression: false,
+      normalMean: '',
+      normalStdDev: '',
+      labels: ''
     };
   }
 
   private createGraphElement(draft: GraphDraft): WhiteboardGraphElement {
+    const expressions = this.parseGraphFunctionList(draft.expression);
+    const primaryColor = draft.curveColor;
+    const secondaryColors = ['#F26076', '#FF9760', '#458B73', '#7c3aed', '#0f5bf1'];
     return {
       id: draft.elementId ?? this.createElementId(),
       type: 'graph',
@@ -4071,16 +5970,26 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       showGrid: draft.showGrid,
       showAxes: draft.showAxes,
       showTicks: draft.showTicks,
-      functions: [
-        {
-          id: 'primary',
-          expression: draft.expression.trim(),
-          color: draft.curveColor,
-          width: Math.max(1, draft.lineWidth)
-        }
-      ],
+      tickStep: this.optionalNumber(draft.tickStep),
+      functions: expressions.map((expression, index) => ({
+        id: `fn-${index + 1}`,
+        expression,
+        color: index === 0 ? primaryColor : secondaryColors[(index - 1) % secondaryColors.length]!,
+        width: Math.max(1, draft.lineWidth)
+      })),
+      inequality: draft.inequality.trim(),
+      parametric: this.createParametricPlot(draft),
+      polar: this.createPolarPlot(draft),
       scatterPoints: draft.scatterPoints.trim(),
       scatterColor: '#FF9760',
+      labels: this.parseGraphLabels(draft.labels),
+      stats: {
+        histogramData: draft.histogramData.trim(),
+        histogramBins: this.optionalPositiveInteger(draft.histogramBins),
+        showRegression: draft.showRegression,
+        normalMean: this.optionalNumber(draft.normalMean),
+        normalStdDev: this.optionalNumber(draft.normalStdDev)
+      },
       helpers: {
         pointX: this.optionalNumber(draft.pointX),
         tangentX: this.optionalNumber(draft.tangentX),
@@ -4091,9 +6000,44 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     };
   }
 
+  private createParametricPlot(draft: GraphDraft): WhiteboardGraphParametricPlot | null {
+    if (!draft.parametricX.trim() && !draft.parametricY.trim()) {
+      return null;
+    }
+    return {
+      xExpression: draft.parametricX.trim(),
+      yExpression: draft.parametricY.trim(),
+      tMin: Number(draft.parametricTMin),
+      tMax: Number(draft.parametricTMax),
+      color: '#458B73',
+      width: Math.max(1, draft.lineWidth)
+    };
+  }
+
+  private createPolarPlot(draft: GraphDraft): WhiteboardGraphPolarPlot | null {
+    if (!draft.polarExpression.trim()) {
+      return null;
+    }
+    return {
+      expression: draft.polarExpression.trim(),
+      thetaMin: Number(draft.polarThetaMin),
+      thetaMax: Number(draft.polarThetaMax),
+      color: '#FF9760',
+      width: Math.max(1, draft.lineWidth)
+    };
+  }
+
   private validateGraphDraft(draft: GraphDraft): string | null {
-    if (!draft.expression.trim()) {
-      return 'Enter a function expression.';
+    if (
+      !draft.expression.trim() &&
+      !draft.parametricX.trim() &&
+      !draft.parametricY.trim() &&
+      !draft.polarExpression.trim() &&
+      !draft.scatterPoints.trim() &&
+      !draft.histogramData.trim() &&
+      !draft.normalMean.trim()
+    ) {
+      return 'Enter a function, curve, scatter data, histogram data, or normal curve.';
     }
     if (![draft.xMin, draft.xMax, draft.yMin, draft.yMax, draft.width, draft.height, draft.lineWidth].every(Number.isFinite)) {
       return 'Graph values must be valid numbers.';
@@ -4104,16 +6048,76 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (Math.abs(draft.xMax - draft.xMin) > 100000 || Math.abs(draft.yMax - draft.yMin) > 100000) {
       return 'Graph range is too large.';
     }
-    const parsed = this.parseGraphExpression(draft.expression);
-    if (parsed.error) {
-      return parsed.error;
+    for (const expression of this.parseGraphFunctionList(draft.expression)) {
+      const parsed = this.parseGraphExpression(expression);
+      if (parsed.error) {
+        return parsed.error;
+      }
     }
-    const optionalValues = [draft.pointX, draft.tangentX, draft.shadeFrom, draft.shadeTo].filter((value) => value.trim());
+    const optionalValues = [
+      draft.tickStep,
+      draft.pointX,
+      draft.tangentX,
+      draft.shadeFrom,
+      draft.shadeTo,
+      draft.parametricTMin,
+      draft.parametricTMax,
+      draft.polarThetaMin,
+      draft.polarThetaMax,
+      draft.histogramBins,
+      draft.normalMean,
+      draft.normalStdDev
+    ].filter((value) => value.trim());
     if (optionalValues.some((value) => !Number.isFinite(Number(value)))) {
-      return 'Helper x values must be numbers.';
+      return 'Graph helper values must be numbers.';
+    }
+    if (draft.tickStep.trim() && Number(draft.tickStep) <= 0) {
+      return 'Tick spacing must be greater than zero.';
+    }
+    if (draft.parametricX.trim() || draft.parametricY.trim()) {
+      if (!draft.parametricX.trim() || !draft.parametricY.trim()) {
+        return 'Parametric plots need both x(t) and y(t).';
+      }
+      const parsedX = this.parseGraphExpression(draft.parametricX, 't');
+      const parsedY = this.parseGraphExpression(draft.parametricY, 't');
+      if (parsedX.error || parsedY.error) {
+        return parsedX.error ?? parsedY.error ?? 'Invalid parametric curve.';
+      }
+      if (Number(draft.parametricTMin) >= Number(draft.parametricTMax)) {
+        return 'Parametric t min must be lower than t max.';
+      }
+    }
+    if (draft.polarExpression.trim()) {
+      const parsedPolar = this.parseGraphExpression(draft.polarExpression, 'theta');
+      if (parsedPolar.error) {
+        return parsedPolar.error;
+      }
+      if (Number(draft.polarThetaMin) >= Number(draft.polarThetaMax)) {
+        return 'Polar theta min must be lower than theta max.';
+      }
+    }
+    if (draft.inequality.trim()) {
+      const inequalityError = this.validateInequalitySource(draft.inequality);
+      if (inequalityError) {
+        return inequalityError;
+      }
     }
     if (draft.scatterPoints.trim() && !this.parseScatterPoints(draft.scatterPoints).length) {
       return 'Scatter points should look like: 1,2; 2,4; 3,5.';
+    }
+    if (draft.histogramData.trim() && !this.parseNumberList(draft.histogramData).length) {
+      return 'Histogram data should be comma or space separated numbers.';
+    }
+    if (draft.normalMean.trim() || draft.normalStdDev.trim()) {
+      if (!draft.normalMean.trim() || !draft.normalStdDev.trim()) {
+        return 'Normal curve needs both mean and standard deviation.';
+      }
+      if (Number(draft.normalStdDev) <= 0) {
+        return 'Normal curve standard deviation must be greater than zero.';
+      }
+    }
+    if (draft.labels.trim() && !this.parseGraphLabels(draft.labels).length) {
+      return 'Labels should look like: 0,0,Origin.';
     }
     return null;
   }
@@ -4135,6 +6139,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       showGrid: element.showGrid,
       showAxes: element.showAxes,
       showTicks: element.showTicks,
+      tickStep: this.optionalNumberText(element.tickStep),
       curveColor: primaryFunction?.color ?? this.strokeColor(),
       lineWidth: primaryFunction?.width ?? this.strokeWidth(),
       pointX: this.optionalNumberText(element.helpers?.pointX),
@@ -4142,7 +6147,21 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       shadeFrom: this.optionalNumberText(element.helpers?.shadeFrom),
       shadeTo: this.optionalNumberText(element.helpers?.shadeTo),
       showIntercepts: !!element.helpers?.showIntercepts,
-      scatterPoints: element.scatterPoints ?? ''
+      inequality: element.inequality ?? '',
+      parametricX: element.parametric?.xExpression ?? '',
+      parametricY: element.parametric?.yExpression ?? '',
+      parametricTMin: this.optionalNumberText(element.parametric?.tMin) || '0',
+      parametricTMax: this.optionalNumberText(element.parametric?.tMax) || String(Number((Math.PI * 2).toFixed(4))),
+      polarExpression: element.polar?.expression ?? '',
+      polarThetaMin: this.optionalNumberText(element.polar?.thetaMin) || '0',
+      polarThetaMax: this.optionalNumberText(element.polar?.thetaMax) || String(Number((Math.PI * 2).toFixed(4))),
+      scatterPoints: element.scatterPoints ?? '',
+      histogramData: element.stats?.histogramData ?? '',
+      histogramBins: this.optionalNumberText(element.stats?.histogramBins),
+      showRegression: !!element.stats?.showRegression,
+      normalMean: this.optionalNumberText(element.stats?.normalMean),
+      normalStdDev: this.optionalNumberText(element.stats?.normalStdDev),
+      labels: this.serializeGraphLabels(element.labels ?? [])
     });
     this.strokeColor.set(primaryFunction?.color ?? this.strokeColor());
   }
@@ -4178,7 +6197,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       mode: element.type,
       elementId: element.id,
       width: bounds.width,
-      height: bounds.height
+      height: bounds.height,
+      align: element.align ?? 'left'
     });
     this.strokeColor.set(element.color);
     if (element.fillColor) {
@@ -4186,6 +6206,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       this.fillEnabled.set(true);
     }
     this.fontSize.set(element.fontSize);
+    if (element.type === 'equation') {
+      this.mathEquationAlignment.set(element.align ?? 'left');
+    }
     window.setTimeout(() => {
       const editor = this.textEditor?.nativeElement;
       editor?.focus();
@@ -4201,6 +6224,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return {
       id: this.createElementId(),
       title,
+      tags: [],
       template,
       view: { ...DEFAULT_PAGE_VIEW },
       background: null,
@@ -4208,9 +6232,55 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     };
   }
 
+  private normalizeTemplateId(template: unknown): WhiteboardTemplateId {
+    return typeof template === 'string' && this.templateOptions.some((option) => option.id === template)
+      ? (template as WhiteboardTemplateId)
+      : DEFAULT_TEMPLATE_ID;
+  }
+
+  private normalizePageView(view: unknown): WhiteboardPageView {
+    if (!view || typeof view !== 'object' || Array.isArray(view)) {
+      return { ...DEFAULT_PAGE_VIEW };
+    }
+    const record = view as Partial<Record<keyof WhiteboardPageView, unknown>>;
+    return {
+      zoom: Number.isFinite(Number(record.zoom)) ? Number(record.zoom) : DEFAULT_PAGE_VIEW.zoom,
+      panX: Number.isFinite(Number(record.panX)) ? Number(record.panX) : DEFAULT_PAGE_VIEW.panX,
+      panY: Number.isFinite(Number(record.panY)) ? Number(record.panY) : DEFAULT_PAGE_VIEW.panY
+    };
+  }
+
+  private normalizePageBackground(background: unknown): WhiteboardPageBackground | null {
+    if (!background || typeof background !== 'object' || Array.isArray(background)) {
+      return null;
+    }
+    const record = background as Partial<WhiteboardPageBackground>;
+    return record.kind === 'image' && typeof record.dataUrl === 'string' ? (structuredClone(record) as WhiteboardPageBackground) : null;
+  }
+
+  private normalizePageTags(value: string | string[] | undefined): string[] {
+    const source = Array.isArray(value) ? value : String(value ?? '').split(',');
+    const seen = new Set<string>();
+    const tags: string[] = [];
+    for (const item of source) {
+      const tag = item.trim().replace(/\s+/g, ' ').slice(0, 32);
+      const key = tag.toLowerCase();
+      if (!tag || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      tags.push(tag);
+      if (tags.length >= 8) {
+        break;
+      }
+    }
+    return tags;
+  }
+
   private clonePage(page: WhiteboardPage): WhiteboardPage {
     return {
       ...structuredClone(page),
+      tags: page.tags ? [...page.tags] : [],
       template: page.template ?? DEFAULT_TEMPLATE_ID,
       view: { ...(page.view ?? DEFAULT_PAGE_VIEW) },
       background: page.background ? { ...page.background } : null
@@ -4267,6 +6337,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   private setSelection(ids: string[]): void {
     this.selectedElementIds.set([...new Set(ids)]);
+    this.syncStyleFromSelection();
     this.render();
   }
 
@@ -4540,12 +6611,18 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   private eraseAlongPath(from: WhiteboardPoint, to: WhiteboardPoint): void {
     const radius = this.eraserRadius();
+    const mode = this.eraserMode();
     const nextElements: WhiteboardElement[] = [];
     const commands: WhiteboardCommand[] = [];
     let changed = false;
 
     for (const element of this.elements) {
       if (element.type === 'stroke') {
+        if (mode === 'stroke' && this.strokeIntersectsEraser(element, from, to, radius)) {
+          changed = true;
+          commands.push({ type: 'delete', elementId: element.id, pageId: this.activePageId() });
+          continue;
+        }
         const fragments = this.eraseStroke(element, from, to, radius);
         if (!fragments) {
           nextElements.push(element);
@@ -4633,6 +6710,19 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }));
   }
 
+  private strokeIntersectsEraser(element: WhiteboardStrokeElement, from: WhiteboardPoint, to: WhiteboardPoint, radius: number): boolean {
+    const threshold = radius + element.width / 2;
+    if (element.points.length <= 1) {
+      return this.distanceToSegment(element.points[0]!, from, to) <= threshold;
+    }
+    for (let index = 0; index < element.points.length - 1; index += 1) {
+      if (this.segmentDistance(element.points[index]!, element.points[index + 1]!, from, to) <= threshold) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private elementIntersectsEraser(element: Exclude<WhiteboardElement, WhiteboardStrokeElement>, from: WhiteboardPoint, to: WhiteboardPoint, radius: number): boolean {
     if (element.type === 'shape' && (element.shape === 'line' || element.shape === 'arrow')) {
       return this.segmentDistance(element.from, element.to, from, to) <= radius + element.width / 2;
@@ -4641,7 +6731,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   private eraserRadius(): number {
-    return Math.max(14, this.strokeWidth() * 2.4);
+    const size = this.eraserSize();
+    return this.eraserMode() === 'area' ? Math.round(size * 1.45) : size;
   }
 
   private pathIntersectsBounds(from: WhiteboardPoint, to: WhiteboardPoint, bounds: ElementBounds): boolean {
@@ -4735,6 +6826,30 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     context.restore();
   }
 
+  private drawEraserCursor(): void {
+    const context = this.context;
+    const point = this.eraserCursor();
+    if (!context || !point || this.activeTool() !== 'eraser' || this.readOnly()) {
+      return;
+    }
+    const radius = this.eraserRadius();
+    context.save();
+    context.strokeStyle = this.cssVariable('--wb-primary', '#F26076');
+    context.fillStyle = this.cssVariable('--accent-soft', 'rgba(242, 96, 118, 0.12)');
+    context.lineWidth = 1.5;
+    context.setLineDash(this.eraserMode() === 'stroke' ? [5, 4] : []);
+    context.beginPath();
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.setLineDash([]);
+    context.fillStyle = this.cssVariable('--wb-primary', '#F26076');
+    context.beginPath();
+    context.arc(point.x, point.y, 2.5, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+  }
+
   private boundsForElement(element: WhiteboardElement): ElementBounds {
     if (element.type === 'stroke') {
       const xs = element.points.map((point) => point.x);
@@ -4750,7 +6865,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
     if (element.type === 'geometry') {
       const padding = Math.max(12, element.width + 8);
-      if (element.kind === 'circle' || element.kind === 'arc') {
+      if (element.kind === 'circle' || element.kind === 'arc' || element.kind === 'protractor' || element.kind === 'polygon') {
         const radius = Math.max(1, this.distance(element.from, element.to));
         return { x: element.from.x - radius - padding, y: element.from.y - radius - padding, width: radius * 2 + padding * 2, height: radius * 2 + padding * 2 };
       }
@@ -4772,7 +6887,13 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     const context = this.context;
     const lines = element.text.split('\n');
     const width = context ? this.measureTextWidth(context, element) : Math.max(...lines.map((line) => line.length)) * element.fontSize * 0.58;
-    return { x: element.position.x, y: element.position.y, width, height: Math.max(1, lines.length) * element.fontSize * 1.25 };
+    const height = Math.max(1, lines.length) * element.fontSize * 1.25;
+    return {
+      x: element.position.x,
+      y: element.position.y,
+      width: Math.max(width, element.width ?? 0),
+      height: Math.max(height, element.height ?? 0)
+    };
   }
 
   private boundsForElements(ids: string[]): ElementBounds {
@@ -4869,6 +6990,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       next.position = mapPoint(next.position);
       if (next.type === 'text') {
         next.fontSize = Math.max(8, next.fontSize * Math.max(scaleX, scaleY));
+        next.width = Math.max(24, (next.width ?? fromBounds.width) * scaleX);
+        next.height = Math.max(18, (next.height ?? fromBounds.height) * scaleY);
       } else if (next.type === 'equation') {
         next.width *= scaleX;
         next.height *= scaleY;
@@ -5045,17 +7168,19 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   private snapPoint(point: WhiteboardPoint, origin?: WhiteboardPoint): WhiteboardPoint {
-    if (!this.snapToGrid()) {
+    if (!this.snapToGrid() && !this.snapToPoints()) {
       this.snapIndicator.set(null);
       return point;
     }
-    const target = this.nearestSnapTarget(point);
-    let snapped = target ?? {
-      x: Math.round(point.x / GRID_SIZE) * GRID_SIZE,
-      y: Math.round(point.y / GRID_SIZE) * GRID_SIZE
-    };
+    const target = this.snapToPoints() ? this.nearestSnapTarget(point) : null;
+    let snapped = target ?? (this.snapToGrid()
+      ? {
+          x: Math.round(point.x / GRID_SIZE) * GRID_SIZE,
+          y: Math.round(point.y / GRID_SIZE) * GRID_SIZE
+        }
+      : { ...point });
     const angleSnap = this.angleSnapDegrees();
-    if (origin && angleSnap > 0 && !target && this.distance(origin, snapped) > 2) {
+    if (origin && angleSnap > 0 && (this.snapToGrid() || this.snapToPoints()) && !target && this.distance(origin, snapped) > 2) {
       const distance = this.distance(origin, point);
       const angle = Math.atan2(point.y - origin.y, point.x - origin.x);
       const increment = (angleSnap * Math.PI) / 180;
@@ -5065,7 +7190,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         y: origin.y + Math.sin(snappedAngle) * distance
       };
     }
-    this.snapIndicator.set(snapped);
+    this.snapIndicator.set(this.distance(point, snapped) > 0.5 ? snapped : null);
     return snapped;
   }
 
@@ -5112,6 +7237,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       }
       if (element.type === 'geometry') {
         targets.push(element.from, element.to, this.midpoint(element.from, element.to));
+        if (element.kind === 'polygon') {
+          targets.push(...this.regularPolygonVertices(element.from, element.to, 6));
+        }
         if (element.kind === 'circle' || element.kind === 'arc') {
           const radius = this.distance(element.from, element.to);
           targets.push(
@@ -5131,6 +7259,69 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   private selectedElements(): WhiteboardElement[] {
     const selectedIds = this.selectedElementIds();
     return this.elements.filter((element) => selectedIds.includes(element.id));
+  }
+
+  private singleSelectedEquation(): WhiteboardEquationElement | null {
+    const selectedIds = this.selectedElementIds();
+    if (selectedIds.length !== 1) {
+      return null;
+    }
+    const element = this.elements.find((item) => item.id === selectedIds[0]);
+    return element?.type === 'equation' ? element : null;
+  }
+
+  private singleSelectedText(): WhiteboardTextElement | null {
+    const selectedIds = this.selectedElementIds();
+    if (selectedIds.length !== 1) {
+      return null;
+    }
+    const element = this.elements.find((item) => item.id === selectedIds[0]);
+    return element?.type === 'text' ? element : null;
+  }
+
+  private syncStyleFromSelection(): void {
+    const selected = this.selectedElements();
+    if (!selected.length) {
+      return;
+    }
+    const firstStrokeColor = this.strokeColorForElement(selected[0]!);
+    if (firstStrokeColor) {
+      this.strokeColor.set(firstStrokeColor);
+    }
+    const fillable = selected.find((element) => this.canElementReceiveFill(element));
+    if (!fillable || !('fillColor' in fillable)) {
+      return;
+    }
+    const selectedFill = fillable.fillColor ?? null;
+    this.fillEnabled.set(Boolean(selectedFill));
+    if (selectedFill) {
+      this.fillColor.set(selectedFill);
+    }
+  }
+
+  private strokeColorForElement(element: WhiteboardElement): string | null {
+    if (element.type === 'shape' || element.type === 'geometry' || element.type === 'diagram') {
+      return element.strokeColor;
+    }
+    if (element.type === 'graph') {
+      return element.functions[0]?.color ?? null;
+    }
+    if (element.type === 'file') {
+      return null;
+    }
+    return element.color;
+  }
+
+  private normalizeColor(color: string): string {
+    const preset = this.colors.find((item) => item.toLowerCase() === color.toLowerCase());
+    return preset ?? color;
+  }
+
+  private rememberColor(color: string): void {
+    if (this.colors.some((preset) => preset.toLowerCase() === color.toLowerCase())) {
+      return;
+    }
+    this.recentColors.update((colors) => [color, ...colors.filter((item) => item.toLowerCase() !== color.toLowerCase())].slice(0, RECENT_COLOR_LIMIT));
   }
 
   private pushHistory(): void {
@@ -5297,6 +7488,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected isGeometryTool(tool: WhiteboardTool): tool is WhiteboardGeometryTool {
     return (
       tool === 'segment' ||
+      tool === 'ruler' ||
+      tool === 'protractor' ||
       tool === 'angle' ||
       tool === 'circle' ||
       tool === 'arc' ||
@@ -5304,12 +7497,23 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       tool === 'parallel' ||
       tool === 'midpoint' ||
       tool === 'point' ||
-      tool === 'vector'
+      tool === 'vector' ||
+      tool === 'polygon'
     );
   }
 
   protected isDiagramTool(tool: WhiteboardTool): tool is WhiteboardDiagramTool {
-    return tool === 'venn' || tool === 'node-edge' || tool === 'tree' || tool === 'flow' || tool === 'probability-tree';
+    return (
+      tool === 'venn' ||
+      tool === 'node-edge' ||
+      tool === 'tree' ||
+      tool === 'flow' ||
+      tool === 'probability-tree' ||
+      tool === 'coordinate-axes' ||
+      tool === 'number-line-template' ||
+      tool === 'table-layout' ||
+      tool === 'fraction-bars'
+    );
   }
 
   private isFillableShape(shape: WhiteboardShapeTool): boolean {
@@ -5559,7 +7763,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 class GraphExpressionParser {
   private index = 0;
 
-  constructor(private readonly tokens: GraphToken[]) {}
+  constructor(
+    private readonly tokens: GraphToken[],
+    private readonly variableName: 'x' | 't' | 'theta' = 'x'
+  ) {}
 
   parse(): GraphAstNode {
     const expression = this.parseAdditive();
@@ -5617,7 +7824,7 @@ class GraphExpressionParser {
     }
     if (this.match('identifier')) {
       const name = token.value;
-      if (name === 'x') {
+      if (name === this.variableName || (this.variableName === 'theta' && name === 't')) {
         return { type: 'variable' };
       }
       if (name === 'pi') {
@@ -5633,7 +7840,7 @@ class GraphExpressionParser {
       if (!this.matchParen(')')) {
         throw new Error(`Missing ")" after ${name}.`);
       }
-      if (!['sin', 'cos', 'tan', 'exp', 'ln', 'log', 'sqrt', 'abs'].includes(name)) {
+      if (!['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'exp', 'ln', 'log', 'sqrt', 'abs'].includes(name)) {
         throw new Error(`Unsupported function "${name}".`);
       }
       return { type: 'call', name, argument };

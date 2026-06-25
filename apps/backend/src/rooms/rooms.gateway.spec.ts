@@ -530,6 +530,50 @@ describe('RoomsGateway', () => {
       expect(ack).toHaveBeenCalledWith({ ok: true, data: event });
     });
 
+    it('forwards whiteboard lock changes to targeted participants only', async () => {
+      const { gateway, rooms, emissions, signals } = createGatewayHarness();
+      const event = {
+        roomId: 'room-1',
+        locked: true,
+        changedAt: '2026-06-22T10:21:00.000Z',
+        lockedByParticipantId: 'teacher-participant',
+        message: 'Teacher locked the whiteboard.'
+      };
+      rooms.setWhiteboardLock.mockResolvedValue({
+        event,
+        targets: [
+          { roomId: 'room-1', participantId: 'student-participant', socketId: 'student-socket-a', userId: 'student-1', nodeId: 'node-a' },
+          { roomId: 'room-1', participantId: 'teacher-participant', socketId: 'teacher-socket', userId: 'teacher-1', nodeId: 'node-a' }
+        ]
+      });
+      const ack = jest.fn();
+
+      await gateway.setWhiteboardLock(
+        { data: { participantId: 'teacher-participant' } } as never,
+        { roomId: 'room-1', locked: true },
+        ack
+      );
+
+      expect(rooms.setWhiteboardLock).toHaveBeenCalledWith('room-1', 'teacher-participant', true);
+      expect(emissions).toEqual([
+        { target: 'student-socket-a', event: 'whiteboard:lock-changed', payload: event },
+        { target: 'teacher-socket', event: 'whiteboard:lock-changed', payload: event }
+      ]);
+      expect(signals.publish).not.toHaveBeenCalledWith('room-1', 'whiteboard:lock-changed', event);
+      expect(signals.publishTargeted).toHaveBeenCalledWith(
+        'room-1',
+        {
+          socketIds: ['student-socket-a', 'teacher-socket'],
+          participantIds: ['student-participant', 'teacher-participant'],
+          userIds: ['student-1', 'teacher-1'],
+          nodeIds: ['node-a']
+        },
+        'whiteboard:lock-changed',
+        event
+      );
+      expect(ack).toHaveBeenCalledWith({ ok: true, data: event });
+    });
+
     it('mutes all class-session students through the bulk moderation event', async () => {
       const { gateway, rooms, emissions, signals } = createGatewayHarness();
       const permissions = {
@@ -1350,8 +1394,10 @@ interface GatewayRoomsHarness {
   lowerStudentHand: jest.Mock;
   setStudentSpeakingPermission: jest.Mock;
   whiteboardControlForParticipant: jest.Mock;
+  whiteboardLockForParticipant: jest.Mock;
   grantWhiteboardControl: jest.Mock;
   revokeWhiteboardControl: jest.Mock;
+  setWhiteboardLock: jest.Mock;
   sendWhiteboardCommand: jest.Mock;
   sendWhiteboardCursor: jest.Mock;
   moderateStudentMedia: jest.Mock;
@@ -1542,8 +1588,10 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
     lowerStudentHand: jest.fn(),
     setStudentSpeakingPermission: jest.fn(),
     whiteboardControlForParticipant: jest.fn(async () => undefined),
+    whiteboardLockForParticipant: jest.fn(async () => undefined),
     grantWhiteboardControl: jest.fn(),
     revokeWhiteboardControl: jest.fn(),
+    setWhiteboardLock: jest.fn(),
     sendWhiteboardCommand: jest.fn(),
     sendWhiteboardCursor: jest.fn(),
     moderateStudentMedia: jest.fn(),

@@ -30,16 +30,26 @@
     "test:load:socketio": "k6 run tests/load/socketio-room-flow.js",
     "test:load:node-drain": "k6 run tests/load/node-drain-soak.js",
     "test:live-soak": "node tests/load/live-soak-signoff.mjs",
+    "test:live-soak:local": "NODE_A_URL=http://127.0.0.1:3000 NODE_B_URL=http://127.0.0.1:3002 SEED_USER_PASSWORD=Password@12345 OPERATIONS_TOKEN=local-multinode-operations-token-32chars EXPECT_DISTRIBUTED=true EXPECT_PIPE_ENABLED=true REPORT_DIR=reports/live-soak npm run test:live-soak",
     "test:eventing:soak": "node tests/load/eventing-mixed-backlog-soak.mjs",
     "test:staging:preflight": "node tests/load/staging-rollout-preflight.mjs",
     "test:rc": "npm run lint && npm run build && npm run test && npm run test:e2e && npm run test:browser",
     "lint": "npm run lint --workspaces --if-present",
     "seed:dummy-users": "npm run seed:dummy-users -w @native-sfu/backend",
+    "seed:dummy-users:multi-node": "MONGODB_URI=mongodb://127.0.0.1:27018/native_sfu SEED_USER_PASSWORD=Password@12345 npm run seed:dummy-users -w @native-sfu/backend",
     "dev:backend": "npm run start:dev -w @native-sfu/backend",
     "dev:frontend": "npm run start -w @native-sfu/frontend",
     "dev:admin-portal": "npm run start -w @native-sfu/admin-portal",
+    "verify:build": "npm run build --workspace @native-sfu/contracts && npm run build --workspace @native-sfu/sfu-core && npm run build --workspace @native-sfu/nest-sfu && npm run build --workspace @native-sfu/backend && npm run build --workspace @native-sfu/frontend && npm run build --workspace @native-sfu/admin-portal",
+    "verify:dev:backend": "npm run dev:backend",
+    "verify:dev:frontend": "npm run dev:frontend",
+    "verify:dev:admin": "npm run dev:admin-portal",
+    "verify:dev:smoke": "node scripts/dev-runtime-smoke.mjs",
     "docker:up": "docker compose -f infra/docker-compose.dev.yml up --build",
-    "docker:down": "docker compose -f infra/docker-compose.dev.yml down --remove-orphans"
+    "docker:down": "docker compose -f infra/docker-compose.dev.yml down --remove-orphans",
+    "docker:up:multi-node": "docker compose -f infra/docker-compose.multi-node.yml up --build",
+    "docker:start:multi-node": "docker compose -f infra/docker-compose.multi-node.yml up --build -d",
+    "docker:down:multi-node": "docker compose -f infra/docker-compose.multi-node.yml down --remove-orphans"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0"

@@ -91,6 +91,14 @@ Use this for:
 - drain and failover exercises
 - pre-scale production proving
 
+Local proof harness:
+
+- `npm run docker:start:multi-node`
+- `npm run seed:dummy-users:multi-node`
+- `npm run test:live-soak:local`
+
+That local harness is useful for repo-level backend/socket evidence, but it is not a substitute for two real nodes with public UDP and ingress validation.
+
 Recommended starting point per SFU node:
 
 - 8 to 16 vCPU

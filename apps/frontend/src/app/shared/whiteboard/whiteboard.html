@@ -71,6 +71,10 @@
             <span class="menu-icon measure-menu-icon"></span>
             <span>{{ showMeasurements() ? 'Hide' : 'Show' }} measurements</span>
           </button>
+          <button class="menu-item" type="button" [disabled]="readOnly()" (click)="openMathTools(); menuOpen.set(false)">
+            <span class="menu-icon math-menu-icon"></span>
+            <span>Math tools</span>
+          </button>
           <hr class="menu-divider">
           <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerFileImport(); menuOpen.set(false)">
             <span class="menu-icon import-menu-icon"></span>
@@ -83,6 +87,10 @@
           <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerPdfPageImport(); menuOpen.set(false)">
             <span class="menu-icon pdf-icon">PDF</span>
             <span>{{ assetImporting() ? 'Importing PDF...' : 'Import PDF pages' }}</span>
+          </button>
+          <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerSlideImageImport(); menuOpen.set(false)">
+            <span class="menu-icon slides-menu-icon"></span>
+            <span>{{ assetImporting() ? 'Importing slides...' : 'Import slide images' }}</span>
           </button>
           <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="fitAssetToPage(); menuOpen.set(false)">
             <span class="menu-icon fit-menu-icon"></span>
@@ -106,6 +114,37 @@
             <span class="menu-icon pdf-icon">PDF</span>
             <span>Export all pages</span>
           </button>
+          <div class="export-pages-panel" aria-label="Select pages to export">
+            <div class="export-pages-panel-head">
+              <span>Selected pages</span>
+              <div>
+                <button type="button" [disabled]="!canExportBoard()" (click)="selectAllExportPages(); $event.stopPropagation()">All</button>
+                <button type="button" [disabled]="!selectedExportPages().length" (click)="clearExportPageSelection(); $event.stopPropagation()">Clear</button>
+              </div>
+            </div>
+            <div class="export-page-list">
+              @for (page of pages(); track page.id) {
+              <label class="export-page-option">
+                <input
+                  type="checkbox"
+                  [checked]="selectedExportPageIds().includes(page.id)"
+                  [disabled]="!canExportBoard()"
+                  (change)="toggleExportPage(page.id)"
+                />
+                <span>{{ page.title }}</span>
+              </label>
+              }
+            </div>
+            <button
+              class="menu-item selected-pages-export"
+              type="button"
+              [disabled]="!canExportSelectedPages()"
+              (click)="exportSelectedPagesPdf(); menuOpen.set(false)"
+            >
+              <span class="menu-icon pdf-icon">PDF</span>
+              <span>Export selected pages</span>
+            </button>
+          </div>
         </div>
         }
       </div>
@@ -124,7 +163,7 @@
         <span class="tool-icon pen-icon" aria-hidden="true"></span>
       </button>
       <button class="icon-button tool-button" [class.active]="activeTool() === 'eraser'" type="button"
-        title="Erase element" aria-label="Erase element" [attr.aria-pressed]="activeTool() === 'eraser'"
+        [title]="'Eraser: ' + eraserMode()" [attr.aria-label]="'Eraser: ' + eraserMode()" [attr.aria-pressed]="activeTool() === 'eraser'"
         [disabled]="!canUseTool('eraser')"
         (click)="selectTool('eraser')">
         <span class="tool-icon erase-icon" aria-hidden="true"></span>
@@ -132,18 +171,6 @@
       <button class="icon-button tool-button" [class.active]="activeTool() === 'text'" type="button" title="Text"
         aria-label="Text" [attr.aria-pressed]="activeTool() === 'text'" [disabled]="!canUseTool('text')" (click)="selectTool('text')">
         <span class="tool-icon text-icon" aria-hidden="true"></span>
-      </button>
-      <button class="icon-button tool-button" [class.active]="activeTool() === 'equation'" type="button"
-        title="Equation" aria-label="Equation" [attr.aria-pressed]="activeTool() === 'equation'"
-        [disabled]="!canUseTool('equation')"
-        (click)="selectTool('equation')">
-        <span class="tool-icon equation-icon" aria-hidden="true"></span>
-      </button>
-      <button class="icon-button tool-button" [class.active]="activeTool() === 'graph'" type="button"
-        title="Graph" aria-label="Graph" [attr.aria-pressed]="activeTool() === 'graph'"
-        [disabled]="!canUseTool('graph')"
-        (click)="selectTool('graph')">
-        <span class="tool-icon graph-icon" aria-hidden="true"></span>
       </button>
       <button class="icon-button tool-button" [class.active]="activeTool() === 'laser'" type="button"
         title="Laser pointer" aria-label="Laser pointer" [attr.aria-pressed]="activeTool() === 'laser'"
@@ -188,26 +215,6 @@
         }
       </div>
 
-      <div class="shape-group-container geometry-group-container">
-        <button class="icon-button tool-button main-geometry-btn" [class.active]="isGeometryTool(activeTool())" type="button"
-          [title]="activeGeometryTool()" [attr.aria-label]="activeGeometryTool()" [disabled]="!canUseTool(activeGeometryTool())" (click)="selectTool(activeGeometryTool())">
-          <span class="tool-icon geometry-icon" aria-hidden="true"></span>
-          <span class="chevron-icon" (click)="toggleGeometryMenu($event)"></span>
-        </button>
-
-        @if (geometryMenuOpen()) {
-        <div class="shape-dropdown-overlay" (click)="geometryMenuOpen.set(false)"></div>
-        <div class="shape-dropdown geometry-dropdown">
-          @for (tool of geometryToolOptions; track tool.id) {
-          <button class="icon-button tool-button" [class.active]="activeTool() === tool.id" type="button"
-            [title]="tool.label" [attr.aria-label]="tool.label" [disabled]="!canUseTool(tool.id)" (click)="selectGeometryTool(tool.id)">
-            <span class="tool-icon" [class]="tool.id + '-icon'" aria-hidden="true"></span>
-          </button>
-          }
-        </div>
-        }
-      </div>
-
       <div class="shape-group-container diagram-group-container">
         <button class="icon-button tool-button main-diagram-btn" [class.active]="isDiagramTool(activeTool())" type="button"
           [title]="activeDiagramTool()" [attr.aria-label]="activeDiagramTool()" [disabled]="!canUseTool(activeDiagramTool())" (click)="selectTool(activeDiagramTool())">
@@ -246,6 +253,10 @@
           <button class="color-swatch" [class.active]="fillColor() === color" [style.background]="color" type="button"
             title="Fill color" aria-label="Fill color" (click)="selectFillColor(color)"></button>
           }
+          @for (color of customRecentColors(); track color) {
+          <button class="color-swatch recent-color" [class.active]="fillColor() === color" [style.background]="color" type="button"
+            title="Recent fill color" aria-label="Recent fill color" (click)="selectFillColor(color)"></button>
+          }
           <label class="custom-color-picker" title="Custom fill color" aria-label="Custom fill color">
             <input type="color" [value]="fillColor()" (change)="setCustomFillColor($event)" />
             <span aria-hidden="true"></span>
@@ -257,12 +268,17 @@
         aria-label="Snap to grid" [attr.aria-pressed]="snapToGrid()" (click)="toggleSnapToGrid()">
         <span class="tool-icon snap-icon" aria-hidden="true"></span>
       </button>
+      <button class="icon-button tool-button" [class.active]="snapToPoints()" type="button" title="Snap to points"
+        aria-label="Snap to points" [attr.aria-pressed]="snapToPoints()" (click)="toggleSnapToPoints()">
+        <span class="tool-icon snap-icon point-snap-icon" aria-hidden="true"></span>
+      </button>
       <button class="icon-button tool-button" type="button" title="Import image or PDF object" aria-label="Import image or PDF object"
         [disabled]="!canImportAssets() || assetImporting()"
         (click)="triggerFileImport()">
         <span class="tool-icon import-icon" aria-hidden="true"></span>
       </button>
       <input #fileInput class="file-input" type="file" [attr.accept]="assetInputAccept()"
+        [multiple]="assetInputMultiple()"
         (change)="importFile($event)" />
       <button class="icon-button tool-button" type="button" title="Clear" aria-label="Clear whiteboard"
         [disabled]="!canClearBoard()"
@@ -301,6 +317,10 @@
           <button class="color-swatch" [class.active]="strokeColor() === color" [style.background]="color" type="button"
             title="Drawing color" aria-label="Drawing color" (click)="selectColor(color)"></button>
           }
+          @for (color of customRecentColors(); track color) {
+          <button class="color-swatch recent-color" [class.active]="strokeColor() === color" [style.background]="color" type="button"
+            title="Recent drawing color" aria-label="Recent drawing color" (click)="selectColor(color)"></button>
+          }
           <label class="custom-color-picker" title="Custom drawing color" aria-label="Custom drawing color">
             <input type="color" [value]="strokeColor()" (change)="setCustomStrokeColor($event)" />
             <span aria-hidden="true"></span>
@@ -310,15 +330,42 @@
       </div>
 
       <div class="brush-group-container">
-        <button class="icon-button tool-button main-brush-btn" [class.active]="activeTool() === 'pen'" type="button"
-          title="Brush settings" aria-label="Brush settings" (click)="toggleBrushMenu($event)">
-          <span class="brush-preview" [style.width.px]="strokeWidth() + 4" [style.height.px]="strokeWidth() + 4"></span>
+        <button class="icon-button tool-button main-brush-btn" [class.active]="activeTool() === 'pen' || activeTool() === 'eraser'" type="button"
+          [title]="activeTool() === 'eraser' ? 'Eraser settings' : 'Brush settings'"
+          [attr.aria-label]="activeTool() === 'eraser' ? 'Eraser settings' : 'Brush settings'" (click)="toggleBrushMenu($event)">
+          <span class="brush-preview" [class.eraser-preview]="activeTool() === 'eraser'"
+            [style.width.px]="(activeTool() === 'eraser' ? eraserSize() : strokeWidth()) + 4"
+            [style.height.px]="(activeTool() === 'eraser' ? eraserSize() : strokeWidth()) + 4"></span>
           <span class="chevron-icon"></span>
         </button>
 
         @if (brushMenuOpen()) {
         <div class="shape-dropdown-overlay" (click)="brushMenuOpen.set(false)"></div>
         <div class="brush-dropdown">
+          @if (activeTool() === 'eraser') {
+          <div class="eraser-mode-grid" aria-label="Eraser mode">
+            @for (mode of eraserModeOptions; track mode.id) {
+            <button type="button" [class.active]="eraserMode() === mode.id" [title]="mode.description"
+              (click)="selectEraserMode(mode.id)">
+              <strong>{{ mode.label }}</strong>
+              <span>{{ mode.description }}</span>
+            </button>
+            }
+          </div>
+          <div class="brush-presets eraser-presets" aria-label="Eraser sizes">
+            @for (size of eraserSizes; track size) {
+            <button class="brush-size" [class.active]="eraserSize() === size" type="button" title="Eraser size"
+              aria-label="Eraser size" (click)="selectEraserSize(size)">
+              <span [style.width.px]="size" [style.height.px]="size"></span>
+            </button>
+            }
+          </div>
+          <div class="brush-slider-row">
+            <span class="size-label">{{ eraserSize() }}px</span>
+            <input class="stroke-range" type="range" min="8" max="44" [value]="eraserSize()" aria-label="Eraser size"
+              (input)="setEraserSize($event)" />
+          </div>
+          } @else {
           <div class="brush-presets" aria-label="Brush sizes">
             @for (size of brushSizes; track size) {
             <button class="brush-size" [class.active]="strokeWidth() === size" type="button" title="Brush size"
@@ -332,6 +379,7 @@
             <input class="stroke-range" type="range" min="2" max="14" [value]="strokeWidth()" aria-label="Stroke size"
               (input)="setStrokeWidth($event)" />
           </div>
+          }
         </div>
         }
       </div>
@@ -339,18 +387,225 @@
     </div>
   </div>
 
+  @if (mathPopoverOpen()) {
+  <aside #mathToolsPopover class="math-tools-popover" [style.transform]="mathPopoverTransform()" role="dialog"
+    aria-label="Math tools">
+    <header class="math-tools-header" (pointerdown)="startMathPopoverDrag($event)">
+      <span class="math-tools-grip" aria-hidden="true"></span>
+      <div>
+        <strong>Math tools</strong>
+        <span>{{ activeMathTab() }}</span>
+      </div>
+      <button class="math-tools-close" type="button" aria-label="Close math tools" (pointerdown)="$event.stopPropagation()"
+        (click)="closeMathTools()">&times;</button>
+    </header>
+
+    <nav class="math-tools-tabs" aria-label="Math tool sections">
+      @for (tab of mathTabs; track tab.id) {
+      <button type="button" [class.active]="activeMathTab() === tab.id" (click)="selectMathTab(tab.id)">
+        {{ tab.label }}
+      </button>
+      }
+    </nav>
+
+    <div class="math-tools-body">
+      @if (activeMathTab() === 'equation') {
+      <section class="math-tools-panel">
+        <label class="math-field full">
+          <span>Equation</span>
+          <textarea #mathEquationInput class="math-equation-input" [value]="mathEquationDraft()"
+            placeholder="\frac{a}{b}, x^2 + y^2 = r^2" (input)="updateMathEquationDraft($event)"></textarea>
+        </label>
+        @if (mathEquationError(); as error) {
+        <p class="math-error" role="alert">{{ error }}</p>
+        }
+        <div class="math-preview-card" aria-label="Equation preview">
+          @if (mathEquationPreview(); as preview) {
+          <img [src]="preview" alt="" />
+          } @else {
+          <span>{{ mathEquationDraft() || '\\frac{a}{b}' }}</span>
+          }
+        </div>
+        <label class="math-size-control">
+          <span>Size</span>
+          <input type="range" min="16" max="72" [value]="mathEquationFontSize()" aria-label="Equation size"
+            (input)="setMathEquationFontSize($event)" />
+          <strong>{{ mathEquationFontSize() }}px</strong>
+        </label>
+        <div class="math-align-row" aria-label="Equation alignment">
+          <span>Align</span>
+          <div>
+            @for (alignment of textAlignmentOptions; track alignment) {
+            <button type="button" [class.active]="mathEquationAlignment() === alignment"
+              [attr.aria-pressed]="mathEquationAlignment() === alignment" (click)="setMathEquationAlignment(alignment)">
+              {{ alignment }}
+            </button>
+            }
+          </div>
+        </div>
+        <div class="math-color-row" aria-label="Equation color">
+          @for (color of colors; track color) {
+          <button class="color-swatch" [class.active]="strokeColor() === color" [style.background]="color" type="button"
+            title="Equation color" aria-label="Equation color" (click)="setMathEquationColor(color)"></button>
+          }
+          @for (color of customRecentColors(); track color) {
+          <button class="color-swatch recent-color" [class.active]="strokeColor() === color" [style.background]="color" type="button"
+            title="Recent equation color" aria-label="Recent equation color" (click)="setMathEquationColor(color)"></button>
+          }
+          <label class="custom-color-picker" title="Custom equation color" aria-label="Custom equation color">
+            <input type="color" [value]="strokeColor()" (change)="setCustomStrokeColor($event)" />
+            <span aria-hidden="true"></span>
+          </label>
+        </div>
+        <div class="math-shortcut-groups" aria-label="Quick equation shortcuts">
+          @for (group of mathShortcutGroups; track group.label) {
+          <section class="math-shortcut-group">
+            <span>{{ group.label }}</span>
+            <div>
+              @for (snippet of group.shortcuts; track snippet.label) {
+              <button type="button" [attr.aria-label]="'Insert ' + snippet.label" (click)="insertMathSnippetIntoPopover(snippet.value)">
+                {{ snippet.label }}
+              </button>
+              }
+            </div>
+          </section>
+          }
+        </div>
+        <div class="math-tools-actions">
+          <button class="primary" type="button" [disabled]="!canUseTool('equation') || !mathEquationDraft().trim() || !!mathEquationError()"
+            (click)="insertEquationFromPopover()">{{ mathEquationActionLabel() }}</button>
+        </div>
+      </section>
+      }
+
+      @if (activeMathTab() === 'templates') {
+      <section class="math-tools-panel">
+        <div class="math-current-draft">
+          <span>Page backgrounds</span>
+          <code>Apply to current page</code>
+        </div>
+        <div class="math-template-grid">
+          @for (template of templateOptions; track template.id) {
+          <button class="math-template-card" type="button" [class.active]="activeTemplate() === template.id"
+            [disabled]="!canManagePages()" (click)="applyMathTemplate(template.id)">
+            <strong>{{ template.label }}</strong>
+            <span>{{ template.description }}</span>
+          </button>
+          }
+        </div>
+        <div class="math-current-draft">
+          <span>Movable structures</span>
+          <code>Insert as board objects</code>
+        </div>
+        <div class="math-template-grid compact">
+          @for (template of insertTemplateOptions; track template.kind) {
+          <button class="math-template-card" type="button" [disabled]="!canUseTool(template.kind)" (click)="insertBoardTemplate(template.kind)">
+            <strong>{{ template.label }}</strong>
+            <span>{{ template.description }}</span>
+          </button>
+          }
+        </div>
+      </section>
+      }
+
+      @if (activeMathTab() === 'snippets') {
+      <section class="math-tools-panel">
+        <div class="math-current-draft">
+          <span>Draft</span>
+          <code>{{ mathEquationDraft() || '\\frac{a}{b}' }}</code>
+        </div>
+        <div class="math-snippet-grid">
+          @for (snippet of mathSnippets; track snippet.label) {
+          <button type="button" (click)="insertMathSnippetIntoPopover(snippet.value)">
+            <strong>{{ snippet.label }}</strong>
+            <span>{{ snippet.value }}</span>
+          </button>
+          }
+        </div>
+      </section>
+      }
+
+      @if (activeMathTab() === 'graph') {
+      <section class="math-tools-panel">
+        <button class="math-feature-button" type="button" [disabled]="!canUseTool('graph')" (click)="openGraphFromMathTools()">
+          <span class="tool-icon graph-icon" aria-hidden="true"></span>
+          <span>
+            <strong>Function graph</strong>
+            <small>Open the existing graph editor on the board</small>
+          </span>
+        </button>
+        <div class="math-template-grid compact">
+          @for (template of templateOptions; track template.id) {
+          @if (template.id === 'graph' || template.id === 'coordinate' || template.id === 'number-line') {
+          <button class="math-template-card" type="button" [class.active]="activeTemplate() === template.id"
+            [disabled]="!canManagePages()" (click)="applyMathTemplate(template.id)">
+            <strong>{{ template.label }}</strong>
+            <span>{{ template.description }}</span>
+          </button>
+          }
+          }
+        </div>
+      </section>
+      }
+
+      @if (activeMathTab() === 'geometry') {
+      <section class="math-tools-panel">
+        <div class="graph-toggle-row">
+          <label><input type="checkbox" [checked]="snapToGrid()" (change)="toggleSnapToGrid()" /> Grid snap</label>
+          <label><input type="checkbox" [checked]="snapToPoints()" (change)="toggleSnapToPoints()" /> Point snap</label>
+        </div>
+        @for (group of geometryToolGroups; track group.label) {
+        <div class="math-current-draft">
+          <span>{{ group.label }}</span>
+          <code>{{ group.tools.length }} tools</code>
+        </div>
+        <div class="math-tool-grid">
+          @for (tool of group.tools; track tool.id) {
+            <button type="button" [class.active]="activeTool() === tool.id" [disabled]="!canUseTool(tool.id)"
+              (click)="selectGeometryToolFromMathTools(tool.id)">
+              <span class="tool-icon" [class]="tool.id + '-icon'" aria-hidden="true"></span>
+              <strong>{{ tool.label }}</strong>
+            </button>
+          }
+        </div>
+        }
+      </section>
+      }
+    </div>
+  </aside>
+  }
+
   <div class="pan">
     <div class="page-tabs" aria-label="Whiteboard pages">
       <div class="page-tab-list">
-        @for (page of pages(); track page.id) {
+        @for (page of filteredPages(); track page.id) {
         <button type="button" [class.active]="page.id === activePageId()" (click)="selectPage(page.id)">{{ page.title
           }}</button>
+        } @empty {
+        <span class="page-empty-state">No matching pages</span>
         }
       </div>
       <div class="page-tools">
+        <input
+          class="page-search-input"
+          type="search"
+          [value]="pageSearchQuery()"
+          aria-label="Search board pages"
+          placeholder="Search pages"
+          (input)="setPageSearchQuery($event)"
+        />
         @if (canManagePages()) {
         <input class="page-title-input" type="text" [value]="activePage().title" aria-label="Rename current board page"
           title="Rename current board page" (change)="renameActivePage($event)" />
+        <input
+          class="page-tags-input"
+          type="text"
+          [value]="activePageTagsText()"
+          aria-label="Current board page tags"
+          title="Add comma-separated page tags"
+          placeholder="Tags"
+          (change)="updateActivePageTags($event)"
+        />
         <label class="template-select-label" title="Board template">
           <span>Template</span>
           <select class="template-select" [value]="activeTemplate()" aria-label="Board template"
@@ -362,6 +617,10 @@
         </label>
         <button class="page-tool-button" type="button" aria-label="Duplicate current board page"
           title="Duplicate current board page" (click)="duplicateActivePage()">Copy</button>
+        <button class="page-tool-button" type="button" aria-label="Add blank page before current page"
+          title="Add blank page before current page" (click)="addPageBefore()">Before</button>
+        <button class="page-tool-button" type="button" aria-label="Add blank page after current page"
+          title="Add blank page after current page" (click)="addPageAfter()">After</button>
         <button class="page-tool-button compact" type="button" aria-label="Add board page" title="Add board page"
           (click)="addPage()">+</button>
         <button class="page-tool-button compact" type="button" aria-label="Remove current board page" title="Remove current board page"
@@ -433,9 +692,9 @@
             }
           </div>
           <label class="graph-field full">
-            <span>Function</span>
-            <input type="text" [value]="graph.expression" aria-label="Function expression"
-              placeholder="x^2, sin(x), 2x + 1" (input)="updateGraphDraftField('expression', $event)" />
+            <span>Functions</span>
+            <textarea [value]="graph.expression" aria-label="Function expressions"
+              placeholder="x^2&#10;sin(x)&#10;2x + 1" (input)="updateGraphDraftField('expression', $event)"></textarea>
           </label>
           <label class="graph-field full">
             <span>Title</span>
@@ -474,6 +733,10 @@
               <input type="number" min="1" max="8" [value]="graph.lineWidth"
                 (input)="updateGraphDraftNumber('lineWidth', $event)" />
             </label>
+            <label class="graph-field">
+              <span>Tick</span>
+              <input type="number" min="0" [value]="graph.tickStep" placeholder="Auto" (input)="updateGraphDraftField('tickStep', $event)" />
+            </label>
             <label class="graph-field color">
               <span>Color</span>
               <input type="color" [value]="graph.curveColor" (input)="setGraphCurveColor($event)" />
@@ -504,9 +767,75 @@
             </label>
           </div>
           <label class="graph-field full">
+            <span>Inequality</span>
+            <input type="text" [value]="graph.inequality" placeholder="y &gt; x + 2, y &lt;= x^2, x &gt;= 0"
+              (input)="updateGraphDraftField('inequality', $event)" />
+          </label>
+          <div class="graph-section-label">Parametric / polar</div>
+          <div class="graph-grid-fields">
+            <label class="graph-field">
+              <span>x(t)</span>
+              <input type="text" [value]="graph.parametricX" placeholder="cos(t)" (input)="updateGraphDraftField('parametricX', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>y(t)</span>
+              <input type="text" [value]="graph.parametricY" placeholder="sin(t)" (input)="updateGraphDraftField('parametricY', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>t min</span>
+              <input type="number" [value]="graph.parametricTMin" (input)="updateGraphDraftField('parametricTMin', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>t max</span>
+              <input type="number" [value]="graph.parametricTMax" (input)="updateGraphDraftField('parametricTMax', $event)" />
+            </label>
+          </div>
+          <div class="graph-grid-fields">
+            <label class="graph-field">
+              <span>r(theta)</span>
+              <input type="text" [value]="graph.polarExpression" placeholder="2sin(theta)" (input)="updateGraphDraftField('polarExpression', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>theta min</span>
+              <input type="number" [value]="graph.polarThetaMin" (input)="updateGraphDraftField('polarThetaMin', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>theta max</span>
+              <input type="number" [value]="graph.polarThetaMax" (input)="updateGraphDraftField('polarThetaMax', $event)" />
+            </label>
+          </div>
+          <div class="graph-section-label">Statistics</div>
+          <label class="graph-field full">
             <span>Scatter points</span>
             <textarea [value]="graph.scatterPoints" placeholder="1,2; 2,4; 3,5"
               (input)="updateGraphDraftField('scatterPoints', $event)"></textarea>
+          </label>
+          <div class="graph-toggle-row">
+            <label><input type="checkbox" [checked]="graph.showRegression" (change)="updateGraphDraftBoolean('showRegression', $event)" /> Regression</label>
+          </div>
+          <label class="graph-field full">
+            <span>Histogram data</span>
+            <textarea [value]="graph.histogramData" placeholder="2, 4, 4, 5, 6, 8, 9"
+              (input)="updateGraphDraftField('histogramData', $event)"></textarea>
+          </label>
+          <div class="graph-grid-fields">
+            <label class="graph-field">
+              <span>Bins</span>
+              <input type="number" min="0" [value]="graph.histogramBins" placeholder="Auto" (input)="updateGraphDraftField('histogramBins', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>Mean</span>
+              <input type="number" [value]="graph.normalMean" placeholder="Normal" (input)="updateGraphDraftField('normalMean', $event)" />
+            </label>
+            <label class="graph-field">
+              <span>Std dev</span>
+              <input type="number" min="0" [value]="graph.normalStdDev" placeholder="Normal" (input)="updateGraphDraftField('normalStdDev', $event)" />
+            </label>
+          </div>
+          <label class="graph-field full">
+            <span>Labels</span>
+            <textarea [value]="graph.labels" placeholder="0,0,Origin&#10;3,9,Peak"
+              (input)="updateGraphDraftField('labels', $event)"></textarea>
           </label>
           <div class="text-editor-actions">
             <button type="button" (pointerdown)="$event.preventDefault()" (click)="cancelGraphDraft()">Cancel</button>
@@ -540,11 +869,29 @@
         <button type="button" role="menuitem" (click)="activateTransform()">Transform</button>
         <button type="button" role="menuitem" [disabled]="!canEditSelectedTextBlock()"
           (click)="editSelectedTextBlock()">Edit text/equation</button>
+        <button type="button" role="menuitem" [disabled]="!canConvertSelectedTextToEquation()"
+          (click)="convertSelectedTextToEquation()">Convert to equation</button>
         <button type="button" role="menuitem" [disabled]="!canEditSelectedGraph()"
           (click)="editSelectedGraph()">Edit graph</button>
         <button type="button" role="menuitem" (click)="groupSelected()">Group</button>
         <button type="button" role="menuitem" (click)="ungroupSelected()">Ungroup</button>
         <button type="button" role="menuitem" (click)="duplicateSelected()">Duplicate</button>
+        <span class="context-menu-divider" aria-hidden="true"></span>
+        <button type="button" role="menuitem" [disabled]="!canAlignTextSelection()"
+          (click)="setSelectedTextAlignment('left')">Text align left</button>
+        <button type="button" role="menuitem" [disabled]="!canAlignTextSelection()"
+          (click)="setSelectedTextAlignment('center')">Text align center</button>
+        <button type="button" role="menuitem" [disabled]="!canAlignTextSelection()"
+          (click)="setSelectedTextAlignment('right')">Text align right</button>
+        <span class="context-menu-divider" aria-hidden="true"></span>
+        <button type="button" role="menuitem" [disabled]="!canAlignSelectedObjects()"
+          (click)="alignSelectedObjects('left')">Align objects left</button>
+        <button type="button" role="menuitem" [disabled]="!canAlignSelectedObjects()"
+          (click)="alignSelectedObjects('center')">Align objects center</button>
+        <button type="button" role="menuitem" [disabled]="!canAlignSelectedObjects()"
+          (click)="alignSelectedObjects('right')">Align objects right</button>
+        <button type="button" role="menuitem" [disabled]="!canDistributeSelectedVertically()"
+          (click)="distributeSelectedVertically()">Distribute vertically</button>
         <span class="context-menu-divider" aria-hidden="true"></span>
         <button type="button" role="menuitem" (click)="flipSelected('left')">Flip left</button>
         <button type="button" role="menuitem" (click)="flipSelected('right')">Flip right</button>

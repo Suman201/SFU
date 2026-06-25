@@ -6,6 +6,7 @@ import {
   NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
+  Optional,
   ServiceUnavailableException
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -98,11 +99,13 @@ import {
   WhiteboardControlEvent,
   WhiteboardCursor,
   WhiteboardCursorEvent,
+  WhiteboardLockEvent,
   WhiteboardPermissionLevel,
   WHITEBOARD_PERMISSION_LEVELS,
   VIEWER_PERMISSIONS
 } from '@native-sfu/contracts';
 import type { RoomOwnerLookupResponse } from '@native-sfu/contracts';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import {
   BatchDocument,
   BatchMongoDocument,
@@ -199,6 +202,13 @@ interface WhiteboardControlState {
   pageId?: string;
   grantedByParticipantId: string;
   grantedAt: Date;
+}
+
+interface WhiteboardLockState {
+  roomId: string;
+  locked: boolean;
+  changedAt: Date;
+  changedByParticipantId: string;
 }
 
 export interface WhiteboardControlDelivery {
@@ -490,6 +500,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   private readonly roomClosedEventListeners = new Set<(roomId: string) => void>();
   private readonly chatReadReceiptEventListeners = new Set<(delivery: ChatReadDeliveryResult) => void>();
   private readonly whiteboardControlByRoomId = new Map<string, WhiteboardControlState>();
+  private readonly whiteboardLockByRoomId = new Map<string, WhiteboardLockState>();
   private readonly classSessionLifecycleEventListeners = new Set<
     (event: ClassSessionLifecycleEventName, payload: ClassSessionLifecycleEvent) => void
   >();
@@ -536,7 +547,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     private readonly platformEvents: PlatformEventsService,
     private readonly studentEnrollments: StudentEnrollmentsService,
     private readonly recordings: RecordingsService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    @Optional() private readonly auditLogs?: AuditLogsService
   ) {
     this.media.onConsumerLayerEvent((event) => {
       void this.handleConsumerLayerEvent(event);
@@ -792,6 +804,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   async joinRoom(user: SocketUser, socketId: string, request: JoinRoomRequest): Promise<JoinRoomResponse> {
     const startedAt = performance.now();
     const classSession: ClassSessionMongoDocument | null = await this.classSessions.findOne({ roomId: request.roomId });
+    try {
     if (classSession) {
       this.assertClassSessionRoomIsLive(classSession);
       await this.assertSocketCanAccessClassSessionBatch(classSession.batchId, classSession.teacherId, user);
@@ -815,9 +828,15 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       }
       await this.replaceParticipantSocket(room.id, existingParticipant.id, socketId);
       if (classSession && this.isClassSessionTeacherUser(classSession, user)) {
+        const hadReconnectGrace = Boolean(classSession.teacherReconnectDeadlineAt || this.classSessionTeacherReconnectTimers.has(classSession.id));
         await this.clearClassSessionTeacherReconnectGrace(classSession.id);
+        if (hadReconnectGrace) {
+          this.metrics.classSessionReconnectGraceEvents.labels('teacher_reconnected').inc();
+          await this.recordClassSessionTeacherConnectionAudit('reconnected', classSession, existingParticipant);
+        }
       }
       this.metrics.roomJoinDuration.observe(performance.now() - startedAt);
+      await this.recordClassSessionRoomJoinAudit(classSession, user, existingParticipant, 'admitted', 'rejoin');
       return {
         room: await this.getRoom(room.id),
         participantId: existingParticipant.id,
@@ -891,7 +910,12 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       nodeId: this.nodeRegistry.localNodeId()
     });
     if (classSession && this.isClassSessionTeacherUser(classSession, user)) {
+      const hadReconnectGrace = Boolean(classSession.teacherReconnectDeadlineAt || this.classSessionTeacherReconnectTimers.has(classSession.id));
       await this.clearClassSessionTeacherReconnectGrace(classSession.id);
+      if (hadReconnectGrace) {
+        this.metrics.classSessionReconnectGraceEvents.labels('teacher_reconnected').inc();
+        await this.recordClassSessionTeacherConnectionAudit('reconnected', classSession, participant);
+      }
     }
     this.metrics.roomJoinDuration.observe(performance.now() - startedAt);
     const updatedRoom = await this.getRoom(room.id);
@@ -909,6 +933,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         asViewer: role === Role.VIEWER
       }
     });
+    await this.recordClassSessionRoomJoinAudit(classSession, user, participant, 'admitted', admitted ? 'live' : 'pending');
     return {
       room: updatedRoom,
       participantId: participant.id,
@@ -916,6 +941,10 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       rejoined: false,
       admissionDecision: joinDecision
     };
+    } catch (error) {
+      await this.recordClassSessionRoomJoinAudit(classSession, user, undefined, 'denied', this.auditErrorReason(error));
+      throw error;
+    }
   }
 
   async replaceParticipantSocket(roomId: string, participantId: string, socketId: string): Promise<void> {
@@ -1188,6 +1217,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
     clearTimeout(timer);
     this.classSessionTeacherReconnectTimers.delete(sessionId);
+    this.metrics.activeClassSessionReconnectGraceTimers.set(this.classSessionTeacherReconnectTimers.size);
   }
 
   private async closeRoomWithActor(roomId: string, actor: PlatformEventActor): Promise<void> {
@@ -1207,6 +1237,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const cleanup = normalizeMediaRoomCleanupSummary(await this.media.closeRoom(roomId));
     this.cleanupRoomAutopilotState(roomId);
     this.whiteboardControlByRoomId.delete(roomId);
+    this.whiteboardLockByRoomId.delete(roomId);
     this.metrics.roomProfileDistribution.labels(room.mediaProfile?.id ?? 'meeting').dec();
     this.clearDistributedRoomObservability(roomId);
     await this.nodeRegistry.releaseRoom(roomId);
@@ -1425,36 +1456,52 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       ? policyContext.summary.protections.screenShare
       : policyContext.summary.protections.publish;
     const source = request.kind === 'screen' && (request.source === 'whiteboard' || request.source === 'screen') ? request.source : undefined;
-    const classSession = request.kind === 'screen' ? await this.classSessions.findOne({ roomId: request.roomId }) : null;
+    const classSession = await this.classSessions.findOne({ roomId: request.roomId });
     this.recordProtectionDecision(profile.id, publishDecision);
     if (request.kind === 'audio' && !permission.canPublishAudio) {
       this.metrics.roomAdmissionRejections.labels('publish_audio_denied').inc();
+      await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, 'publish_audio_denied', participant);
       throw new ForbiddenException('Audio publishing denied');
     }
     if (request.kind === 'video' && !permission.canPublishVideo) {
       this.metrics.roomAdmissionRejections.labels('publish_video_denied').inc();
+      await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, 'publish_video_denied', participant);
       throw new ForbiddenException('Video publishing denied');
     }
     if (request.kind === 'audio' || request.kind === 'video') {
-      await this.assertNoActiveStudentMediaModeration(request.roomId, participantId, request.kind);
+      try {
+        await this.assertNoActiveStudentMediaModeration(request.roomId, participantId, request.kind);
+      } catch (error) {
+        await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, this.auditErrorReason(error), participant);
+        throw error;
+      }
     }
     if (request.kind === 'screen' && !permission.canShareScreen) {
       this.metrics.roomAdmissionRejections.labels('publish_screen_denied').inc();
+      await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, 'publish_screen_denied', participant);
       throw new ForbiddenException('Screen sharing denied');
     }
     if (classSession && request.kind === 'screen') {
-      await this.assertClassSessionStudentScreenShareAllowed(classSession, participant, permission, source);
+      try {
+        await this.assertClassSessionStudentScreenShareAllowed(classSession, participant, permission, source);
+      } catch (error) {
+        await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, this.auditErrorReason(error), participant);
+        throw error;
+      }
       if (classSession && !this.classSessionLiveSettings(classSession).whiteboard.whiteboardSharingEnabled) {
         if (source === 'whiteboard') {
+          await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, 'whiteboard_sharing_disabled', participant);
           throw new ForbiddenException('Whiteboard sharing is disabled for this class.');
         }
       }
     }
     if (source === 'whiteboard') {
       if (classSession && participant.role !== Role.HOST && participant.role !== Role.CO_HOST) {
+        await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, 'whiteboard_share_not_teacher', participant);
         throw new ForbiddenException('Only the teacher can share the class whiteboard.');
       }
       if (classSession && !this.classSessionLiveSettings(classSession).whiteboard.whiteboardSharingEnabled) {
+        await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, 'whiteboard_sharing_disabled', participant);
         throw new ForbiddenException('Whiteboard sharing is disabled for this class.');
       }
     }
@@ -1473,6 +1520,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         relatedParticipantId: participantId
       });
       this.metrics.roomAdmissionRejections.labels(`policy_${publishDecision.code}`).inc();
+      await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, `policy_${publishDecision.code}`, participant);
       throw new RoomPolicyViolationError(publishDecision.message, publishDecision);
     }
     if (request.kind !== 'screen' && publishDecision.action === 'reject') {
@@ -1490,11 +1538,17 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         relatedParticipantId: participantId
       });
       this.metrics.roomAdmissionRejections.labels(`policy_${publishDecision.code}`).inc();
+      await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, `policy_${publishDecision.code}`, participant);
       throw new RoomPolicyViolationError(publishDecision.message, publishDecision);
     }
     const status = publishDecision.action === 'soft-throttle' ? 'paused' : 'live';
     const closedProducerIds = request.kind === 'screen' ? await this.closeExistingParticipantScreenProducers(request.roomId, participantId) : [];
-    await this.media.bindProducer(request.transportId, participantId, rtpParameters);
+    try {
+      await this.media.bindProducer(request.transportId, participantId, rtpParameters);
+    } catch (error) {
+      await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, this.auditErrorReason(error), participant);
+      throw error;
+    }
     const priority = normalizeConsumerPriority(request.priority ?? defaultProducerPriority(profile, request.kind));
     const producerDoc = new this.producers({
       roomId: request.roomId,
@@ -1582,6 +1636,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       if (registered) {
         await this.media.unregisterProducer(producer.id).catch(() => undefined);
       }
+      await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, this.auditErrorReason(error), participant);
       throw error;
     }
   }
@@ -1704,6 +1759,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       await this.moderation.updateMany({ roomId, participantId: targetParticipantId, action: moderationAction, active: true }, { active: false });
     }
     const targets = await this.participantSocketTargets(roomId, [target]);
+    await this.recordClassSessionModerationAudit(classSession, actor, target, action, 'success');
 
     return {
       event: {
@@ -1951,8 +2007,10 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
 
   async createConsumer(request: CreateConsumerRequest, participantId: string): Promise<Consumer> {
     const ownerLookup = await this.requireRoomOwnerLookup(request.roomId);
+    const classSession = await this.classSessions.findOne({ roomId: request.roomId });
     const producer = await this.producers.findById(request.producerId);
     if (!producer || producer.status === 'closed') {
+      await this.recordClassSessionMediaFailure(classSession, 'consume', 'unknown', 'producer_not_found');
       throw new NotFoundException('Producer not found');
     }
     const participant = await this.assertParticipant(request.roomId, participantId);
@@ -2005,6 +2063,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       if (remoteFeed) {
         await this.releaseRemoteConsumerFeedSafely(consumerDoc.id, 'error', 'create_consumer_error');
       }
+      await this.recordClassSessionMediaFailure(classSession, 'consume', producer.kind, this.auditErrorReason(error), participant);
       throw error;
     }
     this.metrics.activeConsumers.inc();
@@ -2940,6 +2999,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     request: { roomId: string; message: string; recipientId?: string; scope?: ChatMessageScope; attachments?: SendChatAttachment[] },
     senderId: string
   ): Promise<ChatDeliveryResult> {
+    try {
     await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
     const sender = await this.assertParticipant(request.roomId, senderId);
     const messageBody = request.message.trim();
@@ -3047,6 +3107,10 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       ...(delivery.broadcastRoomId ? { broadcastRoomId: delivery.broadcastRoomId } : {}),
       ...(delivery.targets?.length ? { targets: delivery.targets, targetSocketIds: delivery.targets.map((target) => target.socketId) } : {})
     };
+    } catch (error) {
+      await this.recordClassSessionChatFailure(request.roomId, 'send', request.scope, error);
+      throw error;
+    }
   }
 
   async getChatHistory(request: { sessionId?: string; roomId?: string; channelId?: string; threadKey?: string; scope?: ChatMessageScope; before?: string; limit?: number }): Promise<ChatHistoryResponse> {
@@ -3313,6 +3377,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     user: SocketUser,
     participantId: string | undefined
   ): Promise<ChatReadDeliveryResult> {
+    try {
     await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
     const classSession = await this.classSessions.findOne({ _id: request.sessionId, roomId: request.roomId });
     if (!classSession) {
@@ -3344,6 +3409,10 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       receipt: this.toChatReadReceiptEvent(detailed.state),
       ...(targets.length ? { targets, targetSocketIds: targets.map((target) => target.socketId) } : {})
     };
+    } catch (error) {
+      await this.recordClassSessionChatFailure(request.roomId, 'read', request.scope, error);
+      throw error;
+    }
   }
 
   async assertCanWatchClassSession(sessionId: string, user: SocketUser, batchId?: string): Promise<void> {
@@ -4172,11 +4241,13 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   private async whiteboardRevokeDelivery(
     roomId: string,
     state: WhiteboardControlState,
+    classSession?: Pick<ClassSessionMongoDocument, 'id' | 'batchId'>,
     revokedByParticipantId?: string,
     reason = 'Whiteboard control revoked.'
   ): Promise<{ event: WhiteboardControlEvent; targets: SocketDeliveryTarget[] }> {
     const participant = await this.activeParticipantForWhiteboardState(roomId, state);
     const event: WhiteboardControlEvent = {
+      ...(classSession ? { sessionId: classSession.id, batchId: classSession.batchId } : {}),
       roomId,
       participantId: participant?.id ?? state.participantId,
       displayName: participant?.displayName ?? state.displayName,
@@ -4190,6 +4261,28 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return {
       event,
       targets: await this.whiteboardControlTargets(roomId, participant ?? undefined)
+    };
+  }
+
+  private whiteboardLockEvent(
+    classSession: Pick<ClassSessionMongoDocument, 'id' | 'batchId'>,
+    state: WhiteboardLockState
+  ): WhiteboardLockEvent {
+    return {
+      sessionId: classSession.id,
+      batchId: classSession.batchId,
+      roomId: state.roomId,
+      locked: state.locked,
+      changedAt: state.changedAt.toISOString(),
+      ...(state.locked
+        ? {
+            lockedByParticipantId: state.changedByParticipantId,
+            message: 'Teacher locked the whiteboard.'
+          }
+        : {
+            unlockedByParticipantId: state.changedByParticipantId,
+            message: 'Teacher unlocked the whiteboard.'
+          })
     };
   }
 
@@ -4220,6 +4313,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   private assertStudentWhiteboardCommandAllowed(state: WhiteboardControlState, command?: WhiteboardCommand): void {
     if (state.permissionLevel === 'view_only') {
       throw new ForbiddenException('Teacher has not allowed editing on the whiteboard.');
+    }
+    if (this.whiteboardLockByRoomId.get(state.roomId)?.locked) {
+      throw new ForbiddenException('Teacher locked the whiteboard.');
     }
     if (!command) {
       return;
@@ -4320,6 +4416,14 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       admitted: true,
       leftAt: { $exists: false }
     }).exec();
+  }
+
+  private async activeWhiteboardControllerParticipant(roomId: string): Promise<ParticipantMongoDocument | undefined> {
+    const state = this.whiteboardControlByRoomId.get(roomId);
+    if (!state) {
+      return undefined;
+    }
+    return (await this.activeParticipantForWhiteboardState(roomId, state)) ?? undefined;
   }
 
   private normalizeWhiteboardCommand(command: WhiteboardCommand): WhiteboardCommand {
@@ -4434,6 +4538,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     this.whiteboardControlByRoomId.set(roomId, nextState);
 
     const event: WhiteboardControlEvent = {
+      sessionId: classSession.id,
+      batchId: classSession.batchId,
       roomId,
       participantId: target.id,
       displayName: target.displayName,
@@ -4447,8 +4553,16 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const targets = await this.whiteboardControlTargets(roomId, target);
     const revoked =
       previous && previous.participantId !== target.id
-        ? await this.whiteboardRevokeDelivery(roomId, previous, actor.id, 'Teacher moved whiteboard control to another student.')
+        ? await this.whiteboardRevokeDelivery(roomId, previous, classSession, actor.id, 'Teacher moved whiteboard control to another student.')
         : undefined;
+    if (revoked && previous) {
+      await this.recordClassSessionWhiteboardAudit(classSession, actor, 'revoke', {
+        participantId: previous.participantId,
+        userId: previous.userId,
+        displayName: previous.displayName
+      });
+    }
+    await this.recordClassSessionWhiteboardAudit(classSession, actor, 'grant', target);
     return {
       event,
       targets,
@@ -4458,7 +4572,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
 
   async revokeWhiteboardControl(roomId: string, actorParticipantId: string, targetParticipantId?: string): Promise<WhiteboardControlDelivery> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
-    await this.requireLiveClassSessionForRoom(roomId);
+    const classSession = await this.requireLiveClassSessionForRoom(roomId);
     const actor = await this.assertModerator(roomId, actorParticipantId, false);
     const state = this.whiteboardControlByRoomId.get(roomId);
     const participantId = targetParticipantId ?? state?.participantId;
@@ -4466,10 +4580,42 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       throw new ConflictException('No matching student has whiteboard control.');
     }
     this.whiteboardControlByRoomId.delete(roomId);
-    const delivery = await this.whiteboardRevokeDelivery(roomId, state, actor.id, 'Teacher revoked whiteboard control.');
+    const delivery = await this.whiteboardRevokeDelivery(roomId, state, classSession, actor.id, 'Teacher revoked whiteboard control.');
+    await this.recordClassSessionWhiteboardAudit(classSession, actor, 'revoke', {
+      participantId: state.participantId,
+      userId: state.userId,
+      displayName: state.displayName
+    });
     return {
       event: delivery.event,
       targets: delivery.targets
+    };
+  }
+
+  async setWhiteboardLock(roomId: string, actorParticipantId: string, locked: boolean): Promise<WhiteboardRealtimeDelivery<WhiteboardLockEvent>> {
+    await this.nodeRegistry.assertLocalRoomOwner(roomId);
+    const classSession = await this.requireLiveClassSessionForRoom(roomId);
+    const actor = await this.assertModerator(roomId, actorParticipantId, false);
+    const changedAt = new Date();
+    const state: WhiteboardLockState = {
+      roomId,
+      locked,
+      changedAt,
+      changedByParticipantId: actor.id
+    };
+    if (locked) {
+      this.whiteboardLockByRoomId.set(roomId, state);
+    } else {
+      this.whiteboardLockByRoomId.delete(roomId);
+    }
+    await this.recordClassSessionWhiteboardAudit(classSession, actor, locked ? 'lock' : 'unlock', {
+      participantId: actor.id,
+      userId: actor.userId,
+      displayName: actor.displayName
+    });
+    return {
+      event: this.whiteboardLockEvent(classSession, state),
+      targets: await this.whiteboardControlTargets(roomId, await this.activeWhiteboardControllerParticipant(roomId))
     };
   }
 
@@ -4527,8 +4673,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (!participant || participant.role !== Role.PARTICIPANT || participant.userId !== state.userId) {
       return undefined;
     }
+    let classSession: ClassSessionMongoDocument;
     try {
-      await this.requireLiveClassSessionForRoom(roomId);
+      classSession = await this.requireLiveClassSessionForRoom(roomId);
     } catch {
       this.whiteboardControlByRoomId.delete(roomId);
       return undefined;
@@ -4538,6 +4685,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
     return {
       event: {
+        sessionId: classSession.id,
+        batchId: classSession.batchId,
         roomId,
         participantId: participant.id,
         displayName: participant.displayName,
@@ -4550,6 +4699,27 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       },
       targets: await this.participantSocketTargets(roomId, [participant])
     };
+  }
+
+  async whiteboardLockForParticipant(roomId: string, participantId: string): Promise<WhiteboardRealtimeDelivery<WhiteboardLockEvent> | undefined> {
+    const state = this.whiteboardLockByRoomId.get(roomId);
+    if (!state?.locked) {
+      return undefined;
+    }
+    const participant = await this.participants.findOne({ _id: participantId, roomId, admitted: true, leftAt: { $exists: false } });
+    if (!participant) {
+      return undefined;
+    }
+    try {
+      const classSession = await this.requireLiveClassSessionForRoom(roomId);
+      return {
+        event: this.whiteboardLockEvent(classSession, state),
+        targets: await this.participantSocketTargets(roomId, [participant])
+      };
+    } catch {
+      this.whiteboardLockByRoomId.delete(roomId);
+      return undefined;
+    }
   }
 
   async setStudentSpeakingPermission(
@@ -5854,6 +6024,11 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       }
     );
     this.scheduleClassSessionTeacherReconnectGrace(session.id, teacherReconnectDeadlineAt);
+    this.metrics.classSessionReconnectGraceEvents.labels('started').inc();
+    await this.recordClassSessionTeacherConnectionAudit('disconnected', session, participant);
+    await this.recordClassSessionReconnectGraceAudit('started', session, participant, {
+      teacherReconnectDeadlineAt: teacherReconnectDeadlineAt.toISOString()
+    });
     return {
       closed: false,
       left: true,
@@ -5873,10 +6048,12 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }, Math.max(0, deadlineAt.getTime() - Date.now()));
     this.unrefTimer(timer);
     this.classSessionTeacherReconnectTimers.set(sessionId, timer);
+    this.metrics.activeClassSessionReconnectGraceTimers.set(this.classSessionTeacherReconnectTimers.size);
   }
 
   private async completeClassSessionAfterTeacherReconnectGrace(sessionId: string): Promise<void> {
     this.classSessionTeacherReconnectTimers.delete(sessionId);
+    this.metrics.activeClassSessionReconnectGraceTimers.set(this.classSessionTeacherReconnectTimers.size);
     const session = await this.classSessions.findById(sessionId);
     if (!session || session.status !== 'live') {
       return;
@@ -5921,6 +6098,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       // The class session is durably completed; lifecycle sync still tells clients to leave.
     }
     this.emitClassSessionLifecycleEvent('session:ended', this.classSessionLifecyclePayload(updated));
+    this.metrics.classSessionReconnectGraceEvents.labels('expired').inc();
+    this.metrics.classSessionLifecycleTransitions.labels('reconnect_timeout', 'completed').inc();
+    await this.recordClassSessionReconnectGraceAudit('expired', updated);
   }
 
   private async restoreClassSessionTeacherReconnectGrace(): Promise<void> {
@@ -5952,7 +6132,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async clearClassSessionTeacherReconnectGrace(sessionId: string): Promise<void> {
+    const hadTimer = this.classSessionTeacherReconnectTimers.has(sessionId);
     this.cancelClassSessionTeacherReconnectGrace(sessionId);
+    const session = await this.classSessions.findById(sessionId);
     await this.classSessions.updateOne(
       { _id: sessionId },
       {
@@ -5962,6 +6144,12 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         }
       }
     );
+    if (hadTimer || session?.teacherReconnectDeadlineAt) {
+      this.metrics.classSessionReconnectGraceEvents.labels('cancelled').inc();
+      if (session) {
+        await this.recordClassSessionReconnectGraceAudit('cancelled', session);
+      }
+    }
   }
 
   private async isClassSessionTeacherConnected(session: ClassSessionMongoDocument): Promise<boolean> {
@@ -5975,6 +6163,279 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
     const presence = await this.redis.participantPresence(session.roomId, teacher.id);
     return presence.length > 0;
+  }
+
+  private async recordClassSessionMediaFailure(
+    session: ClassSessionMongoDocument | null,
+    operation: 'publish' | 'consume',
+    kind: Producer['kind'] | 'unknown',
+    reason: string,
+    participant?: ParticipantMongoDocument
+  ): Promise<void> {
+    if (!session) {
+      return;
+    }
+    const safeReason = this.safeMetricLabel(reason);
+    const safeKind = this.safeMetricLabel(kind);
+    this.metrics.classSessionMediaFailures.labels(operation, safeKind, safeReason).inc();
+    await this.auditLogs?.record({
+      actorId: participant?.userId ?? participant?.id,
+      actorName: participant?.displayName,
+      actorRoles: participant ? [participant.role] : [],
+      action: `class_sessions.media.${operation}.failure`,
+      status: 'failure',
+      resourceType: 'class_session',
+      resourceId: session.id,
+      targetType: participant ? 'participant' : undefined,
+      targetId: participant?.id,
+      metadata: {
+        summary: `Class-session media ${operation} failed`,
+        sessionId: session.id,
+        batchId: session.batchId,
+        roomId: session.roomId,
+        participantId: participant?.id,
+        participantRole: participant?.role,
+        kind: safeKind,
+        reason: safeReason
+      }
+    });
+  }
+
+  private async recordClassSessionRoomJoinAudit(
+    session: ClassSessionMongoDocument | null,
+    user: SocketUser,
+    participant: ParticipantMongoDocument | undefined,
+    result: 'admitted' | 'denied',
+    reason: string
+  ): Promise<void> {
+    if (!session) {
+      return;
+    }
+    const safeReason = this.safeMetricLabel(reason);
+    const role = this.classSessionMetricRole(user, session, participant);
+    this.metrics.classSessionJoinAttempts.labels(result, safeReason, role).inc();
+    await this.auditLogs?.record({
+      actorId: user.id,
+      actorEmail: user.email,
+      actorRoles: user.roles,
+      action: `class_sessions.room_join.${result}`,
+      status: result === 'admitted' ? 'success' : 'failure',
+      resourceType: 'class_session',
+      resourceId: session.id,
+      targetType: participant ? 'participant' : undefined,
+      targetId: participant?.id,
+      metadata: {
+        summary:
+          result === 'admitted'
+            ? `Admitted ${role} socket to class session`
+            : `Denied ${role} socket join to class session`,
+        sessionId: session.id,
+        batchId: session.batchId,
+        roomId: session.roomId,
+        participantId: participant?.id,
+        actorRole: role,
+        result,
+        reason: safeReason
+      }
+    });
+  }
+
+  private async recordClassSessionChatFailure(
+    roomId: string,
+    operation: 'send' | 'read',
+    scope: ChatMessageScope | undefined,
+    error: unknown
+  ): Promise<void> {
+    const session = await this.classSessions.findOne({ roomId });
+    if (!session) {
+      return;
+    }
+    const safeScope = this.safeMetricLabel(scope ?? 'unspecified');
+    const safeReason = this.auditErrorReason(error);
+    this.metrics.classSessionChatFailures.labels(operation, safeScope, safeReason).inc();
+    await this.auditLogs?.record({
+      action: `class_sessions.chat.${operation}.failure`,
+      status: 'failure',
+      resourceType: 'class_session',
+      resourceId: session.id,
+      metadata: {
+        summary: `Class-session chat ${operation} failed`,
+        sessionId: session.id,
+        batchId: session.batchId,
+        roomId,
+        scope: safeScope,
+        reason: safeReason
+      }
+    });
+  }
+
+  private async recordClassSessionModerationAudit(
+    session: ClassSessionMongoDocument,
+    actor: ParticipantMongoDocument,
+    target: ParticipantMongoDocument,
+    action: StudentMediaModerationAction,
+    result: 'success' | 'failure'
+  ): Promise<void> {
+    this.metrics.classSessionModerationActions.labels(action, result).inc();
+    await this.auditLogs?.record({
+      actorId: actor.userId ?? actor.id,
+      actorName: actor.displayName,
+      actorRoles: [actor.role],
+      action: `class_sessions.moderation.${action}`,
+      status: result,
+      resourceType: 'class_session',
+      resourceId: session.id,
+      targetUserId: target.userId,
+      targetType: 'participant',
+      targetId: target.id,
+      metadata: {
+        summary: `Class-session moderation ${action}`,
+        sessionId: session.id,
+        batchId: session.batchId,
+        roomId: session.roomId,
+        actorParticipantId: actor.id,
+        targetParticipantId: target.id,
+        targetRole: target.role,
+        result
+      }
+    });
+  }
+
+  private async recordClassSessionWhiteboardAudit(
+    session: ClassSessionMongoDocument,
+    actor: ParticipantMongoDocument,
+    action: 'grant' | 'revoke' | 'lock' | 'unlock',
+    target: Pick<ParticipantMongoDocument, 'id' | 'userId' | 'displayName'> | { participantId: string; userId?: string; displayName?: string }
+  ): Promise<void> {
+    const targetParticipantId = 'participantId' in target ? target.participantId : target.id;
+    this.metrics.classSessionWhiteboardControlActions.labels(action, 'success').inc();
+    await this.auditLogs?.record({
+      actorId: actor.userId ?? actor.id,
+      actorName: actor.displayName,
+      actorRoles: [actor.role],
+      action: `class_sessions.whiteboard_control.${action}`,
+      resourceType: 'class_session',
+      resourceId: session.id,
+      targetUserId: target.userId,
+      targetType: 'participant',
+      targetId: targetParticipantId,
+      metadata: {
+        summary: `${action} class-session whiteboard control`,
+        sessionId: session.id,
+        batchId: session.batchId,
+        roomId: session.roomId,
+        actorParticipantId: actor.id,
+        targetParticipantId
+      }
+    });
+  }
+
+  private async recordClassSessionReconnectGraceAudit(
+    event: 'started' | 'cancelled' | 'expired',
+    session: ClassSessionMongoDocument,
+    participant?: ParticipantMongoDocument,
+    extra: Record<string, unknown> = {}
+  ): Promise<void> {
+    await this.auditLogs?.record({
+      actorId: participant?.userId ?? session.teacherId,
+      actorName: participant?.displayName,
+      actorRoles: participant ? [participant.role] : ['system'],
+      action: `class_sessions.teacher_reconnect_grace.${event}`,
+      resourceType: 'class_session',
+      resourceId: session.id,
+      metadata: {
+        summary: `Teacher reconnect grace ${event}`,
+        sessionId: session.id,
+        batchId: session.batchId,
+        roomId: session.roomId,
+        teacherId: session.teacherId,
+        event,
+        ...extra
+      }
+    });
+  }
+
+  private async recordClassSessionTeacherConnectionAudit(
+    event: 'disconnected' | 'reconnected',
+    session: ClassSessionMongoDocument,
+    participant: ParticipantMongoDocument
+  ): Promise<void> {
+    await this.auditLogs?.record({
+      actorId: participant.userId ?? session.teacherId,
+      actorName: participant.displayName,
+      actorRoles: [participant.role],
+      action: `class_sessions.teacher.${event}`,
+      resourceType: 'class_session',
+      resourceId: session.id,
+      targetUserId: participant.userId,
+      targetType: 'participant',
+      targetId: participant.id,
+      metadata: {
+        summary: `Class-session teacher ${event}`,
+        sessionId: session.id,
+        batchId: session.batchId,
+        roomId: session.roomId,
+        teacherId: session.teacherId,
+        participantId: participant.id,
+        event
+      }
+    });
+  }
+
+  private auditErrorReason(error: unknown): string {
+    const status = typeof (error as { getStatus?: () => number })?.getStatus === 'function'
+      ? (error as { getStatus: () => number }).getStatus()
+      : undefined;
+    if (status === 400) {
+      return 'bad_request';
+    }
+    if (status === 403) {
+      return 'forbidden';
+    }
+    if (status === 404) {
+      return 'not_found';
+    }
+    if (status === 409) {
+      return 'conflict';
+    }
+    if (status === 503) {
+      return 'service_unavailable';
+    }
+    if (error instanceof Error && error.name) {
+      return this.safeMetricLabel(error.name);
+    }
+    return 'unknown';
+  }
+
+  private classSessionMetricRole(
+    user: SocketUser,
+    session: Pick<ClassSessionMongoDocument, 'teacherId'>,
+    participant?: Pick<ParticipantMongoDocument, 'role'>
+  ): string {
+    if (participant?.role === Role.HOST) {
+      return 'teacher';
+    }
+    if (participant?.role === Role.CO_HOST) {
+      return 'admin';
+    }
+    if (participant?.role === Role.PARTICIPANT) {
+      return 'student';
+    }
+    if (this.isAdminSocketUser(user)) {
+      return 'admin';
+    }
+    if (user.id === session.teacherId || user.roles.includes('TEACHER')) {
+      return 'teacher';
+    }
+    if (user.roles.includes('STUDENT')) {
+      return 'student';
+    }
+    return 'other';
+  }
+
+  private safeMetricLabel(value: string): string {
+    const normalized = value.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+    return normalized.slice(0, 64) || 'unknown';
   }
 
   private unrefTimer(timer: ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>): void {
