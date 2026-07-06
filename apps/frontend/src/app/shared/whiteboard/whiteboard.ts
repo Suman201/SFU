@@ -26,6 +26,8 @@ export type WhiteboardTool =
   | 'text'
   | 'equation'
   | 'graph'
+  | 'matrix'
+  | 'table'
   | 'segment'
   | 'ruler'
   | 'protractor'
@@ -77,10 +79,16 @@ export type WhiteboardFileKind = 'image' | 'document';
 export type WhiteboardAssetFit = 'contain' | 'cover' | 'stretch';
 export type WhiteboardTemplateId = 'blank' | 'ruled' | 'grid' | 'graph' | 'coordinate' | 'number-line' | 'geometry' | 'table' | 'fraction';
 export type WhiteboardTextAlignment = 'left' | 'center' | 'right';
+export type WhiteboardMatrixBracket = 'bracket' | 'parentheses' | 'determinant' | 'none';
+export type WhiteboardPenStyle = 'solid' | 'dashed' | 'dotted' | 'marker' | 'pencil' | 'calligraphy';
 
 export interface WhiteboardPoint {
   x: number;
   y: number;
+}
+
+export interface WhiteboardStrokePoint extends WhiteboardPoint {
+  pressure?: number;
 }
 
 interface WhiteboardElementBase {
@@ -93,7 +101,15 @@ export interface WhiteboardStrokeElement extends WhiteboardElementBase {
   color: string;
   fillColor?: string | null;
   width: number;
-  points: WhiteboardPoint[];
+  points: WhiteboardStrokePoint[];
+  penStyle?: WhiteboardPenStyle;
+  style?: WhiteboardPenStyle;
+  opacity?: number;
+  smoothing?: number;
+  pressureEnabled?: boolean;
+  pressureSensitive?: boolean;
+  closed?: boolean;
+  autoCloseThreshold?: number;
 }
 
 export interface WhiteboardShapeElement extends WhiteboardElementBase {
@@ -202,6 +218,43 @@ export interface WhiteboardGraphElement extends WhiteboardElementBase {
   helpers?: WhiteboardGraphHelpers;
 }
 
+export interface WhiteboardMatrixElement extends WhiteboardElementBase {
+  type: 'matrix';
+  position: WhiteboardPoint;
+  width: number;
+  height: number;
+  rows: number;
+  columns: number;
+  cells: string[][];
+  fontSize: number;
+  strokeColor: string;
+  fillColor?: string | null;
+  textColor: string;
+  borderColor: string;
+  showBorders: boolean;
+  align?: WhiteboardTextAlignment;
+  bracketStyle: WhiteboardMatrixBracket;
+  augmentedColumn?: number | null;
+}
+
+export interface WhiteboardTableElement extends WhiteboardElementBase {
+  type: 'table';
+  position: WhiteboardPoint;
+  width: number;
+  height: number;
+  rows: number;
+  columns: number;
+  cells: string[][];
+  fontSize: number;
+  strokeColor: string;
+  fillColor?: string | null;
+  textColor: string;
+  borderColor: string;
+  showBorders: boolean;
+  align?: WhiteboardTextAlignment;
+  headerRow: boolean;
+}
+
 export interface WhiteboardGeometryElement extends WhiteboardElementBase {
   type: 'geometry';
   kind: WhiteboardGeometryTool;
@@ -258,6 +311,8 @@ export type WhiteboardElement =
   | WhiteboardTextElement
   | WhiteboardEquationElement
   | WhiteboardGraphElement
+  | WhiteboardMatrixElement
+  | WhiteboardTableElement
   | WhiteboardGeometryElement
   | WhiteboardDiagramElement
   | WhiteboardFileElement;
@@ -370,8 +425,95 @@ interface GraphDraft {
 
 type TransformHandle = 'nw' | 'ne' | 'sw' | 'se';
 type FlipDirection = 'horizontal' | 'vertical' | 'left' | 'right';
-type MathToolsTab = 'equation' | 'templates' | 'snippets' | 'graph' | 'geometry';
+type MathToolsTab = 'equation' | 'templates' | 'subjects' | 'snippets' | 'graph' | 'geometry' | 'tables';
 type WhiteboardEraserMode = 'partial' | 'stroke' | 'area';
+type MatrixTableMode = 'matrix' | 'table';
+type SubjectTemplateCategoryId =
+  | 'algebra'
+  | 'calculus'
+  | 'geometry'
+  | 'physics'
+  | 'chemistry'
+  | 'economics'
+  | 'coding'
+  | 'probability'
+  | 'statistics'
+  | 'accounting';
+type SubjectTemplateRegionKind = 'work' | 'formula' | 'graph' | 'table' | 'diagram' | 'list';
+type SubjectTemplateInsertMode = 'page' | 'current' | 'object';
+
+interface MatrixTableDraft {
+  elementId?: string;
+  mode: MatrixTableMode;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rows: number;
+  columns: number;
+  cells: string[][];
+  fontSize: number;
+  strokeColor: string;
+  fillColor: string;
+  fillEnabled: boolean;
+  textColor: string;
+  borderColor: string;
+  showBorders: boolean;
+  align: WhiteboardTextAlignment;
+  headerRow: boolean;
+  bracketStyle: WhiteboardMatrixBracket;
+  augmentedColumn?: number | null;
+  error?: string | null;
+}
+
+interface SubjectTemplateCategory {
+  id: SubjectTemplateCategoryId;
+  label: string;
+  description: string;
+}
+
+interface SubjectTemplateGraphSpec {
+  expression?: string;
+  xMin?: number;
+  xMax?: number;
+  yMin?: number;
+  yMax?: number;
+  scatterPoints?: string;
+  histogramData?: string;
+  histogramBins?: number;
+  showRegression?: boolean;
+  shadeFrom?: number;
+  shadeTo?: number;
+}
+
+interface SubjectTemplateRegion {
+  title: string;
+  detail?: string;
+  kind?: SubjectTemplateRegionKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rows?: number;
+  columns?: number;
+  cells?: string[][];
+  headerRow?: boolean;
+  diagramKind?: WhiteboardDiagramTool;
+  graph?: SubjectTemplateGraphSpec;
+}
+
+interface SubjectTemplateDefinition {
+  id: string;
+  categoryId: SubjectTemplateCategoryId;
+  name: string;
+  description: string;
+  pageTitle: string;
+  pageTemplate: WhiteboardTemplateId;
+  tags: string[];
+  accent: string;
+  regions: SubjectTemplateRegion[];
+  objectSupported?: boolean;
+}
 
 interface ElementBounds {
   x: number;
@@ -418,6 +560,13 @@ interface PdfImagePage {
   jpegDataUrl: string;
   width: number;
   height: number;
+  vectorContent?: string;
+}
+
+interface PdfExportOption {
+  id: PdfExportMode;
+  label: string;
+  description: string;
 }
 
 interface MathSnippet {
@@ -496,6 +645,17 @@ interface EraserModeOption {
   description: string;
 }
 
+interface PenStyleOption {
+  id: WhiteboardPenStyle;
+  label: string;
+  description: string;
+}
+
+interface PenAutoCloseThresholdOption {
+  label: string;
+  value: number;
+}
+
 interface InsertTemplateOption {
   kind: WhiteboardDiagramTool;
   label: string;
@@ -520,21 +680,56 @@ interface AssetImportStatus {
   message: string;
 }
 
-type AssetImportMode = 'element' | 'background' | 'pdf-pages' | 'slide-pages';
+type AssetImportMode = 'element' | 'background' | 'pdf-pages' | 'slide-pages' | 'deck-pages';
 type AssetPageSourceType = 'image' | 'slide-image';
 type PdfJsModule = typeof import('pdfjs-dist');
+type PdfExportMode = 'hybrid' | 'raster';
 
 const GRID_SIZE = 24;
 const ALIGNMENT_TOLERANCE = 6;
 const MAX_IMAGE_ASSET_BYTES = 12 * 1024 * 1024;
 const MAX_PDF_ASSET_BYTES = 25 * 1024 * 1024;
+const MAX_PRESENTATION_ASSET_BYTES = 50 * 1024 * 1024;
 const MAX_PDF_IMPORT_PAGES = 30;
 const MAX_SLIDE_IMAGE_IMPORT_PAGES = 40;
 const PDF_RENDER_MAX_DIMENSION = 1800;
+const MATRIX_TABLE_MIN_ROWS = 1;
+const MATRIX_TABLE_MAX_ROWS = 8;
+const MATRIX_TABLE_MIN_COLUMNS = 1;
+const MATRIX_TABLE_MAX_COLUMNS = 8;
 const IMAGE_ASSET_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const PRESENTATION_ASSET_MIME_TYPES = new Set([
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-powerpoint'
+]);
 const PDFJS_WORKER_SRC = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 const DEFAULT_TEMPLATE_ID: WhiteboardTemplateId = 'grid';
 const DEFAULT_PAGE_VIEW: WhiteboardPageView = { zoom: 1, panX: 0, panY: 0 };
+const PEN_STYLE_OPTIONS: PenStyleOption[] = [
+  { id: 'solid', label: 'Solid', description: 'Clean continuous ink' },
+  { id: 'dashed', label: 'Dashed', description: 'Segmented emphasis' },
+  { id: 'dotted', label: 'Dotted', description: 'Point-by-point guide' },
+  { id: 'marker', label: 'Marker', description: 'Translucent highlight' },
+  { id: 'pencil', label: 'Pencil', description: 'Soft sketch line' },
+  { id: 'calligraphy', label: 'Calligraphy', description: 'Angled variable stroke' }
+];
+const PEN_AUTO_CLOSE_THRESHOLDS: PenAutoCloseThresholdOption[] = [
+  { label: 'Tight', value: 16 },
+  { label: 'Normal', value: 28 },
+  { label: 'Loose', value: 44 }
+];
+const PDF_EXPORT_OPTIONS: PdfExportOption[] = [
+  {
+    id: 'hybrid',
+    label: 'Hybrid PDF',
+    description: 'Raster backgrounds with selectable/vector board annotations where possible.'
+  },
+  {
+    id: 'raster',
+    label: 'Fast raster PDF',
+    description: 'Exact canvas snapshots for maximum compatibility.'
+  }
+];
 const TEMPLATE_OPTIONS: WhiteboardTemplateOption[] = [
   { id: 'blank', label: 'Blank', description: 'Clean canvas' },
   { id: 'ruled', label: 'Ruled notebook', description: 'Writing lines with margin' },
@@ -672,9 +867,663 @@ const DIAGRAM_TOOL_OPTIONS: DiagramToolOption[] = [
 const MATH_TOOLS_TABS: MathToolsTabOption[] = [
   { id: 'equation', label: 'Equation' },
   { id: 'templates', label: 'Templates' },
+  { id: 'subjects', label: 'Subjects' },
   { id: 'snippets', label: 'Snippets' },
   { id: 'graph', label: 'Graph' },
-  { id: 'geometry', label: 'Geometry' }
+  { id: 'geometry', label: 'Geometry' },
+  { id: 'tables', label: 'Matrices' }
+];
+const SUBJECT_TEMPLATE_CATEGORIES: SubjectTemplateCategory[] = [
+  { id: 'algebra', label: 'Algebra', description: 'Solving, factoring, quadratics, and systems.' },
+  { id: 'calculus', label: 'Calculus', description: 'Rules, limits, area, tangents, and secants.' },
+  { id: 'geometry', label: 'Geometry', description: 'Proofs, constructions, triangles, and circles.' },
+  { id: 'physics', label: 'Physics', description: 'Forces, motion, circuits, waves, and formula work.' },
+  { id: 'chemistry', label: 'Chemistry', description: 'Equations, reactions, structures, and lab notes.' },
+  { id: 'economics', label: 'Economics', description: 'Markets, curves, elasticity, and cost tables.' },
+  { id: 'coding', label: 'Coding / CS', description: 'Flowcharts, pseudocode, recursion, data structures.' },
+  { id: 'probability', label: 'Probability', description: 'Trees, Venn sets, sample spaces, and Bayes.' },
+  { id: 'statistics', label: 'Statistics', description: 'Frequency, histograms, regression, and tests.' },
+  { id: 'accounting', label: 'Accounting', description: 'Ledgers, journals, balances, and statements.' }
+];
+const SUBJECT_TEMPLATE_LIBRARY: SubjectTemplateDefinition[] = [
+  {
+    id: 'algebra-equation-solving',
+    categoryId: 'algebra',
+    name: 'Equation Solving Layout',
+    description: 'Two-column setup for steps and reasoning.',
+    pageTitle: 'Algebra - Equation Solving',
+    pageTemplate: 'ruled',
+    tags: ['algebra', 'equations'],
+    accent: '#F26076',
+    regions: [
+      { title: 'Problem', detail: 'Write the original equation and constraints.', kind: 'formula', x: 60, y: 92, width: 680, height: 86 },
+      { title: 'Steps', detail: 'Show one operation per line.', kind: 'work', x: 60, y: 200, width: 320, height: 310 },
+      { title: 'Reasoning', detail: 'Inverse operation, property, or check.', kind: 'work', x: 420, y: 200, width: 320, height: 310 },
+      { title: 'Solution check', detail: 'Substitute back into the original equation.', kind: 'formula', x: 60, y: 538, width: 680, height: 92 }
+    ]
+  },
+  {
+    id: 'algebra-factorization',
+    categoryId: 'algebra',
+    name: 'Factorization Workspace',
+    description: 'Factor tree, identities, and final form.',
+    pageTitle: 'Algebra - Factorization',
+    pageTemplate: 'grid',
+    tags: ['algebra', 'factorization'],
+    accent: '#458B73',
+    regions: [
+      { title: 'Expression', detail: 'Copy the expression exactly.', kind: 'formula', x: 60, y: 90, width: 680, height: 76 },
+      { title: 'Common factor / identity', detail: 'GCF, difference of squares, grouping.', kind: 'work', x: 60, y: 190, width: 320, height: 160 },
+      { title: 'Factor tree / split', detail: 'Break terms or coefficients cleanly.', kind: 'diagram', diagramKind: 'tree', x: 420, y: 190, width: 320, height: 190 },
+      { title: 'Final factored form', detail: 'Check by expansion.', kind: 'formula', x: 60, y: 410, width: 680, height: 120 }
+    ]
+  },
+  {
+    id: 'algebra-quadratic',
+    categoryId: 'algebra',
+    name: 'Quadratic Formula Workspace',
+    description: 'Identify coefficients, discriminant, roots, and graph.',
+    pageTitle: 'Algebra - Quadratic Formula',
+    pageTemplate: 'coordinate',
+    tags: ['algebra', 'quadratic'],
+    accent: '#FF9760',
+    regions: [
+      { title: 'Standard form', detail: 'ax^2 + bx + c = 0', kind: 'formula', x: 60, y: 90, width: 300, height: 88 },
+      { title: 'Coefficient table', kind: 'table', x: 60, y: 200, width: 300, height: 150, rows: 4, columns: 2, cells: [['a', ''], ['b', ''], ['c', ''], ['D = b^2 - 4ac', '']] },
+      { title: 'Substitution', detail: 'x = (-b +/- sqrt(D)) / 2a', kind: 'formula', x: 60, y: 382, width: 300, height: 148 },
+      { title: 'Parabola sketch', kind: 'graph', x: 410, y: 90, width: 340, height: 300, graph: { expression: 'x^2', xMin: -6, xMax: 6, yMin: -4, yMax: 12 } }
+    ]
+  },
+  {
+    id: 'algebra-systems',
+    categoryId: 'algebra',
+    name: 'Simultaneous Equations',
+    description: 'Elimination/substitution layout with coordinate check.',
+    pageTitle: 'Algebra - Simultaneous Equations',
+    pageTemplate: 'coordinate',
+    tags: ['algebra', 'systems'],
+    accent: '#FFD150',
+    regions: [
+      { title: 'System', detail: 'Equation 1 / Equation 2', kind: 'formula', x: 60, y: 90, width: 310, height: 110 },
+      { title: 'Elimination / substitution', detail: 'Align variables and solve.', kind: 'work', x: 60, y: 225, width: 310, height: 260 },
+      { title: 'Graph check', kind: 'graph', x: 415, y: 90, width: 340, height: 300, graph: { expression: 'x; -x+4', xMin: -2, xMax: 6, yMin: -2, yMax: 6 } },
+      { title: 'Solution point', detail: '(x, y) =', kind: 'formula', x: 415, y: 420, width: 340, height: 90 }
+    ]
+  },
+  {
+    id: 'calculus-derivative-rules',
+    categoryId: 'calculus',
+    name: 'Derivative Rules Page',
+    description: 'Rule bank with worked example space.',
+    pageTitle: 'Calculus - Derivative Rules',
+    pageTemplate: 'ruled',
+    tags: ['calculus', 'derivatives'],
+    accent: '#F26076',
+    regions: [
+      { title: 'Rule bank', kind: 'table', x: 60, y: 90, width: 340, height: 250, rows: 5, columns: 2, cells: [['Rule', 'Result'], ['Power', 'd/dx x^n'], ['Product', '(uv)'], ['Quotient', 'u/v'], ['Chain', 'f(g(x))']] },
+      { title: 'Example function', detail: 'f(x) =', kind: 'formula', x: 430, y: 90, width: 320, height: 92 },
+      { title: 'Differentiate step by step', detail: 'Name each rule used.', kind: 'work', x: 430, y: 205, width: 320, height: 280 },
+      { title: 'Final derivative', detail: "f'(x) =", kind: 'formula', x: 60, y: 390, width: 340, height: 95 }
+    ]
+  },
+  {
+    id: 'calculus-integral-rules',
+    categoryId: 'calculus',
+    name: 'Integral Rules Page',
+    description: 'Substitution, constants, and answer check.',
+    pageTitle: 'Calculus - Integral Rules',
+    pageTemplate: 'ruled',
+    tags: ['calculus', 'integrals'],
+    accent: '#458B73',
+    regions: [
+      { title: 'Integral', detail: 'Integral to evaluate', kind: 'formula', x: 60, y: 90, width: 680, height: 92 },
+      { title: 'Rule / substitution', detail: 'Let u = ...', kind: 'work', x: 60, y: 205, width: 320, height: 220 },
+      { title: 'Antiderivative', detail: '+ C / definite bounds', kind: 'work', x: 420, y: 205, width: 320, height: 220 },
+      { title: 'Check by differentiating', detail: 'Derivative of answer should match integrand.', kind: 'formula', x: 60, y: 455, width: 680, height: 92 }
+    ]
+  },
+  {
+    id: 'calculus-limit-workspace',
+    categoryId: 'calculus',
+    name: 'Limit Table + Graph',
+    description: 'Numeric approach table beside graph sketch.',
+    pageTitle: 'Calculus - Limit Workspace',
+    pageTemplate: 'coordinate',
+    tags: ['calculus', 'limits'],
+    accent: '#FF9760',
+    regions: [
+      { title: 'Limit expression', detail: 'lim x -> a f(x)', kind: 'formula', x: 60, y: 88, width: 300, height: 80 },
+      { title: 'Approach table', kind: 'table', x: 60, y: 190, width: 300, height: 260, rows: 6, columns: 3, cells: [['x left', 'x right', 'f(x)'], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', ''], ['conclusion', '', '']] },
+      { title: 'Graph behavior', kind: 'graph', x: 410, y: 88, width: 340, height: 300, graph: { expression: '1/x', xMin: -5, xMax: 5, yMin: -5, yMax: 5 } }
+    ]
+  },
+  {
+    id: 'calculus-tangent-secant',
+    categoryId: 'calculus',
+    name: 'Tangent / Secant Explanation',
+    description: 'Compare average and instantaneous rate of change.',
+    pageTitle: 'Calculus - Tangent And Secant',
+    pageTemplate: 'coordinate',
+    tags: ['calculus', 'tangent'],
+    accent: '#FFD150',
+    regions: [
+      { title: 'Curve + secant/tangent', kind: 'graph', x: 60, y: 90, width: 380, height: 320, graph: { expression: 'x^2', xMin: -4, xMax: 4, yMin: -2, yMax: 12, shadeFrom: 1, shadeTo: 2 } },
+      { title: 'Secant slope', detail: '(f(b)-f(a))/(b-a)', kind: 'formula', x: 470, y: 90, width: 280, height: 130 },
+      { title: 'Tangent slope', detail: 'lim h -> 0 [f(a+h)-f(a)]/h', kind: 'formula', x: 470, y: 250, width: 280, height: 160 },
+      { title: 'Interpretation', detail: 'Units and meaning in context.', kind: 'work', x: 60, y: 440, width: 690, height: 90 }
+    ]
+  },
+  {
+    id: 'geometry-proof-layout',
+    categoryId: 'geometry',
+    name: 'Theorem / Proof Layout',
+    description: 'Given, prove, construction, and proof table.',
+    pageTitle: 'Geometry - Proof Layout',
+    pageTemplate: 'geometry',
+    tags: ['geometry', 'proof'],
+    accent: '#458B73',
+    regions: [
+      { title: 'Given', detail: 'Known facts and diagram labels.', kind: 'work', x: 60, y: 90, width: 320, height: 100 },
+      { title: 'To prove', detail: 'Statement to establish.', kind: 'work', x: 420, y: 90, width: 320, height: 100 },
+      { title: 'Diagram', kind: 'diagram', diagramKind: 'node-edge', x: 60, y: 220, width: 300, height: 220 },
+      { title: 'Statements / reasons', kind: 'table', x: 395, y: 220, width: 355, height: 300, rows: 6, columns: 2, cells: [['Statement', 'Reason'], ['', ''], ['', ''], ['', ''], ['', ''], ['', '']] }
+    ]
+  },
+  {
+    id: 'geometry-triangle-congruence',
+    categoryId: 'geometry',
+    name: 'Triangle Congruence',
+    description: 'Compare two triangles and evidence.',
+    pageTitle: 'Geometry - Triangle Congruence',
+    pageTemplate: 'geometry',
+    tags: ['geometry', 'triangles'],
+    accent: '#F26076',
+    regions: [
+      { title: 'Triangle 1', kind: 'diagram', diagramKind: 'node-edge', x: 60, y: 100, width: 290, height: 220 },
+      { title: 'Triangle 2', kind: 'diagram', diagramKind: 'node-edge', x: 430, y: 100, width: 290, height: 220 },
+      { title: 'Corresponding parts', kind: 'table', x: 60, y: 365, width: 320, height: 190, rows: 5, columns: 3, cells: [['Part', 'Triangle 1', 'Triangle 2'], ['Side', '', ''], ['Angle', '', ''], ['Side', '', ''], ['Conclusion', '', '']] },
+      { title: 'Congruence rule', detail: 'SSS / SAS / ASA / AAS / HL', kind: 'formula', x: 420, y: 365, width: 320, height: 110 }
+    ]
+  },
+  {
+    id: 'geometry-circle-theorem',
+    categoryId: 'geometry',
+    name: 'Circle Theorem Template',
+    description: 'Circle diagram with theorem and proof notes.',
+    pageTitle: 'Geometry - Circle Theorem',
+    pageTemplate: 'geometry',
+    tags: ['geometry', 'circle'],
+    accent: '#FF9760',
+    regions: [
+      { title: 'Circle diagram', kind: 'diagram', diagramKind: 'node-edge', x: 60, y: 95, width: 330, height: 260 },
+      { title: 'Theorem statement', detail: 'Angles / chords / tangents.', kind: 'formula', x: 430, y: 95, width: 320, height: 120 },
+      { title: 'Known relationships', kind: 'table', x: 430, y: 245, width: 320, height: 190, rows: 4, columns: 2, cells: [['Fact', 'Reason'], ['', ''], ['', ''], ['', '']] },
+      { title: 'Proof notes', detail: 'Use equal radii, arc measures, or tangent properties.', kind: 'work', x: 60, y: 395, width: 330, height: 140 }
+    ]
+  },
+  {
+    id: 'physics-free-body',
+    categoryId: 'physics',
+    name: 'Free-Body Diagram',
+    description: 'Body, forces, components, and equations.',
+    pageTitle: 'Physics - Free-Body Diagram',
+    pageTemplate: 'grid',
+    tags: ['physics', 'forces'],
+    accent: '#FFD150',
+    regions: [
+      { title: 'System sketch', detail: 'Object + surfaces + axes.', kind: 'diagram', diagramKind: 'node-edge', x: 60, y: 95, width: 330, height: 260 },
+      { title: 'Force list', kind: 'table', x: 430, y: 95, width: 320, height: 220, rows: 5, columns: 3, cells: [['Force', 'Direction', 'Value'], ['Weight', '', ''], ['Normal', '', ''], ['Friction', '', ''], ['Applied', '', '']] },
+      { title: 'Equations', detail: 'sum Fx = ma, sum Fy = ma', kind: 'formula', x: 60, y: 390, width: 330, height: 120 },
+      { title: 'Answer + units', detail: 'Check sign convention.', kind: 'work', x: 430, y: 350, width: 320, height: 160 }
+    ]
+  },
+  {
+    id: 'physics-motion-graph',
+    categoryId: 'physics',
+    name: 'Motion Graph Workspace',
+    description: 'Position/velocity graph with data and interpretation.',
+    pageTitle: 'Physics - Motion Graph',
+    pageTemplate: 'graph',
+    tags: ['physics', 'motion'],
+    accent: '#458B73',
+    regions: [
+      { title: 'Motion graph', kind: 'graph', x: 60, y: 92, width: 390, height: 300, graph: { expression: '2*x+1', xMin: 0, xMax: 10, yMin: 0, yMax: 25 } },
+      { title: 'Data table', kind: 'table', x: 480, y: 92, width: 270, height: 250, rows: 6, columns: 3, cells: [['t', 'x', 'v'], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', '']] },
+      { title: 'Slope / area meaning', detail: 'Connect graph features to physical quantities.', kind: 'work', x: 60, y: 425, width: 690, height: 110 }
+    ]
+  },
+  {
+    id: 'physics-circuit',
+    categoryId: 'physics',
+    name: 'Circuit Diagram Starter',
+    description: 'Circuit sketch, values, and equations.',
+    pageTitle: 'Physics - Circuit Diagram',
+    pageTemplate: 'grid',
+    tags: ['physics', 'circuits'],
+    accent: '#F26076',
+    regions: [
+      { title: 'Circuit sketch', kind: 'diagram', diagramKind: 'flow', x: 60, y: 95, width: 350, height: 260 },
+      { title: 'Known values', kind: 'table', x: 445, y: 95, width: 305, height: 210, rows: 5, columns: 2, cells: [['Quantity', 'Value'], ['V', ''], ['I', ''], ['R', ''], ['P', '']] },
+      { title: 'Equations', detail: 'V = IR, P = VI', kind: 'formula', x: 445, y: 340, width: 305, height: 120 },
+      { title: 'Result', detail: 'Equivalent resistance / current / power.', kind: 'work', x: 60, y: 390, width: 350, height: 110 }
+    ]
+  },
+  {
+    id: 'chemistry-balancing',
+    categoryId: 'chemistry',
+    name: 'Chemical Equation Balancing',
+    description: 'Reactants/products, atom count, and coefficients.',
+    pageTitle: 'Chemistry - Equation Balancing',
+    pageTemplate: 'ruled',
+    tags: ['chemistry', 'balancing'],
+    accent: '#458B73',
+    regions: [
+      { title: 'Unbalanced equation', detail: 'Reactants -> products', kind: 'formula', x: 60, y: 90, width: 680, height: 86 },
+      { title: 'Atom count', kind: 'table', x: 60, y: 200, width: 360, height: 260, rows: 6, columns: 3, cells: [['Element', 'Reactants', 'Products'], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', '']] },
+      { title: 'Coefficient trials', detail: 'Adjust one element at a time.', kind: 'work', x: 455, y: 200, width: 285, height: 190 },
+      { title: 'Balanced equation', detail: 'Check conservation of atoms and charge.', kind: 'formula', x: 455, y: 420, width: 285, height: 100 }
+    ]
+  },
+  {
+    id: 'chemistry-periodic-notes',
+    categoryId: 'chemistry',
+    name: 'Periodic Table Notes',
+    description: 'Element card and trend workspace.',
+    pageTitle: 'Chemistry - Periodic Notes',
+    pageTemplate: 'grid',
+    tags: ['chemistry', 'periodic table'],
+    accent: '#FFD150',
+    regions: [
+      { title: 'Element card', kind: 'table', x: 60, y: 90, width: 300, height: 240, rows: 5, columns: 2, cells: [['Property', 'Value'], ['Atomic number', ''], ['Mass', ''], ['Group/period', ''], ['Valence', '']] },
+      { title: 'Trend sketch', kind: 'graph', x: 410, y: 90, width: 340, height: 260, graph: { expression: 'x', xMin: 0, xMax: 10, yMin: 0, yMax: 10 } },
+      { title: 'Electron configuration', detail: 'Shell/orbital notation.', kind: 'formula', x: 60, y: 370, width: 300, height: 110 },
+      { title: 'Notes', detail: 'Reactivity, bonding, uses.', kind: 'work', x: 410, y: 380, width: 340, height: 120 }
+    ]
+  },
+  {
+    id: 'chemistry-reaction-flow',
+    categoryId: 'chemistry',
+    name: 'Reaction Mechanism Flow',
+    description: 'Stepwise reaction flow with conditions.',
+    pageTitle: 'Chemistry - Reaction Mechanism',
+    pageTemplate: 'blank',
+    tags: ['chemistry', 'reaction'],
+    accent: '#FF9760',
+    regions: [
+      { title: 'Mechanism flow', kind: 'diagram', diagramKind: 'flow', x: 60, y: 95, width: 420, height: 280 },
+      { title: 'Reagents / conditions', kind: 'table', x: 510, y: 95, width: 240, height: 220, rows: 5, columns: 2, cells: [['Step', 'Condition'], ['1', ''], ['2', ''], ['3', ''], ['Yield', '']] },
+      { title: 'Intermediate notes', detail: 'Charges, arrows, and catalysts.', kind: 'work', x: 60, y: 410, width: 690, height: 110 }
+    ]
+  },
+  {
+    id: 'chemistry-lab-observation',
+    categoryId: 'chemistry',
+    name: 'Lab Observation Table',
+    description: 'Observation, inference, safety, and conclusion.',
+    pageTitle: 'Chemistry - Lab Observation',
+    pageTemplate: 'table',
+    tags: ['chemistry', 'lab'],
+    accent: '#F26076',
+    regions: [
+      { title: 'Observation table', kind: 'table', x: 60, y: 95, width: 690, height: 270, rows: 6, columns: 4, cells: [['Step', 'Observation', 'Inference', 'Safety'], ['', '', '', ''], ['', '', '', ''], ['', '', '', ''], ['', '', '', ''], ['Conclusion', '', '', '']] },
+      { title: 'Variables', detail: 'Independent / dependent / controlled.', kind: 'work', x: 60, y: 395, width: 330, height: 110 },
+      { title: 'Result statement', detail: 'Claim, evidence, reasoning.', kind: 'work', x: 420, y: 395, width: 330, height: 110 }
+    ]
+  },
+  {
+    id: 'economics-supply-demand',
+    categoryId: 'economics',
+    name: 'Supply-Demand Graph',
+    description: 'Market equilibrium and shifts.',
+    pageTitle: 'Economics - Supply Demand',
+    pageTemplate: 'coordinate',
+    tags: ['economics', 'market'],
+    accent: '#458B73',
+    regions: [
+      { title: 'Market graph', kind: 'graph', x: 60, y: 90, width: 390, height: 320, graph: { expression: '-x+10; x', xMin: 0, xMax: 10, yMin: 0, yMax: 10 } },
+      { title: 'Equilibrium', kind: 'table', x: 480, y: 90, width: 270, height: 180, rows: 4, columns: 2, cells: [['Item', 'Value'], ['P*', ''], ['Q*', ''], ['Change', '']] },
+      { title: 'Shift explanation', detail: 'Cause -> curve shift -> new price/quantity.', kind: 'work', x: 480, y: 305, width: 270, height: 140 },
+      { title: 'Conclusion', detail: 'Short market interpretation.', kind: 'work', x: 60, y: 445, width: 690, height: 80 }
+    ]
+  },
+  {
+    id: 'economics-cost-profit',
+    categoryId: 'economics',
+    name: 'Cost / Revenue / Profit Table',
+    description: 'Track total, marginal, and average values.',
+    pageTitle: 'Economics - Cost Revenue Profit',
+    pageTemplate: 'table',
+    tags: ['economics', 'cost'],
+    accent: '#FFD150',
+    regions: [
+      { title: 'Cost table', kind: 'table', x: 60, y: 90, width: 690, height: 300, rows: 7, columns: 5, cells: [['Q', 'TC', 'TR', 'MC/MR', 'Profit'], ['', '', '', '', ''], ['', '', '', '', ''], ['', '', '', '', ''], ['', '', '', '', ''], ['', '', '', '', ''], ['Decision', '', '', '', '']] },
+      { title: 'Break-even / max profit rule', detail: 'MR = MC and profit = TR - TC.', kind: 'formula', x: 60, y: 425, width: 330, height: 100 },
+      { title: 'Interpretation', detail: 'Should the firm produce? Why?', kind: 'work', x: 420, y: 425, width: 330, height: 100 }
+    ]
+  },
+  {
+    id: 'economics-ppc',
+    categoryId: 'economics',
+    name: 'Production Possibility Curve',
+    description: 'Opportunity cost and feasible choices.',
+    pageTitle: 'Economics - PPC',
+    pageTemplate: 'coordinate',
+    tags: ['economics', 'ppc'],
+    accent: '#FF9760',
+    regions: [
+      { title: 'PPC sketch', kind: 'graph', x: 60, y: 90, width: 390, height: 320, graph: { expression: 'sqrt(100-x^2)', xMin: 0, xMax: 10, yMin: 0, yMax: 10 } },
+      { title: 'Points', kind: 'table', x: 480, y: 90, width: 270, height: 190, rows: 5, columns: 3, cells: [['Point', 'Good A', 'Good B'], ['A', '', ''], ['B', '', ''], ['C', '', ''], ['D', '', '']] },
+      { title: 'Opportunity cost', detail: 'What is given up when moving points?', kind: 'work', x: 480, y: 315, width: 270, height: 140 }
+    ]
+  },
+  {
+    id: 'coding-flowchart',
+    categoryId: 'coding',
+    name: 'Flowchart Template',
+    description: 'Algorithm flow with input/process/output.',
+    pageTitle: 'Coding - Flowchart',
+    pageTemplate: 'blank',
+    tags: ['coding', 'flowchart'],
+    accent: '#458B73',
+    regions: [
+      { title: 'Algorithm flow', kind: 'diagram', diagramKind: 'flow', x: 60, y: 95, width: 420, height: 300 },
+      { title: 'Variables', kind: 'table', x: 510, y: 95, width: 240, height: 190, rows: 5, columns: 2, cells: [['Variable', 'Meaning'], ['', ''], ['', ''], ['', ''], ['', '']] },
+      { title: 'Edge cases', detail: 'Empty input, invalid input, limits.', kind: 'work', x: 510, y: 320, width: 240, height: 120 },
+      { title: 'Expected output', detail: 'Trace one example.', kind: 'work', x: 60, y: 430, width: 420, height: 90 }
+    ]
+  },
+  {
+    id: 'coding-pseudocode',
+    categoryId: 'coding',
+    name: 'Pseudocode + Output Table',
+    description: 'Code plan with dry-run table.',
+    pageTitle: 'Coding - Pseudocode',
+    pageTemplate: 'ruled',
+    tags: ['coding', 'pseudocode'],
+    accent: '#F26076',
+    regions: [
+      { title: 'Pseudocode', detail: 'Write steps with indentation.', kind: 'work', x: 60, y: 90, width: 340, height: 310 },
+      { title: 'Dry run table', kind: 'table', x: 430, y: 90, width: 320, height: 310, rows: 7, columns: 4, cells: [['Step', 'Input', 'State', 'Output'], ['', '', '', ''], ['', '', '', ''], ['', '', '', ''], ['', '', '', ''], ['', '', '', ''], ['Result', '', '', '']] },
+      { title: 'Complexity', detail: 'Time: O( ), Space: O( )', kind: 'formula', x: 60, y: 430, width: 690, height: 90 }
+    ]
+  },
+  {
+    id: 'coding-recursion-tree',
+    categoryId: 'coding',
+    name: 'Recursion Tree',
+    description: 'Call tree, base case, and recurrence.',
+    pageTitle: 'Coding - Recursion Tree',
+    pageTemplate: 'grid',
+    tags: ['coding', 'recursion'],
+    accent: '#FFD150',
+    regions: [
+      { title: 'Call tree', kind: 'diagram', diagramKind: 'tree', x: 60, y: 95, width: 430, height: 300 },
+      { title: 'Base case', detail: 'When does recursion stop?', kind: 'formula', x: 520, y: 95, width: 230, height: 100 },
+      { title: 'Recurrence', detail: 'T(n) = ...', kind: 'formula', x: 520, y: 225, width: 230, height: 100 },
+      { title: 'Trace', detail: 'Follow one branch and combine results.', kind: 'work', x: 60, y: 430, width: 690, height: 90 }
+    ]
+  },
+  {
+    id: 'coding-data-structures',
+    categoryId: 'coding',
+    name: 'Stack / Queue Diagram',
+    description: 'Visualize operations and state changes.',
+    pageTitle: 'Coding - Stack Queue',
+    pageTemplate: 'grid',
+    tags: ['coding', 'data structures'],
+    accent: '#FF9760',
+    regions: [
+      { title: 'Structure diagram', kind: 'diagram', diagramKind: 'node-edge', x: 60, y: 95, width: 330, height: 240 },
+      { title: 'Operations trace', kind: 'table', x: 430, y: 95, width: 320, height: 260, rows: 6, columns: 3, cells: [['Operation', 'State', 'Output'], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', ''], ['Final', '', '']] },
+      { title: 'Invariant', detail: 'What must always stay true?', kind: 'work', x: 60, y: 385, width: 690, height: 110 }
+    ]
+  },
+  {
+    id: 'probability-tree',
+    categoryId: 'probability',
+    name: 'Probability Tree',
+    description: 'Branching outcomes and path probabilities.',
+    pageTitle: 'Probability - Tree',
+    pageTemplate: 'blank',
+    tags: ['probability', 'tree'],
+    accent: '#458B73',
+    regions: [
+      { title: 'Event tree', kind: 'diagram', diagramKind: 'probability-tree', x: 60, y: 95, width: 430, height: 300 },
+      { title: 'Path probabilities', kind: 'table', x: 520, y: 95, width: 230, height: 250, rows: 5, columns: 2, cells: [['Path', 'P'], ['', ''], ['', ''], ['', ''], ['Total', '']] },
+      { title: 'Conclusion', detail: 'Answer the target probability in context.', kind: 'work', x: 60, y: 430, width: 690, height: 90 }
+    ]
+  },
+  {
+    id: 'probability-venn',
+    categoryId: 'probability',
+    name: 'Venn Probability',
+    description: 'Set notation and inclusion-exclusion.',
+    pageTitle: 'Probability - Venn',
+    pageTemplate: 'blank',
+    tags: ['probability', 'venn'],
+    accent: '#F26076',
+    regions: [
+      { title: 'Venn diagram', kind: 'diagram', diagramKind: 'venn', x: 60, y: 95, width: 360, height: 260 },
+      { title: 'Known values', kind: 'table', x: 460, y: 95, width: 290, height: 230, rows: 5, columns: 2, cells: [['Region', 'Probability'], ['P(A)', ''], ['P(B)', ''], ['P(A and B)', ''], ['P(A or B)', '']] },
+      { title: 'Formula', detail: 'P(A or B) = P(A) + P(B) - P(A and B)', kind: 'formula', x: 60, y: 395, width: 690, height: 100 }
+    ]
+  },
+  {
+    id: 'probability-sample-space',
+    categoryId: 'probability',
+    name: 'Sample Space Table',
+    description: 'Organize outcomes and favorable cases.',
+    pageTitle: 'Probability - Sample Space',
+    pageTemplate: 'table',
+    tags: ['probability', 'sample space'],
+    accent: '#FFD150',
+    regions: [
+      { title: 'Sample space', kind: 'table', x: 60, y: 95, width: 430, height: 300, rows: 6, columns: 5, cells: [['', '1', '2', '3', '4'], ['A', '', '', '', ''], ['B', '', '', '', ''], ['C', '', '', '', ''], ['D', '', '', '', ''], ['Total', '', '', '', '']] },
+      { title: 'Favorable outcomes', detail: 'List or shade selected outcomes.', kind: 'work', x: 520, y: 95, width: 230, height: 160 },
+      { title: 'Probability', detail: 'favorable / total =', kind: 'formula', x: 520, y: 290, width: 230, height: 110 }
+    ]
+  },
+  {
+    id: 'probability-bayes',
+    categoryId: 'probability',
+    name: 'Bayes Theorem Layout',
+    description: 'Prior, likelihood, evidence, posterior.',
+    pageTitle: 'Probability - Bayes',
+    pageTemplate: 'ruled',
+    tags: ['probability', 'bayes'],
+    accent: '#FF9760',
+    regions: [
+      { title: 'Known probabilities', kind: 'table', x: 60, y: 95, width: 340, height: 260, rows: 5, columns: 2, cells: [['Term', 'Value'], ['P(A)', ''], ['P(B|A)', ''], ['P(B)', ''], ['P(A|B)', '']] },
+      { title: 'Formula', detail: 'P(A|B) = P(B|A)P(A)/P(B)', kind: 'formula', x: 440, y: 95, width: 310, height: 120 },
+      { title: 'Substitution', detail: 'Plug values and simplify.', kind: 'work', x: 440, y: 245, width: 310, height: 170 },
+      { title: 'Interpretation', detail: 'Explain posterior probability.', kind: 'work', x: 60, y: 445, width: 690, height: 80 }
+    ]
+  },
+  {
+    id: 'statistics-frequency',
+    categoryId: 'statistics',
+    name: 'Frequency Table',
+    description: 'Class intervals, frequency, and cumulative count.',
+    pageTitle: 'Statistics - Frequency Table',
+    pageTemplate: 'table',
+    tags: ['statistics', 'frequency'],
+    accent: '#458B73',
+    regions: [
+      { title: 'Frequency table', kind: 'table', x: 60, y: 95, width: 690, height: 320, rows: 7, columns: 5, cells: [['Class', 'Tally', 'Frequency', 'Cumulative', 'Relative'], ['', '', '', '', ''], ['', '', '', '', ''], ['', '', '', '', ''], ['', '', '', '', ''], ['', '', '', '', ''], ['Total', '', '', '', '']] },
+      { title: 'Key measures', detail: 'Mean, median, mode, range.', kind: 'formula', x: 60, y: 450, width: 330, height: 90 },
+      { title: 'Comment', detail: 'Shape, center, spread.', kind: 'work', x: 420, y: 450, width: 330, height: 90 }
+    ]
+  },
+  {
+    id: 'statistics-histogram',
+    categoryId: 'statistics',
+    name: 'Histogram Workspace',
+    description: 'Histogram plus class interval table.',
+    pageTitle: 'Statistics - Histogram',
+    pageTemplate: 'graph',
+    tags: ['statistics', 'histogram'],
+    accent: '#F26076',
+    regions: [
+      { title: 'Histogram', kind: 'graph', x: 60, y: 90, width: 390, height: 310, graph: { histogramData: '4,5,6,6,7,8,8,8,9,10', histogramBins: 5 } },
+      { title: 'Intervals', kind: 'table', x: 480, y: 90, width: 270, height: 250, rows: 6, columns: 3, cells: [['Interval', 'Freq.', 'Notes'], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', ''], ['Total', '', '']] },
+      { title: 'Interpretation', detail: 'Skew, modal class, spread.', kind: 'work', x: 60, y: 430, width: 690, height: 90 }
+    ]
+  },
+  {
+    id: 'statistics-regression',
+    categoryId: 'statistics',
+    name: 'Scatter / Regression',
+    description: 'Scatter plot and correlation statement.',
+    pageTitle: 'Statistics - Scatter Regression',
+    pageTemplate: 'coordinate',
+    tags: ['statistics', 'regression'],
+    accent: '#FF9760',
+    regions: [
+      { title: 'Scatter plot', kind: 'graph', x: 60, y: 90, width: 390, height: 320, graph: { scatterPoints: '1,2\\n2,3\\n3,4\\n4,6\\n5,7', showRegression: true, xMin: 0, xMax: 6, yMin: 0, yMax: 8 } },
+      { title: 'Data notes', kind: 'table', x: 480, y: 90, width: 270, height: 220, rows: 5, columns: 2, cells: [['x', 'y'], ['', ''], ['', ''], ['', ''], ['', '']] },
+      { title: 'Model', detail: 'Line of best fit: y = mx + b', kind: 'formula', x: 480, y: 340, width: 270, height: 100 },
+      { title: 'Interpretation', detail: 'Correlation, slope meaning, prediction limits.', kind: 'work', x: 60, y: 445, width: 690, height: 80 }
+    ]
+  },
+  {
+    id: 'statistics-hypothesis-test',
+    categoryId: 'statistics',
+    name: 'Hypothesis Test Layout',
+    description: 'Structured test workflow.',
+    pageTitle: 'Statistics - Hypothesis Test',
+    pageTemplate: 'ruled',
+    tags: ['statistics', 'hypothesis'],
+    accent: '#FFD150',
+    regions: [
+      { title: 'Hypotheses', detail: 'H0 and H1', kind: 'formula', x: 60, y: 90, width: 320, height: 110 },
+      { title: 'Test details', kind: 'table', x: 420, y: 90, width: 330, height: 210, rows: 5, columns: 2, cells: [['Item', 'Value'], ['alpha', ''], ['test statistic', ''], ['p-value', ''], ['decision', '']] },
+      { title: 'Work', detail: 'Conditions, calculation, and comparison.', kind: 'work', x: 60, y: 230, width: 320, height: 260 },
+      { title: 'Conclusion', detail: 'State result in context.', kind: 'work', x: 420, y: 335, width: 330, height: 130 }
+    ]
+  },
+  {
+    id: 'accounting-ledger',
+    categoryId: 'accounting',
+    name: 'Ledger / T-Account',
+    description: 'Debit and credit sides with balance.',
+    pageTitle: 'Accounting - T Account',
+    pageTemplate: 'table',
+    tags: ['accounting', 'ledger'],
+    accent: '#458B73',
+    regions: [
+      { title: 'T-account', kind: 'table', x: 60, y: 95, width: 430, height: 300, rows: 7, columns: 2, cells: [['Debit', 'Credit'], ['', ''], ['', ''], ['', ''], ['', ''], ['', ''], ['Balance', '']] },
+      { title: 'Account name', detail: 'Asset / liability / equity / revenue / expense.', kind: 'formula', x: 520, y: 95, width: 230, height: 95 },
+      { title: 'Rules', detail: 'Normal balance and posting notes.', kind: 'work', x: 520, y: 220, width: 230, height: 170 },
+      { title: 'Final balance', detail: 'Debit or credit balance.', kind: 'formula', x: 60, y: 430, width: 690, height: 90 }
+    ]
+  },
+  {
+    id: 'accounting-trial-balance',
+    categoryId: 'accounting',
+    name: 'Trial Balance Table',
+    description: 'Account list with debit and credit totals.',
+    pageTitle: 'Accounting - Trial Balance',
+    pageTemplate: 'table',
+    tags: ['accounting', 'trial balance'],
+    accent: '#F26076',
+    regions: [
+      { title: 'Trial balance', kind: 'table', x: 60, y: 95, width: 690, height: 340, rows: 8, columns: 3, cells: [['Account', 'Debit', 'Credit'], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', ''], ['Total', '', '']] },
+      { title: 'Check', detail: 'Total debits must equal total credits.', kind: 'formula', x: 60, y: 470, width: 690, height: 70 }
+    ]
+  },
+  {
+    id: 'accounting-journal-entry',
+    categoryId: 'accounting',
+    name: 'Journal Entry Layout',
+    description: 'Date, accounts, debit, credit, and narration.',
+    pageTitle: 'Accounting - Journal Entry',
+    pageTemplate: 'table',
+    tags: ['accounting', 'journal'],
+    accent: '#FFD150',
+    regions: [
+      { title: 'Journal entry', kind: 'table', x: 60, y: 95, width: 690, height: 300, rows: 6, columns: 4, cells: [['Date', 'Account', 'Debit', 'Credit'], ['', '', '', ''], ['', '', '', ''], ['', '', '', ''], ['', '', '', ''], ['Narration', '', '', '']] },
+      { title: 'Transaction analysis', detail: 'Which accounts increase/decrease?', kind: 'work', x: 60, y: 425, width: 330, height: 105 },
+      { title: 'Accounting equation check', detail: 'Assets = Liabilities + Equity.', kind: 'formula', x: 420, y: 425, width: 330, height: 105 }
+    ]
+  }
+];
+const MATRIX_TABLE_PRESETS: Array<{
+  id: string;
+  label: string;
+  mode: MatrixTableMode;
+  rows: number;
+  columns: number;
+  cells: string[][];
+  bracketStyle?: WhiteboardMatrixBracket;
+  augmentedColumn?: number | null;
+  headerRow?: boolean;
+  showBorders?: boolean;
+}> = [
+  {
+    id: 'matrix-2x2',
+    label: '2 x 2',
+    mode: 'matrix',
+    rows: 2,
+    columns: 2,
+    cells: [
+      ['a', 'b'],
+      ['c', 'd']
+    ]
+  },
+  {
+    id: 'matrix-3x3',
+    label: '3 x 3',
+    mode: 'matrix',
+    rows: 3,
+    columns: 3,
+    cells: [
+      ['a', 'b', 'c'],
+      ['d', 'e', 'f'],
+      ['g', 'h', 'i']
+    ]
+  },
+  { id: 'row-vector', label: 'Row vector', mode: 'matrix', rows: 1, columns: 4, cells: [['x1', 'x2', 'x3', 'x4']] },
+  { id: 'column-vector', label: 'Column vector', mode: 'matrix', rows: 4, columns: 1, cells: [['x1'], ['x2'], ['x3'], ['x4']] },
+  {
+    id: 'augmented',
+    label: 'Augmented',
+    mode: 'matrix',
+    rows: 3,
+    columns: 4,
+    augmentedColumn: 3,
+    cells: [
+      ['1', '0', '0', 'a'],
+      ['0', '1', '0', 'b'],
+      ['0', '0', '1', 'c']
+    ]
+  },
+  {
+    id: 'determinant',
+    label: 'Determinant',
+    mode: 'matrix',
+    rows: 2,
+    columns: 2,
+    bracketStyle: 'determinant',
+    cells: [
+      ['a', 'b'],
+      ['c', 'd']
+    ]
+  },
+  {
+    id: 'table-header',
+    label: 'Header table',
+    mode: 'table',
+    rows: 4,
+    columns: 3,
+    headerRow: true,
+    showBorders: true,
+    cells: [
+      ['Name', 'Value', 'Notes'],
+      ['', '', ''],
+      ['', '', ''],
+      ['', '', '']
+    ]
+  }
 ];
 const ERASER_MODE_OPTIONS: EraserModeOption[] = [
   { id: 'partial', label: 'Partial', description: 'Trim pen strokes under the eraser.' },
@@ -705,6 +1554,8 @@ const TOOL_LABELS: Record<WhiteboardTool, string> = {
   text: 'Text',
   equation: 'Equation',
   graph: 'Graph',
+  matrix: 'Matrix',
+  table: 'Table',
   segment: 'Segment',
   ruler: 'Ruler',
   protractor: 'Protractor',
@@ -746,6 +1597,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   readonly allowAssetImport = input(true);
   readonly allowExport = input(true);
   readonly allowClear = input(true);
+  readonly allowPresentationMode = input(false);
+  readonly allowSubjectTemplates = input(false);
   readonly showEndSession = input(false);
   readonly cursors = input<WhiteboardCursor[]>([]);
   readonly commandCommitted = output<WhiteboardCommand>();
@@ -769,12 +1622,20 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly diagramMenuOpen = signal(false);
   protected readonly colorMenuOpen = signal(false);
   protected readonly fillColorMenuOpen = signal(false);
+  protected readonly penMenuOpen = signal(false);
   protected readonly brushMenuOpen = signal(false);
   protected readonly menuOpen = signal(false);
   protected readonly strokeColor = signal('#071c41');
   protected readonly fillColor = signal('#FFD150');
   protected readonly fillEnabled = signal(false);
   protected readonly strokeWidth = signal(4);
+  protected readonly activePenStyle = signal<WhiteboardPenStyle>('solid');
+  protected readonly penOpacity = signal(1);
+  protected readonly penSmoothing = signal(0.35);
+  protected readonly pressureSensitivePen = signal(false);
+  protected readonly pressureInputAvailable = signal(false);
+  protected readonly penAutoCloseEnabled = signal(true);
+  protected readonly penAutoCloseThreshold = signal(28);
   protected readonly eraserMode = signal<WhiteboardEraserMode>('partial');
   protected readonly eraserSize = signal(18);
   protected readonly fontSize = signal(28);
@@ -783,12 +1644,23 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly customRecentColors = computed(() =>
     this.recentColors().filter((color) => !this.colors.some((preset) => preset.toLowerCase() === color.toLowerCase()))
   );
+  protected readonly penOpacityLabel = computed(() => `${Math.round(this.penOpacity() * 100)}%`);
+  protected readonly penSmoothingLabel = computed(() => `${Math.round(this.penSmoothing() * 100)}%`);
   protected readonly brushSizes = [3, 6, 10, 14];
   protected readonly eraserSizes = [12, 18, 28, 40];
+  protected readonly penStyleOptions = PEN_STYLE_OPTIONS;
+  protected readonly penAutoCloseThresholdOptions = PEN_AUTO_CLOSE_THRESHOLDS;
   protected readonly eraserModeOptions = ERASER_MODE_OPTIONS;
   protected readonly mathSnippets = MATH_SNIPPETS;
   protected readonly mathShortcutGroups = MATH_SHORTCUT_GROUPS;
   protected readonly mathTabs = MATH_TOOLS_TABS;
+  protected readonly visibleMathTabs = computed(() =>
+    this.allowSubjectTemplates() ? this.mathTabs : this.mathTabs.filter((tab) => tab.id !== 'subjects')
+  );
+  protected readonly subjectTemplateCategories = SUBJECT_TEMPLATE_CATEGORIES;
+  protected readonly subjectTemplates = SUBJECT_TEMPLATE_LIBRARY;
+  protected readonly matrixTablePresets = MATRIX_TABLE_PRESETS;
+  protected readonly pdfExportOptions = PDF_EXPORT_OPTIONS;
   protected readonly textAlignmentOptions = TEXT_ALIGNMENT_OPTIONS;
   protected readonly geometryToolGroups = GEOMETRY_TOOL_GROUPS;
   protected readonly geometryToolOptions = GEOMETRY_TOOL_OPTIONS;
@@ -797,6 +1669,26 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly angleSnapOptions = ANGLE_SNAP_OPTIONS;
   protected readonly mathPopoverOpen = signal(false);
   protected readonly activeMathTab = signal<MathToolsTab>('equation');
+  protected readonly activeSubjectTemplateCategory = signal<SubjectTemplateCategoryId>('algebra');
+  protected readonly subjectTemplateSearch = signal('');
+  protected readonly filteredSubjectTemplates = computed(() => {
+    const categoryId = this.activeSubjectTemplateCategory();
+    const query = this.subjectTemplateSearch().trim().toLowerCase();
+    return this.subjectTemplates.filter((template) => {
+      const matchesCategory = template.categoryId === categoryId;
+      if (!matchesCategory) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      return (
+        template.name.toLowerCase().includes(query) ||
+        template.description.toLowerCase().includes(query) ||
+        template.tags.some((tag) => tag.toLowerCase().includes(query))
+      );
+    });
+  });
   protected readonly mathPopoverPosition = signal<MathPopoverPosition>({ x: 72, y: 72 });
   protected readonly mathEquationDraft = signal('\\frac{a}{b}');
   protected readonly mathEquationFontSize = signal(32);
@@ -813,6 +1705,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly selectedElementIds = signal<string[]>([]);
   protected readonly selectedEquationForPopover = computed(() => this.singleSelectedEquation());
   protected readonly selectedTextForPopover = computed(() => this.singleSelectedText());
+  protected readonly selectedMatrixTableForPopover = computed(() => this.singleSelectedMatrixTable());
   protected readonly mathEquationActionLabel = computed(() => {
     if (this.selectedEquationForPopover()) {
       return 'Update equation';
@@ -822,11 +1715,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
     return 'Insert equation';
   });
+  protected readonly matrixTableActionLabel = computed(() => (this.matrixTableDraft()?.elementId ? 'Update object' : 'Insert object'));
   protected readonly textDraft = signal<TextDraft | null>(null);
   protected readonly graphDraft = signal<GraphDraft | null>(null);
+  protected readonly matrixTableDraft = signal<MatrixTableDraft | null>(null);
   protected readonly contextMenu = signal<ContextMenuState | null>(null);
   protected readonly laserPoint = signal<WhiteboardPoint | null>(null);
   protected readonly eraserCursor = signal<WhiteboardPoint | null>(null);
+  protected readonly presentationModeEnabled = signal(false);
+  protected readonly presentationEditEnabled = signal(true);
   protected readonly alignmentGuides = signal<AlignmentGuide[]>([]);
   protected readonly selectionMarquee = signal<SelectionMarquee | null>(null);
   protected readonly snapToGrid = signal(false);
@@ -840,11 +1737,14 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly assetInputAccept = computed(() =>
     this.assetImportMode() === 'pdf-pages'
       ? '.pdf,application/pdf'
+      : this.assetImportMode() === 'deck-pages'
+        ? '.ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation'
       : this.assetImportMode() === 'slide-pages' || this.assetImportMode() === 'background'
         ? 'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp'
         : 'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp,.pdf,application/pdf'
   );
   protected readonly assetInputMultiple = computed(() => this.assetImportMode() === 'slide-pages');
+  protected readonly pdfExportMode = signal<PdfExportMode>('hybrid');
   protected readonly templateOptions = TEMPLATE_OPTIONS;
   protected readonly pages = signal<WhiteboardPage[]>([this.createPage('Board 1')]);
   protected readonly activePageId = signal(this.pages()[0]!.id);
@@ -877,6 +1777,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly canClearBoard = computed(() => !this.readOnly() && this.allowClear());
   protected readonly boardTransform = computed(() => `translate(${this.panX()}px, ${this.panY()}px) scale(${this.zoom()})`);
   protected readonly zoomPercent = computed(() => `${Math.round(this.zoom() * 100)}%`);
+  protected readonly presentationPageLabel = computed(() => {
+    const index = this.pages().findIndex((page) => page.id === this.activePageId());
+    return `${Math.max(1, index + 1)} / ${this.pages().length}`;
+  });
   protected readonly activeToolLabel = computed(() => {
     if (this.activeTool() === 'eraser') {
       return `Erase · ${this.eraserModeOptions.find((mode) => mode.id === this.eraserMode())?.label ?? 'Partial'}`;
@@ -1019,6 +1923,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         this.closeMathTools();
         return;
       }
+      if (this.presentationModeEnabled()) {
+        this.exitPresentationMode();
+        return;
+      }
       this.cancelKeyboardState();
       return;
     }
@@ -1069,6 +1977,18 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (usesModifier && this.isZoomOutShortcut(event)) {
       event.preventDefault();
       this.zoomOut();
+      return;
+    }
+
+    if (this.presentationModeEnabled() && !this.selectedElementIds().length && (event.key === 'ArrowLeft' || event.key === 'PageUp')) {
+      event.preventDefault();
+      this.previousPresentationPage();
+      return;
+    }
+
+    if (this.presentationModeEnabled() && !this.selectedElementIds().length && (event.key === 'ArrowRight' || event.key === 'PageDown')) {
+      event.preventDefault();
+      this.nextPresentationPage();
       return;
     }
 
@@ -1294,10 +2214,14 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!this.isDiagramTool(tool)) {
       this.diagramMenuOpen.set(false);
     }
+    if (tool !== 'pen') {
+      this.penMenuOpen.set(false);
+    }
   }
 
   protected toggleShapeMenu(event: MouseEvent): void {
     event.stopPropagation();
+    this.penMenuOpen.set(false);
     this.shapeMenuOpen.update((open) => !open);
   }
 
@@ -1312,6 +2236,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   protected toggleGeometryMenu(event: MouseEvent): void {
     event.stopPropagation();
+    this.penMenuOpen.set(false);
     this.shapeMenuOpen.set(false);
     this.diagramMenuOpen.set(false);
     this.geometryMenuOpen.update((open) => !open);
@@ -1328,6 +2253,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   protected toggleDiagramMenu(event: MouseEvent): void {
     event.stopPropagation();
+    this.penMenuOpen.set(false);
     this.shapeMenuOpen.set(false);
     this.geometryMenuOpen.set(false);
     this.diagramMenuOpen.update((open) => !open);
@@ -1360,6 +2286,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   protected toggleColorMenu(event: MouseEvent): void {
     event.stopPropagation();
+    this.penMenuOpen.set(false);
     this.fillColorMenuOpen.set(false);
     this.colorMenuOpen.update((open) => !open);
   }
@@ -1369,6 +2296,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       return;
     }
     event.stopPropagation();
+    this.penMenuOpen.set(false);
     this.colorMenuOpen.set(false);
     this.fillColorMenuOpen.update((open) => !open);
   }
@@ -1392,11 +2320,61 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   protected toggleBrushMenu(event: MouseEvent): void {
     event.stopPropagation();
+    this.penMenuOpen.set(false);
     this.brushMenuOpen.update((open) => !open);
+  }
+
+  protected togglePenMenu(event: MouseEvent): void {
+    event.stopPropagation();
+    if (!this.canUseTool('pen')) {
+      return;
+    }
+    this.activeTool.set('pen');
+    this.shapeMenuOpen.set(false);
+    this.geometryMenuOpen.set(false);
+    this.diagramMenuOpen.set(false);
+    this.colorMenuOpen.set(false);
+    this.fillColorMenuOpen.set(false);
+    this.brushMenuOpen.set(false);
+    this.menuOpen.set(false);
+    this.penMenuOpen.update((open) => !open);
+  }
+
+  protected selectPenStyle(style: WhiteboardPenStyle): void {
+    if (!this.canUseTool('pen')) {
+      return;
+    }
+    this.activePenStyle.set(style);
+    this.activeTool.set('pen');
+  }
+
+  protected setPenOpacity(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    this.penOpacity.set(this.clampNumber(Number(inputElement.value), 0.1, 1));
+  }
+
+  protected setPenSmoothing(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    this.penSmoothing.set(this.clampNumber(Number(inputElement.value), 0, 0.85));
+  }
+
+  protected togglePressureSensitivePen(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    this.pressureSensitivePen.set(inputElement.checked && this.pressureInputAvailable());
+  }
+
+  protected togglePenAutoClose(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    this.penAutoCloseEnabled.set(inputElement.checked);
+  }
+
+  protected selectPenAutoCloseThreshold(value: number): void {
+    this.penAutoCloseThreshold.set(value);
   }
 
   protected toggleMenu(event: MouseEvent): void {
     event.stopPropagation();
+    this.penMenuOpen.set(false);
     this.menuOpen.update((open) => !open);
   }
 
@@ -1404,8 +2382,14 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (this.readOnly()) {
       return;
     }
+    if (tab === 'subjects' && !this.allowSubjectTemplates()) {
+      tab = 'templates';
+    }
     if (tab === 'equation') {
       this.loadSelectedEquationIntoMathPopover();
+    }
+    if (tab === 'tables') {
+      this.ensureMatrixTableDraft();
     }
     this.activeMathTab.set(tab);
     this.menuOpen.set(false);
@@ -1414,6 +2398,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.diagramMenuOpen.set(false);
     this.colorMenuOpen.set(false);
     this.fillColorMenuOpen.set(false);
+    this.penMenuOpen.set(false);
     this.brushMenuOpen.set(false);
     this.mathPopoverOpen.set(true);
     this.clampMathPopoverToViewport();
@@ -1428,9 +2413,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   protected selectMathTab(tab: MathToolsTab): void {
+    if (tab === 'subjects' && !this.allowSubjectTemplates()) {
+      return;
+    }
     this.activeMathTab.set(tab);
     if (tab === 'equation') {
       window.setTimeout(() => this.mathEquationInput?.nativeElement.focus());
+    }
+    if (tab === 'tables') {
+      this.ensureMatrixTableDraft();
     }
   }
 
@@ -1540,6 +2531,13 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.selectTemplate(template);
   }
 
+  protected openSubjectTemplates(): void {
+    if (!this.allowSubjectTemplates()) {
+      return;
+    }
+    this.openMathTools('subjects');
+  }
+
   protected insertBoardTemplate(kind: WhiteboardDiagramTool): void {
     if (!this.canUseTool(kind)) {
       return;
@@ -1550,6 +2548,167 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.addElement(element);
     this.activeTool.set('select');
     this.setSelection([element.id]);
+  }
+
+  protected selectSubjectTemplateCategory(categoryId: SubjectTemplateCategoryId): void {
+    this.activeSubjectTemplateCategory.set(categoryId);
+  }
+
+  protected setSubjectTemplateSearch(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    this.subjectTemplateSearch.set(inputElement.value);
+  }
+
+  protected canInsertSubjectTemplate(mode: SubjectTemplateInsertMode): boolean {
+    if (!this.allowSubjectTemplates() || this.readOnly()) {
+      return false;
+    }
+    if (mode === 'page' || mode === 'current') {
+      return this.canManagePages();
+    }
+    return true;
+  }
+
+  protected insertSubjectTemplate(template: SubjectTemplateDefinition, mode: SubjectTemplateInsertMode): void {
+    if (!this.canInsertSubjectTemplate(mode)) {
+      return;
+    }
+    if (mode === 'page') {
+      this.insertSubjectTemplateAsPage(template);
+      return;
+    }
+    if (mode === 'current') {
+      this.applySubjectTemplateToCurrentPage(template);
+      return;
+    }
+    this.insertSubjectTemplateAsObject(template);
+  }
+
+  protected setMatrixTableMode(mode: MatrixTableMode): void {
+    if (!this.canUseTool(mode)) {
+      return;
+    }
+    this.ensureMatrixTableDraft(mode);
+    this.matrixTableDraft.update((draft) =>
+      draft
+        ? {
+            ...draft,
+            mode,
+            showBorders: mode === 'table' ? true : draft.showBorders,
+            headerRow: mode === 'table' ? draft.headerRow : false,
+            bracketStyle: mode === 'matrix' ? draft.bracketStyle : 'none',
+            error: null
+          }
+        : draft
+    );
+  }
+
+  protected applyMatrixTablePreset(preset: (typeof MATRIX_TABLE_PRESETS)[number]): void {
+    if (!this.canUseTool(preset.mode)) {
+      return;
+    }
+    const draft = this.matrixTableDraft() ?? this.createMatrixTableDraft(this.defaultInsertPoint(360, 220), preset.mode);
+    this.matrixTableDraft.set({
+      ...draft,
+      mode: preset.mode,
+      rows: preset.rows,
+      columns: preset.columns,
+      cells: this.normalizeMatrixTableCells(preset.cells, preset.rows, preset.columns),
+      width: Math.max(draft.width, preset.mode === 'table' ? 380 : 260),
+      height: Math.max(draft.height, Math.max(120, preset.rows * 48)),
+      showBorders: preset.showBorders ?? preset.mode === 'table',
+      headerRow: preset.headerRow ?? false,
+      bracketStyle: preset.bracketStyle ?? (preset.mode === 'matrix' ? 'bracket' : 'none'),
+      augmentedColumn: preset.augmentedColumn ?? null,
+      error: null
+    });
+  }
+
+  protected setMatrixTableRows(event: Event): void {
+    this.resizeMatrixTableDraft(Number((event.target as HTMLInputElement).value), this.matrixTableDraft()?.columns ?? 2);
+  }
+
+  protected setMatrixTableColumns(event: Event): void {
+    this.resizeMatrixTableDraft(this.matrixTableDraft()?.rows ?? 2, Number((event.target as HTMLInputElement).value));
+  }
+
+  protected updateMatrixTableCell(rowIndex: number, columnIndex: number, event: Event): void {
+    const value = (event.target as HTMLInputElement).value;
+    this.matrixTableDraft.update((draft) => {
+      if (!draft) {
+        return draft;
+      }
+      const cells = this.normalizeMatrixTableCells(draft.cells, draft.rows, draft.columns);
+      cells[rowIndex]![columnIndex] = value;
+      return { ...draft, cells, error: null };
+    });
+  }
+
+  protected updateMatrixTableNumber(field: 'width' | 'height' | 'fontSize', event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    this.matrixTableDraft.update((draft) => (draft ? { ...draft, [field]: value, error: null } : draft));
+  }
+
+  protected updateMatrixTableColor(field: 'strokeColor' | 'fillColor' | 'textColor' | 'borderColor', event: Event): void {
+    const value = (event.target as HTMLInputElement).value;
+    this.matrixTableDraft.update((draft) => (draft ? { ...draft, [field]: value, error: null } : draft));
+  }
+
+  protected updateMatrixTableBoolean(field: 'fillEnabled' | 'showBorders' | 'headerRow', event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.matrixTableDraft.update((draft) => (draft ? { ...draft, [field]: checked, error: null } : draft));
+  }
+
+  protected setMatrixTableAlignment(align: WhiteboardTextAlignment): void {
+    this.matrixTableDraft.update((draft) => (draft ? { ...draft, align, error: null } : draft));
+  }
+
+  protected setMatrixBracketStyle(event: Event): void {
+    const bracketStyle = (event.target as HTMLSelectElement).value as WhiteboardMatrixBracket;
+    this.matrixTableDraft.update((draft) => (draft ? { ...draft, bracketStyle, error: null } : draft));
+  }
+
+  protected setMatrixAugmentedColumn(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    this.matrixTableDraft.update((draft) => (draft ? { ...draft, augmentedColumn: value ? Number(value) : null, error: null } : draft));
+  }
+
+  protected matrixTableGridTemplate(columns: number): string {
+    return `repeat(${this.clampInteger(columns, MATRIX_TABLE_MIN_COLUMNS, MATRIX_TABLE_MAX_COLUMNS)}, minmax(54px, 1fr))`;
+  }
+
+  protected matrixAugmentedColumnOptions(columns: number): number[] {
+    const safeColumns = this.clampInteger(columns, MATRIX_TABLE_MIN_COLUMNS, MATRIX_TABLE_MAX_COLUMNS);
+    return Array.from({ length: Math.max(0, safeColumns - 1) }, (_value, index) => index + 1);
+  }
+
+  protected commitMatrixTableDraft(): void {
+    const draft = this.matrixTableDraft();
+    if (!draft) {
+      return;
+    }
+    const validation = this.validateMatrixTableDraft(draft);
+    if (validation) {
+      this.matrixTableDraft.set({ ...draft, error: validation });
+      return;
+    }
+    const element = draft.mode === 'matrix' ? this.createMatrixElement(draft) : this.createTableElement(draft);
+    this.pushHistory();
+    if (draft.elementId) {
+      this.elements = this.elements.map((item) => (item.id === draft.elementId ? element : item));
+      this.selectedElementIds.set([draft.elementId]);
+      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.render();
+    } else {
+      this.addElement(element);
+      this.setSelection([element.id]);
+    }
+    this.matrixTableDraft.set(null);
+    this.activeTool.set('select');
+  }
+
+  protected cancelMatrixTableDraft(): void {
+    this.matrixTableDraft.set(null);
   }
 
   protected openGraphFromMathTools(): void {
@@ -1648,6 +2807,71 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.selectEraserSize(Number(inputElement.value));
   }
 
+  protected enterPresentationMode(): void {
+    if (!this.allowPresentationMode()) {
+      return;
+    }
+    this.presentationModeEnabled.set(true);
+    this.menuOpen.set(false);
+    this.penMenuOpen.set(false);
+    this.brushMenuOpen.set(false);
+    this.colorMenuOpen.set(false);
+    this.fillColorMenuOpen.set(false);
+    this.shapeMenuOpen.set(false);
+    this.geometryMenuOpen.set(false);
+    this.diagramMenuOpen.set(false);
+    this.contextMenu.set(null);
+    if (this.canUseTool('laser')) {
+      this.activeTool.set('laser');
+    }
+    this.render();
+  }
+
+  protected exitPresentationMode(): void {
+    this.presentationModeEnabled.set(false);
+    this.laserPoint.set(null);
+    this.render();
+  }
+
+  protected togglePresentationEditMode(): void {
+    this.presentationEditEnabled.update((enabled) => !enabled);
+    if (!this.presentationEditEnabled() && this.canUseTool('laser')) {
+      this.activeTool.set('laser');
+    }
+  }
+
+  protected presentationSelectLaser(): void {
+    if (this.canUseTool('laser')) {
+      this.activeTool.set('laser');
+    }
+  }
+
+  protected presentationSelectPen(style: WhiteboardPenStyle = 'solid'): void {
+    if (!this.canUseTool('pen')) {
+      return;
+    }
+    this.presentationEditEnabled.set(true);
+    this.activePenStyle.set(style);
+    this.activeTool.set('pen');
+  }
+
+  protected previousPresentationPage(): void {
+    this.selectRelativePage(-1);
+  }
+
+  protected nextPresentationPage(): void {
+    this.selectRelativePage(1);
+  }
+
+  protected hasPreviousPage(): boolean {
+    return this.pages().findIndex((page) => page.id === this.activePageId()) > 0;
+  }
+
+  protected hasNextPage(): boolean {
+    const index = this.pages().findIndex((page) => page.id === this.activePageId());
+    return index >= 0 && index < this.pages().length - 1;
+  }
+
   protected zoomOut(): void {
     this.setZoom(this.zoom() - 0.1);
   }
@@ -1731,6 +2955,16 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.applyPageView(page);
     this.selectedElementIds.set([]);
     this.render();
+  }
+
+  private selectRelativePage(delta: -1 | 1): void {
+    const pages = this.pages();
+    const currentIndex = pages.findIndex((page) => page.id === this.activePageId());
+    const nextPage = pages[currentIndex + delta];
+    if (!nextPage) {
+      return;
+    }
+    this.selectPage(nextPage.id);
   }
 
   protected removeActivePage(): void {
@@ -1867,6 +3101,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.fileInput?.nativeElement.click();
   }
 
+  protected triggerDeckImport(): void {
+    if (!this.canImportAssets() || this.assetImporting()) {
+      return;
+    }
+    this.assetImportMode.set('deck-pages');
+    this.assetImportStatus.set(null);
+    this.fileInput?.nativeElement.click();
+  }
+
   protected importFile(event: Event): void {
     const inputElement = event.target as HTMLInputElement;
     const files = Array.from(inputElement.files ?? []);
@@ -1879,7 +3122,16 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       void this.importSlideImageFiles(files);
       return;
     }
+    if (mode === 'deck-pages') {
+      void this.importPresentationDeck(files[0]!);
+      return;
+    }
     void this.importAssetFile(files[0]!, mode);
+  }
+
+  protected setPdfExportMode(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as PdfExportMode;
+    this.pdfExportMode.set(value === 'raster' ? 'raster' : 'hybrid');
   }
 
   protected resetPageBackground(): void {
@@ -1942,13 +3194,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!this.canExportBoard()) {
       return;
     }
-    const canvas = this.whiteboardCanvas?.nativeElement;
-    if (!canvas) {
+    const exported = this.exportSelectedPagesPdfBlob([this.activePageId()], this.activePage().title, this.pdfExportMode());
+    if (!exported) {
       return;
     }
-    const jpegDataUrl = this.renderPageImage(this.activePageId(), 'image/jpeg', 0.92);
-    const blob = this.createPdfBlob([{ jpegDataUrl, width: canvas.width, height: canvas.height }]);
-    this.downloadBlob(blob, `${this.safeFileName(this.activePage().title)}.pdf`);
+    this.downloadBlob(exported.blob, `${this.safeFileName(this.activePage().title)}.pdf`);
   }
 
   protected exportAllPagesPdf(): void {
@@ -1987,11 +3237,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.selectedExportPageIds.set([]);
   }
 
-  exportAllPagesPdfBlob(fileBaseName = this.title()): { blob: Blob; fileName: string } | null {
-    return this.exportSelectedPagesPdfBlob(this.pages().map((page) => page.id), `${fileBaseName}-pages`);
+  exportAllPagesPdfBlob(fileBaseName = this.title(), mode = this.pdfExportMode()): { blob: Blob; fileName: string } | null {
+    return this.exportSelectedPagesPdfBlob(this.pages().map((page) => page.id), `${fileBaseName}-pages`, mode);
   }
 
-  exportSelectedPagesPdfBlob(pageIds: string[], fileBaseName = this.title()): { blob: Blob; fileName: string } | null {
+  exportSelectedPagesPdfBlob(pageIds: string[], fileBaseName = this.title(), mode = this.pdfExportMode()): { blob: Blob; fileName: string } | null {
     if (!this.canExportBoard()) {
       return null;
     }
@@ -2004,15 +3254,43 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!selectedPages.length) {
       return null;
     }
-    const pages = selectedPages.map((page) => ({
-      jpegDataUrl: this.renderPageImage(page.id, 'image/jpeg', 0.92),
-      width: canvas.width,
-      height: canvas.height
-    }));
+    const pages = mode === 'hybrid' ? this.createHybridPdfPages(selectedPages, canvas.width, canvas.height) : this.createRasterPdfPages(selectedPages, canvas.width, canvas.height);
     return {
       blob: this.createPdfBlob(pages),
       fileName: `${this.safeFileName(fileBaseName) || 'whiteboard'}${fileBaseName.endsWith('-pages') ? '' : '-pages'}.pdf`
     };
+  }
+
+  private createRasterPdfPages(pages: WhiteboardPage[], width: number, height: number): PdfImagePage[] {
+    return pages.map((page) => ({
+      jpegDataUrl: this.renderPageImage(page.id, 'image/jpeg', 0.92),
+      width,
+      height
+    }));
+  }
+
+  private createHybridPdfPages(pages: WhiteboardPage[], width: number, height: number): PdfImagePage[] {
+    try {
+      return pages.map((page) => {
+        const rasterElements = page.elements.filter((element) => !this.canRenderElementAsPdfVector(element));
+        return {
+          jpegDataUrl: this.renderPageImage(page.id, 'image/jpeg', 0.9, rasterElements),
+          width,
+          height,
+          vectorContent: page.elements
+            .filter((element) => this.canRenderElementAsPdfVector(element))
+            .map((element) => this.pdfVectorForElement(element, height))
+            .filter(Boolean)
+            .join('\n')
+        };
+      });
+    } catch {
+      this.assetImportStatus.set({
+        type: 'info',
+        message: 'Hybrid PDF export fell back to exact raster snapshots for compatibility.'
+      });
+      return this.createRasterPdfPages(pages, width, height);
+    }
   }
 
   protected updateTextDraft(event: Event): void {
@@ -2083,6 +3361,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   protected canEditSelectedGraph(): boolean {
     return !!this.editableSelectedGraph();
+  }
+
+  protected canEditSelectedMatrixTable(): boolean {
+    return !!this.singleSelectedMatrixTable();
   }
 
   protected editSelectedTextBlock(): void {
@@ -2231,6 +3513,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.closeContextMenu();
   }
 
+  protected editSelectedMatrixTable(): void {
+    const element = this.singleSelectedMatrixTable();
+    if (!element) {
+      return;
+    }
+    this.openMatrixTableDraftForElement(element);
+    this.closeContextMenu();
+  }
+
   protected updateGraphDraftField(field: keyof GraphDraft, event: Event): void {
     const inputElement = event.target as HTMLInputElement | HTMLTextAreaElement;
     this.graphDraft.update((draft) => (draft ? { ...draft, [field]: inputElement.value, error: null } : draft));
@@ -2309,11 +3600,13 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.shapeMenuOpen.set(false);
     this.colorMenuOpen.set(false);
     this.fillColorMenuOpen.set(false);
+    this.penMenuOpen.set(false);
     this.brushMenuOpen.set(false);
     this.menuOpen.set(false);
     this.contextMenu.set(null);
     this.textDraft.set(null);
     this.graphDraft.set(null);
+    this.matrixTableDraft.set(null);
     this.previewElement = null;
     this.alignmentGuides.set([]);
     this.selectionMarquee.set(null);
@@ -2605,6 +3898,12 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         this.render();
         return;
       }
+      if (element?.type === 'matrix' || element?.type === 'table') {
+        this.setSelectionForElement(element, false);
+        this.openMatrixTableDraftForElement(element);
+        this.render();
+        return;
+      }
     }
 
     if (this.activeTool() === 'select') {
@@ -2698,7 +3997,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       this.shapeStart = point;
       this.previewElement = this.createShapeElement(point, point, this.activeTool() as WhiteboardShapeTool);
     } else {
-      this.previewElement = this.createStrokeElement([point]);
+      const strokePoint = this.getStrokePoint(event, point);
+      this.lastPoint = strokePoint;
+      this.previewElement = this.createStrokeElement([strokePoint]);
     }
     this.render();
   }
@@ -2769,10 +4070,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     } else if (this.previewElement.type === 'geometry' && this.shapeStart) {
       this.previewElement = this.createGeometryElement(this.previewElement.kind, this.shapeStart, nextPoint, this.previewElement.id);
     } else if (this.previewElement.type === 'stroke') {
+      const previousStrokePoint = this.previewElement.points[this.previewElement.points.length - 1];
+      const nextStrokePoint = this.getStrokePoint(event, nextPoint, previousStrokePoint);
       this.previewElement = {
         ...this.previewElement,
-        points: [...this.previewElement.points, nextPoint]
+        points: [...this.previewElement.points, nextStrokePoint]
       };
+      this.lastPoint = nextStrokePoint;
+      this.render();
+      return;
     }
     this.lastPoint = nextPoint;
     this.render();
@@ -2789,6 +4095,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     } else if (this.movingSelection || this.transformStart) {
       this.emitSelectionUpserts();
     } else if (this.previewElement && !this.isTinyElement(this.previewElement)) {
+      this.previewElement = this.finalizePreviewElement(this.previewElement);
       this.pushHistory();
       this.addElement(this.previewElement);
     }
@@ -2873,6 +4180,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
     if (this.previewElement) {
       this.drawElement(this.previewElement);
+      this.drawAutoClosePreview(this.previewElement);
     }
     if (includeOverlays) {
       this.drawAlignmentGuides();
@@ -3259,12 +4567,49 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
   }
 
+  private async importPresentationDeck(file: File): Promise<void> {
+    this.assetImporting.set(true);
+    try {
+      this.validatePresentationFile(file);
+      this.assetImportStatus.set({
+        type: 'info',
+        message: `Preparing ${file.name} for slide conversion...`
+      });
+      await Promise.resolve();
+      throw new Error(
+        'Native PPT/PPTX slide conversion is not configured in this build. Export the deck to PDF and use Import PDF pages, or export slides as PNG/JPG and use Import slide images.'
+      );
+    } catch (error) {
+      this.assetImportStatus.set({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Presentation import failed.'
+      });
+    } finally {
+      this.assetImportMode.set('element');
+      this.assetImporting.set(false);
+    }
+  }
+
   private validateImageFile(file: File): void {
     if (!IMAGE_ASSET_MIME_TYPES.has(file.type)) {
       throw new Error('Use a PNG, JPG, JPEG, or WebP image.');
     }
     if (file.size > MAX_IMAGE_ASSET_BYTES) {
       throw new Error('Image is too large. Use an image under 12 MB.');
+    }
+  }
+
+  private validatePresentationFile(file: File): void {
+    const name = file.name.toLowerCase();
+    const isPresentation = PRESENTATION_ASSET_MIME_TYPES.has(file.type) || name.endsWith('.pptx') || name.endsWith('.ppt');
+    if (!isPresentation) {
+      throw new Error('Use a PPT or PPTX presentation file.');
+    }
+    if (file.size > MAX_PRESENTATION_ASSET_BYTES) {
+      throw new Error('Presentation is too large. Use a file under 50 MB.');
+    }
+    if (name.endsWith('.ppt')) {
+      throw new Error('Legacy .ppt files need server-side conversion. Export to PDF or PPTX first, then import the converted pages.');
     }
   }
 
@@ -3535,6 +4880,44 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return this.getCanvasPointFromClient(event.clientX, event.clientY);
   }
 
+  private getStrokePoint(event: PointerEvent, point = this.getCanvasPoint(event), previous?: WhiteboardStrokePoint): WhiteboardStrokePoint {
+    this.detectPressureInput(event);
+    const pressure = this.pointerPressure(event);
+    const nextPoint: WhiteboardStrokePoint = pressure === undefined ? { ...point } : { ...point, pressure };
+    return this.smoothStrokePoint(previous, nextPoint);
+  }
+
+  private detectPressureInput(event: PointerEvent): void {
+    const hasStylusPressure = event.pointerType === 'pen' || (Number.isFinite(event.pressure) && event.pressure > 0 && event.pressure !== 0.5);
+    if (hasStylusPressure) {
+      this.pressureInputAvailable.set(true);
+    }
+  }
+
+  private pointerPressure(event: PointerEvent): number | undefined {
+    if (!this.pressureSensitivePen() || !this.pressureInputAvailable() || !Number.isFinite(event.pressure) || event.pressure <= 0) {
+      return undefined;
+    }
+    return this.clampNumber(event.pressure, 0.05, 1);
+  }
+
+  private smoothStrokePoint(previous: WhiteboardStrokePoint | undefined, nextPoint: WhiteboardStrokePoint): WhiteboardStrokePoint {
+    const smoothing = this.penSmoothing();
+    if (!previous || smoothing <= 0) {
+      return nextPoint;
+    }
+    const weight = 1 - this.clampNumber(smoothing, 0, 0.85);
+    const pressure =
+      previous.pressure === undefined && nextPoint.pressure === undefined
+        ? undefined
+        : (previous.pressure ?? nextPoint.pressure ?? 0.5) * smoothing + (nextPoint.pressure ?? previous.pressure ?? 0.5) * weight;
+    return {
+      x: previous.x + (nextPoint.x - previous.x) * weight,
+      y: previous.y + (nextPoint.y - previous.y) * weight,
+      ...(pressure === undefined ? {} : { pressure: this.clampNumber(pressure, 0.05, 1) })
+    };
+  }
+
   private getCanvasPointFromClient(clientX: number, clientY: number): WhiteboardPoint {
     const canvas = this.whiteboardCanvas!.nativeElement;
     const surface = this.whiteboardSurface!.nativeElement;
@@ -3544,6 +4927,34 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return {
       x: Math.min(Math.max(x, 0), canvas.clientWidth),
       y: Math.min(Math.max(y, 0), canvas.clientHeight)
+    };
+  }
+
+  private finalizePreviewElement(element: WhiteboardElement): WhiteboardElement {
+    return element.type === 'stroke' ? this.finalizeStrokeElement(element) : element;
+  }
+
+  private finalizeStrokeElement(element: WhiteboardStrokeElement): WhiteboardStrokeElement {
+    if (!this.penAutoCloseEnabled()) {
+      return {
+        ...element,
+        closed: false,
+        autoCloseThreshold: this.penAutoCloseThreshold()
+      };
+    }
+    const threshold = this.penAutoCloseThreshold();
+    const closedPoints = this.autoClosedStrokePoints(element, threshold);
+    if (!closedPoints) {
+      return {
+        ...element,
+        autoCloseThreshold: threshold
+      };
+    }
+    return {
+      ...element,
+      points: closedPoints,
+      closed: true,
+      autoCloseThreshold: threshold
     };
   }
 
@@ -3558,6 +4969,328 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       this.render();
     }
     this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId });
+  }
+
+  private insertSubjectTemplateAsPage(template: SubjectTemplateDefinition): void {
+    this.pushHistory();
+    const page = this.createPage(this.uniquePageTitle(template.pageTitle), template.pageTemplate);
+    page.tags = [...template.tags];
+    page.elements = this.createSubjectTemplateElements(template, { x: 0, y: 0 });
+    const activePageId = this.activePageId();
+    const activeIndex = this.pages().findIndex((item) => item.id === activePageId);
+    const insertIndex = activeIndex >= 0 ? activeIndex + 1 : this.pages().length;
+    this.pages.update((pages) => [...pages.slice(0, insertIndex), page, ...pages.slice(insertIndex)]);
+    this.activePageId.set(page.id);
+    this.applyPageView(page);
+    this.selectedElementIds.set([]);
+    this.render();
+    this.stateChanged.emit();
+  }
+
+  private applySubjectTemplateToCurrentPage(template: SubjectTemplateDefinition): void {
+    const pageId = this.activePageId();
+    const elements = this.createSubjectTemplateElements(template, { x: 0, y: 0 });
+    this.pushHistory();
+    this.pages.update((pages) =>
+      pages.map((page) =>
+        page.id === pageId
+          ? {
+              ...page,
+              template: template.pageTemplate,
+              tags: Array.from(new Set([...(page.tags ?? []), ...template.tags])),
+              elements: [...page.elements, ...elements.map((element) => this.cloneElement(element))]
+            }
+          : page
+      )
+    );
+    this.setSelection(elements.map((element) => element.id));
+    this.render();
+    for (const element of elements) {
+      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId });
+    }
+    this.stateChanged.emit();
+  }
+
+  private insertSubjectTemplateAsObject(template: SubjectTemplateDefinition): void {
+    const groupId = this.createElementId();
+    const origin = this.defaultInsertPoint(720, 520);
+    const elements = this.createSubjectTemplateElements(template, origin, groupId);
+    const pageId = this.activePageId();
+    this.pushHistory();
+    this.pages.update((pages) =>
+      pages.map((page) =>
+        page.id === pageId ? { ...page, elements: [...page.elements, ...elements.map((element) => this.cloneElement(element))] } : page
+      )
+    );
+    this.setSelection(elements.map((element) => element.id));
+    this.render();
+    for (const element of elements) {
+      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId });
+    }
+    this.stateChanged.emit();
+  }
+
+  private createSubjectTemplateElements(
+    template: SubjectTemplateDefinition,
+    origin: WhiteboardPoint,
+    groupId?: string
+  ): WhiteboardElement[] {
+    const elements: WhiteboardElement[] = [
+      this.createSubjectText({
+        x: origin.x + 60,
+        y: origin.y + 36,
+        width: 520,
+        height: 34,
+        text: template.name,
+        fontSize: 28,
+        color: '#071c41',
+        groupId
+      }),
+      this.createSubjectText({
+        x: origin.x + 60,
+        y: origin.y + 70,
+        width: 640,
+        height: 24,
+        text: template.description,
+        fontSize: 14,
+        color: '#587083',
+        groupId
+      }),
+      this.createSubjectShape({
+        x: origin.x + 60,
+        y: origin.y + 104,
+        width: 160,
+        height: 4,
+        strokeColor: template.accent,
+        fillColor: template.accent,
+        groupId
+      })
+    ];
+
+    for (const region of template.regions) {
+      elements.push(...this.createSubjectTemplateRegion(region, template, origin, groupId));
+    }
+    return elements;
+  }
+
+  private createSubjectTemplateRegion(
+    region: SubjectTemplateRegion,
+    template: SubjectTemplateDefinition,
+    origin: WhiteboardPoint,
+    groupId?: string
+  ): WhiteboardElement[] {
+    const x = origin.x + region.x;
+    const y = origin.y + region.y;
+    const kind = region.kind ?? 'work';
+    if (kind === 'graph') {
+      return [
+        this.createSubjectGraph(region, template, { x, y }, groupId)
+      ];
+    }
+    if (kind === 'table') {
+      return [
+        this.createSubjectText({
+          x,
+          y,
+          width: region.width,
+          height: 24,
+          text: region.title,
+          fontSize: 15,
+          color: template.accent,
+          groupId
+        }),
+        this.createSubjectTable(region, template, { x, y: y + 30 }, groupId)
+      ];
+    }
+    if (kind === 'diagram') {
+      return [
+        this.createSubjectText({
+          x,
+          y,
+          width: region.width,
+          height: 24,
+          text: region.title,
+          fontSize: 15,
+          color: template.accent,
+          groupId
+        }),
+        this.createSubjectDiagram(region, template, { x, y: y + 30 }, groupId)
+      ];
+    }
+    return [
+      this.createSubjectShape({ x, y, width: region.width, height: region.height, strokeColor: template.accent, groupId }),
+      this.createSubjectText({
+        x: x + 14,
+        y: y + 12,
+        width: Math.max(80, region.width - 28),
+        height: 24,
+        text: region.title,
+        fontSize: 16,
+        color: template.accent,
+        groupId
+      }),
+      this.createSubjectText({
+        x: x + 14,
+        y: y + 42,
+        width: Math.max(80, region.width - 28),
+        height: Math.max(28, region.height - 54),
+        text: region.detail ?? 'Add lesson notes here.',
+        fontSize: kind === 'formula' ? 18 : 14,
+        color: '#24364b',
+        groupId
+      })
+    ];
+  }
+
+  private createSubjectText(options: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    text: string;
+    fontSize: number;
+    color: string;
+    groupId?: string;
+  }): WhiteboardTextElement {
+    return {
+      id: this.createElementId(),
+      groupId: options.groupId,
+      type: 'text',
+      color: options.color,
+      fillColor: null,
+      fontSize: options.fontSize,
+      position: { x: options.x, y: options.y },
+      text: options.text,
+      width: options.width,
+      height: options.height,
+      align: 'left'
+    };
+  }
+
+  private createSubjectShape(options: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    strokeColor: string;
+    fillColor?: string;
+    groupId?: string;
+  }): WhiteboardShapeElement {
+    return {
+      id: this.createElementId(),
+      groupId: options.groupId,
+      type: 'shape',
+      shape: 'rectangle',
+      strokeColor: options.strokeColor,
+      fillColor: options.fillColor ?? '#ffffff',
+      width: options.height <= 6 ? Math.max(1, options.height) : 2,
+      from: { x: options.x, y: options.y },
+      to: { x: options.x + options.width, y: options.y + options.height }
+    };
+  }
+
+  private createSubjectTable(
+    region: SubjectTemplateRegion,
+    template: SubjectTemplateDefinition,
+    position: WhiteboardPoint,
+    groupId?: string
+  ): WhiteboardTableElement {
+    const rows = this.clampInteger(region.rows ?? region.cells?.length ?? 4, MATRIX_TABLE_MIN_ROWS, MATRIX_TABLE_MAX_ROWS);
+    const columns = this.clampInteger(region.columns ?? region.cells?.[0]?.length ?? 3, MATRIX_TABLE_MIN_COLUMNS, MATRIX_TABLE_MAX_COLUMNS);
+    return {
+      id: this.createElementId(),
+      groupId,
+      type: 'table',
+      position,
+      width: Math.max(180, region.width),
+      height: Math.max(110, region.height - 30),
+      rows,
+      columns,
+      cells: this.normalizeMatrixTableCells(region.cells ?? this.defaultMatrixTableCells(rows, columns, 'table'), rows, columns),
+      fontSize: 16,
+      strokeColor: template.accent,
+      fillColor: '#ffffff',
+      textColor: '#071c41',
+      borderColor: '#9eb3aa',
+      showBorders: true,
+      align: 'center',
+      headerRow: region.headerRow ?? true
+    };
+  }
+
+  private createSubjectGraph(
+    region: SubjectTemplateRegion,
+    template: SubjectTemplateDefinition,
+    position: WhiteboardPoint,
+    groupId?: string
+  ): WhiteboardGraphElement {
+    const graph = region.graph ?? {};
+    const expressions = (graph.expression ?? '').split(';').map((expression) => expression.trim()).filter(Boolean);
+    return {
+      id: this.createElementId(),
+      groupId,
+      type: 'graph',
+      position,
+      width: Math.max(220, region.width),
+      height: Math.max(180, region.height),
+      title: region.title,
+      xMin: graph.xMin ?? -10,
+      xMax: graph.xMax ?? 10,
+      yMin: graph.yMin ?? -10,
+      yMax: graph.yMax ?? 10,
+      showGrid: true,
+      showAxes: true,
+      showTicks: true,
+      tickStep: null,
+      functions: expressions.map((expression, index) => ({
+        id: `fn-${index + 1}`,
+        expression,
+        color: index === 0 ? template.accent : index === 1 ? '#458B73' : '#FF9760',
+        width: 2
+      })),
+      inequality: '',
+      parametric: null,
+      polar: null,
+      scatterPoints: graph.scatterPoints ?? '',
+      scatterColor: '#FF9760',
+      labels: [],
+      stats: {
+        histogramData: graph.histogramData ?? '',
+        histogramBins: graph.histogramBins,
+        showRegression: graph.showRegression ?? false,
+        normalMean: null,
+        normalStdDev: null
+      },
+      helpers: {
+        pointX: null,
+        tangentX: null,
+        shadeFrom: graph.shadeFrom ?? null,
+        shadeTo: graph.shadeTo ?? null,
+        showIntercepts: false
+      }
+    };
+  }
+
+  private createSubjectDiagram(
+    region: SubjectTemplateRegion,
+    template: SubjectTemplateDefinition,
+    position: WhiteboardPoint,
+    groupId?: string
+  ): WhiteboardDiagramElement {
+    const kind = region.diagramKind ?? 'flow';
+    return {
+      id: this.createElementId(),
+      groupId,
+      type: 'diagram',
+      kind,
+      position,
+      width: Math.max(180, region.width),
+      height: Math.max(140, region.height - 30),
+      strokeColor: template.accent,
+      fillColor: '#FFD150',
+      lineWidth: 2,
+      labels: this.defaultDiagramLabels(kind)
+    };
   }
 
   private upsertElementInList(elements: WhiteboardElement[], element: WhiteboardElement): WhiteboardElement[] {
@@ -3578,6 +5311,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       this.drawEquation(element);
     } else if (element.type === 'graph') {
       this.drawGraph(element);
+    } else if (element.type === 'matrix') {
+      this.drawMatrixElement(element);
+    } else if (element.type === 'table') {
+      this.drawTableElement(element);
     } else if (element.type === 'geometry') {
       this.drawGeometry(element);
     } else if (element.type === 'diagram') {
@@ -3592,16 +5329,21 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!context || !element.points.length) {
       return;
     }
+    const style = this.strokePenStyle(element);
+    const opacity = this.strokeOpacity(element);
+    const width = this.strokeRenderWidth(element);
     context.save();
     context.lineCap = 'round';
     context.lineJoin = 'round';
-    context.lineWidth = element.width;
+    context.lineWidth = width;
     context.strokeStyle = element.color;
     context.fillStyle = element.color;
+    context.globalAlpha = opacity;
+    this.configureStrokeDash(context, style, width);
     if (element.points.length === 1) {
       const point = element.points[0]!;
       context.beginPath();
-      context.arc(point.x, point.y, element.width / 2, 0, Math.PI * 2);
+      context.arc(point.x, point.y, width / 2, 0, Math.PI * 2);
       context.fill();
       context.restore();
       return;
@@ -3619,12 +5361,131 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       context.fill('evenodd');
     }
 
+    if (style === 'calligraphy' || (this.strokePressureEnabled(element) && element.points.some((point) => point.pressure !== undefined))) {
+      this.drawVariableStrokePath(context, element, width, style);
+    } else {
+      this.drawStrokePolyline(context, element.points);
+      if (style === 'pencil') {
+        context.globalAlpha = opacity * 0.35;
+        context.lineWidth = Math.max(0.8, width * 0.55);
+        this.drawStrokePolyline(
+          context,
+          element.points.map((point, index) => ({
+            ...point,
+            x: point.x + (index % 2 === 0 ? 0.65 : -0.45),
+            y: point.y + (index % 2 === 0 ? -0.4 : 0.55)
+          }))
+        );
+      }
+    }
+    context.restore();
+  }
+
+  private drawStrokePolyline(context: CanvasRenderingContext2D, points: readonly WhiteboardStrokePoint[]): void {
     context.beginPath();
-    context.moveTo(element.points[0]!.x, element.points[0]!.y);
-    for (const point of element.points.slice(1)) {
+    context.moveTo(points[0]!.x, points[0]!.y);
+    for (const point of points.slice(1)) {
       context.lineTo(point.x, point.y);
     }
     context.stroke();
+  }
+
+  private drawVariableStrokePath(context: CanvasRenderingContext2D, element: WhiteboardStrokeElement, baseWidth: number, style: WhiteboardPenStyle): void {
+    for (let index = 1; index < element.points.length; index += 1) {
+      const previous = element.points[index - 1]!;
+      const current = element.points[index]!;
+      context.lineWidth = this.strokeSegmentWidth(element, previous, current, baseWidth, style);
+      context.beginPath();
+      context.moveTo(previous.x, previous.y);
+      context.lineTo(current.x, current.y);
+      context.stroke();
+    }
+  }
+
+  private strokePenStyle(element: WhiteboardStrokeElement): WhiteboardPenStyle {
+    const style = element.penStyle ?? element.style;
+    return this.penStyleOptions.some((option) => option.id === style) ? style! : 'solid';
+  }
+
+  private strokePressureEnabled(element: WhiteboardStrokeElement): boolean {
+    return element.pressureEnabled ?? element.pressureSensitive ?? false;
+  }
+
+  private strokeOpacity(element: WhiteboardStrokeElement): number {
+    const fallback = this.strokePenStyle(element) === 'marker' ? 0.42 : 1;
+    return this.clampNumber(element.opacity ?? fallback, 0.05, 1);
+  }
+
+  private strokeRenderWidth(element: WhiteboardStrokeElement): number {
+    const style = this.strokePenStyle(element);
+    if (style === 'marker') {
+      return Math.max(2, element.width * 2.35);
+    }
+    if (style === 'pencil') {
+      return Math.max(1, element.width * 0.82);
+    }
+    if (style === 'calligraphy') {
+      return Math.max(1, element.width * 1.15);
+    }
+    return Math.max(1, element.width);
+  }
+
+  private configureStrokeDash(context: CanvasRenderingContext2D, style: WhiteboardPenStyle, width: number): void {
+    if (style === 'dashed') {
+      context.setLineDash([Math.max(8, width * 3), Math.max(5, width * 1.8)]);
+      return;
+    }
+    if (style === 'dotted') {
+      context.lineCap = 'round';
+      context.setLineDash([0.01, Math.max(6, width * 2.2)]);
+      return;
+    }
+    context.setLineDash([]);
+  }
+
+  private strokeSegmentWidth(
+    element: WhiteboardStrokeElement,
+    previous: WhiteboardStrokePoint,
+    current: WhiteboardStrokePoint,
+    baseWidth: number,
+    style: WhiteboardPenStyle
+  ): number {
+    const pressureEnabled = this.strokePressureEnabled(element);
+    const pressure = pressureEnabled ? (previous.pressure ?? current.pressure ?? 0.65) : 0.65;
+    const pressureScale = pressureEnabled ? 0.55 + this.clampNumber(pressure, 0.05, 1) * 0.9 : 1;
+    if (style !== 'calligraphy') {
+      return Math.max(0.8, baseWidth * pressureScale);
+    }
+    const angle = Math.atan2(current.y - previous.y, current.x - previous.x);
+    const nibScale = 0.62 + Math.abs(Math.cos(angle - Math.PI / 4)) * 0.72;
+    return Math.max(0.8, baseWidth * nibScale * pressureScale);
+  }
+
+  private drawAutoClosePreview(element: WhiteboardElement): void {
+    const context = this.context;
+    if (!context || element.type !== 'stroke' || !this.penAutoCloseEnabled() || !this.autoClosedStrokePoints(element)) {
+      return;
+    }
+    const first = element.points[0]!;
+    const last = element.points[element.points.length - 1]!;
+    context.save();
+    context.strokeStyle = this.cssVariable('--wb-primary', '#F26076');
+    context.fillStyle = this.cssVariable('--wb-attention', '#FFD150');
+    context.globalAlpha = 0.82;
+    context.lineWidth = 1.5;
+    context.setLineDash([6, 5]);
+    context.beginPath();
+    context.moveTo(last.x, last.y);
+    context.lineTo(first.x, first.y);
+    context.stroke();
+    context.setLineDash([]);
+    context.globalAlpha = 0.92;
+    for (const point of [first, last]) {
+      context.beginPath();
+      context.arc(point.x, point.y, 7, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+    }
     context.restore();
   }
 
@@ -3779,6 +5640,165 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       context.textBaseline = 'bottom';
       context.fillText(error.slice(0, 72), bounds.x + 14, bounds.y + bounds.height - 10);
     }
+    context.restore();
+  }
+
+  private drawMatrixElement(element: WhiteboardMatrixElement): void {
+    const context = this.context;
+    if (!context) {
+      return;
+    }
+    const bounds = this.boundsForElement(element);
+    context.save();
+    if (element.fillColor) {
+      this.drawRoundedBlock(context, bounds, element.fillColor);
+    }
+    const bracketPadding = element.bracketStyle === 'none' ? 8 : 28;
+    const gridBounds: ElementBounds = {
+      x: bounds.x + bracketPadding,
+      y: bounds.y + 10,
+      width: Math.max(24, bounds.width - bracketPadding * 2),
+      height: Math.max(24, bounds.height - 20)
+    };
+    this.drawCellGrid(context, element, gridBounds, false);
+    if (element.showBorders) {
+      this.drawCellGridLines(context, gridBounds, element.rows, element.columns, element.borderColor, 1);
+    }
+    if (element.augmentedColumn && element.augmentedColumn > 0 && element.augmentedColumn < element.columns) {
+      const x = gridBounds.x + (gridBounds.width / element.columns) * element.augmentedColumn;
+      context.save();
+      context.strokeStyle = element.borderColor;
+      context.lineWidth = Math.max(1.4, element.fontSize / 16);
+      context.beginPath();
+      context.moveTo(x, gridBounds.y);
+      context.lineTo(x, gridBounds.y + gridBounds.height);
+      context.stroke();
+      context.restore();
+    }
+    this.drawMatrixBrackets(context, bounds, element);
+    context.restore();
+  }
+
+  private drawTableElement(element: WhiteboardTableElement): void {
+    const context = this.context;
+    if (!context) {
+      return;
+    }
+    const bounds = this.boundsForElement(element);
+    context.save();
+    context.fillStyle = element.fillColor ?? this.cssVariable('--canvas-bg', '#f8fbff');
+    this.roundedRectPath(context, bounds.x, bounds.y, bounds.width, bounds.height, 8);
+    context.fill();
+    if (element.headerRow && element.rows > 0) {
+      context.save();
+      context.globalAlpha = 0.18;
+      context.fillStyle = element.fillColor ?? '#FFD150';
+      context.beginPath();
+      context.rect(bounds.x, bounds.y, bounds.width, bounds.height / element.rows);
+      context.fill();
+      context.restore();
+    }
+    this.drawCellGrid(context, element, bounds, element.headerRow);
+    if (element.showBorders) {
+      this.drawCellGridLines(context, bounds, element.rows, element.columns, element.borderColor, 1);
+    } else {
+      context.strokeStyle = element.strokeColor;
+      context.lineWidth = 1.4;
+      context.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    }
+    context.restore();
+  }
+
+  private drawCellGrid(
+    context: CanvasRenderingContext2D,
+    element: WhiteboardMatrixElement | WhiteboardTableElement,
+    bounds: ElementBounds,
+    emphasizeHeader: boolean
+  ): void {
+    const rows = Math.max(1, element.rows);
+    const columns = Math.max(1, element.columns);
+    const cellWidth = bounds.width / columns;
+    const cellHeight = bounds.height / rows;
+    context.save();
+    context.textBaseline = 'middle';
+    context.fillStyle = element.textColor;
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const text = element.cells[row]?.[column] ?? '';
+        const fontWeight = emphasizeHeader && row === 0 ? 800 : 650;
+        const fontSize = Math.min(element.fontSize, Math.max(10, cellHeight * 0.42));
+        context.font = `${fontWeight} ${fontSize}px Inter, ui-sans-serif, system-ui, sans-serif`;
+        const maxTextWidth = Math.max(8, cellWidth - 14);
+        const measured = context.measureText(text).width;
+        let x = bounds.x + column * cellWidth + 7;
+        if ((element.align ?? 'center') === 'center') {
+          x = bounds.x + column * cellWidth + cellWidth / 2 - Math.min(measured, maxTextWidth) / 2;
+        } else if (element.align === 'right') {
+          x = bounds.x + (column + 1) * cellWidth - Math.min(measured, maxTextWidth) - 7;
+        }
+        const y = bounds.y + row * cellHeight + cellHeight / 2;
+        context.save();
+        context.beginPath();
+        context.rect(bounds.x + column * cellWidth + 4, bounds.y + row * cellHeight + 3, Math.max(1, cellWidth - 8), Math.max(1, cellHeight - 6));
+        context.clip();
+        context.fillText(text, x, y);
+        context.restore();
+      }
+    }
+    context.restore();
+  }
+
+  private drawCellGridLines(context: CanvasRenderingContext2D, bounds: ElementBounds, rows: number, columns: number, color: string, width: number): void {
+    context.save();
+    context.strokeStyle = color;
+    context.lineWidth = width;
+    context.beginPath();
+    for (let column = 0; column <= columns; column += 1) {
+      const x = bounds.x + (bounds.width / columns) * column;
+      context.moveTo(x, bounds.y);
+      context.lineTo(x, bounds.y + bounds.height);
+    }
+    for (let row = 0; row <= rows; row += 1) {
+      const y = bounds.y + (bounds.height / rows) * row;
+      context.moveTo(bounds.x, y);
+      context.lineTo(bounds.x + bounds.width, y);
+    }
+    context.stroke();
+    context.restore();
+  }
+
+  private drawMatrixBrackets(context: CanvasRenderingContext2D, bounds: ElementBounds, element: WhiteboardMatrixElement): void {
+    if (element.bracketStyle === 'none') {
+      return;
+    }
+    context.save();
+    context.strokeStyle = element.strokeColor;
+    context.lineWidth = Math.max(1.6, element.fontSize / 14);
+    const top = bounds.y + 8;
+    const bottom = bounds.y + bounds.height - 8;
+    const left = bounds.x + 14;
+    const right = bounds.x + bounds.width - 14;
+    if (element.bracketStyle === 'determinant') {
+      context.beginPath();
+      context.moveTo(left, top);
+      context.lineTo(left, bottom);
+      context.moveTo(right, top);
+      context.lineTo(right, bottom);
+      context.stroke();
+      context.restore();
+      return;
+    }
+    const hook = element.bracketStyle === 'parentheses' ? 4 : 12;
+    context.beginPath();
+    context.moveTo(left + hook, top);
+    context.lineTo(left, top);
+    context.lineTo(left, bottom);
+    context.lineTo(left + hook, bottom);
+    context.moveTo(right - hook, top);
+    context.lineTo(right, top);
+    context.lineTo(right, bottom);
+    context.lineTo(right - hook, bottom);
+    context.stroke();
     context.restore();
   }
 
@@ -5769,13 +7789,17 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     context.closePath();
   }
 
-  private createStrokeElement(points: WhiteboardPoint[]): WhiteboardStrokeElement {
+  private createStrokeElement(points: WhiteboardStrokePoint[]): WhiteboardStrokeElement {
     return {
       id: this.createElementId(),
       type: 'stroke',
       color: this.strokeColor(),
       fillColor: this.fillEnabled() ? this.fillColor() : null,
       width: this.strokeWidth(),
+      penStyle: this.activePenStyle(),
+      opacity: this.penOpacity(),
+      smoothing: this.penSmoothing(),
+      pressureEnabled: this.pressureSensitivePen() && points.some((point) => point.pressure !== undefined),
       points
     };
   }
@@ -5908,6 +7932,90 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       width: Math.max(draft.width ?? 0, size.width),
       height: Math.max(draft.height ?? 0, size.height),
       align: draft.align ?? 'left'
+    };
+  }
+
+  private ensureMatrixTableDraft(mode: MatrixTableMode = 'matrix'): void {
+    const selected = this.singleSelectedMatrixTable();
+    if (selected) {
+      this.openMatrixTableDraftForElement(selected);
+      return;
+    }
+    if (!this.matrixTableDraft()) {
+      this.matrixTableDraft.set(this.createMatrixTableDraft(this.defaultInsertPoint(mode === 'table' ? 380 : 280, 220), mode));
+    }
+  }
+
+  private createMatrixTableDraft(point: WhiteboardPoint, mode: MatrixTableMode): MatrixTableDraft {
+    const rows = mode === 'table' ? 4 : 2;
+    const columns = mode === 'table' ? 3 : 2;
+    return {
+      mode,
+      x: point.x,
+      y: point.y,
+      width: mode === 'table' ? 380 : 280,
+      height: mode === 'table' ? 220 : 160,
+      rows,
+      columns,
+      cells: this.defaultMatrixTableCells(rows, columns, mode),
+      fontSize: 24,
+      strokeColor: this.strokeColor(),
+      fillColor: this.fillColor(),
+      fillEnabled: this.fillEnabled(),
+      textColor: this.strokeColor(),
+      borderColor: this.strokeColor(),
+      showBorders: mode === 'table',
+      align: 'center',
+      headerRow: mode === 'table',
+      bracketStyle: mode === 'matrix' ? 'bracket' : 'none',
+      augmentedColumn: null
+    };
+  }
+
+  private createMatrixElement(draft: MatrixTableDraft): WhiteboardMatrixElement {
+    const rows = this.clampInteger(draft.rows, MATRIX_TABLE_MIN_ROWS, MATRIX_TABLE_MAX_ROWS);
+    const columns = this.clampInteger(draft.columns, MATRIX_TABLE_MIN_COLUMNS, MATRIX_TABLE_MAX_COLUMNS);
+    return {
+      id: draft.elementId ?? this.createElementId(),
+      type: 'matrix',
+      position: { x: draft.x, y: draft.y },
+      width: Math.max(160, draft.width),
+      height: Math.max(96, draft.height),
+      rows,
+      columns,
+      cells: this.normalizeMatrixTableCells(draft.cells, rows, columns),
+      fontSize: Math.max(12, draft.fontSize),
+      strokeColor: draft.strokeColor,
+      fillColor: draft.fillEnabled ? draft.fillColor : null,
+      textColor: draft.textColor,
+      borderColor: draft.borderColor,
+      showBorders: draft.showBorders,
+      align: draft.align,
+      bracketStyle: draft.bracketStyle,
+      augmentedColumn: draft.augmentedColumn ?? null
+    };
+  }
+
+  private createTableElement(draft: MatrixTableDraft): WhiteboardTableElement {
+    const rows = this.clampInteger(draft.rows, MATRIX_TABLE_MIN_ROWS, MATRIX_TABLE_MAX_ROWS);
+    const columns = this.clampInteger(draft.columns, MATRIX_TABLE_MIN_COLUMNS, MATRIX_TABLE_MAX_COLUMNS);
+    return {
+      id: draft.elementId ?? this.createElementId(),
+      type: 'table',
+      position: { x: draft.x, y: draft.y },
+      width: Math.max(180, draft.width),
+      height: Math.max(110, draft.height),
+      rows,
+      columns,
+      cells: this.normalizeMatrixTableCells(draft.cells, rows, columns),
+      fontSize: Math.max(12, draft.fontSize),
+      strokeColor: draft.strokeColor,
+      fillColor: draft.fillEnabled ? draft.fillColor : null,
+      textColor: draft.textColor,
+      borderColor: draft.borderColor,
+      showBorders: draft.showBorders,
+      align: draft.align,
+      headerRow: draft.headerRow
     };
   }
 
@@ -6120,6 +8228,110 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       return 'Labels should look like: 0,0,Origin.';
     }
     return null;
+  }
+
+  private validateMatrixTableDraft(draft: MatrixTableDraft): string | null {
+    if (!this.canUseTool(draft.mode)) {
+      return 'This whiteboard tool is not available right now.';
+    }
+    if (
+      !Number.isFinite(draft.width) ||
+      !Number.isFinite(draft.height) ||
+      !Number.isFinite(draft.fontSize) ||
+      !Number.isFinite(draft.rows) ||
+      !Number.isFinite(draft.columns)
+    ) {
+      return 'Rows, columns, size, width, and height must be valid numbers.';
+    }
+    if (draft.rows < MATRIX_TABLE_MIN_ROWS || draft.rows > MATRIX_TABLE_MAX_ROWS || draft.columns < MATRIX_TABLE_MIN_COLUMNS || draft.columns > MATRIX_TABLE_MAX_COLUMNS) {
+      return `Use ${MATRIX_TABLE_MIN_ROWS}-${MATRIX_TABLE_MAX_ROWS} rows and ${MATRIX_TABLE_MIN_COLUMNS}-${MATRIX_TABLE_MAX_COLUMNS} columns.`;
+    }
+    if (draft.width < 120 || draft.height < 80 || draft.fontSize < 10) {
+      return 'Matrix/table dimensions are too small.';
+    }
+    return null;
+  }
+
+  private openMatrixTableDraftForElement(element: WhiteboardMatrixElement | WhiteboardTableElement): void {
+    const isMatrix = element.type === 'matrix';
+    this.matrixTableDraft.set({
+      elementId: element.id,
+      mode: element.type,
+      x: element.position.x,
+      y: element.position.y,
+      width: element.width,
+      height: element.height,
+      rows: element.rows,
+      columns: element.columns,
+      cells: this.normalizeMatrixTableCells(element.cells, element.rows, element.columns),
+      fontSize: element.fontSize,
+      strokeColor: element.strokeColor,
+      fillColor: element.fillColor ?? this.fillColor(),
+      fillEnabled: !!element.fillColor,
+      textColor: element.textColor,
+      borderColor: element.borderColor,
+      showBorders: element.showBorders,
+      align: element.align ?? 'center',
+      headerRow: !isMatrix && element.headerRow,
+      bracketStyle: isMatrix ? element.bracketStyle : 'none',
+      augmentedColumn: isMatrix ? element.augmentedColumn ?? null : null
+    });
+    this.strokeColor.set(element.strokeColor);
+    if (element.fillColor) {
+      this.fillColor.set(element.fillColor);
+      this.fillEnabled.set(true);
+    } else {
+      this.fillEnabled.set(false);
+    }
+    this.activeMathTab.set('tables');
+    this.mathPopoverOpen.set(true);
+    this.clampMathPopoverToViewport();
+  }
+
+  private resizeMatrixTableDraft(rows: number, columns: number): void {
+    this.matrixTableDraft.update((draft) => {
+      if (!draft) {
+        return draft;
+      }
+      const nextRows = this.clampInteger(rows, MATRIX_TABLE_MIN_ROWS, MATRIX_TABLE_MAX_ROWS);
+      const nextColumns = this.clampInteger(columns, MATRIX_TABLE_MIN_COLUMNS, MATRIX_TABLE_MAX_COLUMNS);
+      return {
+        ...draft,
+        rows: nextRows,
+        columns: nextColumns,
+        cells: this.normalizeMatrixTableCells(draft.cells, nextRows, nextColumns),
+        error: null
+      };
+    });
+  }
+
+  private normalizeMatrixTableCells(cells: string[][] | undefined, rows: number, columns: number): string[][] {
+    return Array.from({ length: rows }, (_row, rowIndex) =>
+      Array.from({ length: columns }, (_column, columnIndex) => String(cells?.[rowIndex]?.[columnIndex] ?? ''))
+    );
+  }
+
+  private defaultMatrixTableCells(rows: number, columns: number, mode: MatrixTableMode): string[][] {
+    if (mode === 'table') {
+      return Array.from({ length: rows }, (_row, rowIndex) =>
+        Array.from({ length: columns }, (_column, columnIndex) => (rowIndex === 0 ? `Header ${columnIndex + 1}` : ''))
+      );
+    }
+    return Array.from({ length: rows }, (_row, rowIndex) => Array.from({ length: columns }, (_column, columnIndex) => (rowIndex === columnIndex ? '1' : '0')));
+  }
+
+  private clampInteger(value: number, min: number, max: number): number {
+    if (!Number.isFinite(value)) {
+      return min;
+    }
+    return Math.min(max, Math.max(min, Math.round(value)));
+  }
+
+  private clampNumber(value: number, min: number, max: number): number {
+    if (!Number.isFinite(value)) {
+      return min;
+    }
+    return Math.min(max, Math.max(min, value));
   }
 
   private openGraphDraftForElement(element: WhiteboardGraphElement): void {
@@ -6382,7 +8594,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   private strokeContainsPoint(element: WhiteboardStrokeElement, point: WhiteboardPoint): boolean {
-    const tolerance = Math.max(10, element.width + 6);
+    const tolerance = Math.max(10, this.strokeRenderWidth(element) + 6);
     for (let index = 1; index < element.points.length; index += 1) {
       if (this.distanceToSegment(point, element.points[index - 1]!, element.points[index]!) <= tolerance) {
         return true;
@@ -6536,7 +8748,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
           ...element,
           functions: element.functions.map((fn, index) => (index === 0 ? { ...fn, color } : fn))
         };
-      } else if (element.type === 'geometry' || element.type === 'diagram') {
+      } else if (element.type === 'geometry' || element.type === 'diagram' || element.type === 'matrix' || element.type === 'table') {
         currentColor = element.strokeColor;
         nextElement = { ...element, strokeColor: color };
       } else {
@@ -6598,12 +8810,22 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   private canElementReceiveFill(
     element: WhiteboardElement
-  ): element is WhiteboardStrokeElement | WhiteboardShapeElement | WhiteboardTextElement | WhiteboardEquationElement | WhiteboardGeometryElement | WhiteboardDiagramElement {
+  ): element is
+    | WhiteboardStrokeElement
+    | WhiteboardShapeElement
+    | WhiteboardTextElement
+    | WhiteboardEquationElement
+    | WhiteboardGeometryElement
+    | WhiteboardDiagramElement
+    | WhiteboardMatrixElement
+    | WhiteboardTableElement {
     return (
       (element.type === 'stroke' && !!this.strokeFillPath(element)) ||
       (element.type === 'shape' && this.isFillableShape(element.shape)) ||
       element.type === 'geometry' ||
       element.type === 'diagram' ||
+      element.type === 'matrix' ||
+      element.type === 'table' ||
       element.type === 'text' ||
       element.type === 'equation'
     );
@@ -6663,7 +8885,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   private eraseStroke(element: WhiteboardStrokeElement, from: WhiteboardPoint, to: WhiteboardPoint, radius: number): WhiteboardStrokeElement[] | null {
-    const threshold = radius + element.width / 2;
+    const threshold = radius + this.strokeRenderWidth(element) / 2;
     if (element.points.length <= 1) {
       return this.distanceToSegment(element.points[0]!, from, to) <= threshold ? [] : null;
     }
@@ -6711,7 +8933,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   private strokeIntersectsEraser(element: WhiteboardStrokeElement, from: WhiteboardPoint, to: WhiteboardPoint, radius: number): boolean {
-    const threshold = radius + element.width / 2;
+    const threshold = radius + this.strokeRenderWidth(element) / 2;
     if (element.points.length <= 1) {
       return this.distanceToSegment(element.points[0]!, from, to) <= threshold;
     }
@@ -6878,7 +9100,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         height: Math.max(1, Math.abs(element.to.y - element.from.y)) + padding * 2
       };
     }
-    if (element.type === 'equation' || element.type === 'graph' || element.type === 'diagram') {
+    if (element.type === 'equation' || element.type === 'graph' || element.type === 'diagram' || element.type === 'matrix' || element.type === 'table') {
       return { x: element.position.x, y: element.position.y, width: element.width, height: element.height };
     }
     if (element.type === 'file') {
@@ -6996,6 +9218,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         next.width *= scaleX;
         next.height *= scaleY;
         next.fontSize = Math.max(8, next.fontSize * Math.max(scaleX, scaleY));
+      } else if (next.type === 'matrix' || next.type === 'table') {
+        next.width *= scaleX;
+        next.height *= scaleY;
+        next.fontSize = Math.max(10, next.fontSize * Math.max(scaleX, scaleY));
       } else {
         next.width *= scaleX;
         next.height *= scaleY;
@@ -7044,7 +9270,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       x: elementBounds.x + elementBounds.width / 2,
       y: elementBounds.y + elementBounds.height / 2
     });
-    if (next.type === 'file' || next.type === 'equation' || next.type === 'graph' || next.type === 'diagram') {
+    if (next.type === 'file' || next.type === 'equation' || next.type === 'graph' || next.type === 'diagram' || next.type === 'matrix' || next.type === 'table') {
       const width = next.height;
       const height = next.width;
       next.width = width;
@@ -7279,6 +9505,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return element?.type === 'text' ? element : null;
   }
 
+  private singleSelectedMatrixTable(): WhiteboardMatrixElement | WhiteboardTableElement | null {
+    const selectedIds = this.selectedElementIds();
+    if (selectedIds.length !== 1) {
+      return null;
+    }
+    const element = this.elements.find((item) => item.id === selectedIds[0]);
+    return element?.type === 'matrix' || element?.type === 'table' ? element : null;
+  }
+
   private syncStyleFromSelection(): void {
     const selected = this.selectedElements();
     if (!selected.length) {
@@ -7300,7 +9535,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   private strokeColorForElement(element: WhiteboardElement): string | null {
-    if (element.type === 'shape' || element.type === 'geometry' || element.type === 'diagram') {
+    if (element.type === 'shape' || element.type === 'geometry' || element.type === 'diagram' || element.type === 'matrix' || element.type === 'table') {
       return element.strokeColor;
     }
     if (element.type === 'graph') {
@@ -7521,15 +9756,23 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   private strokeFillPath(element: WhiteboardStrokeElement): StrokeFillPath | null {
+    if (element.closed === false) {
+      return null;
+    }
     const points = element.points;
     if (points.length < 3) {
       return null;
     }
 
-    const closeThreshold = Math.max(18, element.width * 3);
-    const minimumArea = Math.max(36, element.width * element.width * 3);
+    const closeThreshold = this.strokeCloseThreshold(element);
+    const minimumArea = this.strokeMinimumFillArea(element);
     const first = points[0]!;
     const last = points[points.length - 1]!;
+
+    if (element.closed === true) {
+      const closedPoints = this.distance(first, last) <= 0.5 ? points : [...points, first];
+      return Math.abs(this.polygonArea(closedPoints)) >= minimumArea ? { points: closedPoints.map((point) => ({ ...point })) } : null;
+    }
 
     if (this.distance(first, last) <= closeThreshold && Math.abs(this.polygonArea(points)) >= minimumArea) {
       return { points: points.map((point) => ({ ...point })) };
@@ -7541,6 +9784,34 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
 
     return this.selfIntersectingStrokePath(points, minimumArea);
+  }
+
+  private autoClosedStrokePoints(element: WhiteboardStrokeElement, threshold = this.penAutoCloseThreshold()): WhiteboardStrokePoint[] | null {
+    const points = element.points;
+    if (points.length < 3) {
+      return null;
+    }
+    const first = points[0]!;
+    const last = points[points.length - 1]!;
+    if (this.distance(first, last) > threshold) {
+      return null;
+    }
+    const closedPoints = this.distance(first, last) <= 0.5 ? points : [...points, first];
+    if (Math.abs(this.polygonArea(closedPoints)) < this.strokeMinimumFillArea(element)) {
+      return null;
+    }
+    return closedPoints.map((point) => ({ ...point }));
+  }
+
+  private strokeCloseThreshold(element: WhiteboardStrokeElement): number {
+    if (Number.isFinite(element.autoCloseThreshold)) {
+      return this.clampNumber(element.autoCloseThreshold!, 8, 96);
+    }
+    return Math.max(18, element.width * 3);
+  }
+
+  private strokeMinimumFillArea(element: WhiteboardStrokeElement): number {
+    return Math.max(36, element.width * element.width * 3);
   }
 
   private endpointClosedStrokePath(points: WhiteboardPoint[], closeThreshold: number, minimumArea: number): StrokeFillPath | null {
@@ -7658,7 +9929,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.persistActivePageView();
   }
 
-  private renderPageImage(pageId: string, type: 'image/png' | 'image/jpeg', quality?: number): string {
+  private renderPageImage(pageId: string, type: 'image/png' | 'image/jpeg', quality?: number, elementsOverride?: WhiteboardElement[]): string {
     const canvas = this.whiteboardCanvas?.nativeElement;
     if (!canvas) {
       return '';
@@ -7666,16 +9937,434 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     const previousPageId = this.activePageId();
     const previousSelection = this.selectedElementIds();
     const previousPreview = this.previewElement;
+    const previousPages = elementsOverride ? this.clonePages(this.pages()) : null;
     this.previewElement = null;
     this.activePageId.set(pageId);
+    if (elementsOverride) {
+      this.pages.update((pages) => pages.map((page) => (page.id === pageId ? { ...page, elements: elementsOverride.map((element) => this.cloneElement(element)) } : page)));
+    }
     this.selectedElementIds.set([]);
     this.render(false);
     const dataUrl = canvas.toDataURL(type, quality);
+    if (previousPages) {
+      this.pages.set(previousPages);
+    }
     this.activePageId.set(previousPageId);
     this.selectedElementIds.set(previousSelection);
     this.previewElement = previousPreview;
     this.render();
     return dataUrl;
+  }
+
+  private canRenderElementAsPdfVector(element: WhiteboardElement): boolean {
+    return (
+      element.type === 'stroke' ||
+      element.type === 'shape' ||
+      element.type === 'text' ||
+      element.type === 'geometry' ||
+      element.type === 'matrix' ||
+      element.type === 'table'
+    );
+  }
+
+  private pdfVectorForElement(element: WhiteboardElement, pageHeight: number): string {
+    if (element.type === 'stroke') {
+      return this.pdfStrokeElement(element, pageHeight);
+    }
+    if (element.type === 'shape') {
+      return this.pdfShapeElement(element, pageHeight);
+    }
+    if (element.type === 'text') {
+      return this.pdfTextElement(element, pageHeight);
+    }
+    if (element.type === 'geometry') {
+      return this.pdfGeometryElement(element, pageHeight);
+    }
+    if (element.type === 'matrix') {
+      return this.pdfMatrixElement(element, pageHeight);
+    }
+    if (element.type === 'table') {
+      return this.pdfTableElement(element, pageHeight);
+    }
+    return '';
+  }
+
+  private pdfStrokeElement(element: WhiteboardStrokeElement, pageHeight: number): string {
+    if (!element.points.length) {
+      return '';
+    }
+    const style = this.strokePenStyle(element);
+    const width = this.strokeRenderWidth(element);
+    const opacity = this.strokeOpacity(element);
+    const commands: string[] = ['q', '1 J 1 j', this.pdfStrokeDash(style, width), `${this.pdfNumber(width)} w`, this.pdfStrokeColor(element.color, opacity)];
+    const fillPath = element.fillColor ? this.strokeFillPath(element) : null;
+    if (element.fillColor && fillPath?.points.length) {
+      commands.push(this.pdfFillColor(element.fillColor, opacity), this.pdfPolylinePath(fillPath.points, pageHeight, true), 'f*');
+    }
+    if (element.points.length === 1) {
+      const point = element.points[0]!;
+      commands.push(this.pdfFillColor(element.color, opacity), this.pdfCirclePath(point.x, point.y, Math.max(1, width / 2), pageHeight), 'f');
+    } else {
+      commands.push(this.pdfPolylinePath(element.points, pageHeight, false), 'S');
+    }
+    commands.push('Q');
+    return commands.join('\n');
+  }
+
+  private pdfStrokeDash(style: WhiteboardPenStyle, width: number): string {
+    if (style === 'dashed') {
+      return `[${this.pdfNumber(Math.max(8, width * 3))} ${this.pdfNumber(Math.max(5, width * 1.8))}] 0 d`;
+    }
+    if (style === 'dotted') {
+      return `[0.1 ${this.pdfNumber(Math.max(6, width * 2.2))}] 0 d`;
+    }
+    return '[] 0 d';
+  }
+
+  private pdfShapeElement(element: WhiteboardShapeElement, pageHeight: number): string {
+    if (element.shape === 'line') {
+      return [
+        'q',
+        '1 J 1 j',
+        `${this.pdfNumber(element.width)} w`,
+        this.pdfStrokeColor(element.strokeColor),
+        this.pdfPolylinePath([element.from, element.to], pageHeight, false),
+        'S',
+        'Q'
+      ].join('\n');
+    }
+    if (element.shape === 'arrow') {
+      return [
+        'q',
+        '1 J 1 j',
+        `${this.pdfNumber(element.width)} w`,
+        this.pdfStrokeColor(element.strokeColor),
+        this.pdfPolylinePath([element.from, element.to], pageHeight, false),
+        'S',
+        this.pdfFillColor(element.strokeColor),
+        this.pdfArrowHeadPath(element.from, element.to, pageHeight),
+        'f',
+        'Q'
+      ].join('\n');
+    }
+    const commands = ['q', '1 J 1 j', `${this.pdfNumber(element.width)} w`, this.pdfStrokeColor(element.strokeColor)];
+    if (element.fillColor) {
+      commands.push(this.pdfFillColor(element.fillColor));
+    }
+    commands.push(this.pdfShapePath(element, pageHeight));
+    commands.push(element.fillColor ? 'B' : 'S', 'Q');
+    return commands.join('\n');
+  }
+
+  private pdfTextElement(element: WhiteboardTextElement, pageHeight: number): string {
+    const bounds = this.boundsForElement(element);
+    const commands: string[] = ['q'];
+    if (element.fillColor) {
+      commands.push(this.pdfFillColor(element.fillColor), this.pdfRectPath(bounds.x, bounds.y, bounds.width, bounds.height, pageHeight), 'f');
+    }
+    const lineHeight = element.fontSize * 1.25;
+    for (const [index, line] of element.text.split('\n').entries()) {
+      const lineWidth = this.pdfMeasureText(line, element.fontSize);
+      const x = this.alignedInlineX(lineWidth, bounds.x, bounds.width, element.align ?? 'left');
+      commands.push(this.pdfText(line, x, element.position.y + index * lineHeight, element.fontSize, element.color, pageHeight));
+    }
+    commands.push('Q');
+    return commands.join('\n');
+  }
+
+  private pdfGeometryElement(element: WhiteboardGeometryElement, pageHeight: number): string {
+    const commands = ['q', '1 J 1 j', `${this.pdfNumber(Math.max(1, element.width))} w`, this.pdfStrokeColor(element.strokeColor), this.pdfFillColor(element.fillColor ?? element.strokeColor)];
+    if (element.kind === 'circle') {
+      commands.push(this.pdfCirclePath(element.from.x, element.from.y, this.distance(element.from, element.to), pageHeight), element.fillColor ? 'B' : 'S');
+    } else if (element.kind === 'arc' || element.kind === 'angle') {
+      const radius = this.distance(element.from, element.to);
+      commands.push(this.pdfCirclePath(element.from.x, element.from.y, radius, pageHeight), 'S');
+    } else if (element.kind === 'point' || element.kind === 'midpoint') {
+      commands.push(this.pdfCirclePath(element.from.x, element.from.y, Math.max(3, element.width * 1.6), pageHeight), 'f');
+    } else if (element.kind === 'polygon') {
+      commands.push(this.pdfPolylinePath(this.regularPolygonVertices(element.from, element.to, 6), pageHeight, true), element.fillColor ? 'B' : 'S');
+    } else {
+      commands.push(this.pdfPolylinePath([element.from, element.to], pageHeight, false), 'S');
+      if (element.kind === 'vector') {
+        commands.push(this.pdfArrowHeadPath(element.from, element.to, pageHeight), 'f');
+      }
+    }
+    commands.push('Q');
+    return commands.join('\n');
+  }
+
+  private pdfMatrixElement(element: WhiteboardMatrixElement, pageHeight: number): string {
+    const bounds = this.boundsForElement(element);
+    const bracketPadding = element.bracketStyle === 'none' ? 8 : 28;
+    const gridBounds: ElementBounds = {
+      x: bounds.x + bracketPadding,
+      y: bounds.y + 10,
+      width: Math.max(24, bounds.width - bracketPadding * 2),
+      height: Math.max(24, bounds.height - 20)
+    };
+    const commands: string[] = ['q'];
+    if (element.fillColor) {
+      commands.push(this.pdfFillColor(element.fillColor), this.pdfRectPath(bounds.x, bounds.y, bounds.width, bounds.height, pageHeight), 'f');
+    }
+    if (element.showBorders) {
+      commands.push(this.pdfGridLines(gridBounds, element.rows, element.columns, element.borderColor, 1, pageHeight));
+    }
+    if (element.augmentedColumn && element.augmentedColumn > 0 && element.augmentedColumn < element.columns) {
+      const x = gridBounds.x + (gridBounds.width / element.columns) * element.augmentedColumn;
+      commands.push(this.pdfStrokeColor(element.borderColor), `${this.pdfNumber(Math.max(1.4, element.fontSize / 16))} w`, this.pdfPolylinePath([{ x, y: gridBounds.y }, { x, y: gridBounds.y + gridBounds.height }], pageHeight, false), 'S');
+    }
+    commands.push(this.pdfMatrixBrackets(bounds, element, pageHeight), this.pdfCellText(element, gridBounds, false, pageHeight), 'Q');
+    return commands.filter(Boolean).join('\n');
+  }
+
+  private pdfTableElement(element: WhiteboardTableElement, pageHeight: number): string {
+    const bounds = this.boundsForElement(element);
+    const commands: string[] = ['q', this.pdfFillColor(element.fillColor ?? '#ffffff'), this.pdfRectPath(bounds.x, bounds.y, bounds.width, bounds.height, pageHeight), 'f'];
+    if (element.headerRow && element.rows > 0) {
+      commands.push(this.pdfFillColor(element.fillColor ?? '#FFD150', 0.18), this.pdfRectPath(bounds.x, bounds.y, bounds.width, bounds.height / element.rows, pageHeight), 'f');
+    }
+    if (element.showBorders) {
+      commands.push(this.pdfGridLines(bounds, element.rows, element.columns, element.borderColor, 1, pageHeight));
+    } else {
+      commands.push(this.pdfStrokeColor(element.strokeColor), '1.4 w', this.pdfRectPath(bounds.x, bounds.y, bounds.width, bounds.height, pageHeight), 'S');
+    }
+    commands.push(this.pdfCellText(element, bounds, element.headerRow, pageHeight), 'Q');
+    return commands.join('\n');
+  }
+
+  private pdfCellText(element: WhiteboardMatrixElement | WhiteboardTableElement, bounds: ElementBounds, emphasizeHeader: boolean, pageHeight: number): string {
+    const commands: string[] = [];
+    const rows = Math.max(1, element.rows);
+    const columns = Math.max(1, element.columns);
+    const cellWidth = bounds.width / columns;
+    const cellHeight = bounds.height / rows;
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const text = element.cells[row]?.[column] ?? '';
+        if (!text.trim()) {
+          continue;
+        }
+        const fontSize = Math.min(element.fontSize, Math.max(10, cellHeight * 0.42));
+        const textWidth = this.pdfMeasureText(text, fontSize);
+        let x = bounds.x + column * cellWidth + 7;
+        if ((element.align ?? 'center') === 'center') {
+          x = bounds.x + column * cellWidth + cellWidth / 2 - Math.min(textWidth, cellWidth - 14) / 2;
+        } else if (element.align === 'right') {
+          x = bounds.x + (column + 1) * cellWidth - Math.min(textWidth, cellWidth - 14) - 7;
+        }
+        const y = bounds.y + row * cellHeight + (cellHeight - fontSize) / 2;
+        commands.push(this.pdfText(text, x, y, fontSize, element.textColor, pageHeight, emphasizeHeader && row === 0));
+      }
+    }
+    return commands.join('\n');
+  }
+
+  private pdfShapePath(element: WhiteboardShapeElement, pageHeight: number): string {
+    if (element.shape === 'line') {
+      return this.pdfPolylinePath([element.from, element.to], pageHeight, false);
+    }
+    if (element.shape === 'rectangle') {
+      const bounds = this.boundsForElement(element);
+      return this.pdfRectPath(bounds.x, bounds.y, bounds.width, bounds.height, pageHeight);
+    }
+    if (element.shape === 'ellipse') {
+      const bounds = this.boundsForElement(element);
+      return this.pdfEllipsePath(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, bounds.width / 2, bounds.height / 2, pageHeight);
+    }
+    return this.pdfPolylinePath(this.starVertices(element.from, element.to), pageHeight, true);
+  }
+
+  private starVertices(from: WhiteboardPoint, to: WhiteboardPoint): WhiteboardPoint[] {
+    const centerX = from.x + (to.x - from.x) / 2;
+    const centerY = from.y + (to.y - from.y) / 2;
+    const outerRadius = Math.max(2, Math.min(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) / 2);
+    const innerRadius = outerRadius * 0.45;
+    return Array.from({ length: 10 }, (_value, index) => {
+      const radius = index % 2 === 0 ? outerRadius : innerRadius;
+      const angle = -Math.PI / 2 + (index * Math.PI) / 5;
+      return { x: centerX + Math.cos(angle) * radius, y: centerY + Math.sin(angle) * radius };
+    });
+  }
+
+  private pdfGridLines(bounds: ElementBounds, rows: number, columns: number, color: string, width: number, pageHeight: number): string {
+    const commands = ['q', this.pdfStrokeColor(color), `${this.pdfNumber(width)} w`];
+    for (let column = 0; column <= columns; column += 1) {
+      const x = bounds.x + (bounds.width / columns) * column;
+      commands.push(this.pdfPolylinePath([{ x, y: bounds.y }, { x, y: bounds.y + bounds.height }], pageHeight, false), 'S');
+    }
+    for (let row = 0; row <= rows; row += 1) {
+      const y = bounds.y + (bounds.height / rows) * row;
+      commands.push(this.pdfPolylinePath([{ x: bounds.x, y }, { x: bounds.x + bounds.width, y }], pageHeight, false), 'S');
+    }
+    commands.push('Q');
+    return commands.join('\n');
+  }
+
+  private pdfMatrixBrackets(bounds: ElementBounds, element: WhiteboardMatrixElement, pageHeight: number): string {
+    if (element.bracketStyle === 'none') {
+      return '';
+    }
+    const top = bounds.y + 8;
+    const bottom = bounds.y + bounds.height - 8;
+    const left = bounds.x + 14;
+    const right = bounds.x + bounds.width - 14;
+    if (element.bracketStyle === 'determinant') {
+      return [
+        this.pdfStrokeColor(element.strokeColor),
+        `${this.pdfNumber(Math.max(1.6, element.fontSize / 14))} w`,
+        this.pdfPolylinePath([{ x: left, y: top }, { x: left, y: bottom }], pageHeight, false),
+        'S',
+        this.pdfPolylinePath([{ x: right, y: top }, { x: right, y: bottom }], pageHeight, false),
+        'S'
+      ].join('\n');
+    }
+    const hook = element.bracketStyle === 'parentheses' ? 4 : 12;
+    const leftPath = [
+      { x: left + hook, y: top },
+      { x: left, y: top },
+      { x: left, y: bottom },
+      { x: left + hook, y: bottom }
+    ];
+    const rightPath = [
+      { x: right - hook, y: top },
+      { x: right, y: top },
+      { x: right, y: bottom },
+      { x: right - hook, y: bottom }
+    ];
+    return [
+      this.pdfStrokeColor(element.strokeColor),
+      `${this.pdfNumber(Math.max(1.6, element.fontSize / 14))} w`,
+      this.pdfPolylinePath(leftPath, pageHeight, false),
+      'S',
+      this.pdfPolylinePath(rightPath, pageHeight, false),
+      'S'
+    ].join('\n');
+  }
+
+  private pdfPolylinePath(points: WhiteboardPoint[], pageHeight: number, close: boolean): string {
+    if (!points.length) {
+      return '';
+    }
+    const [first, ...rest] = points;
+    const commands = [`${this.pdfNumber(first!.x)} ${this.pdfNumber(this.pdfY(first!.y, pageHeight))} m`];
+    for (const point of rest) {
+      commands.push(`${this.pdfNumber(point.x)} ${this.pdfNumber(this.pdfY(point.y, pageHeight))} l`);
+    }
+    if (close) {
+      commands.push('h');
+    }
+    return commands.join('\n');
+  }
+
+  private pdfRectPath(x: number, y: number, width: number, height: number, pageHeight: number): string {
+    return `${this.pdfNumber(x)} ${this.pdfNumber(this.pdfY(y + height, pageHeight))} ${this.pdfNumber(width)} ${this.pdfNumber(height)} re`;
+  }
+
+  private pdfCirclePath(x: number, y: number, radius: number, pageHeight: number): string {
+    return this.pdfEllipsePath(x, y, radius, radius, pageHeight);
+  }
+
+  private pdfEllipsePath(cx: number, cy: number, rx: number, ry: number, pageHeight: number): string {
+    const kappa = 0.5522847498;
+    const left = cx - rx;
+    const right = cx + rx;
+    const top = cy - ry;
+    const bottom = cy + ry;
+    return [
+      `${this.pdfNumber(cx)} ${this.pdfNumber(this.pdfY(top, pageHeight))} m`,
+      `${this.pdfNumber(cx + rx * kappa)} ${this.pdfNumber(this.pdfY(top, pageHeight))} ${this.pdfNumber(right)} ${this.pdfNumber(this.pdfY(cy - ry * kappa, pageHeight))} ${this.pdfNumber(right)} ${this.pdfNumber(this.pdfY(cy, pageHeight))} c`,
+      `${this.pdfNumber(right)} ${this.pdfNumber(this.pdfY(cy + ry * kappa, pageHeight))} ${this.pdfNumber(cx + rx * kappa)} ${this.pdfNumber(this.pdfY(bottom, pageHeight))} ${this.pdfNumber(cx)} ${this.pdfNumber(this.pdfY(bottom, pageHeight))} c`,
+      `${this.pdfNumber(cx - rx * kappa)} ${this.pdfNumber(this.pdfY(bottom, pageHeight))} ${this.pdfNumber(left)} ${this.pdfNumber(this.pdfY(cy + ry * kappa, pageHeight))} ${this.pdfNumber(left)} ${this.pdfNumber(this.pdfY(cy, pageHeight))} c`,
+      `${this.pdfNumber(left)} ${this.pdfNumber(this.pdfY(cy - ry * kappa, pageHeight))} ${this.pdfNumber(cx - rx * kappa)} ${this.pdfNumber(this.pdfY(top, pageHeight))} ${this.pdfNumber(cx)} ${this.pdfNumber(this.pdfY(top, pageHeight))} c`,
+      'h'
+    ].join('\n');
+  }
+
+  private pdfArrowHeadPath(from: WhiteboardPoint, to: WhiteboardPoint, pageHeight: number): string {
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    const headLength = 16;
+    return this.pdfPolylinePath(
+      [
+        to,
+        { x: to.x - headLength * Math.cos(angle - Math.PI / 6), y: to.y - headLength * Math.sin(angle - Math.PI / 6) },
+        { x: to.x - headLength * Math.cos(angle + Math.PI / 6), y: to.y - headLength * Math.sin(angle + Math.PI / 6) }
+      ],
+      pageHeight,
+      true
+    );
+  }
+
+  private pdfText(text: string, x: number, y: number, fontSize: number, color: string, pageHeight: number, bold = false): string {
+    return [
+      'BT',
+      this.pdfFillColor(color),
+      `/F1 ${this.pdfNumber(fontSize)} Tf`,
+      `${bold ? '0.25' : '0'} Tc`,
+      `1 0 0 1 ${this.pdfNumber(x)} ${this.pdfNumber(this.pdfY(y + fontSize, pageHeight))} Tm`,
+      `${this.pdfTextLiteral(text)} Tj`,
+      'ET'
+    ].join('\n');
+  }
+
+  private pdfMeasureText(text: string, fontSize: number): number {
+    const context = this.context;
+    if (!context) {
+      return text.length * fontSize * 0.55;
+    }
+    context.save();
+    context.font = `${fontSize}px Helvetica, Arial, sans-serif`;
+    const width = context.measureText(text).width;
+    context.restore();
+    return width;
+  }
+
+  private pdfStrokeColor(color: string, alpha = 1): string {
+    const [r, g, b] = this.pdfColor(color, alpha);
+    return `${r} ${g} ${b} RG`;
+  }
+
+  private pdfFillColor(color: string, alpha = 1): string {
+    const [r, g, b] = this.pdfColor(color, alpha);
+    return `${r} ${g} ${b} rg`;
+  }
+
+  private pdfColor(color: string, alpha = 1): [string, string, string] {
+    const normalized = color.trim();
+    const hex = normalized.startsWith('#') ? normalized.slice(1) : '';
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (hex.length === 3) {
+      r = Number.parseInt(hex[0]! + hex[0]!, 16);
+      g = Number.parseInt(hex[1]! + hex[1]!, 16);
+      b = Number.parseInt(hex[2]! + hex[2]!, 16);
+    } else if (hex.length >= 6) {
+      r = Number.parseInt(hex.slice(0, 2), 16);
+      g = Number.parseInt(hex.slice(2, 4), 16);
+      b = Number.parseInt(hex.slice(4, 6), 16);
+    } else {
+      const match = normalized.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+      if (match) {
+        r = Number(match[1]);
+        g = Number(match[2]);
+        b = Number(match[3]);
+      }
+    }
+    const mix = (value: number): string => this.pdfNumber((255 - (255 - value) * alpha) / 255);
+    return [mix(r), mix(g), mix(b)];
+  }
+
+  private pdfTextLiteral(text: string): string {
+    const safeText = text.replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '?').replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+    return `(${safeText})`;
+  }
+
+  private pdfY(y: number, pageHeight: number): number {
+    return pageHeight - y;
+  }
+
+  private pdfNumber(value: number): string {
+    return Number.isFinite(value) ? Number(value.toFixed(3)).toString() : '0';
   }
 
   private downloadDataUrl(dataUrl: string, fileName: string): void {
@@ -7720,28 +10409,29 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
     write('%PDF-1.3\n');
     writeObject(1, ['<< /Type /Catalog /Pages 2 0 R >>']);
-    const pageIds = pages.map((_, index) => 3 + index * 3);
+    writeObject(3, ['<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>']);
+    const pageIds = pages.map((_, index) => 4 + index * 3);
     writeObject(2, [`<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pages.length} >>`]);
     pages.forEach((page, index) => {
-      const pageObjectId = 3 + index * 3;
+      const pageObjectId = 4 + index * 3;
       const imageObjectId = pageObjectId + 1;
       const contentObjectId = pageObjectId + 2;
       const imageName = `Im${index}`;
       const imageBytes = this.base64ToBytes(page.jpegDataUrl.split(',')[1] ?? '');
-      const content = `q ${page.width} 0 0 ${page.height} 0 0 cm /${imageName} Do Q`;
+      const content = [`q ${page.width} 0 0 ${page.height} 0 0 cm /${imageName} Do Q`, page.vectorContent ?? ''].filter(Boolean).join('\n');
       writeObject(pageObjectId, [
-        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.width} ${page.height}] /Resources << /XObject << /${imageName} ${imageObjectId} 0 R >> >> /Contents ${contentObjectId} 0 R >>`
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.width} ${page.height}] /Resources << /XObject << /${imageName} ${imageObjectId} 0 R >> /Font << /F1 3 0 R >> >> /Contents ${contentObjectId} 0 R >>`
       ]);
       writeObject(imageObjectId, [
         `<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imageBytes.length} >>\nstream\n`,
         imageBytes,
         '\nendstream'
       ]);
-      writeObject(contentObjectId, [`<< /Length ${content.length} >>\nstream\n${content}\nendstream`]);
+      writeObject(contentObjectId, [`<< /Length ${encoder.encode(content).length} >>\nstream\n${content}\nendstream`]);
     });
 
     const xrefOffset = byteOffset;
-    const objectCount = 2 + pages.length * 3;
+    const objectCount = 3 + pages.length * 3;
     write(`xref\n0 ${objectCount + 1}\n0000000000 65535 f \n`);
     for (let objectId = 1; objectId <= objectCount; objectId += 1) {
       write(`${String(offsets[objectId]).padStart(10, '0')} 00000 n \n`);

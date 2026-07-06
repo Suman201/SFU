@@ -256,8 +256,38 @@ label {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.action-row.batch-next {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .action-row.live {
   border-color: rgb(255 151 96 / 0.44);
+}
+
+.action-row.empty {
+  border-style: dashed;
+}
+
+.action-row .batch-next-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.action-row .batch-next-meta > span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-elevated);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
 }
 
 .action-row > div > span:first-child {
@@ -436,7 +466,8 @@ label {
 .form-grid label:nth-child(3),
 .form-alert,
 .year-range,
-.schedule-picker {
+.schedule-picker,
+.schedule-preview {
   grid-column: 1 / -1;
 }
 
@@ -495,6 +526,50 @@ label {
   font-weight: 800;
 }
 
+.schedule-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgb(69 139 115 / 0.1), transparent 44%),
+    var(--panel-soft);
+}
+
+.schedule-preview > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.schedule-preview strong {
+  color: var(--text);
+}
+
+.schedule-preview span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.preview-grid article {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-elevated);
+}
+
 .schedule-row {
   display: grid;
   grid-template-columns: minmax(130px, 1fr) minmax(120px, 160px);
@@ -533,11 +608,13 @@ label {
   .ops-grid,
   .ops-grid.secondary,
   .session-card,
-  .health-row {
+  .health-row,
+  .action-row.batch-next {
     grid-template-columns: 1fr;
   }
 
-  .session-actions {
+  .session-actions,
+  .batch-next-meta {
     justify-content: start;
   }
 }
@@ -560,11 +637,13 @@ label {
   .form-grid label:nth-child(3),
   .form-alert,
   .year-range,
-  .schedule-picker {
+  .schedule-picker,
+  .schedule-preview {
     grid-column: auto;
   }
 
-  .schedule-row {
+  .schedule-row,
+  .preview-grid {
     grid-template-columns: 1fr;
   }
 }

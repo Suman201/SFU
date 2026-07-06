@@ -30,9 +30,10 @@
   <section class="enrolled-panel">
     <header>
       <div>
-        <p class="eyebrow">Enrolled</p>
-        <h2>My batches</h2>
+        <p class="eyebrow">Upcoming sessions</p>
+        <h2>Next class by batch</h2>
       </div>
+      <span class="panel-count">{{ activeEnrolledBatches().length }} batches</span>
     </header>
 
     @if (classOpenError()) {
@@ -50,9 +51,9 @@
         <h3>Loading enrolled batches</h3>
         <p>Fetching your current enrollments from the server.</p>
       </div>
-    } @else if (enrolledBatches().length) {
+    } @else if (activeEnrolledBatches().length) {
       <div class="enrolled-list">
-        @for (batch of enrolledBatches(); track batch.id) {
+        @for (batch of activeEnrolledBatches(); track batch.id) {
           <article class="enrolled-row">
             <div class="batch-main">
               <span>{{ batch.teacherName[0] }}</span>
@@ -66,19 +67,38 @@
             </div>
 
             <div class="batch-details">
-              <span>{{ batch.schedule }}</span>
-              <span>{{ batch.durationMinutes }} min</span>
-              <span>Starts {{ formatStart(batch.startsAt) }}</span>
+              <span
+                class="session-pill"
+                [class.status-live]="currentSession(batch)?.status === 'live'"
+                [class.status-scheduled]="currentSession(batch)?.status === 'scheduled'"
+                [class.status-error]="currentSessionError(batch)"
+              >
+                {{ sessionStatusLabel(batch) }}
+              </span>
+              <span>{{ currentSession(batch)?.title || 'No upcoming session' }}</span>
+              <span>{{ sessionTimeLabel(batch) }}</span>
             </div>
 
             <div class="batch-actions">
-              <button class="primary" type="button" [disabled]="classOpenLoadingId() === batch.id" (click)="openClass(batch)">
-                {{ classOpenLoadingId() === batch.id ? 'Checking...' : 'Open class' }}
-              </button>
+              @if (canJoinBatch(batch)) {
+                <button class="primary" type="button" [disabled]="classOpenLoadingId() === batch.id" (click)="openClass(batch)">
+                  {{ classOpenLoadingId() === batch.id ? 'Joining...' : 'Join' }}
+                </button>
+              } @else if (currentSession(batch)?.status === 'scheduled') {
+                <button class="waiting-button" type="button" disabled>Waiting</button>
+              } @else if (currentSessionLoading(batch)) {
+                <button class="waiting-button" type="button" disabled>Checking...</button>
+              } @else {
+                <a class="button" [routerLink]="['/teachers', batch.teacherId]">View details</a>
+              }
               <button type="button" [disabled]="enrollment.enrollmentActionBatchId() === batch.id" (click)="leave(batch)">
                 {{ enrollment.enrollmentActionBatchId() === batch.id ? 'Leaving...' : 'Leave' }}
               </button>
             </div>
+
+            @if (currentSessionError(batch)) {
+              <p class="batch-session-error">{{ currentSessionError(batch) }}</p>
+            }
           </article>
         }
       </div>

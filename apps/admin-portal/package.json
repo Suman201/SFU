@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "prestart": "npm run build --workspace @native-sfu/contracts",
-    "start": "ng serve --host 0.0.0.0 --port 4300 --proxy-config proxy.conf.cjs",
+    "start": "ng serve --host localhost --port 4300 --proxy-config proxy.conf.cjs",
+    "prestart:lan": "npm run build --workspace @native-sfu/contracts",
+    "start:lan": "ng serve --host 0.0.0.0 --port 4300 --proxy-config proxy.conf.cjs",
     "prebuild": "npm run build --workspace @native-sfu/contracts",
     "build": "ng build",
     "test": "ng test --watch=false --browsers=ChromeHeadless",
@@ -26,6 +28,7 @@
   },
   "devDependencies": {
     "@angular-devkit/build-angular": "22.0.1",
+    "@angular/build": "22.0.1",
     "@angular/cli": "22.0.1",
     "@angular/compiler-cli": "22.0.1",
     "@types/jasmine": "^5.1.5",

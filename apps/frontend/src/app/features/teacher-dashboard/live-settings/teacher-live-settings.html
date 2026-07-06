@@ -1,0 +1,145 @@
+<sfu-header />
+<main class="live-settings-shell">
+  <a class="back-link" [routerLink]="backLink()">Back</a>
+
+  <section class="settings-hero">
+    <div>
+      <p class="eyebrow">{{ isBatchMode() ? 'Batch overrides' : 'Teacher defaults' }}</p>
+      <h1>{{ pageTitle() }}</h1>
+      <p>{{ pageDescription() }}</p>
+      @if (isBatchMode()) {
+        <strong class="batch-name">{{ batchTitle() }}</strong>
+      }
+    </div>
+
+    <div class="hero-actions">
+      @if (isBatchMode()) {
+        <a class="button" routerLink="/teacher/live-settings">Global defaults</a>
+        <button class="button" type="button" [disabled]="loading() || resetting()" (click)="resetAllOverrides()">
+          {{ resetting() ? 'Resetting...' : 'Reset overrides' }}
+        </button>
+      }
+      <button class="button" type="button" [disabled]="loading() || saving()" (click)="loadSettings()">Refresh</button>
+      <button class="primary" type="button" [disabled]="loading() || saving() || resetting()" (click)="saveSettings()">
+        {{ saving() ? 'Saving...' : isBatchMode() ? 'Save overrides' : 'Save defaults' }}
+      </button>
+    </div>
+  </section>
+
+  <section class="settings-summary" aria-label="Live settings summary">
+    <article>
+      <span>{{ totalFields }}</span>
+      <p>Controls</p>
+    </article>
+    <article>
+      <span>{{ sections.length }}</span>
+      <p>Groups</p>
+    </article>
+    <article>
+      <span>{{ isBatchMode() ? overriddenKeys().size : totalFields }}</span>
+      <p>{{ isBatchMode() ? 'Overrides' : 'Global values' }}</p>
+    </article>
+    <article>
+      <span>{{ isBatchMode() ? totalFields - overriddenKeys().size : 0 }}</span>
+      <p>{{ isBatchMode() ? 'Inherited' : 'Batch overrides' }}</p>
+    </article>
+  </section>
+
+  @if (error()) {
+    <div class="form-alert error">{{ error() }}</div>
+  }
+
+  @if (notice()) {
+    <div class="form-alert success">{{ notice() }}</div>
+  }
+
+  @if (loading()) {
+    <section class="panel empty-state">
+      <h2>Loading live settings</h2>
+      <p>{{ isBatchMode() ? 'Resolving teacher defaults and batch overrides.' : 'Loading your global live-class defaults.' }}</p>
+    </section>
+  } @else {
+    <section class="settings-grid" aria-label="Live settings controls">
+      @for (section of sections; track section.title) {
+        <article class="settings-panel">
+          <header>
+            <div>
+              <p class="eyebrow">Live class</p>
+              <h2>{{ section.title }}</h2>
+              <p>{{ section.description }}</p>
+            </div>
+          </header>
+
+          <div class="field-list">
+            @for (field of section.fields; track field.key) {
+              <div class="setting-row" [class.inherited]="isBatchMode() && !isOverridden(field.key)">
+                <div class="setting-copy">
+                  <div>
+                    <strong>{{ field.label }}</strong>
+                    <p>{{ field.help }}</p>
+                  </div>
+                  <span class="inheritance-pill" [class.override]="isOverridden(field.key)">{{ inheritanceLabel(field) }}</span>
+                </div>
+
+                <div class="setting-control">
+                  @if (isBatchMode()) {
+                    <label class="override-switch">
+                      <input
+                        type="checkbox"
+                        [checked]="isOverridden(field.key)"
+                        [disabled]="loading() || saving() || resetting()"
+                        (change)="toggleOverride(field, checkedValue($event))"
+                      />
+                      <span>Override</span>
+                    </label>
+                  }
+
+                  @if (field.type === 'toggle') {
+                    <label class="toggle-control">
+                      <input
+                        type="checkbox"
+                        [checked]="booleanFieldValue(field)"
+                        [disabled]="fieldDisabled(field)"
+                        (change)="updateBooleanField(field, $event)"
+                      />
+                      <span aria-hidden="true"></span>
+                    </label>
+                  } @else if (field.type === 'number') {
+                    <label class="inline-input">
+                      <input
+                        type="number"
+                        [min]="field.min ?? null"
+                        [max]="field.max ?? null"
+                        [value]="numberFieldValue(field)"
+                        [disabled]="fieldDisabled(field)"
+                        (input)="updateNumberField(field, $event)"
+                      />
+                      @if (field.suffix) {
+                        <span>{{ field.suffix }}</span>
+                      }
+                    </label>
+                  } @else if (field.type === 'select') {
+                    <select [value]="stringFieldValue(field)" [disabled]="fieldDisabled(field)" (change)="updateSelectField(field, $event)">
+                      @for (option of field.options ?? []; track option.value) {
+                        <option [value]="option.value">{{ option.label }}</option>
+                      }
+                    </select>
+                  } @else {
+                    <input
+                      class="text-control"
+                      type="text"
+                      [value]="stringFieldValue(field)"
+                      [disabled]="fieldDisabled(field)"
+                      (input)="updateTextField(field, $event)"
+                    />
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        </article>
+      }
+    </section>
+  }
+</main>
+<sfu-footer />

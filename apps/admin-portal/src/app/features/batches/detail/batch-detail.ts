@@ -1,5 +1,5 @@
 import { DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import type {
@@ -15,6 +15,23 @@ import { finalize } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
 
 type ScheduleFormValue = { dayOfWeek: AdminBatchWeekday; startTime: string };
+type BatchCalendarView = 'month' | 'week' | 'list';
+
+interface BatchCalendarDay {
+  date: Date;
+  key: string;
+  label: string;
+  weekday: string;
+  muted: boolean;
+  today: boolean;
+  sessions: AdminBatchSessionItem[];
+}
+
+interface SchedulePreviewItem {
+  key: string;
+  title: string;
+  dateTime: string;
+}
 
 @Component({
   selector: 'sfu-admin-batch-detail',
@@ -34,9 +51,27 @@ export class BatchDetail implements OnInit {
   protected readonly saving = signal(false);
   protected readonly pendingAction = signal<string | null>(null);
   protected readonly pendingAttendanceSessionId = signal<string | null>(null);
+  protected readonly calendarView = signal<BatchCalendarView>('month');
+  protected readonly calendarCursor = signal(new Date());
+  protected readonly selectedCalendarSession = signal<AdminBatchSessionItem | null>(null);
   protected readonly error = signal('');
   protected readonly success = signal('');
   protected readonly weekdays: AdminBatchWeekday[] = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+  protected readonly timezoneLabel = computed(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local timezone');
+  protected readonly calendarTitle = computed(() => {
+    const cursor = this.calendarCursor();
+    if (this.calendarView() === 'week') {
+      const start = this.startOfWeek(cursor);
+      const end = this.addDays(start, 6);
+      return `${this.shortMonthDay(start)} - ${this.shortMonthDay(end)}`;
+    }
+    if (this.calendarView() === 'list') {
+      return 'All planned sessions';
+    }
+    return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(cursor);
+  });
+  protected readonly calendarDays = computed(() => this.buildMonthDays(this.calendarCursor(), this.batch()?.sessions ?? []));
+  protected readonly calendarWeekDays = computed(() => this.buildWeekDays(this.calendarCursor(), this.batch()?.sessions ?? []));
 
   protected readonly form = this.formBuilder.nonNullable.group({
     name: ['', [Validators.required, Validators.maxLength(120)]],
@@ -163,6 +198,66 @@ export class BatchDetail implements OnInit {
     return `status-${status.toLowerCase()}`;
   }
 
+  protected sessionStatusLabel(status: string): string {
+    return status === 'live' ? 'Live now' : status[0]!.toUpperCase() + status.slice(1);
+  }
+
+  protected setCalendarView(view: BatchCalendarView): void {
+    this.calendarView.set(view);
+  }
+
+  protected moveCalendar(direction: -1 | 1): void {
+    const cursor = this.calendarCursor();
+    if (this.calendarView() === 'week') {
+      this.calendarCursor.set(this.addDays(cursor, direction * 7));
+      return;
+    }
+    this.calendarCursor.set(new Date(cursor.getFullYear(), cursor.getMonth() + direction, 1));
+  }
+
+  protected resetCalendarToday(): void {
+    this.calendarCursor.set(new Date());
+  }
+
+  protected focusCalendarSession(session: AdminBatchSessionItem): void {
+    this.calendarCursor.set(new Date(session.scheduledAt));
+    this.selectedCalendarSession.set(session);
+  }
+
+  protected closeCalendarSession(): void {
+    this.selectedCalendarSession.set(null);
+  }
+
+  protected calendarStatusClass(session: AdminBatchSessionItem): string {
+    return `calendar-event status-${this.calendarDisplayStatus(session)}`;
+  }
+
+  protected calendarSessionStatusLabel(session: AdminBatchSessionItem): string {
+    const status = this.calendarDisplayStatus(session);
+    return status === 'rescheduled' ? 'Rescheduled' : this.sessionStatusLabel(status);
+  }
+
+  protected sessionTimeRange(session: AdminBatchSessionItem): string {
+    const start = new Date(session.scheduledAt);
+    const end = new Date(start.getTime() + session.durationMinutes * 60_000);
+    const formatter = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+    return `${formatter.format(start)} - ${formatter.format(end)}`;
+  }
+
+  protected formatDateTime(value: string): string {
+    return new Intl.DateTimeFormat(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    }).format(new Date(value));
+  }
+
+  protected schedulePreview(): SchedulePreviewItem[] {
+    return this.previewSchedule(Number(this.form.controls.year.value), this.currentSchedule()).slice(0, 12);
+  }
+
   protected trackByRoster(_index: number, row: AdminBatchRosterItem): string {
     return row.enrollmentId;
   }
@@ -224,6 +319,106 @@ export class BatchDetail implements OnInit {
       .getRawValue()
       .map((item) => ({ dayOfWeek: item.dayOfWeek, startTime: item.startTime.trim() }))
       .filter((item) => item.startTime);
+  }
+
+  private previewSchedule(year: number, schedule: ScheduleFormValue[]): SchedulePreviewItem[] {
+    if (!Number.isFinite(year) || year < 2000 || !schedule.length) {
+      return [];
+    }
+
+    const end = new Date(year, 11, 31, 23, 59, 59);
+    const preview = schedule.flatMap((item) => {
+      const weekdayIndex = this.weekdayIndex(item.dayOfWeek);
+      const [hours = 0, minutes = 0] = item.startTime.split(':').map((part) => Number(part));
+      const first = new Date(year, 0, 1, hours, minutes, 0, 0);
+      first.setDate(first.getDate() + ((weekdayIndex - first.getDay() + 7) % 7));
+      const dates: SchedulePreviewItem[] = [];
+      for (let cursor = first; cursor <= end && dates.length < 16; cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 7, hours, minutes)) {
+        dates.push({
+          key: `${item.dayOfWeek}-${cursor.toISOString()}`,
+          title: item.dayOfWeek,
+          dateTime: this.formatDateTime(cursor.toISOString())
+        });
+      }
+      return dates;
+    });
+
+    return preview.sort((left, right) => new Date(left.key.split('-').slice(1).join('-')).getTime() - new Date(right.key.split('-').slice(1).join('-')).getTime());
+  }
+
+  private buildMonthDays(cursor: Date, sessions: AdminBatchSessionItem[]): BatchCalendarDay[] {
+    const monthStart = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const gridStart = this.startOfWeek(monthStart);
+    return Array.from({ length: 42 }, (_value, index) => {
+      const date = this.addDays(gridStart, index);
+      return this.calendarDay(date, sessions, date.getMonth() !== monthStart.getMonth());
+    });
+  }
+
+  private buildWeekDays(cursor: Date, sessions: AdminBatchSessionItem[]): BatchCalendarDay[] {
+    const weekStart = this.startOfWeek(cursor);
+    return Array.from({ length: 7 }, (_value, index) => this.calendarDay(this.addDays(weekStart, index), sessions, false));
+  }
+
+  private calendarDay(date: Date, sessions: AdminBatchSessionItem[], muted: boolean): BatchCalendarDay {
+    const key = this.dateKey(date);
+    return {
+      date,
+      key,
+      label: new Intl.DateTimeFormat(undefined, { day: 'numeric' }).format(date),
+      weekday: new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(date),
+      muted,
+      today: key === this.dateKey(new Date()),
+      sessions: sessions
+        .filter((session) => this.dateKey(new Date(session.scheduledAt)) === key)
+        .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime())
+    };
+  }
+
+  private startOfWeek(date: Date): Date {
+    const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    start.setDate(start.getDate() - start.getDay());
+    return start;
+  }
+
+  private addDays(date: Date, days: number): Date {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+  }
+
+  private dateKey(date: Date): string {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+
+  private shortMonthDay(date: Date): string {
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+  }
+
+  private calendarDisplayStatus(session: AdminBatchSessionItem): string {
+    const plannedDate = this.plannedDateFromSessionId(session.id);
+    if (session.status === 'scheduled' && plannedDate && plannedDate !== this.dateKey(new Date(session.scheduledAt))) {
+      return 'rescheduled';
+    }
+    return session.status;
+  }
+
+  private plannedDateFromSessionId(sessionId: string): string | null {
+    const match = /-(\d{4}-\d{2}-\d{2})$/.exec(sessionId);
+    return match?.[1] ?? null;
+  }
+
+  private weekdayIndex(day: AdminBatchWeekday): number {
+    const index: Record<AdminBatchWeekday, number> = {
+      SUNDAY: 0,
+      MONDAY: 1,
+      TUESDAY: 2,
+      WEDNESDAY: 3,
+      THURSDAY: 4,
+      FRIDAY: 5,
+      SATURDAY: 6
+    };
+    return index[day];
   }
 
   private sameSchedule(left: AdminBatchScheduleItem[], right: AdminBatchScheduleItem[]): boolean {

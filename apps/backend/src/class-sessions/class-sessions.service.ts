@@ -1292,7 +1292,8 @@ export class ClassSessionsService {
     const persistedSessions = await this.classSessions.find({ batchId: batch.id }).sort({ scheduledAt: 1 }).exec();
     const sessions = this.mergeSessions(batch, schedules, persistedSessions);
     const live = sessions.find((session) => session.status === 'live');
-    const nextScheduled = sessions.find((session) => session.status === 'scheduled');
+    const now = Date.now();
+    const nextScheduled = sessions.find((session) => session.status === 'scheduled' && session.planned.scheduledAt.getTime() >= now);
     const lastFinished = [...sessions].reverse().find((session) => session.status === 'completed' || session.status === 'cancelled');
     const selected = live ?? nextScheduled ?? lastFinished;
     if (!selected) {

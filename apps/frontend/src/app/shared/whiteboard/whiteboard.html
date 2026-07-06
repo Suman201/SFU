@@ -1,4 +1,4 @@
-<section class="whiteboard-pane" aria-label="Class whiteboard">
+<section class="whiteboard-pane" [class.presentation-mode]="presentationModeEnabled()" aria-label="Class whiteboard">
   <div class="whiteboard-toolbar">
     <div class="board-actions" aria-label="Whiteboard tools">
       <div class="menu-group-container">
@@ -71,10 +71,22 @@
             <span class="menu-icon measure-menu-icon"></span>
             <span>{{ showMeasurements() ? 'Hide' : 'Show' }} measurements</span>
           </button>
+          @if (allowPresentationMode()) {
+          <button class="menu-item" type="button" [disabled]="readOnly()" (click)="enterPresentationMode(); menuOpen.set(false)">
+            <span class="menu-icon presentation-menu-icon"></span>
+            <span>Presentation mode</span>
+          </button>
+          }
           <button class="menu-item" type="button" [disabled]="readOnly()" (click)="openMathTools(); menuOpen.set(false)">
             <span class="menu-icon math-menu-icon"></span>
             <span>Math tools</span>
           </button>
+          @if (allowSubjectTemplates()) {
+          <button class="menu-item" type="button" [disabled]="readOnly()" (click)="openSubjectTemplates(); menuOpen.set(false)">
+            <span class="menu-icon subject-menu-icon"></span>
+            <span>Subject templates</span>
+          </button>
+          }
           <hr class="menu-divider">
           <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerFileImport(); menuOpen.set(false)">
             <span class="menu-icon import-menu-icon"></span>
@@ -92,6 +104,10 @@
             <span class="menu-icon slides-menu-icon"></span>
             <span>{{ assetImporting() ? 'Importing slides...' : 'Import slide images' }}</span>
           </button>
+          <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerDeckImport(); menuOpen.set(false)">
+            <span class="menu-icon slides-menu-icon"></span>
+            <span>{{ assetImporting() ? 'Preparing deck...' : 'Import PPT/PPTX deck' }}</span>
+          </button>
           <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="fitAssetToPage(); menuOpen.set(false)">
             <span class="menu-icon fit-menu-icon"></span>
             <span>Fit asset to page</span>
@@ -106,6 +122,14 @@
             <span class="menu-icon png-icon">PNG</span>
             <span>Export page PNG</span>
           </button>
+          <label class="menu-select-row">
+            <span>PDF export</span>
+            <select [value]="pdfExportMode()" aria-label="PDF export mode" (change)="setPdfExportMode($event)">
+              @for (option of pdfExportOptions; track option.id) {
+              <option [value]="option.id">{{ option.label }}</option>
+              }
+            </select>
+          </label>
           <button class="menu-item" type="button" [disabled]="!canExportBoard()" (click)="exportPdf(); menuOpen.set(false)">
             <span class="menu-icon pdf-icon">PDF</span>
             <span>Export page PDF</span>
@@ -158,10 +182,77 @@
         (click)="selectTool('select')">
         <span class="tool-icon select-icon" aria-hidden="true"></span>
       </button>
-      <button class="icon-button tool-button" [class.active]="activeTool() === 'pen'" type="button" title="Pen"
-        aria-label="Pen" [attr.aria-pressed]="activeTool() === 'pen'" [disabled]="!canUseTool('pen')" (click)="selectTool('pen')">
-        <span class="tool-icon pen-icon" aria-hidden="true"></span>
-      </button>
+      <div class="pen-group-container">
+        <button class="icon-button tool-button main-pen-btn" [class.active]="activeTool() === 'pen'" type="button"
+          [title]="'Pen: ' + activePenStyle()" [attr.aria-label]="'Pen: ' + activePenStyle()"
+          [attr.aria-pressed]="activeTool() === 'pen'" [disabled]="!canUseTool('pen')" (click)="selectTool('pen')">
+          <span class="tool-icon pen-icon" aria-hidden="true"></span>
+          <span class="chevron-icon" (click)="togglePenMenu($event)"></span>
+        </button>
+
+        @if (penMenuOpen()) {
+        <div class="shape-dropdown-overlay" (click)="penMenuOpen.set(false)"></div>
+        <div class="pen-dropdown">
+          <div class="pen-style-grid" aria-label="Pen style">
+            @for (option of penStyleOptions; track option.id) {
+            <button type="button" [class.active]="activePenStyle() === option.id" [title]="option.description"
+              [attr.aria-pressed]="activePenStyle() === option.id" (click)="selectPenStyle(option.id)">
+              <span class="pen-style-sample" [class.pen-style-dashed]="option.id === 'dashed'"
+                [class.pen-style-dotted]="option.id === 'dotted'" [class.pen-style-marker]="option.id === 'marker'"
+                [class.pen-style-pencil]="option.id === 'pencil'" [class.pen-style-calligraphy]="option.id === 'calligraphy'"
+                aria-hidden="true"></span>
+              <strong>{{ option.label }}</strong>
+              <small>{{ option.description }}</small>
+            </button>
+            }
+          </div>
+          <div class="brush-presets" aria-label="Pen stroke sizes">
+            @for (size of brushSizes; track size) {
+            <button class="brush-size" [class.active]="strokeWidth() === size" type="button" title="Pen size"
+              aria-label="Pen size" (click)="selectBrushSize(size)">
+              <span [style.width.px]="size + 6" [style.height.px]="size + 6"></span>
+            </button>
+            }
+          </div>
+          <label class="pen-slider-row">
+            <span>Width</span>
+            <input class="stroke-range" type="range" min="2" max="18" [value]="strokeWidth()" aria-label="Pen width"
+              (input)="setStrokeWidth($event)" />
+            <strong>{{ strokeWidth() }}px</strong>
+          </label>
+          <label class="pen-slider-row">
+            <span>Opacity</span>
+            <input class="stroke-range" type="range" min="0.1" max="1" step="0.05" [value]="penOpacity()" aria-label="Pen opacity"
+              (input)="setPenOpacity($event)" />
+            <strong>{{ penOpacityLabel() }}</strong>
+          </label>
+          <label class="pen-slider-row">
+            <span>Smooth</span>
+            <input class="stroke-range" type="range" min="0" max="0.85" step="0.05" [value]="penSmoothing()" aria-label="Pen smoothing"
+              (input)="setPenSmoothing($event)" />
+            <strong>{{ penSmoothingLabel() }}</strong>
+          </label>
+          <label class="pen-toggle-row" [class.disabled]="!pressureInputAvailable()">
+            <input type="checkbox" [checked]="pressureSensitivePen()" [disabled]="!pressureInputAvailable()"
+              (change)="togglePressureSensitivePen($event)" />
+            <span>Pressure</span>
+          </label>
+          <label class="pen-toggle-row">
+            <input type="checkbox" [checked]="penAutoCloseEnabled()" (change)="togglePenAutoClose($event)" />
+            <span>Auto close</span>
+          </label>
+          <div class="pen-threshold-row" [class.disabled]="!penAutoCloseEnabled()" aria-label="Auto close sensitivity">
+            @for (option of penAutoCloseThresholdOptions; track option.value) {
+            <button type="button" [class.active]="penAutoCloseThreshold() === option.value" [disabled]="!penAutoCloseEnabled()"
+              [attr.aria-pressed]="penAutoCloseThreshold() === option.value" (click)="selectPenAutoCloseThreshold(option.value)">
+              {{ option.label }}
+            </button>
+            }
+          </div>
+          <small class="pen-helper-text">Close near loops for fill.</small>
+        </div>
+        }
+      </div>
       <button class="icon-button tool-button" [class.active]="activeTool() === 'eraser'" type="button"
         [title]="'Eraser: ' + eraserMode()" [attr.aria-label]="'Eraser: ' + eraserMode()" [attr.aria-pressed]="activeTool() === 'eraser'"
         [disabled]="!canUseTool('eraser')"
@@ -334,6 +425,13 @@
           [title]="activeTool() === 'eraser' ? 'Eraser settings' : 'Brush settings'"
           [attr.aria-label]="activeTool() === 'eraser' ? 'Eraser settings' : 'Brush settings'" (click)="toggleBrushMenu($event)">
           <span class="brush-preview" [class.eraser-preview]="activeTool() === 'eraser'"
+            [class.pen-brush-preview]="activeTool() !== 'eraser'"
+            [class.pen-brush-dashed]="activeTool() !== 'eraser' && activePenStyle() === 'dashed'"
+            [class.pen-brush-dotted]="activeTool() !== 'eraser' && activePenStyle() === 'dotted'"
+            [class.pen-brush-marker]="activeTool() !== 'eraser' && activePenStyle() === 'marker'"
+            [class.pen-brush-pencil]="activeTool() !== 'eraser' && activePenStyle() === 'pencil'"
+            [class.pen-brush-calligraphy]="activeTool() !== 'eraser' && activePenStyle() === 'calligraphy'"
+            [style.opacity]="activeTool() === 'eraser' ? 1 : penOpacity()"
             [style.width.px]="(activeTool() === 'eraser' ? eraserSize() : strokeWidth()) + 4"
             [style.height.px]="(activeTool() === 'eraser' ? eraserSize() : strokeWidth()) + 4"></span>
           <span class="chevron-icon"></span>
@@ -401,7 +499,7 @@
     </header>
 
     <nav class="math-tools-tabs" aria-label="Math tool sections">
-      @for (tab of mathTabs; track tab.id) {
+      @for (tab of visibleMathTabs(); track tab.id) {
       <button type="button" [class.active]="activeMathTab() === tab.id" (click)="selectMathTab(tab.id)">
         {{ tab.label }}
       </button>
@@ -508,6 +606,57 @@
       </section>
       }
 
+      @if (activeMathTab() === 'subjects') {
+      <section class="math-tools-panel subject-template-panel">
+        <div class="math-current-draft">
+          <span>Subject templates</span>
+          <code>Insert as page, current page, or movable object</code>
+        </div>
+        <label class="math-field full">
+          <span>Search templates</span>
+          <input type="search" [value]="subjectTemplateSearch()" placeholder="Search by topic or tag"
+            (input)="setSubjectTemplateSearch($event)" />
+        </label>
+        <div class="subject-category-list" aria-label="Subject categories">
+          @for (category of subjectTemplateCategories; track category.id) {
+          <button type="button" [class.active]="activeSubjectTemplateCategory() === category.id"
+            [attr.aria-pressed]="activeSubjectTemplateCategory() === category.id"
+            [title]="category.description"
+            (click)="selectSubjectTemplateCategory(category.id)">
+            {{ category.label }}
+          </button>
+          }
+        </div>
+        <div class="subject-template-grid">
+          @for (template of filteredSubjectTemplates(); track template.id) {
+          <article class="subject-template-card">
+            <div class="subject-template-preview" [style.borderColor]="template.accent">
+              <span [style.background]="template.accent"></span>
+              <strong>{{ template.name }}</strong>
+            </div>
+            <div class="subject-template-copy">
+              <strong>{{ template.name }}</strong>
+              <span>{{ template.description }}</span>
+            </div>
+            <div class="subject-template-actions">
+              <button type="button" [disabled]="!canInsertSubjectTemplate('page')" (click)="insertSubjectTemplate(template, 'page')">
+                New page
+              </button>
+              <button type="button" [disabled]="!canInsertSubjectTemplate('current')" (click)="insertSubjectTemplate(template, 'current')">
+                Current page
+              </button>
+              <button type="button" [disabled]="!canInsertSubjectTemplate('object')" (click)="insertSubjectTemplate(template, 'object')">
+                As object
+              </button>
+            </div>
+          </article>
+          } @empty {
+          <p class="subject-template-empty">No templates match this search.</p>
+          }
+        </div>
+      </section>
+      }
+
       @if (activeMathTab() === 'snippets') {
       <section class="math-tools-panel">
         <div class="math-current-draft">
@@ -571,6 +720,135 @@
         }
       </section>
       }
+
+      @if (activeMathTab() === 'tables') {
+      <section class="math-tools-panel">
+        @if (matrixTableDraft(); as matrix) {
+        <div class="math-current-draft">
+          <span>{{ matrix.elementId ? 'Editing' : 'New' }} {{ matrix.mode }}</span>
+          <code>{{ matrix.rows }} x {{ matrix.columns }}</code>
+        </div>
+
+        <div class="matrix-mode-toggle" aria-label="Matrix or table mode">
+          <button type="button" [class.active]="matrix.mode === 'matrix'" [disabled]="!canUseTool('matrix')"
+            (click)="setMatrixTableMode('matrix')">Matrix</button>
+          <button type="button" [class.active]="matrix.mode === 'table'" [disabled]="!canUseTool('table')"
+            (click)="setMatrixTableMode('table')">Table</button>
+        </div>
+
+        <div class="matrix-preset-row" aria-label="Matrix and table presets">
+          @for (preset of matrixTablePresets; track preset.id) {
+          <button type="button" [disabled]="!canUseTool(preset.mode)" (click)="applyMatrixTablePreset(preset)">
+            {{ preset.label }}
+          </button>
+          }
+        </div>
+
+        <div class="graph-grid-fields">
+          <label class="graph-field">
+            <span>Rows</span>
+            <input type="number" min="1" max="8" [value]="matrix.rows" (input)="setMatrixTableRows($event)" />
+          </label>
+          <label class="graph-field">
+            <span>Columns</span>
+            <input type="number" min="1" max="8" [value]="matrix.columns" (input)="setMatrixTableColumns($event)" />
+          </label>
+          <label class="graph-field">
+            <span>Width</span>
+            <input type="number" min="120" [value]="matrix.width" (input)="updateMatrixTableNumber('width', $event)" />
+          </label>
+          <label class="graph-field">
+            <span>Height</span>
+            <input type="number" min="80" [value]="matrix.height" (input)="updateMatrixTableNumber('height', $event)" />
+          </label>
+          <label class="graph-field">
+            <span>Text size</span>
+            <input type="number" min="10" max="72" [value]="matrix.fontSize" (input)="updateMatrixTableNumber('fontSize', $event)" />
+          </label>
+          @if (matrix.mode === 'matrix') {
+          <label class="graph-field">
+            <span>Brackets</span>
+            <select [value]="matrix.bracketStyle" (change)="setMatrixBracketStyle($event)">
+              <option value="bracket">Bracket</option>
+              <option value="parentheses">Parentheses</option>
+              <option value="determinant">Determinant</option>
+              <option value="none">None</option>
+            </select>
+          </label>
+          <label class="graph-field">
+            <span>Augment</span>
+            <select [value]="matrix.augmentedColumn ?? ''" (change)="setMatrixAugmentedColumn($event)">
+              <option value="">None</option>
+              @for (column of matrixAugmentedColumnOptions(matrix.columns); track column) {
+              <option [value]="column">Before {{ column + 1 }}</option>
+              }
+            </select>
+          </label>
+          }
+        </div>
+
+        <div class="matrix-cell-grid" [style.gridTemplateColumns]="matrixTableGridTemplate(matrix.columns)" aria-label="Matrix and table cells">
+          @for (row of matrix.cells; track $index; let rowIndex = $index) {
+          @for (cell of row; track $index; let columnIndex = $index) {
+          <input class="matrix-cell-input" type="text" [value]="cell"
+            [attr.aria-label]="'Cell ' + (rowIndex + 1) + ', ' + (columnIndex + 1)"
+            (input)="updateMatrixTableCell(rowIndex, columnIndex, $event)" />
+          }
+          }
+        </div>
+
+        <div class="matrix-table-options">
+          <label><input type="checkbox" [checked]="matrix.fillEnabled" (change)="updateMatrixTableBoolean('fillEnabled', $event)" /> Fill</label>
+          <label><input type="checkbox" [checked]="matrix.showBorders" (change)="updateMatrixTableBoolean('showBorders', $event)" /> Borders</label>
+          @if (matrix.mode === 'table') {
+          <label><input type="checkbox" [checked]="matrix.headerRow" (change)="updateMatrixTableBoolean('headerRow', $event)" /> Header row</label>
+          }
+        </div>
+
+        <div class="math-align-row" aria-label="Matrix and table text alignment">
+          <span>Align</span>
+          <div>
+            @for (alignment of textAlignmentOptions; track alignment) {
+            <button type="button" [class.active]="matrix.align === alignment"
+              [attr.aria-pressed]="matrix.align === alignment" (click)="setMatrixTableAlignment(alignment)">
+              {{ alignment }}
+            </button>
+            }
+          </div>
+        </div>
+
+        <div class="matrix-color-grid">
+          <label class="graph-field color">
+            <span>Text</span>
+            <input type="color" [value]="matrix.textColor" (input)="updateMatrixTableColor('textColor', $event)" />
+          </label>
+          <label class="graph-field color">
+            <span>Stroke</span>
+            <input type="color" [value]="matrix.strokeColor" (input)="updateMatrixTableColor('strokeColor', $event)" />
+          </label>
+          <label class="graph-field color">
+            <span>Fill</span>
+            <input type="color" [value]="matrix.fillColor" (input)="updateMatrixTableColor('fillColor', $event)" />
+          </label>
+          <label class="graph-field color">
+            <span>Border</span>
+            <input type="color" [value]="matrix.borderColor" (input)="updateMatrixTableColor('borderColor', $event)" />
+          </label>
+        </div>
+
+        @if (matrix.error) {
+        <p class="math-error" role="alert">{{ matrix.error }}</p>
+        }
+
+        <div class="math-tools-actions">
+          <button type="button" (click)="cancelMatrixTableDraft()">Cancel</button>
+          <button class="primary" type="button" [disabled]="!canUseTool(matrix.mode)" (click)="commitMatrixTableDraft()">
+            {{ matrixTableActionLabel() }}
+          </button>
+        </div>
+        }
+      </section>
+      }
     </div>
   </aside>
   }
@@ -585,6 +863,35 @@
         <span class="page-empty-state">No matching pages</span>
         }
       </div>
+      @if (presentationModeEnabled()) {
+      <div class="presentation-controls" aria-label="Presentation controls">
+        <button class="presentation-control" type="button" title="Previous page" aria-label="Previous page"
+          [disabled]="!hasPreviousPage()" (click)="previousPresentationPage()">Prev</button>
+        <span class="presentation-page-count">{{ presentationPageLabel() }}</span>
+        <button class="presentation-control" type="button" title="Next page" aria-label="Next page"
+          [disabled]="!hasNextPage()" (click)="nextPresentationPage()">Next</button>
+        <button class="presentation-control emphasis" [class.active]="activeTool() === 'laser'" type="button"
+          title="Laser pointer" aria-label="Laser pointer" [disabled]="!canUseTool('laser')" (click)="presentationSelectLaser()">
+          Laser
+        </button>
+        @if (!readOnly()) {
+        <button class="presentation-control" [class.active]="activeTool() === 'pen' && activePenStyle() !== 'marker'" type="button"
+          title="Pen" aria-label="Pen" [disabled]="!canUseTool('pen') || !presentationEditEnabled()" (click)="presentationSelectPen('solid')">
+          Pen
+        </button>
+        <button class="presentation-control" [class.active]="activeTool() === 'pen' && activePenStyle() === 'marker'" type="button"
+          title="Highlighter" aria-label="Highlighter" [disabled]="!canUseTool('pen') || !presentationEditEnabled()" (click)="presentationSelectPen('marker')">
+          Mark
+        </button>
+        <button class="presentation-control" [class.active]="presentationEditEnabled()" type="button"
+          [attr.aria-pressed]="presentationEditEnabled()" (click)="togglePresentationEditMode()">
+          {{ presentationEditEnabled() ? 'Edit on' : 'Edit off' }}
+        </button>
+        }
+        <button class="presentation-control exit" type="button" title="Exit presentation mode" aria-label="Exit presentation mode"
+          (click)="exitPresentationMode()">Exit</button>
+      </div>
+      }
       <div class="page-tools">
         <input
           class="page-search-input"
@@ -873,6 +1180,8 @@
           (click)="convertSelectedTextToEquation()">Convert to equation</button>
         <button type="button" role="menuitem" [disabled]="!canEditSelectedGraph()"
           (click)="editSelectedGraph()">Edit graph</button>
+        <button type="button" role="menuitem" [disabled]="!canEditSelectedMatrixTable()"
+          (click)="editSelectedMatrixTable()">Edit matrix/table</button>
         <button type="button" role="menuitem" (click)="groupSelected()">Group</button>
         <button type="button" role="menuitem" (click)="ungroupSelected()">Ungroup</button>
         <button type="button" role="menuitem" (click)="duplicateSelected()">Duplicate</button>

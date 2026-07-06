@@ -36,6 +36,7 @@
 }
 
 .dashboard-heading a,
+.batch-actions .button,
 .empty-state a,
 .empty-state button {
   border: 1px solid var(--accent-border);
@@ -120,6 +121,19 @@
   font-size: 25px;
 }
 
+.panel-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
 .eyebrow {
   color: var(--accent);
   font-size: 12px;
@@ -135,6 +149,7 @@
 
 .enrolled-row {
   padding: 14px;
+  flex-wrap: wrap;
 }
 
 .batch-main {
@@ -205,9 +220,47 @@
   flex: 0 0 auto;
 }
 
+.batch-actions .button {
+  min-height: 40px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.waiting-button {
+  border-color: rgb(255 209 80 / 0.5);
+  background: rgb(255 209 80 / 0.16);
+  color: #7b5a00;
+}
+
 .batch-actions button:disabled {
   cursor: wait;
   opacity: .64;
+}
+
+.session-pill.status-live {
+  border-color: rgb(255 151 96 / 0.45);
+  background: rgb(255 151 96 / 0.15);
+  color: #b55321;
+}
+
+.session-pill.status-scheduled {
+  border-color: rgb(69 139 115 / 0.36);
+  background: rgb(69 139 115 / 0.12);
+  color: #2d6a56;
+}
+
+.session-pill.status-error {
+  border-color: rgb(242 96 118 / 0.32);
+  background: rgb(242 96 118 / 0.1);
+  color: #a12f43;
+}
+
+.batch-session-error {
+  flex: 1 0 100%;
+  margin: 0;
+  color: #F26076;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .empty-state {

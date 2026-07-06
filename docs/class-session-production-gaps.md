@@ -350,9 +350,16 @@ Priority items:
 - **Done**: ~~open Math tools in a draggable popover. Done/preserved.~~
 - **Done**: ~~support equation, templates, and snippets first. Done: equation update flow, expanded snippets, and editable starter templates are wired.~~
 - **Done**: ~~make eraser behavior production-grade, not only element-wise deletion. Done: partial, stroke, and area eraser modes are available.~~
+- **Done**: ~~add a production pen dropdown with premium writing styles. Done 2026-07-06: the Pen tool has its own dropdown for solid, dashed, dotted, marker, pencil, and calligraphy strokes, plus stroke width, opacity, smoothing, prompt-aligned `penStyle` / `pressureEnabled` stroke metadata, pressure-sensitive input where supported, and a style-aware brush preview.~~
+- **Done**: ~~add Pen Auto Close controls for near-closed loops. Done 2026-07-06: Pen settings include an Auto close toggle, Tight/Normal/Loose sensitivity, helper text, explicit closed/open state for new strokes, and a canvas snap preview when the current stroke is close enough to close.~~
+- **Done**: ~~add Presentation / Teach Mode for focused live instruction. Done 2026-07-06: the whiteboard menu enters a local presentation mode that hides the full toolbar, keeps compact page controls visible, emphasizes the laser pointer, offers quick pen/highlighter actions with an edit toggle, exits with Escape, and preserves the existing canvas whiteboard sharing path.~~
 - **Done**: ~~make closed-shape fill and fill-color updates reliable. Done: selected style sync lets teachers update fill/stroke color after selection; existing closed-stroke fill detection is preserved.~~
 - **Done**: ~~add color picker beyond predefined colors. Done: custom color input and recent colors are available for stroke, fill, and equation color.~~
 - **Done**: ~~preserve undo/redo, delete, escape deselect, zoom, copy/paste/duplicate shortcuts. Done/preserved, with arrow-key nudging added.~~
+
+Verification:
+
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed for the pen dropdown, Pen Auto Close, and Presentation Mode pass.~~
 
 ### P1: Whiteboard Math-Friendly Templates
 
@@ -390,6 +397,33 @@ Priority items:
 - **Done**: ~~convert text to equation. Done: selected text labels can become rendered equations while preserving position, approximate size, color, fill, alignment, and undo support.~~
 - **Done**: ~~equation alignment. Done: context menu actions support text alignment, selected-object left/center/right alignment, and vertical distribution.~~
 - **Done**: ~~keyboard safety while editing. Done: global board shortcuts do not fire while text or equation inputs are focused.~~
+
+### P1: Whiteboard Matrix And Table Editor
+
+The 2026-07-06 matrix/table pass completed the editable structured-content workflow below; keep this section as a regression checklist.
+
+Status: **Done**. Every checklist item below is fully struck through, so the Done note is part of the completed item.
+
+Priority items:
+
+- **Done**: ~~canvas-native matrix objects. Done: matrix elements are selectable, movable, resizable, duplicable, deletable, undoable, exportable, persistable, and synced through the existing whiteboard command path.~~
+- **Done**: ~~canvas-native table objects. Done: table elements support editable cells, rows, columns, header row state, borders, fills, colors, alignment, and existing object transforms.~~
+- **Done**: ~~common matrix presets. Done: 2 x 2, 3 x 3, row vector, column vector, augmented matrix, and determinant presets are available in Math tools.~~
+- **Done**: ~~cell editing workflow. Done: the Matrix/Table Math tools panel supports direct cell editing, dimensions, text size, colors, border visibility, fill, bracket style, augmented-column selection, Insert, and Update.~~
+- **Done**: ~~selected object edit flow. Done: double-click and context-menu edit load an existing matrix/table back into the editor.~~
+- **Done**: ~~export and sharing compatibility. Done: matrix/table objects render on canvas, so they appear in PNG/PDF export and whiteboard-as-video sharing.~~
+- **Done**: ~~student whiteboard-control compatibility. Done: granted students can create/edit matrix/table objects under annotate/current-page-edit permissions while unauthorized students stay blocked.~~
+
+Verification:
+
+- Contracts build passed: `npm run build --workspace @native-sfu/contracts`.
+- Frontend build passed: `npm run build --workspace @native-sfu/frontend`.
+- `git diff --check` passed.
+
+Intentional limits:
+
+- Cell editing is panel-based rather than inline-cell editing on the canvas.
+- Hybrid PDF export can emit matrix/table content as vector/text primitives, but exported content remains a whiteboard object representation rather than selectable spreadsheet cells.
 
 ### P1: Whiteboard Graphing And Visualization
 
@@ -462,11 +496,11 @@ Priority items:
 
 - **Done**: ~~PDF import. Done: PDF files render client-side through the existing pdf.js path into ordered annotatable whiteboard pages, with size and page-count limits plus password/corrupt-file errors.~~
 - **Done**: ~~image import. Done: PNG, JPEG, and WebP files can be imported as movable image objects or as non-selectable page backgrounds.~~
-- **Done**: ~~slide-image import. Done: exported slide images can be multi-selected and imported in order as separate annotatable pages; native PPT/PPTX parsing remains intentionally out of scope.~~
+- **Done**: ~~slide-image import. Done: exported slide images can be multi-selected and imported in order as separate annotatable pages; PPT/PPTX files now have a guarded import entry that validates type/size and directs teachers to the conversion-backed PDF/image import path when conversion is not configured.~~
 - **Done**: ~~annotation over imported pages. Done: imported PDF/image/slide pages render as page backgrounds, while pen, eraser, text, equations, graphs, geometry, diagrams, and images remain editable elements above them.~~
 - **Done**: ~~material page navigation. Done/preserved: imported pages use the existing page tabs/navigation and active-page whiteboard-as-video capture.~~
 - **Done**: ~~blank page interleaving. Done: teachers can add blank pages before or after the current page, plus the existing add-at-end flow.~~
-- **Done**: ~~annotated lesson export. Done: all whiteboard pages export as a raster PDF including imported page backgrounds, blank pages, templates, annotations, equations, graphs, geometry, and diagrams.~~
+- **Done**: ~~annotated lesson export. Done: all whiteboard pages export as PDF, with Hybrid PDF mode emitting supported text/vector annotations where feasible and keeping raster fallback for imported assets, complex content, and failures.~~
 - **Done**: ~~attach exported board notes. Done: teacher can attach generated board-note PDFs through the existing class-session materials upload/share flow so authorized students receive them in the materials panel.~~
 
 Verification:
@@ -476,10 +510,36 @@ Verification:
 
 Intentional Phase 6 limits:
 
-- Native PPT/PPTX parsing is not implemented; teachers should import exported slide images.
-- Exported whiteboard PDFs are raster page snapshots, not selectable/vector PDF text.
+- Native PPT/PPTX slide conversion is not implemented in-browser; the PPT/PPTX menu path validates files and clearly directs teachers to PDF-page or slide-image import until a server conversion service is configured.
+- Hybrid PDF export is partial by design: text, strokes, shapes, geometry basics, matrices, and tables can be emitted as PDF text/vector primitives; imported raster assets, imported PDF pages, complex equations, graphs, diagrams, and failures stay on the reliable raster fallback.
 - Imported page/background mutations are local whiteboard page state; students see them through whiteboard-as-video and attached notes, while element annotations keep the existing command path.
 - Remote image URLs are not imported directly, avoiding cross-origin canvas tainting; selected local files and server-downloaded materials remain the safe path.
+
+### P1: Whiteboard Advanced Import/Export Polish
+
+The 2026-07-06 import/export pass added guarded deck-import UX and hybrid PDF output quality improvements; keep this section as a regression checklist.
+
+Status: **Done** for implemented scope. Every completed checklist item below is fully struck through, so the Done note is part of the completed item.
+
+Priority items:
+
+- **Done**: ~~PPT/PPTX import entry. Done: the whiteboard menu exposes Import PPT/PPTX deck.~~
+- **Done**: ~~presentation validation. Done: PPT/PPTX files are type/extension checked and capped at 50 MB before conversion guidance is shown.~~
+- **Done**: ~~safe conversion behavior. Done: since there is no repo-native PPT renderer or backend conversion pipeline yet, the UI does not attempt unreliable browser conversion and instead guides teachers to import PDF pages or exported slide images.~~
+- **Done**: ~~PDF export mode selector. Done: teachers can choose Hybrid PDF or Fast raster PDF from the whiteboard menu.~~
+- **Done**: ~~hybrid PDF vector/text primitives. Done: text, strokes, basic shapes/arrows, geometry basics, matrices, and tables can export as PDF primitives where feasible.~~
+- **Done**: ~~raster fallback. Done: imported assets, imported PDF pages, slide-image backgrounds, complex equations, graphs, diagrams, and failures remain covered by exact raster PDF output.~~
+
+Verification:
+
+- Frontend build passed: `npm run build --workspace @native-sfu/frontend`.
+- `git diff --check` passed.
+
+Intentional limits:
+
+- Native deck-to-slide conversion remains future work and should be server-backed, not browser-only.
+- Hybrid PDF does not embed custom fonts and is intentionally partial.
+- Large converted decks must stay capped because current whiteboard memory stores imported backgrounds as data URLs.
 
 ### P1: Whiteboard Academic Session Memory
 
@@ -514,6 +574,24 @@ Intentional Phase 8 limits:
 - Whiteboard memory stores bounded full-board snapshots/checkpoints, not a durable per-operation edit log.
 - Search is title/tag based for saved pages; deeper full-text note search remains future work.
 - Students can read authorized saved board state through class-session access rules, but teacher/admin owns mutation and restore operations.
+
+### P1: Subject-Specific Whiteboard Templates
+
+Status: **Done** for implemented scope. Every completed checklist item below is fully struck through, so the Done note is part of the completed item.
+
+Priority items:
+
+- **Done**: ~~Subject Templates entry. Done: the teacher whiteboard menu opens the Subject Templates tab inside Math tools.~~
+- **Done**: ~~Subject categories. Done: algebra, calculus, geometry, physics, chemistry, economics, coding/CS, probability, statistics, and accounting categories are available.~~
+- **Done**: ~~Template search. Done: teachers can filter the selected subject category by template name, description, or tags.~~
+- **Done**: ~~New-page insertion. Done: subject templates can create a new tagged board page with the correct page background and generated canvas-native elements.~~
+- **Done**: ~~Current-page insertion. Done: subject templates can apply their page template and append guide elements without deleting existing annotations.~~
+- **Done**: ~~Movable-object insertion. Done: subject templates can be inserted as grouped text, shape, table, graph, and diagram elements for normal move/duplicate/delete workflows.~~
+- **Done**: ~~Export, memory, and sharing compatibility. Done: templates use existing whiteboard elements, so PNG/PDF export, saved whiteboard memory, checkpoints, restore, and whiteboard-as-video sharing continue on the existing paths.~~
+
+Verification:
+
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed for the subject template pass.~~
 
 ### P1: Observability, Audit, And Operator Runbooks
 

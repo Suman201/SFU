@@ -20,6 +20,7 @@ export const routes: Routes = [
   { path: 'register', loadComponent: () => import('./features/auth/register/register').then((route) => route.Register) },
   { path: 'teacher-dashboard', redirectTo: 'teacher/dashboard', pathMatch: 'full' },
   { path: 'teacher-dashboard/batches/:batchId', redirectTo: 'teacher/dashboard/batches/:batchId', pathMatch: 'full' },
+  { path: 'teacher-dashboard/batches/:batchId/live-settings', redirectTo: 'teacher/batches/:batchId/live-settings', pathMatch: 'full' },
   {
     path: 'teacher/dashboard',
     canActivate: [roleGuard],
@@ -42,7 +43,13 @@ export const routes: Routes = [
     path: 'teacher/live-settings',
     canActivate: [roleGuard],
     data: { role: 'teacher' },
-    loadComponent: () => import('./features/profile/teacher-profile/teacher-profile').then((route) => route.TeacherProfile)
+    loadComponent: () => import('./features/teacher-dashboard/live-settings/teacher-live-settings').then((route) => route.TeacherLiveSettings)
+  },
+  {
+    path: 'teacher/batches/:batchId/live-settings',
+    canActivate: [roleGuard],
+    data: { role: 'teacher' },
+    loadComponent: () => import('./features/teacher-dashboard/live-settings/teacher-live-settings').then((route) => route.TeacherLiveSettings)
   },
   {
     path: 'teachers/:teacherId',

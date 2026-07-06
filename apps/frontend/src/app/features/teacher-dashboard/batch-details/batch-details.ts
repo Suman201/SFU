@@ -32,6 +32,18 @@ interface MessageFormModel {
   message: string;
 }
 
+type BatchCalendarView = 'month' | 'week' | 'list';
+
+interface BatchCalendarDay {
+  date: Date;
+  key: string;
+  label: string;
+  weekday: string;
+  muted: boolean;
+  today: boolean;
+  sessions: TeacherSession[];
+}
+
 interface LiveSettingsForm {
   studentsJoinMuted: boolean;
   studentsJoinCameraOff: boolean;
@@ -244,6 +256,9 @@ export class BatchDetails {
   protected readonly messageTargetId = signal<string | null>(null);
   protected readonly actionNotice = signal('');
   protected readonly actionError = signal('');
+  protected readonly calendarView = signal<BatchCalendarView>('month');
+  protected readonly calendarCursor = signal(new Date());
+  protected readonly selectedCalendarSession = signal<TeacherSession | null>(null);
   protected readonly liveSettings = signal<BatchLiveClassSettingsResponse | null>(null);
   protected readonly liveSettingsForm = signal<LiveSettingsForm>({ ...EMPTY_LIVE_SETTINGS_FORM });
   protected readonly liveSettingsLoading = signal(false);
@@ -259,6 +274,21 @@ export class BatchDetails {
     const targetId = this.messageTargetId();
     return targetId ? this.students().find((student) => student.id === targetId) ?? null : null;
   });
+  protected readonly timezoneLabel = computed(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local timezone');
+  protected readonly calendarTitle = computed(() => {
+    const cursor = this.calendarCursor();
+    if (this.calendarView() === 'week') {
+      const start = this.startOfWeek(cursor);
+      const end = this.addDays(start, 6);
+      return `${this.shortMonthDay(start)} - ${this.shortMonthDay(end)}`;
+    }
+    if (this.calendarView() === 'list') {
+      return 'All planned sessions';
+    }
+    return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(cursor);
+  });
+  protected readonly calendarDays = computed(() => this.buildMonthDays(this.calendarCursor(), this.sessions()));
+  protected readonly calendarWeekDays = computed(() => this.buildWeekDays(this.calendarCursor(), this.sessions()));
   protected readonly hasLiveSettingsOverrides = computed(() => {
     const overrides = this.liveSettings()?.overrides;
     return Boolean(
@@ -516,6 +546,48 @@ export class BatchDetails {
     }).format(new Date(value));
   }
 
+  protected setCalendarView(view: BatchCalendarView): void {
+    this.calendarView.set(view);
+  }
+
+  protected moveCalendar(direction: -1 | 1): void {
+    const cursor = this.calendarCursor();
+    if (this.calendarView() === 'week') {
+      this.calendarCursor.set(this.addDays(cursor, direction * 7));
+      return;
+    }
+    this.calendarCursor.set(new Date(cursor.getFullYear(), cursor.getMonth() + direction, 1));
+  }
+
+  protected resetCalendarToday(): void {
+    this.calendarCursor.set(new Date());
+  }
+
+  protected focusCalendarSession(session: TeacherSession): void {
+    this.calendarCursor.set(new Date(session.scheduledAt));
+    this.selectedCalendarSession.set(session);
+  }
+
+  protected closeCalendarSession(): void {
+    this.selectedCalendarSession.set(null);
+  }
+
+  protected calendarStatusClass(session: TeacherSession): string {
+    return `calendar-event status-${this.calendarDisplayStatus(session)}`;
+  }
+
+  protected calendarSessionStatusLabel(session: TeacherSession): string {
+    const status = this.calendarDisplayStatus(session);
+    return status === 'rescheduled' ? 'Rescheduled' : this.statusLabel(status);
+  }
+
+  protected sessionTimeRange(session: TeacherSession): string {
+    const start = new Date(session.scheduledAt);
+    const end = new Date(start.getTime() + session.durationMinutes * 60_000);
+    const formatter = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+    return `${formatter.format(start)} - ${formatter.format(end)}`;
+  }
+
   protected trackSession(_index: number, session: TeacherSession): string {
     return session.id;
   }
@@ -661,6 +733,68 @@ export class BatchDetails {
       error: () => this.actionError.set(this.dashboard.error() || 'Unable to load batch live settings.'),
       complete: () => this.liveSettingsLoading.set(false)
     });
+  }
+
+  private buildMonthDays(cursor: Date, sessions: TeacherSession[]): BatchCalendarDay[] {
+    const monthStart = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const gridStart = this.startOfWeek(monthStart);
+    return Array.from({ length: 42 }, (_value, index) => {
+      const date = this.addDays(gridStart, index);
+      return this.calendarDay(date, sessions, date.getMonth() !== monthStart.getMonth());
+    });
+  }
+
+  private buildWeekDays(cursor: Date, sessions: TeacherSession[]): BatchCalendarDay[] {
+    const weekStart = this.startOfWeek(cursor);
+    return Array.from({ length: 7 }, (_value, index) => this.calendarDay(this.addDays(weekStart, index), sessions, false));
+  }
+
+  private calendarDay(date: Date, sessions: TeacherSession[], muted: boolean): BatchCalendarDay {
+    const key = this.dateKey(date);
+    return {
+      date,
+      key,
+      label: new Intl.DateTimeFormat(undefined, { day: 'numeric' }).format(date),
+      weekday: new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(date),
+      muted,
+      today: key === this.dateKey(new Date()),
+      sessions: sessions
+        .filter((session) => this.dateKey(new Date(session.scheduledAt)) === key)
+        .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime())
+    };
+  }
+
+  private startOfWeek(date: Date): Date {
+    const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    start.setDate(start.getDate() - start.getDay());
+    return start;
+  }
+
+  private addDays(date: Date, days: number): Date {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+  }
+
+  private dateKey(date: Date): string {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+
+  private shortMonthDay(date: Date): string {
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+  }
+
+  private calendarDisplayStatus(session: TeacherSession): TeacherSessionStatus | 'rescheduled' {
+    const plannedDate = this.plannedDateFromSessionId(session.id);
+    if (session.status === 'scheduled' && plannedDate && plannedDate !== this.dateKey(new Date(session.scheduledAt))) {
+      return 'rescheduled';
+    }
+    return session.status;
+  }
+
+  private plannedDateFromSessionId(sessionId: string): string | null {
+    const match = /-(\d{4}-\d{2}-\d{2})$/.exec(sessionId);
+    return match?.[1] ?? null;
   }
 
   private liveSettingsRequest(): LiveClassSettingsPatch {

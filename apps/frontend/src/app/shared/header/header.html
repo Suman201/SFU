@@ -19,6 +19,7 @@
     <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Home</a>
     @if (auth.role() === 'teacher') {
       <a routerLink="/teacher/dashboard" routerLinkActive="active">Dashboard</a>
+      <a routerLink="/teacher/live-settings" routerLinkActive="active">Live Settings</a>
       <a routerLink="/teacher/profile" routerLinkActive="active">Profile</a>
       <a routerLink="/sfu-forms" routerLinkActive="active">Class forms</a>
     } @else if (auth.role() === 'student') {

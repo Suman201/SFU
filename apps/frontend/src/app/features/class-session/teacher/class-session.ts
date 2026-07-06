@@ -334,6 +334,8 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   });
   protected readonly cameraPreviewReady = computed(() => Boolean(this.preflightPreviewStream()?.getVideoTracks().some((track) => track.readyState === 'live')));
   protected readonly microphonePreviewReady = computed(() => Boolean(this.preflightPreviewStream()?.getAudioTracks().some((track) => track.readyState === 'live')));
+  protected readonly cameraOptionalReady = computed(() => this.cameraPreviewReady() || this.videoInputDevices().length === 0);
+  protected readonly microphoneOptionalReady = computed(() => this.microphonePreviewReady() || this.audioInputDevices().length === 0);
   protected readonly preflightCanConfirm = computed(
     () =>
       Boolean(this.session()) &&
@@ -341,15 +343,22 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       !this.preflightPreparing() &&
       !this.preflightActionPending() &&
       this.preflightSocketReady() &&
-      this.cameraPreviewReady() &&
-      this.microphonePreviewReady()
+      this.cameraOptionalReady() &&
+      this.microphoneOptionalReady()
   );
   protected readonly socketReadinessLabel = computed(() => (this.preflightSocketReady() ? 'Socket connected' : 'Connecting socket'));
-  protected readonly cameraReadinessLabel = computed(() => (this.cameraPreviewReady() ? 'Camera ready' : 'Camera permission needed'));
-  protected readonly microphoneReadinessLabel = computed(() => (this.microphonePreviewReady() ? 'Microphone ready' : 'Microphone permission needed'));
+  protected readonly cameraReadinessLabel = computed(() => {
+    if (this.cameraPreviewReady()) return 'Camera ready';
+    return this.videoInputDevices().length ? 'Camera off or permission needed' : 'No camera detected';
+  });
+  protected readonly microphoneReadinessLabel = computed(() => {
+    if (this.microphonePreviewReady()) return 'Microphone ready';
+    return this.audioInputDevices().length ? 'Microphone off or permission needed' : 'No microphone detected';
+  });
   protected readonly deviceReadinessLabel = computed(() => {
     if (this.audioInputDevices().length && this.videoInputDevices().length) return 'Devices detected';
     if (this.preflightPreparing()) return 'Checking devices';
+    if (this.audioInputDevices().length || this.videoInputDevices().length) return 'Partial device setup';
     return 'Device list pending';
   });
   protected readonly mediaBusy = computed(() =>

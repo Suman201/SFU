@@ -41,14 +41,29 @@
                 }
               ],
               "outputHashing": "all"
+            },
+            "development": {
+              "optimization": {
+                "scripts": false,
+                "styles": false,
+                "fonts": false
+              },
+              "sourceMap": true,
+              "extractLicenses": false
             }
           }
         },
         "serve": {
-          "builder": "@angular-devkit/build-angular:dev-server",
-          "options": {
-            "buildTarget": "admin-portal:build"
-          }
+          "builder": "@angular/build:dev-server",
+          "configurations": {
+            "production": {
+              "buildTarget": "admin-portal:build:production"
+            },
+            "development": {
+              "buildTarget": "admin-portal:build:development"
+            }
+          },
+          "defaultConfiguration": "development"
         },
         "test": {
           "builder": "@angular-devkit/build-angular:karma",

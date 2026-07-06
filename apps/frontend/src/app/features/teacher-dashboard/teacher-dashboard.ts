@@ -33,6 +33,17 @@ interface DashboardMetric {
   tone: 'green' | 'rose' | 'coral' | 'amber';
 }
 
+interface SchedulePreviewItem {
+  key: string;
+  title: string;
+  dateTime: string;
+}
+
+interface NextBatchAction {
+  batch: TeacherBatch;
+  session: TeacherSession | null;
+}
+
 @Component({
   selector: 'sfu-teacher-dashboard',
   standalone: true,
@@ -66,10 +77,15 @@ export class TeacherDashboard {
   protected readonly upcomingSessions = this.dashboard.upcomingSessions;
   protected readonly recentRecordings = this.dashboard.recentRecordings;
   protected readonly messageIndicators = this.dashboard.messageIndicators;
+  protected readonly nextBatchActions = computed<NextBatchAction[]>(() =>
+    this.batches()
+      .filter((batch) => batch.status === 'ACTIVE')
+      .map((batch) => ({ batch, session: this.nextSession(batch) }))
+  );
   protected readonly metrics = computed<DashboardMetric[]>(() => [
     { label: 'Live now', value: `${this.liveSessions().length}`, tone: 'coral' },
     { label: "Today's sessions", value: `${this.todaySessions().length}`, tone: 'green' },
-    { label: 'Upcoming', value: `${this.upcomingSessions().length}`, tone: 'amber' },
+    { label: 'Upcoming batches', value: `${this.nextBatchActions().filter((item) => item.session?.status === 'scheduled').length}`, tone: 'amber' },
     { label: 'Students enrolled', value: `${this.dashboard.totalStudents()}`, tone: 'rose' },
     { label: 'Attendance alerts', value: `${this.dashboard.attendanceWarnings().length}`, tone: 'amber' },
     { label: 'Recordings ready', value: `${this.dashboard.recordingsReadyCount()}`, tone: 'green' }
@@ -95,6 +111,7 @@ export class TeacherDashboard {
   );
   protected readonly batchModel = signal<BatchFormModel>(this.initialBatchModel());
   protected readonly selectedSchedule = computed(() => this.scheduleFromModel(this.batchModel()));
+  protected readonly schedulePreview = computed(() => this.previewSchedule(this.batchModel()).slice(0, 12));
   protected readonly dateRangeLabel = computed(() => {
     const year = this.batchModel().year;
     return `01 Jan ${year} to 31 Dec ${year}`;
@@ -170,6 +187,20 @@ export class TeacherDashboard {
 
   protected sessionActionLabel(batch: TeacherBatch): string {
     return this.nextSession(batch)?.status === 'live' ? 'Open session' : 'Start session';
+  }
+
+  protected nextBatchStatusLabel(item: NextBatchAction): string {
+    if (!item.session) {
+      return 'No upcoming session';
+    }
+    return this.sessionStatusLabel(item.session);
+  }
+
+  protected nextBatchActionLabel(item: NextBatchAction): string {
+    if (!item.session) {
+      return 'Open calendar';
+    }
+    return item.session.status === 'live' ? 'Enter class' : 'Start session';
   }
 
   protected async runSessionAction(batch: TeacherBatch): Promise<void> {
@@ -323,6 +354,36 @@ export class TeacherDashboard {
     return this.weekdays
       .filter((weekday) => Object.prototype.hasOwnProperty.call(model.schedule, weekday.value))
       .map((weekday) => ({ dayOfWeek: weekday.value, startTime: model.schedule[weekday.value] ?? '' }));
+  }
+
+  private previewSchedule(model: BatchFormModel): SchedulePreviewItem[] {
+    const year = Number(model.year);
+    const schedule = this.scheduleFromModel(model).filter((item) => item.startTime);
+    if (!Number.isFinite(year) || year < 2000 || !schedule.length) {
+      return [];
+    }
+
+    const end = new Date(year, 11, 31, 23, 59, 59);
+    const preview = schedule.flatMap((item) => {
+      const weekday = this.weekdays.find((weekday) => weekday.value === item.dayOfWeek);
+      if (!weekday) {
+        return [];
+      }
+      const [hours = 0, minutes = 0] = item.startTime.split(':').map((part) => Number(part));
+      const first = new Date(year, 0, 1, hours, minutes, 0, 0);
+      first.setDate(first.getDate() + ((weekday.dayIndex - first.getDay() + 7) % 7));
+      const dates: SchedulePreviewItem[] = [];
+      for (let cursor = first; cursor <= end && dates.length < 16; cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 7, hours, minutes)) {
+        dates.push({
+          key: `${item.dayOfWeek}-${cursor.toISOString()}`,
+          title: weekday.label,
+          dateTime: this.formatDateTime(cursor.toISOString())
+        });
+      }
+      return dates;
+    });
+
+    return preview.sort((left, right) => new Date(left.key.split('-').slice(1).join('-')).getTime() - new Date(right.key.split('-').slice(1).join('-')).getTime());
   }
 
   private validateForm(model: BatchFormModel): string[] {

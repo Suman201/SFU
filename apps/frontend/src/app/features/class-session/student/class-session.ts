@@ -68,6 +68,8 @@ const ANNOTATE_WHITEBOARD_TOOLS: readonly WhiteboardTool[] = [
   'text',
   'equation',
   'graph',
+  'matrix',
+  'table',
   'segment',
   'angle',
   'circle',
@@ -1927,7 +1929,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
     if (permissionLevel === 'draw') {
       return elementType === 'stroke';
     }
-    return ['stroke', 'shape', 'text', 'equation', 'graph', 'geometry', 'diagram'].includes(elementType);
+    return ['stroke', 'shape', 'text', 'equation', 'graph', 'matrix', 'table', 'geometry', 'diagram'].includes(elementType);
   }
 
   private applyWhiteboardControlEvent(event: WhiteboardControlEvent): void {

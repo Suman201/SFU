@@ -386,7 +386,14 @@ describe('ClassSessionsService', () => {
   });
 
   it('returns current session metadata for an enrolled student', async () => {
-    const { service, classSessions, studentEnrollments } = createService();
+    const { service, batches, classSessions, studentEnrollments } = createService();
+    batches.findOne.mockReturnValue(
+      execResult({
+        ...batch,
+        startDate: new Date('2026-08-03T00:00:00.000Z'),
+        endDate: new Date('2026-08-03T23:59:59.000Z')
+      })
+    );
     classSessions.find.mockReturnValue({ sort: jest.fn(() => ({ exec: jest.fn(async () => []) })) });
     studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(true);
 
@@ -1194,6 +1201,10 @@ describe('ClassSessionsService', () => {
 
   function createService(): {
     service: ClassSessionsService;
+    batches: {
+      findOne: jest.Mock;
+      find: jest.Mock;
+    };
     classSessions: {
       findById: jest.Mock;
       exists: jest.Mock;
@@ -1471,6 +1482,7 @@ describe('ClassSessionsService', () => {
         auditLogs as never,
         metrics as never
       ),
+      batches,
       classSessions,
       attendanceSnapshots,
       materials,

@@ -17,6 +17,7 @@
         @if (nextSession(); as next) {
           <button class="primary" type="button" (click)="startSession(next)">Start next session</button>
         }
+        <a class="button" [routerLink]="['/teacher/batches', batch.id, 'live-settings']">Live Settings</a>
         <a class="button" routerLink="/teacher/dashboard">All batches</a>
       </div>
     </section>
@@ -75,6 +76,153 @@
       </div>
     </section>
 
+    <section class="panel calendar-panel">
+      <header>
+        <div>
+          <p class="eyebrow">Calendar</p>
+          <h2>Session schedule</h2>
+        </div>
+        <div class="calendar-actions">
+          <div class="calendar-tabs" aria-label="Calendar view">
+            <button type="button" [class.active]="calendarView() === 'month'" (click)="setCalendarView('month')">Month</button>
+            <button type="button" [class.active]="calendarView() === 'week'" (click)="setCalendarView('week')">Week</button>
+            <button type="button" [class.active]="calendarView() === 'list'" (click)="setCalendarView('list')">List</button>
+          </div>
+          <button class="button" type="button" (click)="resetCalendarToday()">Today</button>
+        </div>
+      </header>
+
+      <div class="calendar-toolbar">
+        <button type="button" class="table-action" [disabled]="calendarView() === 'list'" (click)="moveCalendar(-1)">Previous</button>
+        <div>
+          <strong>{{ calendarTitle() }}</strong>
+          <span>{{ timezoneLabel() }}</span>
+        </div>
+        <button type="button" class="table-action" [disabled]="calendarView() === 'list'" (click)="moveCalendar(1)">Next</button>
+      </div>
+
+      <div class="calendar-legend" aria-label="Session statuses">
+        <span class="status-scheduled">Scheduled</span>
+        <span class="status-rescheduled">Rescheduled</span>
+        <span class="status-live">Live</span>
+        <span class="status-completed">Completed</span>
+        <span class="status-cancelled">Cancelled</span>
+      </div>
+
+      @if (calendarView() === 'month') {
+        <div class="calendar-month" aria-label="Month calendar">
+          @for (weekday of ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; track weekday) {
+            <strong class="weekday-head">{{ weekday }}</strong>
+          }
+          @for (day of calendarDays(); track day.key) {
+            <article class="calendar-day" [class.muted]="day.muted" [class.today]="day.today">
+              <span class="day-number">{{ day.label }}</span>
+              <div class="day-events">
+                @for (session of day.sessions.slice(0, 3); track session.id) {
+                  <button type="button" [class]="calendarStatusClass(session)" (click)="focusCalendarSession(session)">
+                    <span>{{ sessionTimeRange(session) }}</span>
+                    <strong>{{ session.title }}</strong>
+                  </button>
+                }
+                @if (day.sessions.length > 3) {
+                  <span class="more-events">+{{ day.sessions.length - 3 }} more</span>
+                }
+              </div>
+            </article>
+          }
+        </div>
+      } @else if (calendarView() === 'week') {
+        <div class="calendar-week" aria-label="Week calendar">
+          @for (day of calendarWeekDays(); track day.key) {
+            <article class="week-day" [class.today]="day.today">
+              <header>
+                <strong>{{ day.weekday }}</strong>
+                <span>{{ formatDate(day.date.toISOString()) }}</span>
+              </header>
+              <div class="week-events">
+                @for (session of day.sessions; track session.id) {
+                  <button type="button" [class]="calendarStatusClass(session)" (click)="focusCalendarSession(session)">
+                    <span>{{ sessionTimeRange(session) }}</span>
+                    <strong>{{ session.title }}</strong>
+                  </button>
+                } @empty {
+                  <span class="empty-day">No sessions</span>
+                }
+              </div>
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="calendar-list" aria-label="Session list">
+          @for (session of sessions(); track session.id) {
+            <button type="button" class="calendar-list-row" (click)="focusCalendarSession(session)">
+              <span
+                class="status-pill"
+                [class.live]="session.status === 'live'"
+                [class.completed]="session.status === 'completed'"
+                [class.status-rescheduled]="calendarSessionStatusLabel(session) === 'Rescheduled'"
+              >
+                {{ calendarSessionStatusLabel(session) }}
+              </span>
+              <strong>{{ session.title }}</strong>
+              <span>{{ formatDateTime(session.scheduledAt) }}</span>
+              <span>{{ session.durationMinutes }} min</span>
+            </button>
+          } @empty {
+            <div class="empty-state compact">
+              <h3>No sessions planned</h3>
+              <p>Sessions will appear once a weekly schedule is available.</p>
+            </div>
+          }
+        </div>
+      }
+
+      @if (selectedCalendarSession(); as selectedSession) {
+        <aside class="calendar-detail" aria-label="Session details">
+          <header>
+            <div>
+              <p class="eyebrow">Session details</p>
+              <h3>{{ selectedSession.title }}</h3>
+            </div>
+            <button class="icon-button" type="button" aria-label="Close session details" (click)="closeCalendarSession()">×</button>
+          </header>
+          <div class="calendar-detail-grid">
+            <div>
+              <span>Status</span>
+              <strong>{{ calendarSessionStatusLabel(selectedSession) }}</strong>
+            </div>
+            <div>
+              <span>Scheduled</span>
+              <strong>{{ formatDateTime(selectedSession.scheduledAt) }}</strong>
+            </div>
+            <div>
+              <span>Duration</span>
+              <strong>{{ selectedSession.durationMinutes }} minutes</strong>
+            </div>
+            <div>
+              <span>Session</span>
+              <strong>#{{ selectedSession.sessionNumber }}</strong>
+            </div>
+          </div>
+          <footer>
+            @if (selectedSession.status === 'scheduled') {
+              <button class="primary" type="button" [disabled]="sessionActionLoadingId() === selectedSession.id" (click)="startSession(selectedSession)">
+                {{ sessionActionLoadingId() === selectedSession.id ? 'Starting...' : 'Start session' }}
+              </button>
+              <button class="button" type="button" (click)="rescheduleSession(selectedSession)">Reschedule</button>
+            }
+            @if (selectedSession.status === 'live') {
+              <button class="primary" type="button" (click)="openSession(selectedSession)">Open live class</button>
+              <button class="button" type="button" [disabled]="sessionActionLoadingId() === selectedSession.id" (click)="completeSession(selectedSession)">End session</button>
+            }
+            @if (selectedSession.status === 'completed') {
+              <button class="button" type="button" (click)="openSession(selectedSession)">Review class</button>
+            }
+          </footer>
+        </aside>
+      }
+    </section>
+
     <section class="panel live-settings-panel">
       <header>
         <div>
@@ -83,6 +231,7 @@
         </div>
         <div class="live-settings-actions">
           <a class="button" routerLink="/teacher/live-settings">Global defaults</a>
+          <a class="button" [routerLink]="['/teacher/batches', batch.id, 'live-settings']">Open dedicated editor</a>
           @if (hasLiveSettingsOverrides()) {
             <span class="progress-label">Custom overrides active</span>
           } @else {

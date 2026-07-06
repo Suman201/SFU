@@ -59,6 +59,8 @@
   <sfu-whiteboard
     [cursors]="studentCursors()"
     [readOnly]="!sessionLive() || ending()"
+    [allowPresentationMode]="true"
+    [allowSubjectTemplates]="true"
     [showEndSession]="false"
     (commandCommitted)="handleTeacherWhiteboardCommand($event)"
     (cursorMoved)="handleTeacherWhiteboardCursor($event)"
@@ -92,140 +94,11 @@
             aria-controls="teacher-media-actions"
             title="Media controls"
             aria-label="Open media controls"
-            (click)="toggleMediaMenu()"
+            aria-haspopup="menu"
+            (click)="$event.stopPropagation(); toggleMediaMenu()"
           >
             <span aria-hidden="true"></span>
           </button>
-          @if (mediaMenuOpen()) {
-            <button class="media-menu-backdrop" type="button" aria-label="Close media controls menu" (click)="closeMediaMenu()"></button>
-            <div id="teacher-media-actions" class="media-quick-menu" role="menu" aria-label="Teacher media actions">
-              <span class="media-menu-group-label">Media</span>
-              <button type="button" role="menuitem" class="media-menu-item device-settings" (click)="openMediaDrawer('devices')">
-                <span class="media-menu-icon device-icon" aria-hidden="true"></span>
-                <span>Device settings</span>
-              </button>
-              <button type="button" role="menuitem" class="media-menu-item class-controls-menu" (click)="openMediaDrawer('controls')">
-                <span class="media-menu-icon attention-menu-icon" aria-hidden="true"></span>
-                <span>Class status</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                class="media-menu-item share-screen"
-                [class.active]="screenSharing()"
-                [disabled]="!roomJoined() || mediaBusy()"
-                (click)="closeMediaMenu(); toggleScreenShare()"
-              >
-                <span class="media-menu-icon screen-menu-icon" aria-hidden="true"></span>
-                @if (screenSharing()) {
-                  <span>Stop screen share</span>
-                } @else if (whiteboardSharing()) {
-                  <span>Switch to screen</span>
-                } @else {
-                  <span>Share screen</span>
-                }
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                class="media-menu-item share-whiteboard"
-                [class.active]="whiteboardSharing()"
-                [disabled]="!roomJoined() || mediaBusy() || (!whiteboardSharing() && !whiteboardSharingEnabled())"
-                (click)="closeMediaMenu(); toggleWhiteboardShare()"
-              >
-                <span class="media-menu-icon board-menu-icon" aria-hidden="true"></span>
-                @if (whiteboardSharing()) {
-                  <span>Stop whiteboard</span>
-                } @else if (screenSharing()) {
-                  <span>Switch to whiteboard</span>
-                } @else {
-                  <span>Share whiteboard</span>
-                }
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                class="media-menu-item recording"
-                [class.active]="recordingActive()"
-                [disabled]="!sessionLive() || recordingActionPending() || (!recordingActive() && !teacherRecordingControlEnabled())"
-                (click)="closeMediaMenu(); toggleRecording()"
-              >
-                <span class="media-menu-icon recording-menu-icon" aria-hidden="true"></span>
-                <span>{{ recordingControlLabel() }}</span>
-              </button>
-              <span class="media-menu-divider" aria-hidden="true"></span>
-              <span class="media-menu-group-label">Moderation</span>
-              <button
-                type="button"
-                role="menuitem"
-                class="media-menu-item mute-all"
-                [disabled]="!sessionLive() || !roomJoined() || classControlsBusy() || !studentControlTargets().length"
-                (click)="closeMediaMenu(); muteAllStudents()"
-              >
-                <span class="media-menu-icon mic-menu-icon" aria-hidden="true"></span>
-                <span>{{ mutingAllStudents() ? 'Muting students' : 'Mute all students' }}</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                class="media-menu-item stop-cameras"
-                [disabled]="!sessionLive() || !roomJoined() || classControlsBusy() || !studentControlTargets().length"
-                (click)="closeMediaMenu(); stopAllStudentCameras()"
-              >
-                <span class="media-menu-icon camera-menu-icon" aria-hidden="true"></span>
-                <span>{{ stoppingAllStudentCameras() ? 'Stopping cameras' : 'Stop student cameras' }}</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                class="media-menu-item lock-class"
-                [class.active]="roomLocked()"
-                [disabled]="!sessionLive() || !roomJoined() || classControlsBusy()"
-                (click)="closeMediaMenu(); toggleClassLock()"
-              >
-                <span class="media-menu-icon lock-menu-icon" aria-hidden="true"></span>
-                @if (lockingClass()) {
-                  <span>Updating lock</span>
-                } @else if (roomLocked()) {
-                  <span>Unlock class</span>
-                } @else {
-                  <span>Lock class</span>
-                }
-              </button>
-              <span class="media-menu-divider" aria-hidden="true"></span>
-              <span class="media-menu-group-label">Session</span>
-              <button
-                type="button"
-                role="menuitem"
-                class="media-menu-item attendance"
-                [disabled]="!sessionLive() || classControlsBusy()"
-                (click)="closeMediaMenu(); downloadAttendance()"
-              >
-                <span class="media-menu-icon attendance-menu-icon" aria-hidden="true"></span>
-                <span>{{ downloadingAttendance() ? 'Exporting attendance' : 'Download attendance' }}</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                class="media-menu-item notes"
-                [disabled]="!sessionLive() || classControlsBusy() || !teacherCanUploadMaterials()"
-                (click)="closeMediaMenu(); attachWhiteboardNotes()"
-              >
-                <span class="media-menu-icon notes-menu-icon" aria-hidden="true"></span>
-                <span>{{ attachingWhiteboardNotes() ? 'Attaching notes' : 'Attach board notes' }}</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                class="media-menu-item end-class"
-                [disabled]="!sessionLive() || classControlsBusy()"
-                (click)="closeMediaMenu(); endSession()"
-              >
-                <span class="media-menu-icon end-menu-icon" aria-hidden="true"></span>
-                <span>{{ ending() ? 'Ending class' : 'End for everyone' }}</span>
-              </button>
-            </div>
-          }
         </div>
       </div>
 
@@ -791,6 +664,134 @@
     </section>
   </aside>
 </main>
+@if (mediaMenuOpen()) {
+  <section class="media-menu-layer" aria-label="Teacher tool menu">
+    <button class="media-menu-backdrop" type="button" aria-label="Close media controls menu" (click)="closeMediaMenu()"></button>
+    <div id="teacher-media-actions" class="media-quick-menu" role="menu" aria-label="Teacher media actions" (click)="$event.stopPropagation()">
+      <span class="media-menu-group-label">Media</span>
+      <button type="button" role="menuitem" class="media-menu-item device-settings" (click)="openMediaDrawer('devices')">
+        <span class="media-menu-icon device-icon" aria-hidden="true"></span>
+        <span>Device settings</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="media-menu-item share-screen"
+        [class.active]="screenSharing()"
+        [disabled]="!roomJoined() || mediaBusy()"
+        (click)="closeMediaMenu(); toggleScreenShare()"
+      >
+        <span class="media-menu-icon screen-menu-icon" aria-hidden="true"></span>
+        @if (screenSharing()) {
+          <span>Stop screen share</span>
+        } @else if (whiteboardSharing()) {
+          <span>Switch to screen</span>
+        } @else {
+          <span>Share screen</span>
+        }
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="media-menu-item share-whiteboard"
+        [class.active]="whiteboardSharing()"
+        [disabled]="!roomJoined() || mediaBusy() || (!whiteboardSharing() && !whiteboardSharingEnabled())"
+        (click)="closeMediaMenu(); toggleWhiteboardShare()"
+      >
+        <span class="media-menu-icon board-menu-icon" aria-hidden="true"></span>
+        @if (whiteboardSharing()) {
+          <span>Stop whiteboard</span>
+        } @else if (screenSharing()) {
+          <span>Switch to whiteboard</span>
+        } @else {
+          <span>Share whiteboard</span>
+        }
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="media-menu-item recording"
+        [class.active]="recordingActive()"
+        [disabled]="!sessionLive() || recordingActionPending() || (!recordingActive() && !teacherRecordingControlEnabled())"
+        (click)="closeMediaMenu(); toggleRecording()"
+      >
+        <span class="media-menu-icon recording-menu-icon" aria-hidden="true"></span>
+        <span>{{ recordingControlLabel() }}</span>
+      </button>
+      <span class="media-menu-divider" aria-hidden="true"></span>
+      <span class="media-menu-group-label">Moderation</span>
+      <button
+        type="button"
+        role="menuitem"
+        class="media-menu-item mute-all"
+        [disabled]="!sessionLive() || !roomJoined() || classControlsBusy() || !studentControlTargets().length"
+        (click)="closeMediaMenu(); muteAllStudents()"
+      >
+        <span class="media-menu-icon mic-menu-icon" aria-hidden="true"></span>
+        <span>{{ mutingAllStudents() ? 'Muting students' : 'Mute all students' }}</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="media-menu-item stop-cameras"
+        [disabled]="!sessionLive() || !roomJoined() || classControlsBusy() || !studentControlTargets().length"
+        (click)="closeMediaMenu(); stopAllStudentCameras()"
+      >
+        <span class="media-menu-icon camera-menu-icon" aria-hidden="true"></span>
+        <span>{{ stoppingAllStudentCameras() ? 'Stopping cameras' : 'Stop student cameras' }}</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="media-menu-item lock-class"
+        [class.active]="roomLocked()"
+        [disabled]="!sessionLive() || !roomJoined() || classControlsBusy()"
+        (click)="closeMediaMenu(); toggleClassLock()"
+      >
+        <span class="media-menu-icon lock-menu-icon" aria-hidden="true"></span>
+        @if (lockingClass()) {
+          <span>Updating lock</span>
+        } @else if (roomLocked()) {
+          <span>Unlock class</span>
+        } @else {
+          <span>Lock class</span>
+        }
+      </button>
+      <span class="media-menu-divider" aria-hidden="true"></span>
+      <span class="media-menu-group-label">Session</span>
+      <button
+        type="button"
+        role="menuitem"
+        class="media-menu-item attendance"
+        [disabled]="!sessionLive() || classControlsBusy()"
+        (click)="closeMediaMenu(); downloadAttendance()"
+      >
+        <span class="media-menu-icon attendance-menu-icon" aria-hidden="true"></span>
+        <span>{{ downloadingAttendance() ? 'Exporting attendance' : 'Download attendance' }}</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="media-menu-item notes"
+        [disabled]="!sessionLive() || classControlsBusy() || !teacherCanUploadMaterials()"
+        (click)="closeMediaMenu(); attachWhiteboardNotes()"
+      >
+        <span class="media-menu-icon notes-menu-icon" aria-hidden="true"></span>
+        <span>{{ attachingWhiteboardNotes() ? 'Attaching notes' : 'Attach board notes' }}</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="media-menu-item end-class"
+        [disabled]="!sessionLive() || classControlsBusy()"
+        (click)="closeMediaMenu(); endSession()"
+      >
+        <span class="media-menu-icon end-menu-icon" aria-hidden="true"></span>
+        <span>{{ ending() ? 'Ending class' : 'End for everyone' }}</span>
+      </button>
+    </div>
+  </section>
+}
 }
 <!-- <sfu-footer /> -->
 
@@ -891,15 +892,15 @@
               <i aria-hidden="true"></i>
               {{ socketReadinessLabel() }}
             </span>
-            <span [class.ready]="audioInputDevices().length > 0 && videoInputDevices().length > 0">
+            <span [class.ready]="cameraOptionalReady() && microphoneOptionalReady()">
               <i aria-hidden="true"></i>
               {{ deviceReadinessLabel() }}
             </span>
-            <span [class.ready]="cameraPreviewReady()">
+            <span [class.ready]="cameraOptionalReady()">
               <i aria-hidden="true"></i>
               {{ cameraReadinessLabel() }}
             </span>
-            <span [class.ready]="microphonePreviewReady()">
+            <span [class.ready]="microphoneOptionalReady()">
               <i aria-hidden="true"></i>
               {{ microphoneReadinessLabel() }}
             </span>

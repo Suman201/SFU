@@ -7,6 +7,7 @@
     </div>
 
     <div class="hero-actions">
+      <a class="button" routerLink="/teacher/live-settings">Live Settings</a>
       <a class="button" routerLink="/teacher/profile">Profile</a>
       <button class="button" type="button" (click)="refreshDashboard()">Refresh</button>
       <button class="primary" type="button" (click)="openCreateDrawer()">Add new batch</button>
@@ -91,38 +92,39 @@
     <article class="panel upcoming-panel">
       <header>
         <div>
-          <p class="eyebrow">Live and upcoming</p>
-          <h2>Next actions</h2>
+          <p class="eyebrow">Upcoming sessions</p>
+          <h2>Next class by batch</h2>
         </div>
+        <span class="panel-count">{{ nextBatchActions().length }} batches</span>
       </header>
 
       <div class="action-list">
-        @for (session of liveSessions(); track session.id) {
-          <article class="action-row live">
+        @for (item of nextBatchActions(); track item.batch.id) {
+          <article class="action-row batch-next" [class.live]="item.session?.status === 'live'" [class.empty]="!item.session">
             <div>
-              <span>Live now</span>
-              <strong>{{ session.title }}</strong>
-              <p>{{ sessionBatchName(session) }}</p>
+              <span>{{ nextBatchStatusLabel(item) }}</span>
+              <strong>{{ item.batch.name }}</strong>
+              @if (item.session) {
+                <p>{{ item.session.title }} · {{ formatDateTime(item.session.scheduledAt) }}</p>
+              } @else {
+                <p>No scheduled or live session is available.</p>
+              }
             </div>
-            <button class="table-action primary" type="button" (click)="enterSession(session)">Enter</button>
-          </article>
-        }
-        @for (session of upcomingSessions().slice(0, 4); track session.id) {
-          <article class="action-row">
-            <div>
-              <span>{{ formatDateTime(session.scheduledAt) }}</span>
-              <strong>{{ session.title }}</strong>
-              <p>{{ sessionBatchName(session) }}</p>
+            <div class="batch-next-meta">
+              <span>{{ item.batch.enrolledCount }}/{{ item.batch.capacity }} students</span>
+              @if (item.session) {
+                <button class="table-action primary" type="button" [disabled]="sessionActionDisabled(item.session)" (click)="runSessionAction(item.batch)">
+                  {{ sessionActionDisabled(item.session) ? 'Working...' : nextBatchActionLabel(item) }}
+                </button>
+              } @else {
+                <a class="table-action" [routerLink]="['/teacher/dashboard/batches', item.batch.id]">Open calendar</a>
+              }
             </div>
-            <button class="table-action primary" type="button" [disabled]="sessionActionDisabled(session)" (click)="startSession(session)">
-              {{ sessionActionDisabled(session) ? 'Starting...' : 'Start' }}
-            </button>
           </article>
-        }
-        @if (!liveSessions().length && !upcomingSessions().length) {
+        } @empty {
           <div class="empty-state compact">
-            <h3>No upcoming sessions</h3>
-            <p>Create a batch schedule to generate class sessions.</p>
+            <h3>No active batches</h3>
+            <p>Create or activate a batch to see its next class here.</p>
           </div>
         }
       </div>
@@ -406,6 +408,23 @@
             </div>
           }
         </fieldset>
+
+        <section class="schedule-preview" aria-label="Generated session preview">
+          <div>
+            <strong>Calendar preview</strong>
+            <span>{{ schedulePreview().length ? 'First planned dates before saving' : 'Select weekdays and times to preview sessions' }}</span>
+          </div>
+          @if (schedulePreview().length) {
+            <div class="preview-grid">
+              @for (item of schedulePreview(); track item.key) {
+                <article>
+                  <strong>{{ item.title }}</strong>
+                  <span>{{ item.dateTime }}</span>
+                </article>
+              }
+            </div>
+          }
+        </section>
       </div>
 
       <footer>

@@ -3,12 +3,12 @@ const rawTarget = process.env.SFU_BACKEND_ORIGIN?.trim();
 const target = normalizeTarget(rawTarget && rawTarget.length > 0 ? rawTarget : defaultTarget);
 
 module.exports = {
-  '/api': {
+  '/api/**': {
     target,
     changeOrigin: true,
     secure: false
   },
-  '/socket.io': {
+  '/socket.io/**': {
     target,
     changeOrigin: true,
     secure: false,

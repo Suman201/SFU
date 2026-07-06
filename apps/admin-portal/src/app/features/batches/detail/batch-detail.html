@@ -41,6 +41,142 @@
     </article>
   </section>
 
+  <section class="data-table-shell calendar-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Session calendar</h2>
+        <p>{{ item.sessions.length }} sessions · {{ timezoneLabel() }}</p>
+      </div>
+      <div class="calendar-actions">
+        <div class="calendar-tabs" aria-label="Calendar view">
+          <button type="button" [class.active]="calendarView() === 'month'" (click)="setCalendarView('month')">Month</button>
+          <button type="button" [class.active]="calendarView() === 'week'" (click)="setCalendarView('week')">Week</button>
+          <button type="button" [class.active]="calendarView() === 'list'" (click)="setCalendarView('list')">List</button>
+        </div>
+        <button class="table-action" type="button" (click)="resetCalendarToday()">Today</button>
+      </div>
+    </div>
+
+    <div class="calendar-toolbar">
+      <button type="button" class="table-action" [disabled]="calendarView() === 'list'" (click)="moveCalendar(-1)">Previous</button>
+      <strong>{{ calendarTitle() }}</strong>
+      <button type="button" class="table-action" [disabled]="calendarView() === 'list'" (click)="moveCalendar(1)">Next</button>
+    </div>
+
+    <div class="calendar-legend" aria-label="Session statuses">
+      <span class="status-scheduled">Scheduled</span>
+      <span class="status-rescheduled">Rescheduled</span>
+      <span class="status-live">Live</span>
+      <span class="status-completed">Completed</span>
+      <span class="status-cancelled">Cancelled</span>
+    </div>
+
+    @if (calendarView() === 'month') {
+      <div class="calendar-month" aria-label="Month calendar">
+        @for (weekday of ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; track weekday) {
+          <strong class="weekday-head">{{ weekday }}</strong>
+        }
+        @for (day of calendarDays(); track day.key) {
+          <article class="calendar-day" [class.muted]="day.muted" [class.today]="day.today">
+            <span class="day-number">{{ day.label }}</span>
+            <div class="day-events">
+              @for (session of day.sessions.slice(0, 3); track session.id) {
+                <button type="button" [class]="calendarStatusClass(session)" (click)="focusCalendarSession(session)">
+                  <span>{{ sessionTimeRange(session) }}</span>
+                  <strong>{{ session.title }}</strong>
+                </button>
+              }
+              @if (day.sessions.length > 3) {
+                <span class="more-events">+{{ day.sessions.length - 3 }} more</span>
+              }
+            </div>
+          </article>
+        }
+      </div>
+    } @else if (calendarView() === 'week') {
+      <div class="calendar-week" aria-label="Week calendar">
+        @for (day of calendarWeekDays(); track day.key) {
+          <article class="week-day" [class.today]="day.today">
+            <header>
+              <strong>{{ day.weekday }}</strong>
+              <span>{{ day.date | date: 'mediumDate' }}</span>
+            </header>
+            <div class="week-events">
+              @for (session of day.sessions; track session.id) {
+                <button type="button" [class]="calendarStatusClass(session)" (click)="focusCalendarSession(session)">
+                  <span>{{ sessionTimeRange(session) }}</span>
+                  <strong>{{ session.title }}</strong>
+                </button>
+              } @empty {
+                <span class="empty-day">No sessions</span>
+              }
+            </div>
+          </article>
+        }
+      </div>
+    } @else {
+      <div class="calendar-list" aria-label="Session list">
+        @for (session of item.sessions; track session.id) {
+          <button type="button" class="calendar-list-row" (click)="focusCalendarSession(session)">
+            <span class="data-pill status-{{ session.status }}" [class.status-rescheduled]="calendarSessionStatusLabel(session) === 'Rescheduled'">
+              {{ calendarSessionStatusLabel(session) }}
+            </span>
+            <strong>{{ session.title }}</strong>
+            <span>{{ session.scheduledAt | date: 'short' }}</span>
+            <span>{{ session.durationMinutes }} min</span>
+          </button>
+        } @empty {
+          <div class="empty-state">No sessions are planned.</div>
+        }
+      </div>
+    }
+
+    @if (selectedCalendarSession(); as selectedSession) {
+      <aside class="calendar-detail" aria-label="Session details">
+        <header>
+          <div>
+            <p class="eyebrow">Session details</p>
+            <h3>{{ selectedSession.title }}</h3>
+          </div>
+          <button class="table-action" type="button" aria-label="Close session details" (click)="closeCalendarSession()">Close</button>
+        </header>
+        <div class="calendar-detail-grid">
+          <div>
+            <span>Status</span>
+            <strong>{{ calendarSessionStatusLabel(selectedSession) }}</strong>
+          </div>
+          <div>
+            <span>Scheduled</span>
+            <strong>{{ selectedSession.scheduledAt | date: 'short' }}</strong>
+          </div>
+          <div>
+            <span>Duration</span>
+            <strong>{{ selectedSession.durationMinutes }} min</strong>
+          </div>
+          <div>
+            <span>Session</span>
+            <strong>#{{ selectedSession.sessionNumber }}</strong>
+          </div>
+        </div>
+        <footer>
+          @if (selectedSession.status !== 'scheduled') {
+            <a class="table-action primary" [routerLink]="['/class-sessions', selectedSession.id]">Open report</a>
+            <button
+              type="button"
+              class="table-action"
+              [disabled]="pendingAttendanceSessionId() === selectedSession.id"
+              (click)="downloadAttendance(selectedSession)"
+            >
+              {{ pendingAttendanceSessionId() === selectedSession.id ? 'Downloading...' : 'Attendance CSV' }}
+            </button>
+          } @else {
+            <span class="data-pill planned-pill">Planned session</span>
+          }
+        </footer>
+      </aside>
+    }
+  </section>
+
   <section class="data-table-shell edit-shell">
     <div class="data-table-toolbar">
       <div>
@@ -99,6 +235,22 @@
           </div>
         }
       </div>
+      <section class="schedule-preview" aria-label="Generated session preview">
+        <div>
+          <strong>Calendar preview</strong>
+          <span>{{ schedulePreview().length ? 'First planned dates before saving' : 'Add schedule rows to preview sessions' }}</span>
+        </div>
+        @if (schedulePreview().length) {
+          <div class="preview-grid">
+            @for (preview of schedulePreview(); track preview.key) {
+              <article>
+                <strong>{{ preview.title }}</strong>
+                <span>{{ preview.dateTime }}</span>
+              </article>
+            }
+          </div>
+        }
+      </section>
       <div class="form-actions">
         <button type="submit" class="table-action primary" [disabled]="saving()">{{ saving() ? 'Saving...' : 'Save changes' }}</button>
       </div>

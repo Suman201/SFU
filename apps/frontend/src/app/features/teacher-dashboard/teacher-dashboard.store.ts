@@ -326,9 +326,17 @@ export class TeacherDashboardStore {
   }
 
   nextSession(batch: TeacherBatch): TeacherSession | null {
+    const liveSession = [...batch.sessions]
+      .filter((session) => session.status === 'live')
+      .sort((left, right) => new Date(left.startedAt ?? left.scheduledAt).getTime() - new Date(right.startedAt ?? right.scheduledAt).getTime())[0];
+    if (liveSession) {
+      return liveSession;
+    }
+
+    const now = Date.now();
     return (
       [...batch.sessions]
-        .filter((session) => session.status === 'scheduled' || session.status === 'live')
+        .filter((session) => session.status === 'scheduled' && new Date(session.scheduledAt).getTime() >= now)
         .sort((left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime())[0] ?? null
     );
   }

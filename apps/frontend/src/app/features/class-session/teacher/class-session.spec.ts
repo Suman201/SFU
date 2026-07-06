@@ -180,6 +180,33 @@ describe('TeacherClassSession participant cards', () => {
     expect(classSessionsMock.startSession).toHaveBeenCalledOnceWith('session-1', 'batch-1');
   });
 
+  it('allows teacher preflight confirmation without a webcam', () => {
+    const component = fixture.componentInstance as unknown as {
+      session: { set(value: ClassroomPayload): void };
+      preflightOpen: { set(value: boolean): void };
+      preflightPreparing: { set(value: boolean): void };
+      preflightActionPending: { set(value: boolean): void };
+      preflightSocketReady: { set(value: boolean): void };
+      preflightCanConfirm: () => boolean;
+      cameraReadinessLabel: () => string;
+      confirmPreflight(): void;
+    };
+    component.session.set({ ...payload, status: 'scheduled' });
+    component.preflightOpen.set(true);
+    component.preflightPreparing.set(false);
+    component.preflightActionPending.set(false);
+    component.preflightSocketReady.set(true);
+    webrtcMock.devices.set({ audioInputs: [], videoInputs: [] });
+    webrtcMock.localStream.set(null);
+
+    expect(component.cameraReadinessLabel()).toBe('No camera detected');
+    expect(component.preflightCanConfirm()).toBeTrue();
+
+    component.confirmPreflight();
+
+    expect(classSessionsMock.startSession).toHaveBeenCalledOnceWith('session-1', 'batch-1');
+  });
+
   it('stops preview media when preflight is cancelled', async () => {
     const component = fixture.componentInstance as unknown as {
       cancelPreflight(): Promise<void>;
@@ -308,6 +335,43 @@ describe('TeacherClassSession participant cards', () => {
     component.openMediaDrawer('controls');
     expect(component.mediaDrawerOpen()).toBeTrue();
     expect(component.mediaDrawerMode()).toBe('controls');
+  });
+
+  it('renders teacher tool menu as an unclipped overlay with direct actions', () => {
+    const component = fixture.componentInstance as unknown as {
+      preflightOpen: { set(value: boolean): void };
+      mediaMenuOpen: { set(value: boolean): void } & (() => boolean);
+      mediaDrawerOpen: () => boolean;
+      mediaDrawerMode: () => 'devices' | 'controls';
+    };
+    component.preflightOpen.set(false);
+    component.mediaMenuOpen.set(true);
+
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement as HTMLElement;
+    const menuLayer = root.querySelector('.media-menu-layer');
+    const menu = root.querySelector('#teacher-media-actions');
+    expect(menuLayer).not.toBeNull();
+    expect(menu).not.toBeNull();
+    expect(menu?.closest('.participants-header-actions')).toBeNull();
+
+    const labels = Array.from(root.querySelectorAll('.media-menu-item')).map((item) => item.textContent?.replace(/\s+/g, ' ').trim());
+    expect(labels).toContain('Device settings');
+    expect(labels).toContain('Share screen');
+    expect(labels).toContain('Share whiteboard');
+    expect(labels).toContain('Mute all students');
+    expect(labels).toContain('Stop student cameras');
+    expect(labels).toContain('Lock class');
+    expect(labels).toContain('End for everyone');
+    expect(labels).not.toContain('Class status');
+
+    (root.querySelector('.media-menu-item.device-settings') as HTMLButtonElement).click();
+    fixture.detectChanges();
+
+    expect(component.mediaDrawerOpen()).toBeTrue();
+    expect(component.mediaDrawerMode()).toBe('devices');
+    expect(component.mediaMenuOpen()).toBeFalse();
   });
 
   it('renders moderation controls only for student participant cards', () => {
