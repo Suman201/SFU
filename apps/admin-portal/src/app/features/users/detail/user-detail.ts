@@ -5,6 +5,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import type { AdminUserDetail, AdminUserRole, AdminUserStatus, AdminUserUpdateRequest } from '@native-sfu/contracts';
 import { finalize } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
+import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 
 @Component({
   selector: 'sfu-admin-user-detail',
@@ -18,6 +19,7 @@ export class UserDetail implements OnInit {
   private readonly api = inject(AdminApiService);
   private readonly route = inject(ActivatedRoute);
   private readonly formBuilder = inject(FormBuilder);
+  private readonly confirmDialog = inject(ConfirmDialogService);
 
   protected readonly user = signal<AdminUserDetail | null>(null);
   protected readonly loading = signal(false);
@@ -74,9 +76,19 @@ export class UserDetail implements OnInit {
     this.runAction('activate');
   }
 
-  protected deactivate(): void {
+  protected async deactivate(): Promise<void> {
     const user = this.user();
-    if (!user || !confirm(`Deactivate ${user.name}? They will be signed out and blocked from logging in until reactivated.`)) {
+    if (!user) {
+      return;
+    }
+    const confirmed = await this.confirmDialog.confirm({
+      title: `Deactivate ${user.name}?`,
+      message: 'They will be signed out and blocked from logging in until reactivated.',
+      confirmLabel: 'Deactivate',
+      pendingLabel: 'Deactivating...',
+      variant: 'danger'
+    });
+    if (!confirmed) {
       return;
     }
     this.runAction('deactivate');

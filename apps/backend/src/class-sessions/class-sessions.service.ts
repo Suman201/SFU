@@ -21,23 +21,42 @@ import type {
   AdminClassSessionReportResponse,
   AdminClassSessionReportRow,
   AdminClassSessionReportSummary,
+  Assignment,
+  AssignmentAttachment,
+  AssignmentSubmissionSummary,
   ChatHistoryResponse,
   ChatAttachment,
+  ChatMessage,
   ChatMessageScope,
   ChatReadState,
   ChatThreadSummaryResponse,
+  ClassSessionReport,
+  ClassSessionPostClassQuestionThread,
+  ClassSessionPostClassThreadWorkflow,
+  ClassSessionPostClassWorkspace,
   ClassSessionMaterial,
   ClassSessionMaterialEvent,
   ClassSessionMaterialKind,
+  ClassSessionTimelineEvent,
+  ClassSessionTimelineCategory,
+  ClassSessionTimelineResponse,
   CreateWhiteboardMemoryCheckpointRequest,
   CreateClassSessionMaterialLinkRequest,
+  CreatePostClassAnnouncementRequest,
   ClassSessionLifecycleEvent,
   LiveClassSettings,
   PreviousWhiteboardMemoryListResponse,
   RestorePreviousWhiteboardMemoryRequest,
   RestoreWhiteboardMemoryVersionRequest,
+  UpdatePostClassQuestionStateRequest,
   Recording,
   SaveWhiteboardMemoryRequest,
+  SendPostClassQuestionRequest,
+  StudentClassAttendanceSummary,
+  StudentCompletedClassDetailResponse,
+  StudentCompletedClassSessionListItem,
+  StudentCompletedClassSessionListResponse,
+  StudentCompletedClassWhiteboardSummary,
   WhiteboardMemoryPage,
   WhiteboardMemoryPageSearchResponse,
   WhiteboardMemorySaveReason,
@@ -49,17 +68,24 @@ import type {
 } from '@native-sfu/contracts';
 import { Model, type AnyBulkWriteOperation } from 'mongoose';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { ClassSessionActivityService } from '../class-session-activity/class-session-activity.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import {
   BatchDocument,
   BatchMongoDocument,
   BatchScheduleDocument,
   BatchScheduleMongoDocument,
+  AssignmentDocument,
+  AssignmentMongoDocument,
+  AssignmentSubmissionDocument,
+  AssignmentSubmissionMongoDocument,
   ClassSessionDocument,
   ClassSessionAttendanceSnapshotDocument,
   ClassSessionAttendanceSnapshotMongoDocument,
   ClassSessionMaterialDocument,
   ClassSessionMaterialMongoDocument,
+  ClassSessionPostClassThreadStateDocument,
+  ClassSessionPostClassThreadStateMongoDocument,
   ClassSessionWhiteboardStateDocument,
   ClassSessionWhiteboardStateMongoDocument,
   ClassSessionWhiteboardVersionDocument,
@@ -105,6 +131,15 @@ const WHITEBOARD_MEMORY_MAX_BYTES = 1_500_000;
 const WHITEBOARD_MEMORY_MAX_PAGES = 80;
 const WHITEBOARD_MEMORY_MAX_ELEMENTS = 2_500;
 const WHITEBOARD_MEMORY_MAX_VERSIONS = 25;
+const ASSIGNMENT_SUBMISSION_STATUS_KEYS: Array<keyof AssignmentSubmissionSummary> = [
+  'assigned',
+  'viewed',
+  'submitted',
+  'late',
+  'reviewed',
+  'returned',
+  'completed'
+];
 
 export interface ClassroomParticipantPayload {
   id: string;
@@ -151,6 +186,13 @@ interface AttendanceRowsWithSource {
   source: AdminAttendanceSource;
 }
 
+interface StudentCompletedClassQuery {
+  page?: number | string;
+  limit?: number | string;
+  batchId?: string;
+  courseId?: string;
+}
+
 export interface ClassSessionMaterialUploadFile {
   originalname: string;
   mimetype: string;
@@ -175,10 +217,16 @@ export class ClassSessionsService {
     private readonly attendanceSnapshots: Model<ClassSessionAttendanceSnapshotMongoDocument>,
     @InjectModel(ClassSessionMaterialDocument.name)
     private readonly materials: Model<ClassSessionMaterialMongoDocument>,
+    @InjectModel(ClassSessionPostClassThreadStateDocument.name)
+    private readonly postClassThreadStates: Model<ClassSessionPostClassThreadStateMongoDocument>,
     @InjectModel(ClassSessionWhiteboardStateDocument.name)
     private readonly whiteboardStates: Model<ClassSessionWhiteboardStateMongoDocument>,
     @InjectModel(ClassSessionWhiteboardVersionDocument.name)
     private readonly whiteboardVersions: Model<ClassSessionWhiteboardVersionMongoDocument>,
+    @InjectModel(AssignmentDocument.name)
+    private readonly assignments: Model<AssignmentMongoDocument>,
+    @InjectModel(AssignmentSubmissionDocument.name)
+    private readonly assignmentSubmissions: Model<AssignmentSubmissionMongoDocument>,
     private readonly studentEnrollments: StudentEnrollmentsService,
     private readonly rooms: RoomsService,
     private readonly recordings: RecordingsService,
@@ -186,6 +234,7 @@ export class ClassSessionsService {
     private readonly config: ConfigService,
     @Optional() @InjectModel(UserDocument.name) private readonly users?: Model<UserMongoDocument>,
     @Optional() private readonly auditLogs?: AuditLogsService,
+    @Optional() private readonly activity?: ClassSessionActivityService,
     @Optional() private readonly metrics?: MetricsService
   ) {}
 
@@ -224,6 +273,286 @@ export class ClassSessionsService {
       throw new NotFoundException('Class session not found.');
     }
     return row;
+  }
+
+  async getClassSessionReport(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<ClassSessionReport> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCompletedClassSession(resolution);
+    this.assertCanManageBatch(resolution.batch, user);
+    const persisted = resolution.persisted;
+    if (!persisted) {
+      throw new NotFoundException('Completed class session not found.');
+    }
+    const teacherMap = await this.adminTeacherMap([persisted.teacherId]);
+    const teacher = teacherMap.get(persisted.teacherId);
+    const [attendance, timelineEvents, broadcastHistory, materials, recordings, whiteboard, assignments, qna] = await Promise.all([
+      this.adminAttendanceRowsForSession(persisted),
+      this.classSessionReportTimelineEvents(resolution, user),
+      persisted.roomId
+        ? this.rooms.getClassSessionChatHistory({
+            sessionId: resolution.planned.id,
+            batchId: resolution.batch.id,
+            roomId: persisted.roomId,
+            channelId: persisted.chatChannelId,
+            teacherId: resolution.batch.teacherId,
+            requesterUserId: user.sub,
+            requesterRole: this.isAdmin(user) ? 'admin' : 'teacher',
+            scope: 'broadcast',
+            limit: 100
+          })
+        : Promise.resolve({ messages: [] }),
+      this.classSessionReportMaterials(resolution),
+      this.recordings.listAuthorizedClassSessionRecordings(resolution.planned.id),
+      this.studentCompletedWhiteboardSummary(resolution, { includeUnpublished: true }),
+      this.classSessionReportAssignments(resolution.planned.id, resolution.batch.id),
+      persisted.roomId
+        ? this.rooms.getClassSessionPostClassTeacherChatSummary({
+            sessionId: resolution.planned.id,
+            batchId: resolution.batch.id,
+            roomId: persisted.roomId,
+            teacherId: resolution.batch.teacherId,
+            requesterUserId: user.sub
+          })
+        : Promise.resolve({ sessionId: resolution.planned.id, roomId: '', threads: [] })
+    ]);
+    return {
+      audience: this.isAdmin(user) ? 'admin' : 'teacher',
+      generatedAt: new Date().toISOString(),
+      session: {
+        sessionId: persisted.id,
+        batchId: resolution.batch.id,
+        batchName: resolution.batch.name,
+        ...(resolution.batch.courseId ? { courseId: resolution.batch.courseId } : {}),
+        ...(resolution.batch.courseName ? { courseName: resolution.batch.courseName } : {}),
+        teacherId: persisted.teacherId,
+        ...(teacher?.displayName || teacher?.name ? { teacherName: teacher.displayName ?? teacher.name } : {}),
+        ...(teacher?.email ? { teacherEmail: teacher.email } : {}),
+        title: persisted.title,
+        sessionNumber: persisted.sessionNumber,
+        scheduledAt: persisted.scheduledAt.toISOString(),
+        ...(persisted.startedAt ? { startedAt: persisted.startedAt.toISOString() } : {}),
+        ...(persisted.completedAt ? { completedAt: persisted.completedAt.toISOString() } : {}),
+        durationMinutes: persisted.durationMinutes,
+        status: 'completed',
+        ...(persisted.roomId ? { roomId: persisted.roomId } : {}),
+        ...(persisted.chatChannelId ? { chatChannelId: persisted.chatChannelId } : {}),
+        ...(persisted.whiteboardChannelId ? { whiteboardChannelId: persisted.whiteboardChannelId } : {})
+      },
+      attendance: this.classSessionReportAttendance(persisted, attendance),
+      participation: this.classSessionReportParticipation(timelineEvents),
+      broadcasts: this.classSessionReportBroadcasts(broadcastHistory.messages),
+      artifacts: {
+        recordings,
+        materials,
+        whiteboard
+      },
+      assignments,
+      qna: this.classSessionReportQna(qna),
+      incidents: this.classSessionReportIncidents(timelineEvents)
+    };
+  }
+
+  async exportClassSessionReportCsv(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<string> {
+    const report = await this.getClassSessionReport(sessionId, batchId, user);
+    return this.classSessionReportCsv(report);
+  }
+
+  async getPostClassWorkspace(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<ClassSessionPostClassWorkspace> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCompletedClassSession(resolution);
+    this.assertCanManageBatch(resolution.batch, user);
+    const persisted = resolution.persisted;
+    if (!persisted) {
+      throw new NotFoundException('Completed class session not found.');
+    }
+    const [report, qnaSummary, states, assignments] = await Promise.all([
+      this.getClassSessionReport(sessionId, batchId, user),
+      this.rooms.getClassSessionPostClassTeacherChatSummary({
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        roomId: persisted.roomId,
+        teacherId: resolution.batch.teacherId,
+        requesterUserId: user.sub
+      }),
+      this.postClassThreadStates.find({ sessionId: resolution.planned.id, batchId: resolution.batch.id }).exec(),
+      this.classSessionWorkspaceAssignments(resolution.planned.id, resolution.batch.id)
+    ]);
+    return {
+      generatedAt: new Date().toISOString(),
+      session: report.session,
+      report,
+      qna: {
+        threads: this.postClassQuestionThreads(qnaSummary, states, resolution)
+      },
+      materials: report.artifacts.materials,
+      recordings: report.artifacts.recordings,
+      whiteboard: report.artifacts.whiteboard,
+      assignments
+    };
+  }
+
+  async updatePostClassQuestionState(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    request: UpdatePostClassQuestionStateRequest
+  ): Promise<ClassSessionPostClassThreadWorkflow> {
+    const resolution = await this.resolveSession(sessionId, batchId ?? request.batchId);
+    this.assertCompletedClassSession(resolution);
+    this.assertCanManageBatch(resolution.batch, user);
+    const studentId = this.cleanParticipantId(request.participantId);
+    if (!studentId) {
+      throw new BadRequestException('Student participant id is required.');
+    }
+    if (!(await this.studentEnrollments.isStudentHistoricallyEnrolledInBatch(studentId, resolution.batch.id))) {
+      throw new BadRequestException('Target student is not enrolled in this class history.');
+    }
+    const updates: Partial<Pick<ClassSessionPostClassThreadStateDocument, 'important' | 'answered' | 'followUp' | 'updatedByUserId'>> = {
+      updatedByUserId: user.sub
+    };
+    if (typeof request.important === 'boolean') {
+      updates.important = request.important;
+    }
+    if (typeof request.answered === 'boolean') {
+      updates.answered = request.answered;
+    }
+    if (typeof request.followUp === 'boolean') {
+      updates.followUp = request.followUp;
+    }
+    if (Object.keys(updates).length === 1) {
+      throw new BadRequestException('At least one Q&A workflow flag is required.');
+    }
+    const threadKey = this.postClassThreadKey(resolution.planned.id, resolution.batch.teacherId, studentId);
+    const state = await this.postClassThreadStates.findOneAndUpdate(
+      { sessionId: resolution.planned.id, batchId: resolution.batch.id, studentId },
+      {
+        $set: updates,
+        $setOnInsert: {
+          sessionId: resolution.planned.id,
+          batchId: resolution.batch.id,
+          teacherId: resolution.batch.teacherId,
+          studentId,
+          threadKey
+        }
+      },
+      { new: true, upsert: true }
+    );
+    if (!state) {
+      throw new ConflictException('Post-class question state could not be saved.');
+    }
+    await this.activity?.record({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId: resolution.persisted?.roomId,
+      eventType: 'post_class.question_state_updated',
+      category: 'chat',
+      summary: 'Teacher updated post-class Q&A workflow state',
+      actor: { id: user.sub, email: user.email, roles: user.roles },
+      target: { userId: studentId, type: 'student' },
+      visibility: 'full',
+      metadata: {
+        important: state.important,
+        answered: state.answered,
+        followUp: state.followUp
+      }
+    });
+    return this.postClassWorkflowFromState(state, resolution, studentId);
+  }
+
+  async createPostClassAnnouncement(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    request: CreatePostClassAnnouncementRequest
+  ): Promise<ChatMessage> {
+    const resolution = await this.resolveSession(sessionId, batchId ?? request.batchId);
+    this.assertCompletedClassSession(resolution);
+    this.assertCanManageBatch(resolution.batch, user);
+    const persisted = resolution.persisted;
+    if (!persisted) {
+      throw new NotFoundException('Completed class session not found.');
+    }
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    if (!liveSettings.chat.teacherBroadcastEnabled) {
+      throw new ForbiddenException('Teacher announcements are disabled for this class.');
+    }
+    const senderName = await this.userDisplayName(user);
+    const message = await this.rooms.sendClassSessionPostClassBroadcastMessage({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId: persisted.roomId,
+      channelId: persisted.chatChannelId,
+      senderId: user.sub,
+      senderName,
+      senderRole: this.isAdmin(user) ? 'admin' : 'teacher',
+      message: request.message,
+      maxMessageLength: liveSettings.chat.messageLengthLimit
+    });
+    await this.activity?.record({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId: persisted.roomId,
+      eventType: 'post_class.announcement.sent',
+      category: 'chat',
+      summary: 'Teacher sent a post-class announcement',
+      actor: { id: user.sub, name: senderName, email: user.email, roles: user.roles },
+      source: { collection: 'chat', id: message.id },
+      visibility: 'student_safe',
+      metadata: { scope: 'broadcast', phase: 'post_class' }
+    });
+    return message;
+  }
+
+  async publishPostClassMaterial(
+    sessionId: string,
+    materialId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<ClassSessionMaterial> {
+    return this.updatePostClassMaterialPublication(sessionId, materialId, batchId, user, true);
+  }
+
+  async unpublishPostClassMaterial(
+    sessionId: string,
+    materialId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<ClassSessionMaterial> {
+    return this.updatePostClassMaterialPublication(sessionId, materialId, batchId, user, false);
+  }
+
+  async publishPostClassRecording(
+    sessionId: string,
+    recordingId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<Recording> {
+    return this.updatePostClassRecordingPublication(sessionId, recordingId, batchId, user, true);
+  }
+
+  async unpublishPostClassRecording(
+    sessionId: string,
+    recordingId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<Recording> {
+    return this.updatePostClassRecordingPublication(sessionId, recordingId, batchId, user, false);
+  }
+
+  async publishPostClassWhiteboard(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<StudentCompletedClassWhiteboardSummary> {
+    return this.updatePostClassWhiteboardPublication(sessionId, batchId, user, true);
+  }
+
+  async unpublishPostClassWhiteboard(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<StudentCompletedClassWhiteboardSummary> {
+    return this.updatePostClassWhiteboardPublication(sessionId, batchId, user, false);
   }
 
   async getAdminAttendanceSummary(query: AdminAttendanceQuery, user: AuthenticatedUser): Promise<AdminAttendanceSummary> {
@@ -472,6 +801,17 @@ export class ClassSessionsService {
       metadata: { summary: `Started class session ${payload.title}`, batchId: payload.batchId, roomId: payload.roomId },
       after: { status: payload.status, startedAt: payload.startedAt }
     });
+    await this.activity?.record({
+      sessionId: payload.sessionId,
+      batchId: payload.batchId,
+      roomId: payload.roomId,
+      eventType: 'session.started',
+      category: 'lifecycle',
+      summary: `Started class session ${payload.title}`,
+      actor: { id: user.sub, email: user.email, roles: user.roles },
+      visibility: 'student_safe',
+      metadata: { status: payload.status, startedAt: payload.startedAt }
+    });
     this.metrics?.classSessionLifecycleTransitions.labels('started', payload.status).inc();
     return payload;
   }
@@ -541,6 +881,17 @@ export class ClassSessionsService {
       metadata: { summary: `Ended class session ${payload.title}`, batchId: payload.batchId, roomId: payload.roomId },
       after: { status: payload.status, completedAt: payload.completedAt }
     });
+    await this.activity?.record({
+      sessionId: payload.sessionId,
+      batchId: payload.batchId,
+      roomId: payload.roomId,
+      eventType: 'session.ended',
+      category: 'lifecycle',
+      summary: `Ended class session ${payload.title}`,
+      actor: { id: user.sub, email: user.email, roles: user.roles },
+      visibility: 'student_safe',
+      metadata: { status: payload.status, completedAt: payload.completedAt }
+    });
     this.metrics?.classSessionLifecycleTransitions.labels('ended', payload.status).inc();
     return payload;
   }
@@ -608,12 +959,15 @@ export class ClassSessionsService {
 
   async listRecordings(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<Recording[]> {
     const resolution = await this.resolveSession(sessionId, batchId);
-    await this.assertCanReadClassSession(resolution.batch, user);
+    await this.assertCanReadClassSessionForResolution(resolution, user);
     const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
     if (!this.canViewRecordingContent(liveSettings, resolution.batch, user)) {
       return [];
     }
-    return this.recordings.listClassSessionRecordings(resolution.planned.id, user);
+    const recordings = await this.recordings.listAuthorizedClassSessionRecordings(resolution.planned.id);
+    return this.payloadRole(user, resolution.batch) === 'student' && (resolution.persisted?.status === 'completed' || resolution.persisted?.status === 'cancelled')
+      ? recordings.filter((recording) => this.isPostClassRecordingPublished(recording))
+      : recordings;
   }
 
   async downloadRecording(
@@ -623,13 +977,245 @@ export class ClassSessionsService {
     user: AuthenticatedUser
   ): Promise<RecordingDownload> {
     const resolution = await this.resolveSession(sessionId, batchId);
-    await this.assertCanReadClassSession(resolution.batch, user);
+    await this.assertCanReadClassSessionForResolution(resolution, user);
     const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
     if (!this.canViewRecordingContent(liveSettings, resolution.batch, user)) {
       throw new ForbiddenException('Recording playback is not available for this class.');
     }
     this.assertExportWithinRetention(liveSettings, resolution.persisted?.completedAt);
-    return this.recordings.readClassSessionRecordingDownload(resolution.planned.id, recordingId, user);
+    if (this.payloadRole(user, resolution.batch) === 'student' && (resolution.persisted?.status === 'completed' || resolution.persisted?.status === 'cancelled')) {
+      const recordings = await this.recordings.listAuthorizedClassSessionRecordings(resolution.planned.id);
+      const recording = recordings.find((item) => item.recordingId === recordingId || item.id === recordingId);
+      if (!recording || !this.isPostClassRecordingPublished(recording)) {
+        throw new ForbiddenException('Recording playback is not available for this class.');
+      }
+    }
+    return this.recordings.readAuthorizedClassSessionRecordingDownload(resolution.planned.id, recordingId);
+  }
+
+  async listStudentCompletedSessions(
+    user: AuthenticatedUser,
+    query: StudentCompletedClassQuery = {}
+  ): Promise<StudentCompletedClassSessionListResponse> {
+    this.assertStudentUser(user);
+    const page = this.clampPositiveInteger(query.page, 1, 10_000);
+    const limit = this.clampPositiveInteger(query.limit, 25, 100);
+    const eligibleBatchIds = await this.studentEnrollments.listStudentClassHistoryBatchIds(user.sub);
+    if (query.batchId && !eligibleBatchIds.includes(query.batchId)) {
+      throw new ForbiddenException('You are not allowed to view this class history.');
+    }
+    const batchMap = await this.adminBatchMap(query.batchId ? [query.batchId] : eligibleBatchIds);
+    const visibleBatchIds = (query.batchId ? [query.batchId] : eligibleBatchIds).filter((batchId) => {
+      const batch = batchMap.get(batchId);
+      if (!batch) {
+        return false;
+      }
+      return query.courseId ? batch.courseId === query.courseId : true;
+    });
+    if (!visibleBatchIds.length) {
+      return { items: [], page, limit, total: 0 };
+    }
+    const filter = {
+      batchId: { $in: visibleBatchIds },
+      status: 'completed'
+    };
+    const skip = (page - 1) * limit;
+    const [sessions, total] = await Promise.all([
+      this.classSessions.find(filter).sort({ completedAt: -1, scheduledAt: -1 }).skip(skip).limit(limit).exec(),
+      this.classSessions.countDocuments(filter).exec()
+    ]);
+    const teacherMap = await this.adminTeacherMap(sessions.map((session) => session.teacherId));
+    const items = await Promise.all(
+      sessions.map((session) => this.toStudentCompletedClassRow(session, batchMap.get(session.batchId), teacherMap.get(session.teacherId), user))
+    );
+    return {
+      items: items.filter((item): item is StudentCompletedClassSessionListItem => Boolean(item)),
+      page,
+      limit,
+      total
+    };
+  }
+
+  async getStudentCompletedSessionDetail(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<StudentCompletedClassDetailResponse> {
+    this.assertStudentUser(user);
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCompletedClassSession(resolution);
+    await this.assertCanReadClassSessionHistory(resolution.batch, user);
+    const persisted = resolution.persisted;
+    if (!persisted) {
+      throw new NotFoundException('Completed class session not found.');
+    }
+    const teacherMap = await this.adminTeacherMap([persisted.teacherId]);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    const [row, recordings, materials, whiteboard, announcements, privateThread, chatSummary, attendance] = await Promise.all([
+      this.toStudentCompletedClassRow(persisted, resolution.batch, teacherMap.get(persisted.teacherId), user),
+      this.canViewRecordingContent(liveSettings, resolution.batch, user)
+        ? this.recordings
+            .listAuthorizedClassSessionRecordings(resolution.planned.id)
+            .then((items) => items.filter((recording) => this.isPostClassRecordingPublished(recording)))
+        : Promise.resolve([]),
+      this.studentCompletedMaterials(resolution, liveSettings),
+      this.studentCompletedWhiteboardSummary(resolution),
+      this.rooms.getClassSessionPostClassStudentChatHistory({
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        roomId: persisted.roomId,
+        channelId: persisted.chatChannelId,
+        teacherId: resolution.batch.teacherId,
+        studentId: user.sub,
+        scope: 'broadcast',
+        limit: 100
+      }),
+      this.rooms.getClassSessionPostClassStudentChatHistory({
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        roomId: persisted.roomId,
+        channelId: persisted.chatChannelId,
+        teacherId: resolution.batch.teacherId,
+        studentId: user.sub,
+        scope: 'private',
+        limit: 100
+      }),
+      this.rooms.getClassSessionPostClassStudentChatSummary({
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        roomId: persisted.roomId,
+        teacherId: resolution.batch.teacherId,
+        studentId: user.sub
+      }),
+      this.studentAttendanceForSession(persisted, user.sub)
+    ]);
+    if (!row) {
+      throw new NotFoundException('Completed class session not found.');
+    }
+    return {
+      session: row,
+      recordings,
+      materials,
+      whiteboard,
+      announcements: announcements.messages,
+      privateThread,
+      chatSummary,
+      attendance
+    };
+  }
+
+  async sendPostClassQuestion(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    request: SendPostClassQuestionRequest
+  ): Promise<ChatMessage> {
+    const resolution = await this.resolveSession(sessionId, batchId ?? request.batchId);
+    this.assertCompletedClassSession(resolution);
+    await this.assertCanReadClassSessionHistory(resolution.batch, user);
+    const persisted = resolution.persisted;
+    if (!persisted) {
+      throw new NotFoundException('Completed class session not found.');
+    }
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    if (!liveSettings.chat.privateTeacherStudentChatEnabled) {
+      throw new ForbiddenException('Private class chat is disabled for this class.');
+    }
+    const role = this.payloadRole(user, resolution.batch);
+    let studentId = user.sub;
+    if (role === 'student') {
+      if (request.recipientId && request.recipientId !== resolution.batch.teacherId) {
+        throw new ForbiddenException('Students can only message the teacher.');
+      }
+    } else {
+      this.assertCanManageBatch(resolution.batch, user);
+      if (!request.recipientId) {
+        throw new BadRequestException('A student recipient is required.');
+      }
+      if (!(await this.studentEnrollments.isStudentHistoricallyEnrolledInBatch(request.recipientId, resolution.batch.id))) {
+        throw new BadRequestException('Target student is not enrolled in this class history.');
+      }
+      studentId = request.recipientId;
+    }
+    const senderName = await this.userDisplayName(user);
+    const message = await this.rooms.sendClassSessionPostClassPrivateMessage({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId: persisted.roomId,
+      channelId: persisted.chatChannelId,
+      teacherId: resolution.batch.teacherId,
+      senderId: user.sub,
+      senderName,
+      senderRole: role,
+      studentId,
+      message: request.message,
+      maxMessageLength: liveSettings.chat.messageLengthLimit
+    });
+    await this.activity?.record({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId: persisted.roomId,
+      eventType: role === 'student' ? 'post_class.question.asked' : 'post_class.question.replied',
+      category: 'chat',
+      summary: role === 'student' ? 'Student asked a private post-class question' : 'Teacher replied to a private post-class question',
+      actor: { id: user.sub, name: senderName, email: user.email, roles: user.roles },
+      target: {
+        userId: role === 'student' ? resolution.batch.teacherId : studentId,
+        type: role === 'student' ? 'teacher' : 'student'
+      },
+      source: { collection: 'chat', id: message.id },
+      visibility: 'actor_only',
+      metadata: { scope: 'private', phase: 'post_class' }
+    });
+    return message;
+  }
+
+  async getPostClassChatSummary(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<ChatThreadSummaryResponse> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCompletedClassSession(resolution);
+    this.assertCanManageBatch(resolution.batch, user);
+    const persisted = resolution.persisted;
+    if (!persisted) {
+      throw new NotFoundException('Completed class session not found.');
+    }
+    return this.rooms.getClassSessionPostClassTeacherChatSummary({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId: persisted.roomId,
+      teacherId: resolution.batch.teacherId,
+      requesterUserId: user.sub
+    });
+  }
+
+  async getPostClassChatHistory(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    options: { participantId?: string; before?: string; limit?: number } = {}
+  ): Promise<ChatHistoryResponse> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCompletedClassSession(resolution);
+    this.assertCanManageBatch(resolution.batch, user);
+    const persisted = resolution.persisted;
+    if (!persisted) {
+      throw new NotFoundException('Completed class session not found.');
+    }
+    if (!options.participantId) {
+      throw new BadRequestException('Student participant id is required for post-class Q&A.');
+    }
+    return this.rooms.getClassSessionPostClassTeacherChatHistory({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId: persisted.roomId,
+      teacherId: resolution.batch.teacherId,
+      participantId: options.participantId,
+      before: options.before,
+      limit: options.limit
+    });
   }
 
   async joinSession(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<ClassroomPayload> {
@@ -891,7 +1477,7 @@ export class ClassSessionsService {
     user: AuthenticatedUser
   ): Promise<ClassSessionMaterialDownload> {
     const resolution = await this.resolveSession(sessionId, batchId);
-    await this.assertCanReadClassSession(resolution.batch, user);
+    await this.assertCanReadClassSessionForResolution(resolution, user);
     const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
     this.assertMaterialsEnabled(liveSettings);
     const role = this.payloadRole(user, resolution.batch);
@@ -921,8 +1507,16 @@ export class ClassSessionsService {
 
   async getWhiteboardMemory(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<WhiteboardMemoryState | null> {
     const resolution = await this.resolveSession(sessionId, batchId);
-    await this.assertCanReadClassSession(resolution.batch, user);
+    await this.assertCanReadClassSessionForResolution(resolution, user);
     const state = await this.whiteboardStates.findOne({ sessionId: resolution.planned.id, batchId: resolution.batch.id });
+    if (
+      state &&
+      this.payloadRole(user, resolution.batch) === 'student' &&
+      (resolution.persisted?.status === 'completed' || resolution.persisted?.status === 'cancelled') &&
+      !this.isPostClassWhiteboardPublished(state)
+    ) {
+      return null;
+    }
     return state ? this.toWhiteboardMemoryState(state) : null;
   }
 
@@ -960,6 +1554,7 @@ export class ClassSessionsService {
         pages,
         pageCount: summary.pageCount,
         elementCount: summary.elementCount,
+        compactedThroughSeq: previous?.lastOperationSeq ?? previous?.compactedThroughSeq ?? 0,
         updatedByUserId: user.sub
       },
       $setOnInsert: {
@@ -1104,9 +1699,19 @@ export class ClassSessionsService {
     user: AuthenticatedUser
   ): Promise<WhiteboardMemoryPageSearchResponse> {
     const resolution = await this.resolveSession(sessionId, batchId);
-    await this.assertCanReadClassSession(resolution.batch, user);
+    await this.assertCanReadClassSessionForResolution(resolution, user);
     const search = this.cleanWhiteboardText(query ?? '', 80).toLowerCase();
-    const states = await this.whiteboardStates.find({ batchId: resolution.batch.id }).sort({ updatedAt: -1 }).limit(50).exec();
+    const role = this.payloadRole(user, resolution.batch);
+    const allStates = await this.whiteboardStates.find({ batchId: resolution.batch.id }).sort({ updatedAt: -1 }).limit(50).exec();
+    const states =
+      role === 'student'
+        ? allStates.filter((state) => {
+            if (state.sessionId !== resolution.planned.id) {
+              return this.isPostClassWhiteboardPublished(state);
+            }
+            return resolution.persisted?.status === 'live' || this.isPostClassWhiteboardPublished(state);
+          })
+        : allStates;
     const results = states.flatMap((state) =>
       state.pages
         .filter((page) => !search || page.title.toLowerCase().includes(search) || page.tags.some((tag) => tag.toLowerCase().includes(search)))
@@ -1193,6 +1798,134 @@ export class ClassSessionsService {
     await this.emitMaterialEvent('material:unshared', resolution, material, user, false);
     await this.recordClassSessionMaterialAudit('unshare', resolution, material, user);
     return this.toMaterialPayload(material);
+  }
+
+  private async updatePostClassMaterialPublication(
+    sessionId: string,
+    materialId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    published: boolean
+  ): Promise<ClassSessionMaterial> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCompletedClassSession(resolution);
+    this.assertCanManageBatch(resolution.batch, user);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    this.assertMaterialsEnabled(liveSettings);
+    if (!liveSettings.materials.publishMaterialsAfterClass) {
+      throw new ForbiddenException('Post-class material publishing is disabled for this class.');
+    }
+    const now = new Date();
+    const update = published
+      ? {
+          $set: {
+            publishedAt: now,
+            publishedByUserId: user.sub,
+            shared: true
+          },
+          $unset: {
+            unpublishedAt: ''
+          }
+        }
+      : {
+          $set: {
+            unpublishedAt: now,
+            shared: false
+          },
+          $unset: {
+            publishedAt: '',
+            publishedByUserId: ''
+          }
+        };
+    const material = await this.materials.findOneAndUpdate(
+      {
+        materialId,
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        deletedAt: { $exists: false }
+      },
+      update,
+      { new: true }
+    );
+    if (!material) {
+      throw new NotFoundException('Class material not found.');
+    }
+    await this.recordClassSessionMaterialAudit(published ? 'publish' : 'unpublish', resolution, material, user);
+    return this.toMaterialPayload(material);
+  }
+
+  private async updatePostClassRecordingPublication(
+    sessionId: string,
+    recordingId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    published: boolean
+  ): Promise<Recording> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCompletedClassSession(resolution);
+    this.assertCanManageBatch(resolution.batch, user);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    if (!liveSettings.recording.recordingEnabled) {
+      throw new ForbiddenException('Recordings are disabled for this class.');
+    }
+    return this.recordings.updateClassSessionRecordingPublication(resolution.planned.id, recordingId, user.sub, published);
+  }
+
+  private async updatePostClassWhiteboardPublication(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    published: boolean
+  ): Promise<StudentCompletedClassWhiteboardSummary> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    this.assertCompletedClassSession(resolution);
+    this.assertCanManageBatch(resolution.batch, user);
+    const now = new Date();
+    const state = await this.whiteboardStates.findOneAndUpdate(
+      {
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id
+      },
+      published
+        ? {
+            $set: {
+              publishedAt: now,
+              publishedByUserId: user.sub
+            },
+            $unset: {
+              unpublishedAt: ''
+            }
+          }
+        : {
+            $set: {
+              unpublishedAt: now
+            },
+            $unset: {
+              publishedAt: '',
+              publishedByUserId: ''
+            }
+          },
+      { new: true }
+    );
+    if (!state) {
+      throw new NotFoundException('Whiteboard snapshot not found.');
+    }
+    await this.activity?.record({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId: resolution.persisted?.roomId,
+      eventType: published ? 'whiteboard.post_class_published' : 'whiteboard.post_class_unpublished',
+      category: 'whiteboard',
+      summary: published ? 'Published post-class whiteboard notes' : 'Unpublished post-class whiteboard notes',
+      actor: { id: user.sub, email: user.email, roles: user.roles },
+      visibility: 'student_safe',
+      metadata: {
+        snapshotVersion: state.snapshotVersion,
+        pageCount: state.pageCount,
+        elementCount: state.elementCount
+      }
+    });
+    return this.studentCompletedWhiteboardSummary(resolution, { includeUnpublished: true });
   }
 
   async getChatSummary(sessionId: string, batchId: string | undefined, user: AuthenticatedUser): Promise<ChatThreadSummaryResponse> {
@@ -1285,6 +2018,33 @@ export class ClassSessionsService {
     return this.toPayload(resolution, user);
   }
 
+  async getTimeline(
+    sessionId: string,
+    batchId: string | undefined,
+    user: AuthenticatedUser,
+    options: { before?: string; limit?: number; category?: ClassSessionTimelineCategory | 'all' } = {}
+  ): Promise<ClassSessionTimelineResponse> {
+    const resolution = await this.resolveSession(sessionId, batchId);
+    await this.assertCanReadClassSessionForResolution(resolution, user);
+    const fullAccess = this.isAdmin(user) || (user.roles.includes('TEACHER') && resolution.batch.teacherId === user.sub);
+    return this.activity?.listTimeline({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      before: options.before,
+      limit: options.limit,
+      category: options.category,
+      visibility: fullAccess ? 'full' : 'student_safe',
+      audienceIds: [user.sub]
+    }) ?? {
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      visibility: fullAccess ? 'full' : 'student_safe',
+      items: [],
+      limit: Number.isFinite(options.limit) ? Math.min(100, Math.max(1, Math.trunc(options.limit as number))) : 50,
+      hasMore: false
+    };
+  }
+
   async getCurrentForBatch(batchId: string, user: AuthenticatedUser): Promise<ClassroomPayload> {
     const batch = await this.findBatch(batchId);
     await this.assertCanReadClassSession(batch, user);
@@ -1375,10 +2135,24 @@ export class ClassSessionsService {
         reason: safeReason
       }
     });
+    await this.activity?.record({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId: resolution.persisted?.roomId ?? classSessionChannelIds(resolution.planned.id).roomId,
+      eventType: `session.join_${result}`,
+      category: 'attendance',
+      summary:
+        result === 'admitted'
+          ? `${role} was admitted to the class session`
+          : `${role} class-session join was denied`,
+      actor: { id: user.sub, email: user.email, roles: user.roles },
+      visibility: result === 'admitted' ? 'actor_only' : 'full',
+      metadata: { actorRole: role, result, reason: safeReason }
+    });
   }
 
   private async recordClassSessionMaterialAudit(
-    action: 'upload' | 'link' | 'share' | 'unshare' | 'download' | 'delete',
+    action: 'upload' | 'link' | 'share' | 'unshare' | 'publish' | 'unpublish' | 'download' | 'delete',
     resolution: SessionResolution,
     material: ClassSessionMaterialMongoDocument,
     user: AuthenticatedUser
@@ -1396,6 +2170,43 @@ export class ClassSessionsService {
         sessionId: resolution.planned.id,
         batchId: resolution.batch.id,
         roomId: material.roomId,
+        materialId: material.materialId,
+        kind,
+        source: material.source,
+        size: material.size ?? 0
+      }
+    });
+    const materialEventTypeByAction = {
+      upload: 'material.uploaded',
+      link: 'material.linked',
+      share: 'material.shared',
+      unshare: 'material.unshared',
+      publish: 'material.published',
+      unpublish: 'material.unpublished',
+      download: 'material.downloaded',
+      delete: 'material.deleted'
+    } as const;
+    await this.activity?.record({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      roomId: material.roomId ?? resolution.persisted?.roomId,
+      eventType: materialEventTypeByAction[action],
+      category: 'materials',
+      summary:
+        action === 'share'
+          ? `Shared material ${material.title}`
+          : action === 'unshare'
+            ? `Stopped sharing material ${material.title}`
+            : action === 'download'
+              ? `Downloaded material ${material.title}`
+              : action === 'delete'
+                ? `Archived material ${material.title}`
+                : `Added material ${material.title}`,
+      actor: { id: user.sub, email: user.email, roles: user.roles },
+      target: { id: material.materialId, name: material.title, type: 'material' },
+      source: { collection: 'class_session_materials', id: material.materialId },
+      visibility: action === 'share' || action === 'unshare' ? 'student_safe' : 'full',
+      metadata: {
         materialId: material.materialId,
         kind,
         source: material.source,
@@ -1608,6 +2419,454 @@ export class ClassSessionsService {
     );
   }
 
+  private classSessionReportAttendance(
+    session: ClassSessionMongoDocument,
+    attendance: AttendanceRowsWithSource
+  ): ClassSessionReport['attendance'] {
+    const rows = attendance.rows;
+    const presentRows = rows.filter((row) => row.status === 'present');
+    const enrolled = rows.length;
+    const present = presentRows.length;
+    const totalDurationSeconds = presentRows.reduce((total, row) => total + row.totalDurationSeconds, 0);
+    const lateJoinThresholdMs = this.lateJoinThresholdMs(session);
+    const lateJoins = presentRows.filter(
+      (row) => row.firstJoinAt && row.firstJoinAt.getTime() > session.scheduledAt.getTime() + lateJoinThresholdMs
+    ).length;
+    const earlyLeaves =
+      session.completedAt || session.status === 'completed'
+        ? presentRows.filter(
+            (row) =>
+              row.lastLeaveAt &&
+              session.completedAt &&
+              row.lastLeaveAt.getTime() < session.completedAt.getTime() - ADMIN_ATTENDANCE_EARLY_LEAVE_MS
+          ).length
+        : 0;
+    return {
+      enrolled,
+      present,
+      absent: Math.max(0, enrolled - present),
+      attendanceRate: enrolled ? Math.round((present / enrolled) * 100) : 0,
+      averageDurationSeconds: present ? Math.round(totalDurationSeconds / present) : 0,
+      reconnects: presentRows.reduce((total, row) => total + row.reconnectCount, 0),
+      lateJoins,
+      earlyLeaves,
+      source: attendance.source
+    };
+  }
+
+  private classSessionReportParticipation(events: ClassSessionTimelineEvent[]): ClassSessionReport['participation'] {
+    const matches = (...needles: string[]) =>
+      events.filter((event) => {
+        const text = `${event.eventType} ${event.summary}`.toLowerCase();
+        return needles.every((needle) => text.includes(needle));
+      }).length;
+    const attendanceEvents = events.filter((event) => event.category === 'attendance');
+    return {
+      joins: attendanceEvents.filter((event) => {
+        const text = `${event.eventType} ${event.summary}`.toLowerCase();
+        return text.includes('join') && !text.includes('denied');
+      }).length,
+      leaves: attendanceEvents.filter((event) => {
+        const text = `${event.eventType} ${event.summary}`.toLowerCase();
+        return text.includes('leave') || text.includes('left');
+      }).length,
+      reconnects: matches('reconnect'),
+      handRaises: events.filter((event) => {
+        const text = `${event.eventType} ${event.summary}`.toLowerCase();
+        return text.includes('hand') && (text.includes('raise') || text.includes('raised'));
+      }).length,
+      allowedSpeaks: events.filter((event) => {
+        const text = `${event.eventType} ${event.summary}`.toLowerCase();
+        return text.includes('speak') && (text.includes('allow') || text.includes('allowed'));
+      }).length,
+      revokedSpeaks: events.filter((event) => {
+        const text = `${event.eventType} ${event.summary}`.toLowerCase();
+        return text.includes('speak') && (text.includes('revoke') || text.includes('revoked'));
+      }).length,
+      mutedMics: events.filter((event) => {
+        const text = `${event.eventType} ${event.summary}`.toLowerCase();
+        return (text.includes('mute') || text.includes('muted')) && (text.includes('mic') || text.includes('microphone'));
+      }).length,
+      stoppedCameras: events.filter((event) => {
+        const text = `${event.eventType} ${event.summary}`.toLowerCase();
+        return (text.includes('camera') || text.includes('video')) && (text.includes('stop') || text.includes('stopped'));
+      }).length
+    };
+  }
+
+  private classSessionReportBroadcasts(messages: ChatMessage[]): ClassSessionReport['broadcasts'] {
+    const broadcasts = messages.filter((message) => message.scope === 'broadcast');
+    const latest = [...broadcasts].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
+    return {
+      count: broadcasts.length,
+      ...(latest?.createdAt ? { latestAt: latest.createdAt } : {}),
+      ...(latest?.message ? { latestPreview: this.reportPreview(latest.message) } : {})
+    };
+  }
+
+  private async classSessionReportMaterials(resolution: SessionResolution): Promise<ClassSessionMaterial[]> {
+    const materials = await this.materials
+      .find({
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        deletedAt: { $exists: false }
+      })
+      .sort({ shared: -1, createdAt: -1 })
+      .exec();
+    return materials.map((material) => this.toMaterialPayload(material));
+  }
+
+  private async classSessionReportAssignments(sessionId: string, batchId: string): Promise<ClassSessionReport['assignments']> {
+    const assignments = await this.assignments
+      .find({
+        sessionId,
+        batchId,
+        deletedAt: { $exists: false }
+      })
+      .exec();
+    const assignmentIds = assignments.map((assignment) => assignment.assignmentId).filter(Boolean);
+    const submissions = this.emptyAssignmentSubmissionSummary();
+    if (assignmentIds.length) {
+      const submissionRows = await this.assignmentSubmissions
+        .find({
+          assignmentId: { $in: assignmentIds },
+          batchId,
+          deletedAt: { $exists: false }
+        })
+        .exec();
+      for (const submission of submissionRows) {
+        if (ASSIGNMENT_SUBMISSION_STATUS_KEYS.includes(submission.status)) {
+          submissions[submission.status] += 1;
+        }
+      }
+    }
+    return {
+      total: assignments.length,
+      published: assignments.filter((assignment) => assignment.status === 'published').length,
+      archived: assignments.filter((assignment) => assignment.status === 'archived').length,
+      submissions
+    };
+  }
+
+  private emptyAssignmentSubmissionSummary(): AssignmentSubmissionSummary {
+    return {
+      assigned: 0,
+      viewed: 0,
+      submitted: 0,
+      late: 0,
+      reviewed: 0,
+      returned: 0,
+      completed: 0
+    };
+  }
+
+  private async classSessionWorkspaceAssignments(sessionId: string, batchId: string): Promise<Assignment[]> {
+    const assignments = await this.assignments
+      .find({
+        sessionId,
+        batchId,
+        deletedAt: { $exists: false }
+      })
+      .sort({ createdAt: -1 })
+      .exec();
+    const assignmentIds = assignments.map((assignment) => assignment.assignmentId).filter(Boolean);
+    const submissions = assignmentIds.length
+      ? await this.assignmentSubmissions
+          .find({
+            assignmentId: { $in: assignmentIds },
+            batchId,
+            deletedAt: { $exists: false }
+          })
+          .exec()
+      : [];
+    const submissionsByAssignment = new Map<string, AssignmentSubmissionMongoDocument[]>();
+    for (const submission of submissions) {
+      submissionsByAssignment.set(submission.assignmentId, [...(submissionsByAssignment.get(submission.assignmentId) ?? []), submission]);
+    }
+    return assignments.map((assignment) => this.toWorkspaceAssignmentPayload(assignment, submissionsByAssignment.get(assignment.assignmentId) ?? []));
+  }
+
+  private toWorkspaceAssignmentPayload(assignment: AssignmentMongoDocument, submissions: AssignmentSubmissionMongoDocument[]): Assignment {
+    return {
+      id: assignment.id,
+      assignmentId: assignment.assignmentId,
+      batchId: assignment.batchId,
+      ...(assignment.batchName ? { batchName: assignment.batchName } : {}),
+      ...(assignment.sessionId ? { sessionId: assignment.sessionId } : {}),
+      ...(assignment.sessionTitle ? { sessionTitle: assignment.sessionTitle } : {}),
+      teacherId: assignment.teacherId,
+      title: assignment.title,
+      instructions: assignment.instructions,
+      ...(assignment.dueAt ? { dueAt: assignment.dueAt.toISOString() } : {}),
+      attachments: (assignment.attachments ?? []).map((attachment) => this.toWorkspaceAssignmentAttachment(attachment, assignment.assignmentId)),
+      allowedSubmissionTypes: assignment.allowedSubmissionTypes ?? ['text'],
+      status: assignment.status,
+      submissionSummary: this.assignmentSubmissionSummary(submissions),
+      createdAt: assignment.createdAt.toISOString(),
+      updatedAt: assignment.updatedAt.toISOString(),
+      ...(assignment.deletedAt ? { deletedAt: assignment.deletedAt.toISOString() } : {})
+    };
+  }
+
+  private toWorkspaceAssignmentAttachment(
+    attachment: AssignmentMongoDocument['attachments'][number],
+    assignmentId: string,
+    submissionId?: string
+  ): AssignmentAttachment {
+    return {
+      id: attachment.id,
+      type: attachment.type,
+      title: attachment.title,
+      ...(attachment.url ? { url: attachment.url } : {}),
+      ...(attachment.materialId ? { materialId: attachment.materialId } : {}),
+      ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+      ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+      ...(attachment.size !== undefined ? { size: attachment.size } : {}),
+      ...(attachment.storageProvider ? { storageProvider: attachment.storageProvider } : {}),
+      ...(attachment.type === 'file'
+        ? {
+            downloadUrl: submissionId
+              ? `/api/v1/assignments/${encodeURIComponent(assignmentId)}/submissions/${encodeURIComponent(submissionId)}/attachments/${encodeURIComponent(attachment.id)}/download`
+              : `/api/v1/assignments/${encodeURIComponent(assignmentId)}/attachments/${encodeURIComponent(attachment.id)}/download`
+          }
+        : {}),
+      ...(attachment.createdAt ? { createdAt: this.dateToIso(attachment.createdAt) } : {})
+    };
+  }
+
+  private assignmentSubmissionSummary(submissions: AssignmentSubmissionMongoDocument[]): AssignmentSubmissionSummary {
+    const summary = this.emptyAssignmentSubmissionSummary();
+    for (const submission of submissions) {
+      if (ASSIGNMENT_SUBMISSION_STATUS_KEYS.includes(submission.status)) {
+        summary[submission.status] += 1;
+      }
+    }
+    return summary;
+  }
+
+  private postClassQuestionThreads(
+    summary: ChatThreadSummaryResponse,
+    states: ClassSessionPostClassThreadStateMongoDocument[],
+    resolution: SessionResolution
+  ): ClassSessionPostClassQuestionThread[] {
+    const stateByStudent = new Map(states.map((state) => [state.studentId, state]));
+    return summary.threads
+      .filter((thread) => thread.scope === 'private')
+      .map((thread) => {
+        const studentId = this.cleanParticipantId(thread.participantId ?? thread.id.replace(/^private:/, ''));
+        return {
+          summary: thread,
+          workflow: this.postClassWorkflowFromState(stateByStudent.get(studentId), resolution, studentId)
+        };
+      });
+  }
+
+  private postClassWorkflowFromState(
+    state: ClassSessionPostClassThreadStateMongoDocument | undefined | null,
+    resolution: SessionResolution,
+    studentId: string
+  ): ClassSessionPostClassThreadWorkflow {
+    return {
+      studentId,
+      threadKey: state?.threadKey ?? this.postClassThreadKey(resolution.planned.id, resolution.batch.teacherId, studentId),
+      important: Boolean(state?.important),
+      answered: Boolean(state?.answered),
+      followUp: Boolean(state?.followUp),
+      ...(state?.updatedAt ? { updatedAt: state.updatedAt.toISOString() } : {}),
+      ...(state?.updatedByUserId ? { updatedByUserId: state.updatedByUserId } : {})
+    };
+  }
+
+  private postClassThreadKey(sessionId: string, teacherId: string, studentId: string): string {
+    return `${sessionId}:teacher:${teacherId || 'teacher'}:student:${studentId}`;
+  }
+
+  private cleanParticipantId(value: string | undefined): string {
+    return (value ?? '').trim();
+  }
+
+  private classSessionReportQna(summary: ChatThreadSummaryResponse): ClassSessionReport['qna'] {
+    const privateThreads = summary.threads.filter((thread) => thread.scope === 'private');
+    const latestAt = this.latestIso(privateThreads.map((thread) => thread.lastMessageAt).filter((value): value is string => Boolean(value)));
+    return {
+      threads: privateThreads.length,
+      withQuestions: privateThreads.filter((thread) => Boolean(thread.lastMessageAt)).length,
+      unanswered: privateThreads.filter((thread) => thread.lastMessage?.senderRole === 'student').length,
+      unreadForTeacher: privateThreads.reduce((total, thread) => total + thread.unreadCount, 0),
+      ...(latestAt ? { latestAt } : {})
+    };
+  }
+
+  private classSessionReportIncidents(events: ClassSessionTimelineEvent[]): ClassSessionReport['incidents'] {
+    const incidents = events
+      .filter((event) => {
+        const text = `${event.category} ${event.eventType} ${event.summary}`.toLowerCase();
+        return (
+          event.category === 'support' ||
+          text.includes('failed') ||
+          text.includes('failure') ||
+          text.includes('denied') ||
+          text.includes('error') ||
+          text.includes('disconnect') ||
+          text.includes('reconnect grace')
+        );
+      })
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+    return {
+      total: incidents.length,
+      support: incidents.filter((event) => event.category === 'support').length,
+      media: incidents.filter((event) => event.category === 'media').length,
+      moderation: incidents.filter((event) => event.category === 'moderation').length,
+      latest: incidents.slice(0, 5)
+    };
+  }
+
+  private classSessionReportCsv(report: ClassSessionReport): string {
+    const rows: string[][] = [['Section', 'Field', 'Value', 'Notes']];
+    const add = (section: string, field: string, value: unknown = '', notes: unknown = '') => {
+      rows.push([section, field, this.csvValue(value), this.csvValue(notes)]);
+    };
+    const session = report.session;
+    add('Session', 'Session ID', session.sessionId);
+    add('Session', 'Title', session.title);
+    add('Session', 'Batch', session.batchName, session.batchId);
+    add('Session', 'Course', session.courseName ?? '', session.courseId ?? '');
+    add('Session', 'Teacher', session.teacherName ?? session.teacherEmail ?? session.teacherId, session.teacherId);
+    add('Session', 'Session number', session.sessionNumber);
+    add('Session', 'Status', session.status);
+    add('Session', 'Scheduled at', session.scheduledAt);
+    add('Session', 'Started at', session.startedAt ?? '');
+    add('Session', 'Completed at', session.completedAt ?? '');
+    add('Session', 'Duration minutes', session.durationMinutes);
+    add('Session', 'Room ID', session.roomId ?? '');
+    add('Report', 'Audience', report.audience);
+    add('Report', 'Generated at', report.generatedAt);
+
+    add('Attendance', 'Enrolled students', report.attendance.enrolled);
+    add('Attendance', 'Present students', report.attendance.present);
+    add('Attendance', 'Absent students', report.attendance.absent);
+    add('Attendance', 'Attendance rate', `${report.attendance.attendanceRate}%`);
+    add('Attendance', 'Average duration seconds', report.attendance.averageDurationSeconds);
+    add('Attendance', 'Reconnects', report.attendance.reconnects);
+    add('Attendance', 'Late joins', report.attendance.lateJoins);
+    add('Attendance', 'Early leaves', report.attendance.earlyLeaves);
+    add('Attendance', 'Source', report.attendance.source);
+
+    add('Participation', 'Joins', report.participation.joins);
+    add('Participation', 'Leaves', report.participation.leaves);
+    add('Participation', 'Reconnects', report.participation.reconnects);
+    add('Participation', 'Hand raises', report.participation.handRaises);
+    add('Participation', 'Allowed speak', report.participation.allowedSpeaks);
+    add('Participation', 'Revoked speak', report.participation.revokedSpeaks);
+    add('Participation', 'Mic moderations', report.participation.mutedMics);
+    add('Participation', 'Camera stops', report.participation.stoppedCameras);
+
+    add('Broadcasts', 'Count', report.broadcasts.count);
+    add('Broadcasts', 'Latest at', report.broadcasts.latestAt ?? '');
+    add('Broadcasts', 'Latest preview', report.broadcasts.latestPreview ?? '');
+
+    add('Recordings', 'Count', report.artifacts.recordings.length);
+    report.artifacts.recordings.forEach((recording, index) => {
+      add(
+        'Recording',
+        recording.recordingId ?? recording.id ?? `Recording ${index + 1}`,
+        recording.status,
+        [
+          `scope=${recording.scope}`,
+          `durationSeconds=${recording.durationSeconds ?? ''}`,
+          `publishedAt=${recording.publishedAt ?? ''}`,
+          `startedAt=${recording.startedAt ?? ''}`,
+          `stoppedAt=${recording.stoppedAt ?? ''}`
+        ].join('; ')
+      );
+    });
+
+    add('Materials', 'Count', report.artifacts.materials.length);
+    report.artifacts.materials.forEach((material, index) => {
+      add(
+        'Material',
+        material.title || material.materialId || `Material ${index + 1}`,
+        material.kind,
+        [
+          `source=${material.source}`,
+          `shared=${material.shared}`,
+          `publishedAt=${material.publishedAt ?? ''}`,
+          `fileName=${material.fileName ?? ''}`
+        ].join('; ')
+      );
+    });
+
+    add('Whiteboard', 'Available', report.artifacts.whiteboard.available ? 'Yes' : 'No');
+    add('Whiteboard', 'Snapshot version', report.artifacts.whiteboard.snapshotVersion ?? '');
+    add('Whiteboard', 'Updated at', report.artifacts.whiteboard.updatedAt ?? '');
+    add('Whiteboard', 'Pages', report.artifacts.whiteboard.summary?.pageCount ?? '');
+    add('Whiteboard', 'Elements', report.artifacts.whiteboard.summary?.elementCount ?? '');
+
+    add('Assignments', 'Total', report.assignments.total);
+    add('Assignments', 'Published', report.assignments.published);
+    add('Assignments', 'Archived', report.assignments.archived);
+    Object.entries(report.assignments.submissions).forEach(([status, count]) => add('Assignment submissions', status, count));
+
+    add('Post-class Q&A', 'Threads', report.qna.threads);
+    add('Post-class Q&A', 'Threads with questions', report.qna.withQuestions);
+    add('Post-class Q&A', 'Unanswered', report.qna.unanswered);
+    add('Post-class Q&A', 'Unread for teacher', report.qna.unreadForTeacher);
+    add('Post-class Q&A', 'Latest activity at', report.qna.latestAt ?? '');
+
+    add('Incidents', 'Total', report.incidents.total);
+    add('Incidents', 'Support', report.incidents.support);
+    add('Incidents', 'Media', report.incidents.media);
+    add('Incidents', 'Moderation', report.incidents.moderation);
+    report.incidents.latest.forEach((incident) => {
+      add('Incident', incident.eventType, incident.summary, `${incident.category}; ${incident.createdAt}`);
+    });
+
+    return `${rows.map((row) => row.map((cell) => this.csvEscape(cell)).join(',')).join('\n')}\n`;
+  }
+
+  private csvValue(value: unknown): string {
+    if (value === null || value === undefined) {
+      return '';
+    }
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => this.csvValue(item)).join('; ');
+    }
+    if (typeof value === 'object') {
+      return JSON.stringify(value);
+    }
+    return String(value);
+  }
+
+  private async classSessionReportTimelineEvents(resolution: SessionResolution, user: AuthenticatedUser): Promise<ClassSessionTimelineEvent[]> {
+    if (!this.activity) {
+      return [];
+    }
+    const response = await this.activity.listTimeline({
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      limit: 200,
+      visibility: 'full',
+      audienceIds: [user.sub]
+    });
+    return response.items;
+  }
+
+  private latestIso(values: string[]): string | undefined {
+    return values
+      .map((value) => new Date(value))
+      .filter((value) => !Number.isNaN(value.getTime()))
+      .sort((left, right) => right.getTime() - left.getTime())[0]
+      ?.toISOString();
+  }
+
+  private reportPreview(value: string): string {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    return normalized.length > 140 ? `${normalized.slice(0, 137)}...` : normalized;
+  }
+
   private async adminAttendanceStudentRows(query: AdminAttendanceQuery): Promise<AdminAttendanceStudentRow[]> {
     const bounded = this.boundedAdminAttendanceQuery(query);
     const filters = await this.adminClassSessionFilters(bounded);
@@ -1801,6 +3060,23 @@ export class ClassSessionsService {
       }
     }));
     await this.attendanceSnapshots.bulkWrite(operations, { ordered: false });
+    await this.activity?.record({
+      sessionId: session.id,
+      batchId: session.batchId,
+      roomId: session.roomId,
+      eventType: 'attendance.snapshot_created',
+      category: 'attendance',
+      summary: 'Final attendance snapshot created',
+      actor: { id: session.teacherId, roles: ['system'] },
+      visibility: 'full',
+      metadata: {
+        snapshotSource,
+        enrolled: rows.length,
+        present: rows.filter((row) => row.status === 'present').length,
+        absent: rows.filter((row) => row.status === 'absent').length,
+        reconnects: rows.reduce((total, row) => total + row.reconnectCount, 0)
+      }
+    });
   }
 
   private adminAttendanceSummary(rows: AdminAttendanceSessionRow[]): AdminAttendanceSummary {
@@ -1822,11 +3098,12 @@ export class ClassSessionsService {
     };
   }
 
-  private csvEscape(value: string): string {
-    if (!/[",\n\r]/.test(value)) {
-      return value;
+  private csvEscape(value: unknown): string {
+    const text = this.csvValue(value);
+    if (!/[",\n\r]/.test(text)) {
+      return text;
     }
-    return `"${value.replace(/"/g, '""')}"`;
+    return `"${text.replace(/"/g, '""')}"`;
   }
 
   private async toAdminReportRows(sessions: ClassSessionMongoDocument[]): Promise<AdminClassSessionReportRow[]> {
@@ -1916,6 +3193,134 @@ export class ClassSessionsService {
     return new Map(teachers.map((teacher) => [teacher.id, teacher]));
   }
 
+  private persistedSessionResolution(session: ClassSessionMongoDocument, batch: BatchMongoDocument): SessionResolution {
+    return {
+      batch,
+      schedules: [],
+      planned: {
+        id: session.id,
+        batchId: session.batchId,
+        title: session.title,
+        sessionNumber: session.sessionNumber,
+        scheduledAt: session.scheduledAt,
+        durationMinutes: session.durationMinutes
+      },
+      persisted: session
+    };
+  }
+
+  private async toStudentCompletedClassRow(
+    session: ClassSessionMongoDocument,
+    batch: BatchMongoDocument | undefined,
+    teacher: UserMongoDocument | undefined,
+    user: AuthenticatedUser
+  ): Promise<StudentCompletedClassSessionListItem | null> {
+    if (!batch) {
+      return null;
+    }
+    const resolution = this.persistedSessionResolution(session, batch);
+    const liveSettings = await this.resolvedLiveSettingsForResolution(resolution);
+    const emptyRecordingSummary: { active?: Recording; latest?: Recording } = {};
+    const [recordingSummary, materials, whiteboard, chatSummary, attendance] = await Promise.all([
+      this.canViewRecordingContent(liveSettings, batch, user) ? this.recordings.getClassSessionRecordingSummary(session.id) : Promise.resolve(emptyRecordingSummary),
+      this.studentCompletedMaterials(resolution, liveSettings),
+      this.studentCompletedWhiteboardSummary(resolution),
+      this.rooms.getClassSessionPostClassStudentChatSummary({
+        sessionId: session.id,
+        batchId: batch.id,
+        roomId: session.roomId,
+        teacherId: batch.teacherId,
+        studentId: user.sub
+      }),
+      this.studentAttendanceForSession(session, user.sub)
+    ]);
+    const latestRecording = recordingSummary.latest && this.isPostClassRecordingPublished(recordingSummary.latest) ? recordingSummary.latest : undefined;
+    return {
+      sessionId: session.id,
+      batchId: batch.id,
+      batchName: batch.name,
+      ...(batch.courseId ? { courseId: batch.courseId } : {}),
+      ...(batch.courseName ? { courseName: batch.courseName } : {}),
+      teacherId: session.teacherId,
+      ...(teacher?.displayName || teacher?.name ? { teacherName: teacher.displayName ?? teacher.name } : {}),
+      title: session.title,
+      sessionNumber: session.sessionNumber,
+      scheduledAt: session.scheduledAt.toISOString(),
+      ...(session.startedAt ? { startedAt: session.startedAt.toISOString() } : {}),
+      ...(session.completedAt ? { completedAt: session.completedAt.toISOString() } : {}),
+      durationMinutes: session.durationMinutes,
+      status: 'completed',
+      recordingAvailable: Boolean(latestRecording && latestRecording.status !== 'failed'),
+      ...(latestRecording?.status ? { recordingStatus: latestRecording.status } : {}),
+      materialCount: materials.length,
+      notesAvailable: whiteboard.available,
+      notesPageCount: whiteboard.summary?.pageCount ?? 0,
+      qnaUnreadCount: chatSummary.studentThread?.unreadCount ?? 0,
+      ...(chatSummary.studentThread?.lastMessageAt ? { qnaLastMessageAt: chatSummary.studentThread.lastMessageAt } : {}),
+      attendance
+    };
+  }
+
+  private async studentCompletedMaterials(resolution: SessionResolution, liveSettings: LiveClassSettings): Promise<ClassSessionMaterial[]> {
+    if (!liveSettings.materials.materialsEnabled) {
+      return [];
+    }
+    const materials = await this.materials
+      .find({
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        deletedAt: { $exists: false }
+      })
+      .sort({ shared: -1, createdAt: -1 })
+      .exec();
+    return materials
+      .filter((material) => this.canAccessMaterial(material, resolution, 'student', liveSettings))
+      .map((material) => this.toMaterialPayload(material));
+  }
+
+  private async studentCompletedWhiteboardSummary(
+    resolution: SessionResolution,
+    options: { includeUnpublished?: boolean } = {}
+  ): Promise<StudentCompletedClassWhiteboardSummary> {
+    const state = await this.whiteboardStates.findOne({ sessionId: resolution.planned.id, batchId: resolution.batch.id });
+    if (!state) {
+      return { available: false };
+    }
+    if (!options.includeUnpublished && !this.isPostClassWhiteboardPublished(state)) {
+      return { available: false };
+    }
+    return {
+      available: true,
+      snapshotVersion: state.snapshotVersion,
+      updatedAt: state.updatedAt.toISOString(),
+      ...(state.publishedAt ? { publishedAt: state.publishedAt.toISOString() } : {}),
+      ...(state.publishedByUserId ? { publishedByUserId: state.publishedByUserId } : {}),
+      ...(state.unpublishedAt ? { unpublishedAt: state.unpublishedAt.toISOString() } : {}),
+      summary: this.whiteboardDocumentSummary(state)
+    };
+  }
+
+  private async studentAttendanceForSession(session: ClassSessionMongoDocument, studentId: string): Promise<StudentClassAttendanceSummary> {
+    const attendance = await this.adminAttendanceRowsForSession(session);
+    const row = attendance.rows.find((item) => item.studentId === studentId);
+    if (!row) {
+      return {
+        status: 'unknown',
+        totalDurationSeconds: 0,
+        reconnectCount: 0,
+        source: 'none'
+      };
+    }
+    return {
+      status: row.status,
+      ...(row.firstJoinAt ? { firstJoinAt: row.firstJoinAt.toISOString() } : {}),
+      ...(row.lastLeaveAt ? { lastLeaveAt: row.lastLeaveAt.toISOString() } : {}),
+      totalDurationSeconds: row.totalDurationSeconds,
+      reconnectCount: row.reconnectCount,
+      source: attendance.source === 'snapshot' ? 'snapshot' : 'inferred'
+    };
+  }
+
   private async adminAttendanceFallback(batchId: string): Promise<AdminClassSessionReportRow['attendance']> {
     const roster = await this.studentEnrollments.listBatchRoster(batchId, { includeInactive: true });
     return {
@@ -1971,6 +3376,14 @@ export class ClassSessionsService {
     throw new ForbiddenException('You are not allowed to manage this class session.');
   }
 
+  private async assertCanReadClassSessionForResolution(resolution: SessionResolution, user: AuthenticatedUser): Promise<void> {
+    if (resolution.persisted?.status === 'completed') {
+      await this.assertCanReadClassSessionHistory(resolution.batch, user);
+      return;
+    }
+    await this.assertCanReadClassSession(resolution.batch, user);
+  }
+
   private async assertCanReadClassSession(batch: BatchMongoDocument, user: AuthenticatedUser): Promise<void> {
     if (this.isAdmin(user) || (user.roles.includes('TEACHER') && batch.teacherId === user.sub)) {
       return;
@@ -1979,6 +3392,28 @@ export class ClassSessionsService {
       return;
     }
     throw new ForbiddenException('You are not allowed to open this class session.');
+  }
+
+  private async assertCanReadClassSessionHistory(batch: BatchMongoDocument, user: AuthenticatedUser): Promise<void> {
+    if (this.isAdmin(user) || (user.roles.includes('TEACHER') && batch.teacherId === user.sub)) {
+      return;
+    }
+    if (user.roles.includes('STUDENT') && (await this.studentEnrollments.isStudentHistoricallyEnrolledInBatch(user.sub, batch.id))) {
+      return;
+    }
+    throw new ForbiddenException('You are not allowed to open this completed class session.');
+  }
+
+  private assertCompletedClassSession(resolution: SessionResolution): void {
+    if (!resolution.persisted || resolution.persisted.status !== 'completed') {
+      throw new ConflictException('This class session is not completed yet.');
+    }
+  }
+
+  private assertStudentUser(user: AuthenticatedUser): void {
+    if (!user.roles.includes('STUDENT')) {
+      throw new ForbiddenException('Student access required.');
+    }
   }
 
   private assertBatchCanHostSession(batch: BatchMongoDocument): void {
@@ -2218,9 +3653,21 @@ export class ClassSessionsService {
       return Boolean(material.shared || settings.materials.publishMaterialsBeforeClass);
     }
     if (status === 'completed' || status === 'cancelled') {
-      return settings.materials.publishMaterialsAfterClass;
+      return settings.materials.publishMaterialsAfterClass && this.isPostClassMaterialPublished(material);
     }
     return settings.materials.publishMaterialsBeforeClass;
+  }
+
+  private isPostClassMaterialPublished(material: ClassSessionMaterialMongoDocument | ClassSessionMaterial): boolean {
+    return Boolean(material.shared || (material.publishedAt && !material.unpublishedAt));
+  }
+
+  private isPostClassRecordingPublished(recording: Recording): boolean {
+    return Boolean(recording.publishedAt && !recording.unpublishedAt);
+  }
+
+  private isPostClassWhiteboardPublished(state: ClassSessionWhiteboardStateMongoDocument): boolean {
+    return Boolean(state.publishedAt && !state.unpublishedAt);
   }
 
   private normalizeWhiteboardSnapshot(snapshot: WhiteboardMemorySnapshot): WhiteboardMemorySnapshot {
@@ -2396,6 +3843,10 @@ export class ClassSessionsService {
       whiteboardChannelId: state.whiteboardChannelId,
       schemaVersion: WHITEBOARD_MEMORY_SCHEMA_VERSION,
       snapshotVersion: state.snapshotVersion,
+      lastOperationSeq: state.lastOperationSeq ?? 0,
+      ...(state.lastOperationId ? { lastOperationId: state.lastOperationId } : {}),
+      operationCount: state.operationCount ?? 0,
+      compactedThroughSeq: state.compactedThroughSeq ?? 0,
       snapshot: state.currentSnapshot as unknown as WhiteboardMemorySnapshot,
       summary: this.whiteboardDocumentSummary(state),
       ...(state.latestVersionId ? { latestVersionId: state.latestVersionId } : {}),
@@ -2474,6 +3925,24 @@ export class ClassSessionsService {
         ...metadata
       }
     });
+    if (metadata.reason !== 'autosave') {
+      await this.activity?.record({
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        roomId: resolution.persisted?.roomId,
+        eventType: `whiteboard.memory_${action === 'save' ? 'saved' : 'restored'}`,
+        category: 'whiteboard',
+        summary: action === 'save' ? 'Saved class whiteboard memory' : 'Restored class whiteboard memory',
+        actor: { id: user.sub, email: user.email, roles: user.roles },
+        visibility: 'full',
+        metadata: {
+          reason: metadata.reason,
+          snapshotVersion: metadata.snapshotVersion,
+          pageCount: metadata.pageCount,
+          elementCount: metadata.elementCount
+        }
+      });
+    }
   }
 
   private async emitMaterialEvent(
@@ -2520,6 +3989,9 @@ export class ClassSessionsService {
       shared: Boolean(material.shared),
       ...(material.sharedAt ? { sharedAt: this.dateToIso(material.sharedAt) } : {}),
       ...(material.sharedByUserId ? { sharedByUserId: material.sharedByUserId } : {}),
+      ...(material.publishedAt ? { publishedAt: this.dateToIso(material.publishedAt) } : {}),
+      ...(material.publishedByUserId ? { publishedByUserId: material.publishedByUserId } : {}),
+      ...(material.unpublishedAt ? { unpublishedAt: this.dateToIso(material.unpublishedAt) } : {}),
       uploadedByUserId: material.uploadedByUserId,
       createdAt: this.dateToIso(material.createdAt),
       updatedAt: this.dateToIso(material.updatedAt),
@@ -2611,6 +4083,11 @@ export class ClassSessionsService {
 
   private dateToIso(value: Date | string): string {
     return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+  }
+
+  private async userDisplayName(user: AuthenticatedUser): Promise<string> {
+    const profile = this.users ? await this.users.findById(user.sub).exec() : null;
+    return profile?.displayName ?? profile?.name ?? user.email ?? user.sub;
   }
 
   private isDuplicateKeyError(error: unknown): boolean {

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
+import type { Assignment, AssignmentSubmission } from '@native-sfu/contracts';
 import { ClassSessionService, type ClassroomPayload } from '../../class-session/class-session.service';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
@@ -26,6 +27,9 @@ export class StudentDashboard implements OnInit {
   protected readonly currentSessions = signal<Record<string, ClassroomPayload | null>>({});
   protected readonly currentSessionErrors = signal<Record<string, string>>({});
   protected readonly currentSessionLoadingIds = signal<Set<string>>(new Set());
+  protected readonly assignments = signal<Array<Assignment & { submission?: AssignmentSubmission }>>([]);
+  protected readonly assignmentsLoading = signal(false);
+  protected readonly assignmentsError = signal('');
 
   private readonly loadedCurrentSessionBatchIds = new Set<string>();
 
@@ -45,6 +49,7 @@ export class StudentDashboard implements OnInit {
 
   ngOnInit(): void {
     this.enrollment.loadEnrolledBatches();
+    this.loadAssignments();
   }
 
   protected leave(batch: StudentBatch): void {
@@ -132,6 +137,23 @@ export class StudentDashboard implements OnInit {
     return !batch.enrollmentStatus || batch.enrollmentStatus === 'active';
   }
 
+  protected assignmentStatus(assignment: Assignment & { submission?: AssignmentSubmission }): string {
+    const status = assignment.submission?.status ?? 'assigned';
+    return status.replace(/_/g, ' ');
+  }
+
+  protected assignmentDueLabel(assignment: Assignment): string {
+    return assignment.dueAt ? this.formatStart(assignment.dueAt) : 'No due date';
+  }
+
+  protected assignmentBatchLabel(assignment: Assignment): string {
+    return assignment.batchName || this.enrolledBatches().find((batch) => batch.id === assignment.batchId)?.title || 'Batch';
+  }
+
+  protected dueAssignments(): Array<Assignment & { submission?: AssignmentSubmission }> {
+    return this.assignments().filter((assignment) => !['completed', 'reviewed'].includes(assignment.submission?.status ?? ''));
+  }
+
   private loadCurrentSession(batchId: string): void {
     this.currentSessionLoadingIds.update((ids) => new Set(ids).add(batchId));
     this.classSessions.getCurrentForBatch(batchId).subscribe({
@@ -153,6 +175,16 @@ export class StudentDashboard implements OnInit {
         this.clearCurrentSessionLoading(batchId);
       },
       complete: () => this.clearCurrentSessionLoading(batchId)
+    });
+  }
+
+  private loadAssignments(): void {
+    this.assignmentsLoading.set(true);
+    this.assignmentsError.set('');
+    this.classSessions.listStudentAssignments().subscribe({
+      next: (response) => this.assignments.set(response.items),
+      error: (error) => this.assignmentsError.set(this.classSessions.errorMessage(error)),
+      complete: () => this.assignmentsLoading.set(false)
     });
   }
 

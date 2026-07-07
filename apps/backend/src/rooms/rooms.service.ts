@@ -13,14 +13,15 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { createReadStream, type ReadStream } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { randomBytes, randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { extname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { Model, Types } from 'mongoose';
 import {
   ChatMessage,
   ChatAttachment,
   type ChatDeliveryState,
+  type ChatMessageContext,
   type ChatMessageScope,
   type ChatReadReceiptEvent,
   ChatReadState,
@@ -104,8 +105,9 @@ import {
   WHITEBOARD_PERMISSION_LEVELS,
   VIEWER_PERMISSIONS
 } from '@native-sfu/contracts';
-import type { RoomOwnerLookupResponse } from '@native-sfu/contracts';
+import type { RoomOwnerLookupResponse, WhiteboardMemorySnapshot } from '@native-sfu/contracts';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { ClassSessionActivityService } from '../class-session-activity/class-session-activity.service';
 import {
   BatchDocument,
   BatchMongoDocument,
@@ -119,6 +121,10 @@ import {
   ChatReadStateMongoDocument,
   ClassSessionDocument,
   ClassSessionMongoDocument,
+  ClassSessionWhiteboardOperationDocument,
+  ClassSessionWhiteboardOperationMongoDocument,
+  ClassSessionWhiteboardStateDocument,
+  ClassSessionWhiteboardStateMongoDocument,
   ConsumerDocument,
   ConsumerMongoDocument,
   ModerationDocument,
@@ -143,8 +149,14 @@ import { StudentEnrollmentsService, type StudentEnrollmentRosterItem } from '../
 const CHAT_MESSAGE_MAX_LENGTH = 2000;
 const CHAT_ATTACHMENT_MAX_COUNT = 3;
 const CHAT_ATTACHMENT_MAX_SIZE_BYTES = 2 * 1024 * 1024;
-const CHAT_ATTACHMENT_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const CHAT_ATTACHMENT_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const CHAT_ATTACHMENT_FILE_MIME_TYPES = new Set([...CHAT_ATTACHMENT_IMAGE_MIME_TYPES, 'application/pdf']);
+const CHAT_ATTACHMENT_EXTENSIONS_BY_MIME_TYPE = new Map<string, readonly string[]>([
+  ['application/pdf', ['.pdf']],
+  ['image/jpeg', ['.jpg', '.jpeg']],
+  ['image/png', ['.png']],
+  ['image/webp', ['.webp']]
+]);
 import { NodeRegistryService } from '../cluster/node-registry.service';
 import { PipeCoordinatorService } from '../cluster/pipe-coordinator.service';
 import { MediaService, type MediaWorkerRoomFailureEvent } from '@native-sfu/nest-sfu';
@@ -211,6 +223,13 @@ interface WhiteboardLockState {
   changedByParticipantId: string;
 }
 
+interface PersistedWhiteboardOperationResult {
+  operationId: string;
+  operationSeq: number;
+  createdAt: Date;
+  idempotentReplay?: boolean;
+}
+
 export interface WhiteboardControlDelivery {
   event: WhiteboardControlEvent;
   targets: SocketDeliveryTarget[];
@@ -223,6 +242,7 @@ export interface WhiteboardControlDelivery {
 export interface WhiteboardRealtimeDelivery<TEvent> {
   event: TEvent;
   targets: SocketDeliveryTarget[];
+  idempotentReplay?: boolean;
 }
 
 const DEFAULT_WHITEBOARD_PERMISSION_LEVEL: WhiteboardPermissionLevel = 'annotate';
@@ -548,7 +568,14 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     private readonly studentEnrollments: StudentEnrollmentsService,
     private readonly recordings: RecordingsService,
     private readonly config: ConfigService,
-    @Optional() private readonly auditLogs?: AuditLogsService
+    @Optional() private readonly auditLogs?: AuditLogsService,
+    @Optional() private readonly activity?: ClassSessionActivityService,
+    @Optional()
+    @InjectModel(ClassSessionWhiteboardOperationDocument.name)
+    private readonly whiteboardOperations?: Model<ClassSessionWhiteboardOperationMongoDocument>,
+    @Optional()
+    @InjectModel(ClassSessionWhiteboardStateDocument.name)
+    private readonly whiteboardStates?: Model<ClassSessionWhiteboardStateMongoDocument>
   ) {
     this.media.onConsumerLayerEvent((event) => {
       void this.handleConsumerLayerEvent(event);
@@ -837,6 +864,15 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       }
       this.metrics.roomJoinDuration.observe(performance.now() - startedAt);
       await this.recordClassSessionRoomJoinAudit(classSession, user, existingParticipant, 'admitted', 'rejoin');
+      if (classSession) {
+        await this.recordClassSessionParticipantActivity(
+          classSession,
+          existingParticipant,
+          'participant.rejoined',
+          `${existingParticipant.displayName} rejoined the class session`,
+          { admitted: existingParticipant.admitted, rejoined: true }
+        );
+      }
       return {
         room: await this.getRoom(room.id),
         participantId: existingParticipant.id,
@@ -934,6 +970,15 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       }
     });
     await this.recordClassSessionRoomJoinAudit(classSession, user, participant, 'admitted', admitted ? 'live' : 'pending');
+    if (classSession) {
+      await this.recordClassSessionParticipantActivity(
+        classSession,
+        participant,
+        admitted ? 'participant.joined' : 'participant.waiting',
+        admitted ? `${participant.displayName} joined the class session` : `${participant.displayName} entered the waiting room`,
+        { admitted, rejoined: false }
+      );
+    }
     return {
       room: updatedRoom,
       participantId: participant.id,
@@ -1119,6 +1164,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
     this.metrics.activeParticipants.labels(roomId).dec();
     const room = await this.rooms.findById(roomId);
+    const classSession = await this.classSessions.findOne({ roomId });
     const roomReference = room
       ? {
           roomId: room.id,
@@ -1153,6 +1199,15 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
           participantCount: 0
         }
       });
+      if (classSession) {
+        await this.recordClassSessionParticipantActivity(
+          classSession,
+          participant,
+          'participant.left',
+          `${participant.displayName} left the class session`,
+          { closedRoom: true }
+        );
+      }
       return { closed: true };
     }
     await this.platformEvents.appendEvent({
@@ -1165,6 +1220,15 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         closedRoom: false
       }
     });
+    if (classSession) {
+      await this.recordClassSessionParticipantActivity(
+        classSession,
+        participant,
+        'participant.left',
+        `${participant.displayName} left the class session`,
+        { closedRoom: false }
+      );
+    }
     return { closed: false };
   }
 
@@ -1280,6 +1344,20 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         locked
       }
     });
+    const classSession = await this.classSessions.findOne({ roomId });
+    if (classSession) {
+      await this.activity?.record({
+        sessionId: classSession.id,
+        batchId: classSession.batchId,
+        roomId,
+        eventType: locked ? 'class.locked' : 'class.unlocked',
+        category: 'moderation',
+        summary: locked ? 'Teacher locked the class' : 'Teacher unlocked the class',
+        actor: { id: actor.userId ?? actor.id, name: actor.displayName, roles: [actor.role] },
+        visibility: 'student_safe',
+        metadata: { locked }
+      });
+    }
     return room;
   }
 
@@ -1790,7 +1868,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('Class session room not found');
     }
     this.assertClassSessionRoomIsLive(classSession);
-    await this.assertModerator(roomId, actorParticipantId, false);
+    const actor = await this.assertModerator(roomId, actorParticipantId, false);
     const students = await this.participants.find({
       roomId,
       role: Role.PARTICIPANT,
@@ -1801,6 +1879,17 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     for (const student of students) {
       results.push(await this.moderateStudentMedia(roomId, actorParticipantId, student.id, action));
     }
+    await this.activity?.record({
+      sessionId: classSession.id,
+      batchId: classSession.batchId,
+      roomId,
+      eventType: action === 'mute-mic' ? 'moderation.mute_all_students' : 'moderation.stop_all_cameras',
+      category: 'moderation',
+      summary: action === 'mute-mic' ? 'Teacher muted all student microphones' : 'Teacher stopped all student cameras',
+      actor: { id: actor.userId ?? actor.id, name: actor.displayName, roles: [actor.role] },
+      visibility: 'student_safe',
+      metadata: { action, targetedStudents: students.length, succeeded: results.length }
+    });
     return results;
   }
 
@@ -3101,6 +3190,20 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       deliveryState,
       ...(deliveryTimestamp ? { deliveredAt: deliveryTimestamp } : {})
     };
+    if (classSession && delivery.scope === 'broadcast') {
+      await this.activity?.record({
+        sessionId: classSession.id,
+        batchId: classSession.batchId,
+        roomId: classSession.roomId,
+        eventType: 'chat.broadcast_sent',
+        category: 'chat',
+        summary: 'Teacher sent a class broadcast',
+        actor: { id: sender.userId ?? sender.id, name: sender.displayName, roles: [sender.role] },
+        source: { collection: 'chat', id: doc.id },
+        visibility: 'student_safe',
+        metadata: { scope: 'broadcast', hasAttachments: preparedAttachments.attachments.length > 0 }
+      });
+    }
     return {
       message,
       deliveryState,
@@ -3113,7 +3216,16 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async getChatHistory(request: { sessionId?: string; roomId?: string; channelId?: string; threadKey?: string; scope?: ChatMessageScope; before?: string; limit?: number }): Promise<ChatHistoryResponse> {
+  async getChatHistory(request: {
+    sessionId?: string;
+    roomId?: string;
+    channelId?: string;
+    threadKey?: string;
+    scope?: ChatMessageScope;
+    context?: ChatMessageContext;
+    before?: string;
+    limit?: number;
+  }): Promise<ChatHistoryResponse> {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
     if (request.sessionId) {
       filter.sessionId = request.sessionId;
@@ -3130,6 +3242,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
     if (request.scope) {
       filter.scope = request.scope;
+    }
+    if (request.context) {
+      filter.context = request.context;
     }
 
     if (request.before) {
@@ -3217,6 +3332,224 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async getClassSessionPostClassStudentChatHistory(request: {
+    sessionId: string;
+    batchId: string;
+    roomId: string;
+    channelId: string;
+    teacherId: string;
+    studentId: string;
+    scope?: ChatMessageScope;
+    before?: string;
+    limit?: number;
+  }): Promise<ChatHistoryResponse> {
+    const threadKey = this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, request.studentId);
+    if (request.scope === 'broadcast') {
+      return this.getChatHistory({
+        sessionId: request.sessionId,
+        scope: 'broadcast',
+        before: request.before,
+        limit: request.limit
+      });
+    }
+    if (request.scope === 'private') {
+      return this.getChatHistory({
+        sessionId: request.sessionId,
+        scope: 'private',
+        context: 'post_class',
+        threadKey,
+        before: request.before,
+        limit: request.limit
+      });
+    }
+    return this.getChatHistoryByFilter({
+      sessionId: request.sessionId,
+      before: request.before,
+      limit: request.limit,
+      filter: {
+        $or: [{ scope: 'broadcast' }, { scope: 'private', context: 'post_class', threadKey }]
+      }
+    });
+  }
+
+  async getClassSessionPostClassStudentChatSummary(request: {
+    sessionId: string;
+    batchId: string;
+    roomId: string;
+    teacherId: string;
+    studentId: string;
+  }): Promise<ChatThreadSummaryResponse> {
+    const threadKey = this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, request.studentId);
+    const readStates = await this.chatReadStates.find({ sessionId: request.sessionId, userId: request.studentId });
+    const studentThread = await this.buildChatThreadSummary({
+      sessionId: request.sessionId,
+      scope: 'private',
+      threadKey,
+      context: 'post_class',
+      readState: this.readStateFor(readStates, 'private', threadKey),
+      unreadFilter: { senderRole: { $ne: 'student' } }
+    });
+    const broadcast = await this.buildChatThreadSummary({
+      sessionId: request.sessionId,
+      scope: 'broadcast',
+      readState: this.readStateFor(readStates, 'broadcast'),
+      unreadFilter: { senderRole: { $ne: 'student' } }
+    });
+    return {
+      sessionId: request.sessionId,
+      roomId: request.roomId,
+      threads: [studentThread, broadcast],
+      studentThread,
+      broadcast
+    };
+  }
+
+  async getClassSessionPostClassTeacherChatHistory(request: {
+    sessionId: string;
+    batchId: string;
+    roomId: string;
+    teacherId: string;
+    participantId: string;
+    before?: string;
+    limit?: number;
+  }): Promise<ChatHistoryResponse> {
+    const target = await this.resolveClassSessionHistoricalStudentThreadTarget({
+      batchId: request.batchId,
+      sessionId: request.sessionId,
+      teacherId: request.teacherId,
+      participantId: request.participantId
+    });
+    return this.getChatHistory({
+      sessionId: request.sessionId,
+      scope: 'private',
+      threadKey: target.threadKey,
+      context: 'post_class',
+      before: request.before,
+      limit: request.limit
+    });
+  }
+
+  async getClassSessionPostClassTeacherChatSummary(request: {
+    sessionId: string;
+    batchId: string;
+    roomId: string;
+    teacherId: string;
+    requesterUserId: string;
+  }): Promise<ChatThreadSummaryResponse> {
+    const roster = (await this.studentEnrollments.listBatchRoster(request.batchId, { includeInactive: true })).filter((student) =>
+      this.canReadPostClassStudentThread(student)
+    );
+    const readStates = await this.chatReadStates.find({ sessionId: request.sessionId, userId: request.requesterUserId });
+    const privateThreads = await Promise.all(
+      roster.map((student) => {
+        const threadKey = this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, student.userId);
+        return this.buildChatThreadSummary({
+          sessionId: request.sessionId,
+          scope: 'private',
+          threadKey,
+          context: 'post_class',
+          rosterItem: student,
+          readState: this.readStateFor(readStates, 'private', threadKey),
+          unreadFilter: { senderRole: 'student' }
+        });
+      })
+    );
+    const broadcast = await this.buildChatThreadSummary({
+      sessionId: request.sessionId,
+      scope: 'broadcast',
+      readState: this.readStateFor(readStates, 'broadcast'),
+      unreadFilter: { senderId: '__teacher_broadcast_unread_disabled__' }
+    });
+    return {
+      sessionId: request.sessionId,
+      roomId: request.roomId,
+      threads: [...privateThreads, broadcast],
+      broadcast
+    };
+  }
+
+  async sendClassSessionPostClassPrivateMessage(request: {
+    sessionId: string;
+    batchId: string;
+    roomId: string;
+    channelId: string;
+    teacherId: string;
+    senderId: string;
+    senderName: string;
+    senderRole: 'teacher' | 'student' | 'admin';
+    studentId: string;
+    message: string;
+    maxMessageLength: number;
+  }): Promise<ChatMessage> {
+    const messageBody = request.message.trim();
+    if (!messageBody) {
+      throw new BadRequestException('Chat message is required.');
+    }
+    if (messageBody.length > request.maxMessageLength) {
+      throw new BadRequestException(`Chat message cannot exceed ${request.maxMessageLength} characters.`);
+    }
+    const threadKey = this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, request.studentId);
+    const recipientId = request.senderRole === 'student' ? request.teacherId : request.studentId;
+    const doc = await this.chat.create({
+      sessionId: request.sessionId,
+      batchId: request.batchId,
+      roomId: request.roomId,
+      channelId: request.channelId,
+      chatChannelId: request.channelId,
+      senderId: request.senderId,
+      senderName: request.senderName,
+      senderRole: request.senderRole === 'admin' ? 'teacher' : request.senderRole,
+      recipientId,
+      scope: 'private',
+      context: 'post_class',
+      threadKey,
+      message: messageBody,
+      shadowMuted: false
+    });
+    return {
+      ...this.toChatMessage(doc),
+      deliveryState: 'sent'
+    };
+  }
+
+  async sendClassSessionPostClassBroadcastMessage(request: {
+    sessionId: string;
+    batchId: string;
+    roomId: string;
+    channelId: string;
+    senderId: string;
+    senderName: string;
+    senderRole: 'teacher' | 'admin';
+    message: string;
+    maxMessageLength: number;
+  }): Promise<ChatMessage> {
+    const messageBody = request.message.trim();
+    if (!messageBody) {
+      throw new BadRequestException('Announcement message is required.');
+    }
+    if (messageBody.length > request.maxMessageLength) {
+      throw new BadRequestException(`Announcement cannot exceed ${request.maxMessageLength} characters.`);
+    }
+    const doc = await this.chat.create({
+      sessionId: request.sessionId,
+      batchId: request.batchId,
+      roomId: request.roomId,
+      channelId: request.channelId,
+      chatChannelId: request.channelId,
+      senderId: request.senderId,
+      senderName: request.senderName,
+      senderRole: 'teacher',
+      scope: 'broadcast',
+      context: 'post_class',
+      message: messageBody,
+      shadowMuted: false
+    });
+    return {
+      ...this.toChatMessage(doc),
+      deliveryState: 'sent'
+    };
+  }
+
   async createClassSessionChatAttachments(request: {
     sessionId: string;
     batchId: string;
@@ -3247,6 +3580,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const created: ChatAttachmentFileMongoDocument[] = [];
     for (const file of request.files) {
       const mimeType = this.normalizeUploadedChatAttachmentMimeType(file.mimetype);
+      this.assertChatAttachmentExtensionMatchesMimeType(file.originalname, mimeType);
       const type = this.chatAttachmentTypeForMimeType(mimeType);
       if (file.size > this.chatAttachmentMaxFileSizeBytes()) {
         throw new BadRequestException('Chat attachments cannot exceed 2 MB.');
@@ -3255,9 +3589,11 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         throw new BadRequestException('Attachment upload is empty.');
       }
       const attachmentId = randomUUID();
+      const originalName = this.safeAttachmentFileName(file.originalname, type);
       const fileName = this.safeAttachmentFileName(file.originalname, type);
       const storageKey = `class-sessions/${this.safeStorageSegment(request.sessionId)}/${attachmentId}/${fileName}`;
       const storagePath = join(directory, `${attachmentId}-${fileName}`);
+      const checksum = this.chatAttachmentChecksum(file.buffer);
       await writeFile(storagePath, file.buffer);
       const doc = await this.chatAttachments.create({
         attachmentId,
@@ -3270,11 +3606,14 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         uploadedByParticipantId: participant.id,
         scope: 'pending',
         type,
+        originalName,
         fileName,
         title: fileName,
         mimeType,
         size: file.size,
+        sizeBytes: file.size,
         storageProvider: 'local',
+        checksum,
         storageKey,
         path: storagePath
       });
@@ -3494,6 +3833,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   private async buildChatThreadSummary(request: {
     sessionId: string;
     scope: ChatMessageScope;
+    context?: ChatMessageContext;
     threadKey?: string;
     participant?: ParticipantMongoDocument;
     rosterItem?: StudentEnrollmentRosterItem;
@@ -3507,6 +3847,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     };
     if (request.threadKey) {
       messageFilter.threadKey = request.threadKey;
+    }
+    if (request.context) {
+      messageFilter.context = request.context;
     }
     const latestDocs = await this.chat.find(messageFilter).sort({ createdAt: -1 }).limit(1).exec();
     const latestMessage = latestDocs[0] ? this.toChatMessage(latestDocs[0]) : undefined;
@@ -3675,6 +4018,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       if (attachment.dataUrl) {
         throw new BadRequestException('Upload file attachments before sending chat messages.');
       }
+      if (attachment.url) {
+        throw new BadRequestException('File attachments must use uploaded attachment ids, not external URLs.');
+      }
       const attachmentId = this.cleanAttachmentText(attachment.attachmentId ?? attachment.id, 120);
       if (!attachmentId) {
         throw new BadRequestException('Uploaded attachment id is required.');
@@ -3699,6 +4045,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       }
       if (attachment.mimeType && attachment.mimeType.toLowerCase() !== doc.mimeType) {
         throw new BadRequestException('Attachment MIME type does not match uploaded file.');
+      }
+      if (typeof attachment.sizeBytes === 'number' && attachment.sizeBytes !== (doc.sizeBytes ?? doc.size)) {
+        throw new BadRequestException('Attachment size does not match uploaded file.');
       }
       normalized.push(this.toChatAttachmentFromFile(doc));
       fileAttachments.push(doc);
@@ -3783,7 +4132,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Only PDF and common image attachments are allowed.');
     }
     if (attachment.type === 'image' && !CHAT_ATTACHMENT_IMAGE_MIME_TYPES.has(expectedMimeType)) {
-      throw new BadRequestException('Only JPEG, PNG, GIF, and WebP image attachments are allowed.');
+      throw new BadRequestException('Only JPEG, PNG, and WebP image attachments are allowed.');
     }
     if (attachment.type === 'pdf' && expectedMimeType !== 'application/pdf') {
       throw new BadRequestException('PDF attachments must use application/pdf.');
@@ -3803,10 +4152,12 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return {
       id: randomUUID(),
       type: attachment.type,
+      ...(attachment.originalName ? { originalName: this.cleanAttachmentText(attachment.originalName, 180) } : {}),
       ...(fileName ? { fileName } : {}),
       ...(title ? { title } : {}),
       mimeType: expectedMimeType,
       size,
+      sizeBytes: size,
       ...(url ? { url } : {}),
       ...(dataUrl ? { dataUrl } : {}),
       createdAt
@@ -3858,9 +4209,21 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   private normalizeUploadedChatAttachmentMimeType(value: string | undefined): string {
     const mimeType = value?.trim().toLowerCase();
     if (!mimeType || !CHAT_ATTACHMENT_FILE_MIME_TYPES.has(mimeType)) {
-      throw new BadRequestException('Only PDF, JPEG, PNG, GIF, and WebP attachments are allowed.');
+      throw new BadRequestException('Only PDF, JPEG, PNG, and WebP attachments are allowed.');
     }
     return mimeType;
+  }
+
+  private assertChatAttachmentExtensionMatchesMimeType(fileName: string | undefined, mimeType: string): void {
+    const allowedExtensions = CHAT_ATTACHMENT_EXTENSIONS_BY_MIME_TYPE.get(mimeType) ?? [];
+    const extension = extname(fileName ?? '').toLowerCase();
+    if (!extension || !allowedExtensions.includes(extension)) {
+      throw new BadRequestException('Attachment file extension does not match the uploaded file type.');
+    }
+  }
+
+  private chatAttachmentChecksum(buffer: Buffer): string {
+    return `sha256:${createHash('sha256').update(buffer).digest('hex')}`;
   }
 
   private chatAttachmentTypeForMimeType(mimeType: string): 'image' | 'pdf' {
@@ -3894,11 +4257,14 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       id: doc.attachmentId,
       attachmentId: doc.attachmentId,
       type: doc.type,
+      ...(doc.originalName ? { originalName: doc.originalName } : {}),
       fileName: doc.fileName,
       title: doc.title || doc.fileName,
       mimeType: doc.mimeType,
       size: doc.size,
+      sizeBytes: doc.sizeBytes ?? doc.size,
       storageProvider: doc.storageProvider,
+      ...(doc.checksum ? { checksum: doc.checksum } : {}),
       downloadUrl: this.classSessionChatAttachmentDownloadUrl(doc.sessionId, doc.attachmentId),
       createdAt: this.dateToIso(doc.createdAt)
     };
@@ -3917,6 +4283,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       requesterRole: 'teacher' | 'student' | 'admin';
     }
   ): boolean {
+    if (doc.scope === 'pending') {
+      return doc.uploadedByUserId === request.requesterUserId;
+    }
     if (request.requesterRole === 'teacher' || request.requesterRole === 'admin') {
       return true;
     }
@@ -4078,6 +4447,33 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       rosterItem,
       threadKey: this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, rosterItem.userId)
     };
+  }
+
+  private async resolveClassSessionHistoricalStudentThreadTarget(request: {
+    batchId: string;
+    sessionId: string;
+    teacherId: string;
+    participantId: string;
+  }): Promise<{ studentId: string; threadKey: string; rosterItem: StudentEnrollmentRosterItem }> {
+    const roster = await this.studentEnrollments.listBatchRoster(request.batchId, { includeInactive: true });
+    const rosterItem = roster.find((student) => {
+      if (!this.canReadPostClassStudentThread(student)) {
+        return false;
+      }
+      return student.userId === request.participantId || student.id === request.participantId || student.enrollmentId === request.participantId;
+    });
+    if (!rosterItem) {
+      throw new BadRequestException('Target student is not enrolled in this completed class session.');
+    }
+    return {
+      studentId: rosterItem.userId,
+      rosterItem,
+      threadKey: this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, rosterItem.userId)
+    };
+  }
+
+  private canReadPostClassStudentThread(student: StudentEnrollmentRosterItem): boolean {
+    return student.status === 'active' || student.status === 'completed';
   }
 
   private async chatReadReceiptTargets(
@@ -4381,19 +4777,14 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async whiteboardRealtimeTargets(roomId: string, actor: ParticipantMongoDocument): Promise<SocketDeliveryTarget[]> {
-    const participants = new Map<string, ParticipantMongoDocument>();
-    for (const moderator of await this.whiteboardActiveModerators(roomId)) {
-      participants.set(moderator.id, moderator);
-    }
-    const state = this.whiteboardControlByRoomId.get(roomId);
-    if (state) {
-      const student = await this.activeParticipantForWhiteboardState(roomId, state);
-      if (student) {
-        participants.set(student.id, student);
-      }
-    }
-    participants.set(actor.id, actor);
-    return this.participantSocketTargets(roomId, [...participants.values()]);
+    const participants = await this.participants
+      .find({
+        roomId,
+        admitted: true,
+        leftAt: { $exists: false }
+      })
+      .exec();
+    return this.participantSocketTargets(roomId, participants);
   }
 
   private async whiteboardActiveModerators(roomId: string): Promise<ParticipantMongoDocument[]> {
@@ -4449,6 +4840,221 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     throw new BadRequestException('Whiteboard command type is invalid.');
   }
 
+  private normalizeWhiteboardOperationId(operationId?: string): string {
+    if (operationId === undefined || operationId === null || operationId === '') {
+      return randomUUID();
+    }
+    if (typeof operationId !== 'string') {
+      throw new BadRequestException('Whiteboard operation id is invalid.');
+    }
+    const normalized = operationId.trim();
+    if (!normalized || normalized.length > 128) {
+      throw new BadRequestException('Whiteboard operation id is invalid.');
+    }
+    return normalized;
+  }
+
+  private normalizeWhiteboardBaseSnapshotVersion(baseSnapshotVersion?: number): number | undefined {
+    if (baseSnapshotVersion === undefined || baseSnapshotVersion === null) {
+      return undefined;
+    }
+    const normalized = Math.floor(Number(baseSnapshotVersion));
+    if (!Number.isFinite(normalized) || normalized < 0) {
+      throw new BadRequestException('Whiteboard base snapshot version is invalid.');
+    }
+    return normalized;
+  }
+
+  private whiteboardCommandHash(command: WhiteboardCommand): string {
+    return createHash('sha256').update(JSON.stringify(command)).digest('hex');
+  }
+
+  private defaultWhiteboardSnapshot(pageId?: string): WhiteboardMemorySnapshot {
+    const id = pageId || 'page-1';
+    return {
+      schemaVersion: 1,
+      activePageId: id,
+      pages: [
+        {
+          id,
+          title: 'Board 1',
+          tags: [],
+          order: 0,
+          elements: []
+        }
+      ]
+    };
+  }
+
+  private cloneWhiteboardSnapshot(snapshot: Record<string, unknown> | WhiteboardMemorySnapshot | undefined, pageId?: string): WhiteboardMemorySnapshot {
+    if (!snapshot || typeof snapshot !== 'object' || (snapshot as WhiteboardMemorySnapshot).schemaVersion !== 1 || !Array.isArray((snapshot as WhiteboardMemorySnapshot).pages)) {
+      return this.defaultWhiteboardSnapshot(pageId);
+    }
+    return JSON.parse(JSON.stringify(snapshot)) as WhiteboardMemorySnapshot;
+  }
+
+  private findOrCreateWhiteboardPage(snapshot: WhiteboardMemorySnapshot, pageId?: string): WhiteboardMemorySnapshot['pages'][number] {
+    const id = pageId || snapshot.activePageId || snapshot.pages[0]?.id || 'page-1';
+    let page = snapshot.pages.find((candidate) => candidate.id === id);
+    if (!page) {
+      page = {
+        id,
+        title: `Board ${snapshot.pages.length + 1}`,
+        tags: [],
+        order: snapshot.pages.length,
+        elements: []
+      };
+      snapshot.pages.push(page);
+    }
+    snapshot.activePageId = id;
+    return page;
+  }
+
+  private applyWhiteboardCommandToSnapshot(snapshot: WhiteboardMemorySnapshot, command: WhiteboardCommand): WhiteboardMemorySnapshot {
+    if (command.type === 'clear') {
+      if (command.pageId) {
+        this.findOrCreateWhiteboardPage(snapshot, command.pageId).elements = [];
+        return snapshot;
+      }
+      const activePageId = snapshot.activePageId || snapshot.pages[0]?.id || 'page-1';
+      snapshot.pages = snapshot.pages.length ? snapshot.pages.map((page) => ({ ...page, elements: [] })) : this.defaultWhiteboardSnapshot(activePageId).pages;
+      snapshot.activePageId = activePageId;
+      return snapshot;
+    }
+    if (command.type === 'delete') {
+      const pages = command.pageId ? [this.findOrCreateWhiteboardPage(snapshot, command.pageId)] : snapshot.pages;
+      for (const page of pages) {
+        page.elements = page.elements.filter((element) => element.id !== command.elementId);
+      }
+      return snapshot;
+    }
+    const page = this.findOrCreateWhiteboardPage(snapshot, command.pageId);
+    const nextElement = JSON.parse(JSON.stringify(command.element)) as Record<string, unknown>;
+    const existingIndex = page.elements.findIndex((element) => element.id === command.element.id);
+    if (existingIndex >= 0) {
+      page.elements[existingIndex] = nextElement;
+    } else {
+      page.elements.push(nextElement);
+    }
+    return snapshot;
+  }
+
+  private whiteboardSnapshotPageMeta(snapshot: WhiteboardMemorySnapshot): Array<{ pageId: string; title: string; tags: string[]; order: number; elementCount: number }> {
+    return snapshot.pages.map((page, index) => ({
+      pageId: page.id,
+      title: page.title || `Board ${index + 1}`,
+      tags: Array.isArray(page.tags) ? page.tags.filter((tag): tag is string => typeof tag === 'string') : [],
+      order: Number.isFinite(page.order) ? page.order : index,
+      elementCount: Array.isArray(page.elements) ? page.elements.length : 0
+    }));
+  }
+
+  private async persistWhiteboardOperation(
+    classSession: ClassSessionMongoDocument,
+    actor: ParticipantMongoDocument,
+    command: WhiteboardCommand,
+    rawOperationId?: string,
+    rawBaseSnapshotVersion?: number
+  ): Promise<PersistedWhiteboardOperationResult> {
+    const operationId = this.normalizeWhiteboardOperationId(rawOperationId);
+    const baseSnapshotVersion = this.normalizeWhiteboardBaseSnapshotVersion(rawBaseSnapshotVersion);
+    const commandHash = this.whiteboardCommandHash(command);
+    const now = new Date();
+    if (!this.whiteboardOperations || !this.whiteboardStates) {
+      return { operationId, operationSeq: 0, createdAt: now };
+    }
+
+    const existing = await this.whiteboardOperations.findOne({ sessionId: classSession.id, operationId }).exec();
+    if (existing) {
+      if (existing.commandHash !== commandHash) {
+        throw new ConflictException('Whiteboard operation id was already used for a different command.');
+      }
+      return {
+        operationId: existing.operationId,
+        operationSeq: existing.operationSeq,
+        createdAt: existing.createdAt,
+        idempotentReplay: true
+      };
+    }
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const previousState = await this.whiteboardStates.findOne({ sessionId: classSession.id, batchId: classSession.batchId }).exec();
+      const operationSeq = (previousState?.lastOperationSeq ?? 0) + 1;
+      try {
+        const operation = await this.whiteboardOperations.create({
+          operationId,
+          sessionId: classSession.id,
+          batchId: classSession.batchId,
+          roomId: classSession.roomId,
+          whiteboardChannelId: classSession.whiteboardChannelId,
+          operationSeq,
+          ...(baseSnapshotVersion !== undefined ? { baseSnapshotVersion } : {}),
+          actorParticipantId: actor.id,
+          actorUserId: actor.userId,
+          actorRole: actor.role,
+          actorName: actor.displayName,
+          command,
+          commandHash
+        });
+        const snapshot = this.applyWhiteboardCommandToSnapshot(
+          this.cloneWhiteboardSnapshot(previousState?.currentSnapshot, command.pageId),
+          command
+        );
+        const pages = this.whiteboardSnapshotPageMeta(snapshot);
+        const elementCount = pages.reduce((total, page) => total + page.elementCount, 0);
+        await this.whiteboardStates.findOneAndUpdate(
+          { sessionId: classSession.id, batchId: classSession.batchId },
+          {
+            $set: {
+              sessionId: classSession.id,
+              batchId: classSession.batchId,
+              roomId: classSession.roomId,
+              whiteboardChannelId: classSession.whiteboardChannelId,
+              schemaVersion: 1,
+              snapshotVersion: operationSeq,
+              currentSnapshot: snapshot as unknown as Record<string, unknown>,
+              pages,
+              pageCount: pages.length,
+              elementCount,
+              lastOperationSeq: operationSeq,
+              lastOperationId: operationId,
+              operationCount: operationSeq,
+              updatedByUserId: actor.userId
+            },
+            $setOnInsert: {
+              createdByUserId: actor.userId
+            }
+          },
+          { upsert: true, new: true }
+        );
+        return {
+          operationId: operation.operationId,
+          operationSeq: operation.operationSeq,
+          createdAt: operation.createdAt
+        };
+      } catch (error) {
+        const code = typeof error === 'object' && error && 'code' in error ? (error as { code?: unknown }).code : undefined;
+        if (code === 11000) {
+          const replay = await this.whiteboardOperations.findOne({ sessionId: classSession.id, operationId }).exec();
+          if (replay) {
+            if (replay.commandHash !== commandHash) {
+              throw new ConflictException('Whiteboard operation id was already used for a different command.');
+            }
+            return {
+              operationId: replay.operationId,
+              operationSeq: replay.operationSeq,
+              createdAt: replay.createdAt,
+              idempotentReplay: true
+            };
+          }
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new ConflictException('Whiteboard operation could not be persisted. Please retry.');
+  }
+
   private isTeacherChatParticipant(participant: ParticipantMongoDocument): boolean {
     return participant.role === Role.HOST || participant.role === Role.CO_HOST;
   }
@@ -4473,12 +5079,35 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         { _id: participantId, roomId },
         { $set: { handRaised: true, handRaisedAt } }
       );
+      await this.activity?.record({
+        sessionId: classSession.id,
+        batchId: classSession.batchId,
+        roomId,
+        eventType: 'hand.raised',
+        category: 'moderation',
+        summary: `${participant.displayName} raised a hand`,
+        actor: { id: participant.userId ?? participant.id, name: participant.displayName, roles: [participant.role] },
+        target: { id: participant.id, userId: participant.userId, name: participant.displayName, role: participant.role, type: 'participant' },
+        visibility: 'actor_only',
+        metadata: { handRaisedAt: handRaisedAt.toISOString() }
+      });
       return { handRaised: true, handRaisedAt: handRaisedAt.toISOString() };
     }
     await this.participants.updateOne(
       { _id: participantId, roomId },
       { $set: { handRaised: false }, $unset: { handRaisedAt: '' } }
     );
+    await this.activity?.record({
+      sessionId: classSession.id,
+      batchId: classSession.batchId,
+      roomId,
+      eventType: 'hand.lowered',
+      category: 'moderation',
+      summary: `${participant.displayName} lowered a hand`,
+      actor: { id: participant.userId ?? participant.id, name: participant.displayName, roles: [participant.role] },
+      target: { id: participant.id, userId: participant.userId, name: participant.displayName, role: participant.role, type: 'participant' },
+      visibility: 'actor_only'
+    });
     return { handRaised: false, handRaisedAt: null };
   }
 
@@ -4498,6 +5127,16 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       { _id: targetParticipantId, roomId },
       { $set: { handRaised: false }, $unset: { handRaisedAt: '' } }
     );
+    await this.activity?.record({
+      sessionId: classSession.id,
+      batchId: classSession.batchId,
+      roomId,
+      eventType: 'hand.lowered_by_teacher',
+      category: 'moderation',
+      summary: `Teacher lowered ${target.displayName}'s hand`,
+      target: { id: target.id, userId: target.userId, name: target.displayName, role: target.role, type: 'participant' },
+      visibility: 'full'
+    });
     return { handRaised: false, handRaisedAt: null };
   }
 
@@ -4619,20 +5258,32 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async sendWhiteboardCommand(roomId: string, actorParticipantId: string, command: WhiteboardCommand): Promise<WhiteboardRealtimeDelivery<WhiteboardCommandEvent>> {
+  async sendWhiteboardCommand(
+    roomId: string,
+    actorParticipantId: string,
+    command: WhiteboardCommand,
+    operationId?: string,
+    baseSnapshotVersion?: number
+  ): Promise<WhiteboardRealtimeDelivery<WhiteboardCommandEvent>> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
-    await this.requireLiveClassSessionForRoom(roomId);
+    const classSession = await this.requireLiveClassSessionForRoom(roomId);
     const normalizedCommand = this.normalizeWhiteboardCommand(command);
     const actor = await this.assertWhiteboardCommandParticipant(roomId, actorParticipantId, normalizedCommand);
+    const persisted = await this.persistWhiteboardOperation(classSession, actor, normalizedCommand, operationId, baseSnapshotVersion);
     const event: WhiteboardCommandEvent = {
       roomId,
       participantId: actor.id,
       displayName: actor.displayName,
+      operationId: persisted.operationId,
+      operationSeq: persisted.operationSeq,
+      createdAt: persisted.createdAt.toISOString(),
+      ...(persisted.idempotentReplay ? { idempotentReplay: true } : {}),
       command: normalizedCommand
     };
     return {
       event,
-      targets: await this.whiteboardRealtimeTargets(roomId, actor)
+      targets: persisted.idempotentReplay ? [] : await this.whiteboardRealtimeTargets(roomId, actor),
+      ...(persisted.idempotentReplay ? { idempotentReplay: true } : {})
     };
   }
 
@@ -4763,6 +5414,24 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
           $unset: { allowedToSpeakAt: '', allowedToSpeakBy: '' }
         };
     await this.participants.updateOne({ _id: targetParticipantId, roomId }, update);
+    const classSession = await this.classSessions.findOne({ roomId });
+    if (classSession) {
+      const target = await this.participants.findOne({ _id: targetParticipantId, roomId });
+      await this.activity?.record({
+        sessionId: classSession.id,
+        batchId: classSession.batchId,
+        roomId,
+        eventType: allowedToSpeak ? 'speak.allowed' : 'speak.revoked',
+        category: 'moderation',
+        summary: allowedToSpeak ? 'Teacher allowed a student to speak' : 'Teacher revoked student speaking permission',
+        actor: { id: moderation.event.moderatedByParticipantId, roles: ['teacher'] },
+        target: target
+          ? { id: target.id, userId: target.userId, name: target.displayName, role: target.role, type: 'participant' }
+          : { id: targetParticipantId, type: 'participant' },
+        visibility: 'full',
+        metadata: { allowedToSpeak }
+      });
+    }
     return {
       event: {
         roomId,
@@ -6199,6 +6868,52 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         reason: safeReason
       }
     });
+    await this.activity?.record({
+      sessionId: session.id,
+      batchId: session.batchId,
+      roomId: session.roomId,
+      eventType: `media.${operation}_failed`,
+      category: 'media',
+      summary: `Class-session media ${operation} failed`,
+      actor: participant ? { id: participant.userId ?? participant.id, name: participant.displayName, roles: [participant.role] } : undefined,
+      target: participant
+        ? { id: participant.id, userId: participant.userId, name: participant.displayName, role: participant.role, type: 'participant' }
+        : undefined,
+      visibility: 'full',
+      metadata: { operation, kind: safeKind, reason: safeReason }
+    });
+  }
+
+  private async recordClassSessionParticipantActivity(
+    session: ClassSessionMongoDocument,
+    participant: ParticipantMongoDocument,
+    eventType: string,
+    summary: string,
+    metadata: Record<string, unknown> = {}
+  ): Promise<void> {
+    await this.activity?.record({
+      sessionId: session.id,
+      batchId: session.batchId,
+      roomId: session.roomId,
+      eventType,
+      category: 'attendance',
+      summary,
+      actor: {
+        id: participant.userId ?? participant.id,
+        name: participant.displayName,
+        roles: [participant.role]
+      },
+      target: {
+        id: participant.id,
+        userId: participant.userId,
+        name: participant.displayName,
+        role: participant.role,
+        type: 'participant'
+      },
+      source: { collection: 'participants', id: participant.id },
+      visibility: 'actor_only',
+      metadata
+    });
   }
 
   private async recordClassSessionRoomJoinAudit(
@@ -6238,6 +6953,19 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         reason: safeReason
       }
     });
+    if (result === 'denied') {
+      await this.activity?.record({
+        sessionId: session.id,
+        batchId: session.batchId,
+        roomId: session.roomId,
+        eventType: 'participant.join_denied',
+        category: 'support',
+        summary: `Denied ${role} socket join to class session`,
+        actor: { id: user.id, email: user.email, roles: user.roles },
+        visibility: 'full',
+        metadata: { actorRole: role, result, reason: safeReason }
+      });
+    }
   }
 
   private async recordClassSessionChatFailure(
@@ -6266,6 +6994,16 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         scope: safeScope,
         reason: safeReason
       }
+    });
+    await this.activity?.record({
+      sessionId: session.id,
+      batchId: session.batchId,
+      roomId,
+      eventType: `chat.${operation}_failed`,
+      category: 'support',
+      summary: `Class-session chat ${operation} failed`,
+      visibility: 'full',
+      metadata: { operation, scope: safeScope, reason: safeReason }
     });
   }
 
@@ -6299,6 +7037,23 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         result
       }
     });
+    await this.activity?.record({
+      sessionId: session.id,
+      batchId: session.batchId,
+      roomId: session.roomId,
+      eventType: `moderation.${action}`,
+      category: 'moderation',
+      summary: `Teacher moderation: ${this.studentMediaModerationMessage(action)}`,
+      actor: { id: actor.userId ?? actor.id, name: actor.displayName, roles: [actor.role] },
+      target: { id: target.id, userId: target.userId, name: target.displayName, role: target.role, type: 'participant' },
+      visibility: 'full',
+      metadata: {
+        action,
+        result,
+        actorParticipantId: actor.id,
+        targetParticipantId: target.id
+      }
+    });
   }
 
   private async recordClassSessionWhiteboardAudit(
@@ -6328,6 +7083,30 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         targetParticipantId
       }
     });
+    await this.activity?.record({
+      sessionId: session.id,
+      batchId: session.batchId,
+      roomId: session.roomId,
+      eventType: `whiteboard.control_${action === 'grant' ? 'granted' : action === 'revoke' ? 'revoked' : action === 'lock' ? 'locked' : 'unlocked'}`,
+      category: 'whiteboard',
+      summary:
+        action === 'grant'
+          ? 'Granted student whiteboard control'
+          : action === 'revoke'
+            ? 'Revoked student whiteboard control'
+            : action === 'lock'
+              ? 'Locked the class whiteboard'
+              : 'Unlocked the class whiteboard',
+      actor: { id: actor.userId ?? actor.id, name: actor.displayName, roles: [actor.role] },
+      target: {
+        id: targetParticipantId,
+        userId: target.userId,
+        name: target.displayName,
+        type: 'participant'
+      },
+      visibility: action === 'lock' || action === 'unlock' ? 'student_safe' : 'full',
+      metadata: { action, actorParticipantId: actor.id, targetParticipantId }
+    });
   }
 
   private async recordClassSessionReconnectGraceAudit(
@@ -6352,6 +7131,18 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         event,
         ...extra
       }
+    });
+    await this.activity?.record({
+      sessionId: session.id,
+      batchId: session.batchId,
+      roomId: session.roomId,
+      eventType: `teacher_reconnect_grace.${event}`,
+      category: 'lifecycle',
+      summary: `Teacher reconnect grace ${event}`,
+      actor: { id: participant?.userId ?? session.teacherId, name: participant?.displayName, roles: participant ? [participant.role] : ['system'] },
+      target: { userId: session.teacherId, type: 'teacher' },
+      visibility: 'student_safe',
+      metadata: { event, ...extra }
     });
   }
 
@@ -6379,6 +7170,18 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         participantId: participant.id,
         event
       }
+    });
+    await this.activity?.record({
+      sessionId: session.id,
+      batchId: session.batchId,
+      roomId: session.roomId,
+      eventType: `teacher.${event}`,
+      category: 'lifecycle',
+      summary: `Teacher ${event}`,
+      actor: { id: participant.userId ?? session.teacherId, name: participant.displayName, roles: [participant.role] },
+      target: { id: participant.id, userId: participant.userId, name: participant.displayName, role: participant.role, type: 'participant' },
+      visibility: 'student_safe',
+      metadata: { participantId: participant.id, event }
     });
   }
 
@@ -6678,6 +7481,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       senderRole: doc.senderRole,
       ...(doc.recipientId ? { recipientId: doc.recipientId } : {}),
       scope: doc.scope ?? (doc.recipientId ? 'private' : 'broadcast'),
+      context: doc.context ?? 'live',
       ...(doc.threadKey ? { threadKey: doc.threadKey } : {}),
       message: doc.message,
       ...(doc.attachments?.length
@@ -6686,11 +7490,14 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
               id: attachment.id,
               ...(attachment.attachmentId ? { attachmentId: attachment.attachmentId } : {}),
               type: attachment.type,
+              ...(attachment.originalName ? { originalName: attachment.originalName } : {}),
               ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
               ...(attachment.title ? { title: attachment.title } : {}),
               ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
               ...(typeof attachment.size === 'number' ? { size: attachment.size } : {}),
+              ...(typeof attachment.sizeBytes === 'number' ? { sizeBytes: attachment.sizeBytes } : {}),
               ...(attachment.storageProvider ? { storageProvider: attachment.storageProvider } : {}),
+              ...(attachment.checksum ? { checksum: attachment.checksum } : {}),
               ...(attachment.downloadUrl ? { downloadUrl: attachment.downloadUrl } : {}),
               ...(attachment.url ? { url: attachment.url } : {}),
               ...(attachment.dataUrl ? { dataUrl: attachment.dataUrl } : {}),

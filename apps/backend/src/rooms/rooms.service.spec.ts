@@ -1,4 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DEFAULT_PARTICIPANT_PERMISSIONS, Role, type ConsumerLayerEvent, type RoomQualityState, type RoomQualitySummaryState } from '@native-sfu/contracts';
 import { CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS, RoomsService, type SocketUser } from './rooms.service';
 import { defaultConsumerLayers, defaultConsumerPriority, defaultProducerPriority, resolveRoomMediaProfile } from './room-policy';
@@ -1671,6 +1674,191 @@ describe('RoomsService', () => {
     expect(chat.create).not.toHaveBeenCalled();
   });
 
+  it('marks post-class Q&A messages as private post-class chat', async () => {
+    const { service, chat } = createService();
+    const createdAt = new Date('2026-06-22T11:10:00.000Z');
+    chat.create.mockImplementation(async (payload: Record<string, unknown>) => ({
+      id: 'post-class-chat-1',
+      createdAt,
+      updatedAt: createdAt,
+      ...payload
+    }));
+
+    const message = await service.sendClassSessionPostClassPrivateMessage({
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      channelId: 'classroom:session-1:chat',
+      teacherId: 'teacher-1',
+      senderId: 'student-1',
+      senderName: 'Student One',
+      senderRole: 'student',
+      studentId: 'student-1',
+      message: '  Can you explain the second step?  ',
+      maxMessageLength: 500
+    });
+
+    expect(chat.create.mock.calls[0]?.[0]).toEqual({
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      channelId: 'classroom:session-1:chat',
+      chatChannelId: 'classroom:session-1:chat',
+      senderId: 'student-1',
+      senderName: 'Student One',
+      senderRole: 'student',
+      recipientId: 'teacher-1',
+      scope: 'private',
+      context: 'post_class',
+      threadKey: 'session-1:teacher:teacher-1:student:student-1',
+      message: 'Can you explain the second step?',
+      shadowMuted: false
+    });
+    expect(message.context).toBe('post_class');
+    expect(message.scope).toBe('private');
+    expect(message.deliveryState).toBe('sent');
+  });
+
+  it('loads post-class student Q&A history from only post-class private messages', async () => {
+    const { service, chat } = createService();
+
+    await service.getClassSessionPostClassStudentChatHistory({
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      channelId: 'classroom:session-1:chat',
+      teacherId: 'teacher-1',
+      studentId: 'student-1',
+      scope: 'private'
+    });
+
+    expect(chat.find.mock.calls[0]?.[0]).toEqual({
+      deletedAt: { $exists: false },
+      sessionId: 'session-1',
+      threadKey: 'session-1:teacher:teacher-1:student:student-1',
+      scope: 'private',
+      context: 'post_class'
+    });
+  });
+
+  it('counts post-class Q&A unread from post-class private messages only', async () => {
+    const { service, chat, chatReadStates } = createService();
+    chatReadStates.find.mockResolvedValue([]);
+
+    await service.getClassSessionPostClassStudentChatSummary({
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      teacherId: 'teacher-1',
+      studentId: 'student-1'
+    });
+
+    expect(chat.find.mock.calls[0]?.[0]).toEqual({
+      deletedAt: { $exists: false },
+      sessionId: 'session-1',
+      scope: 'private',
+      threadKey: 'session-1:teacher:teacher-1:student:student-1',
+      context: 'post_class'
+    });
+    expect(chat.countDocuments.mock.calls[0]?.[0]).toEqual({
+      deletedAt: { $exists: false },
+      sessionId: 'session-1',
+      scope: 'private',
+      threadKey: 'session-1:teacher:teacher-1:student:student-1',
+      context: 'post_class',
+      senderRole: { $ne: 'student' }
+    });
+  });
+
+  it('stores uploaded class-session chat attachments with sanitized metadata and checksum', async () => {
+    const { service, participants, chatAttachments, config } = createService();
+    const tempDir = await mkdtemp(join(tmpdir(), 'native-sfu-chat-attachments-'));
+    config.get.mockImplementation((key: string, fallback?: unknown) => (key === 'chatAttachments.localPath' ? tempDir : fallback));
+    participants.findOne.mockResolvedValue({
+      id: 'student-participant',
+      userId: 'student-1',
+      socketId: 'student-socket',
+      roomId: 'room-1',
+      role: Role.PARTICIPANT,
+      displayName: 'Student One',
+      admitted: true
+    });
+
+    try {
+      const uploaded = await service.createClassSessionChatAttachments({
+        sessionId: 'session-1',
+        batchId: 'batch-1',
+        roomId: 'room-1',
+        channelId: 'classroom:session-1:chat',
+        teacherId: 'teacher-1',
+        requesterUserId: 'student-1',
+        files: [
+          {
+            originalname: '../lesson.pdf',
+            mimetype: 'application/pdf',
+            size: 5,
+            buffer: Buffer.from('hello')
+          }
+        ]
+      });
+
+      const payload = chatAttachments.create.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(payload.originalName).toBe('_lesson.pdf');
+      expect(payload.fileName).toBe('_lesson.pdf');
+      expect(payload.sizeBytes).toBe(5);
+      expect(String(payload.checksum)).toMatch(/^sha256:/);
+      expect(String(payload.storageKey)).toContain('class-sessions/session-1/');
+      expect(String(payload.storageKey)).not.toContain('..');
+      expect(uploaded[0]?.attachmentId).toBeDefined();
+      expect(uploaded[0]?.originalName).toBe('_lesson.pdf');
+      expect(uploaded[0]?.sizeBytes).toBe(5);
+      expect(uploaded[0]?.checksum).toBe(String(payload.checksum));
+      expect('storageKey' in (uploaded[0] as unknown as Record<string, unknown>)).toBe(false);
+      expect('path' in (uploaded[0] as unknown as Record<string, unknown>)).toBe(false);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects class-session chat uploads when file extension and MIME type disagree', async () => {
+    const { service, participants, chatAttachments } = createService();
+    participants.findOne.mockResolvedValue({
+      id: 'student-participant',
+      userId: 'student-1',
+      socketId: 'student-socket',
+      roomId: 'room-1',
+      role: Role.PARTICIPANT,
+      displayName: 'Student One',
+      admitted: true
+    });
+
+    let thrown: unknown;
+    try {
+      await service.createClassSessionChatAttachments({
+        sessionId: 'session-1',
+        batchId: 'batch-1',
+        roomId: 'room-1',
+        channelId: 'classroom:session-1:chat',
+        teacherId: 'teacher-1',
+        requesterUserId: 'student-1',
+        files: [
+          {
+            originalname: 'renamed.png',
+            mimetype: 'application/pdf',
+            size: 5,
+            buffer: Buffer.from('hello')
+          }
+        ]
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(BadRequestException);
+    expect((thrown as Error).message).toBe('Attachment file extension does not match the uploaded file type.');
+    expect(chatAttachments.create).not.toHaveBeenCalled();
+  });
+
   it('allows attachment-only private class-session chat with uploaded PDF metadata', async () => {
     const { service, classSessions, participants, chatAttachments, chat } = createService();
     const createdAt = new Date('2026-06-22T10:05:15.000Z');
@@ -1719,11 +1907,14 @@ describe('RoomsService', () => {
       uploadedByParticipantId: 'student-participant',
       scope: 'pending',
       type: 'pdf',
+      originalName: 'lesson.pdf',
       fileName: 'lesson.pdf',
       title: 'lesson.pdf',
       mimeType: 'application/pdf',
       size: 5,
+      sizeBytes: 5,
       storageProvider: 'local',
+      checksum: 'sha256:test',
       storageKey: 'class-sessions/session-1/attachment-1/lesson.pdf',
       path: '/tmp/attachment-1-lesson.pdf',
       createdAt
@@ -1756,12 +1947,17 @@ describe('RoomsService', () => {
     const payload = chat.create.mock.calls[0]?.[0] as { attachments?: Array<Record<string, unknown>> };
     expect(payload.attachments?.[0]?.type).toBe('pdf');
     expect(payload.attachments?.[0]?.fileName).toBe('lesson.pdf');
+    expect(payload.attachments?.[0]?.originalName).toBe('lesson.pdf');
     expect(payload.attachments?.[0]?.mimeType).toBe('application/pdf');
     expect(payload.attachments?.[0]?.size).toBe(5);
+    expect(payload.attachments?.[0]?.sizeBytes).toBe(5);
     expect(payload.attachments?.[0]?.attachmentId).toBe('attachment-1');
     expect(payload.attachments?.[0]?.storageProvider).toBe('local');
+    expect(payload.attachments?.[0]?.checksum).toBe('sha256:test');
     expect(payload.attachments?.[0]?.downloadUrl).toBe('/api/v1/class-sessions/session-1/chat/attachments/attachment-1');
     expect(payload.attachments?.[0]?.dataUrl).toBeUndefined();
+    expect(payload.attachments?.[0]?.storageKey).toBeUndefined();
+    expect(payload.attachments?.[0]?.path).toBeUndefined();
     expect(chatAttachments.updateOne).toHaveBeenCalledWith(
       {
         _id: 'attachment-doc-1',
@@ -1782,11 +1978,16 @@ describe('RoomsService', () => {
     expect(result.message.message).toBe('');
     expect(result.message.attachments?.[0]?.type).toBe('pdf');
     expect(result.message.attachments?.[0]?.fileName).toBe('lesson.pdf');
+    expect(result.message.attachments?.[0]?.originalName).toBe('lesson.pdf');
     expect(result.message.attachments?.[0]?.mimeType).toBe('application/pdf');
     expect(result.message.attachments?.[0]?.size).toBe(5);
+    expect(result.message.attachments?.[0]?.sizeBytes).toBe(5);
     expect(result.message.attachments?.[0]?.attachmentId).toBe('attachment-1');
+    expect(result.message.attachments?.[0]?.checksum).toBe('sha256:test');
     expect(result.message.attachments?.[0]?.downloadUrl).toBe('/api/v1/class-sessions/session-1/chat/attachments/attachment-1');
     expect(result.message.attachments?.[0]?.dataUrl).toBeUndefined();
+    expect('storageKey' in (result.message.attachments?.[0] as unknown as Record<string, unknown>)).toBe(false);
+    expect('path' in (result.message.attachments?.[0] as unknown as Record<string, unknown>)).toBe(false);
     expect(result.targetSocketIds).toEqual(['student-socket', 'teacher-socket']);
   });
 
@@ -1853,6 +2054,71 @@ describe('RoomsService', () => {
     expect(chat.create).not.toHaveBeenCalled();
   });
 
+  it('rejects external file URLs for class-session chat attachments even with an attachment id', async () => {
+    const { service, classSessions, participants, chatAttachments, chat } = createService();
+    participants.findOne.mockImplementation(async (filter: Record<string, unknown>) => {
+      if (filter['_id'] === 'student-participant') {
+        return {
+          id: 'student-participant',
+          userId: 'student-1',
+          socketId: 'student-socket',
+          roomId: 'room-1',
+          role: Role.PARTICIPANT,
+          displayName: 'Student One',
+          admitted: true
+        };
+      }
+      if (filter['userId'] === 'teacher-1') {
+        return {
+          id: 'teacher-participant',
+          userId: 'teacher-1',
+          socketId: 'teacher-socket',
+          roomId: 'room-1',
+          role: Role.HOST,
+          displayName: 'Teacher One',
+          admitted: true
+        };
+      }
+      return null;
+    });
+    classSessions.findOne.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      teacherId: 'teacher-1',
+      roomId: 'room-1',
+      status: 'live',
+      chatChannelId: 'classroom:session-1:chat'
+    });
+
+    let thrown: unknown;
+    try {
+      await service.sendChat(
+        {
+          roomId: 'room-1',
+          message: '',
+          attachments: [
+            {
+              type: 'pdf',
+              attachmentId: 'attachment-1',
+              fileName: 'lesson.pdf',
+              mimeType: 'application/pdf',
+              size: 5,
+              url: 'https://example.test/lesson.pdf'
+            }
+          ]
+        },
+        'student-participant'
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(BadRequestException);
+    expect((thrown as Error).message).toBe('File attachments must use uploaded attachment ids, not external URLs.');
+    expect(chatAttachments.findOne).not.toHaveBeenCalled();
+    expect(chat.create).not.toHaveBeenCalled();
+  });
+
   it('limits private class-session attachment downloads to the matching teacher-student thread', async () => {
     const { service, chatAttachments } = createService();
     chatAttachments.findOne.mockResolvedValue({
@@ -1906,6 +2172,60 @@ describe('RoomsService', () => {
     } catch (error) {
       thrown = error;
     }
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+  });
+
+  it('keeps pending class-session chat uploads readable only by the uploader', async () => {
+    const { service, chatAttachments } = createService();
+    chatAttachments.findOne.mockResolvedValue({
+      attachmentId: 'attachment-1',
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      channelId: 'classroom:session-1:chat',
+      chatChannelId: 'classroom:session-1:chat',
+      uploadedByUserId: 'student-1',
+      uploadedByParticipantId: 'student-participant',
+      scope: 'pending',
+      type: 'pdf',
+      originalName: 'lesson.pdf',
+      fileName: 'lesson.pdf',
+      title: 'lesson.pdf',
+      mimeType: 'application/pdf',
+      size: 5,
+      sizeBytes: 5,
+      storageProvider: 'local',
+      checksum: 'sha256:test',
+      storageKey: 'class-sessions/session-1/attachment-1/lesson.pdf',
+      path: __filename
+    });
+
+    const uploader = await service.readClassSessionChatAttachment({
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      teacherId: 'teacher-1',
+      requesterUserId: 'student-1',
+      requesterRole: 'student',
+      attachmentId: 'attachment-1'
+    });
+    uploader.stream.destroy();
+
+    let thrown: unknown;
+    try {
+      await service.readClassSessionChatAttachment({
+        sessionId: 'session-1',
+        batchId: 'batch-1',
+        roomId: 'room-1',
+        teacherId: 'teacher-1',
+        requesterUserId: 'teacher-1',
+        requesterRole: 'teacher',
+        attachmentId: 'attachment-1'
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
     expect(thrown).toBeInstanceOf(ForbiddenException);
   });
 
@@ -2321,7 +2641,8 @@ describe('RoomsService', () => {
       roomId: 'room-1',
       role: Role.PARTICIPANT,
       displayName: 'Student One',
-      admitted: true
+      admitted: true,
+      socketId: 'student-socket'
     });
     classSessions.findOne.mockResolvedValue({ id: 'session-1', roomId: 'room-1', status: 'completed' });
 
@@ -2782,7 +3103,8 @@ describe('RoomsService', () => {
       roomId: 'room-1',
       role: Role.PARTICIPANT,
       displayName: 'Student One',
-      admitted: true
+      admitted: true,
+      socketId: 'student-socket'
     };
     const studentTwo = {
       id: 'student-two',
@@ -3132,6 +3454,118 @@ describe('RoomsService', () => {
     expect(moderateSpy.mock.calls[0]).toEqual(['room-1', 'teacher-participant', 'student-one', 'mute-mic']);
     expect(moderateSpy.mock.calls[1]).toEqual(['room-1', 'teacher-participant', 'student-two', 'mute-mic']);
     expect(results.length).toBe(2);
+  });
+
+  it('persists accepted teacher whiteboard commands and updates the current snapshot', async () => {
+    const { service, classSessions, participants, whiteboardOperations, whiteboardStates } = createService();
+    const teacher = {
+      id: 'teacher-participant',
+      userId: 'teacher-1',
+      roomId: 'room-1',
+      role: Role.HOST,
+      displayName: 'Teacher One',
+      admitted: true,
+      socketId: 'teacher-socket'
+    };
+    const student = {
+      id: 'student-participant',
+      userId: 'student-1',
+      roomId: 'room-1',
+      role: Role.PARTICIPANT,
+      displayName: 'Student One',
+      admitted: true,
+      socketId: 'student-socket'
+    };
+    classSessions.findOne.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      whiteboardChannelId: 'whiteboard-1',
+      status: 'live'
+    });
+    participants.findOne.mockResolvedValue(teacher);
+    participants.find.mockReturnValue({
+      exec: jest.fn(async () => [teacher, student])
+    });
+    const command = {
+      type: 'upsert' as const,
+      pageId: 'page-1',
+      element: { id: 'stroke-1', type: 'stroke', points: [{ x: 1, y: 2 }] }
+    };
+    const normalizedCommand = {
+      type: 'upsert' as const,
+      element: command.element,
+      pageId: 'page-1'
+    };
+
+    const delivery = await service.sendWhiteboardCommand('room-1', 'teacher-participant', command, 'op-1', 0);
+
+    const createdOperation = whiteboardOperations.create.mock.calls[0]?.[0];
+    expect(createdOperation.operationId).toBe('op-1');
+    expect(createdOperation.sessionId).toBe('session-1');
+    expect(createdOperation.batchId).toBe('batch-1');
+    expect(createdOperation.roomId).toBe('room-1');
+    expect(createdOperation.whiteboardChannelId).toBe('whiteboard-1');
+    expect(createdOperation.operationSeq).toBe(1);
+    expect(createdOperation.actorParticipantId).toBe('teacher-participant');
+    expect(createdOperation.actorUserId).toBe('teacher-1');
+    expect(createdOperation.actorRole).toBe(Role.HOST);
+    expect(createdOperation.actorName).toBe('Teacher One');
+    expect(createdOperation.command).toEqual(command);
+    const stateUpdate = whiteboardStates.findOneAndUpdate.mock.calls[0]?.[1]?.$set;
+    expect(stateUpdate.lastOperationSeq).toBe(1);
+    expect(stateUpdate.lastOperationId).toBe('op-1');
+    expect(stateUpdate.currentSnapshot.pages[0].elements[0].id).toBe('stroke-1');
+    expect(delivery.event.operationId).toBe('op-1');
+    expect(delivery.event.operationSeq).toBe(1);
+    expect(delivery.targets.map((target) => target.participantId)).toEqual(['teacher-participant', 'student-participant']);
+  });
+
+  it('treats duplicate whiteboard operation ids as idempotent replays', async () => {
+    const { service, classSessions, participants, whiteboardOperations, whiteboardStates } = createService();
+    const teacher = {
+      id: 'teacher-participant',
+      userId: 'teacher-1',
+      roomId: 'room-1',
+      role: Role.HOST,
+      displayName: 'Teacher One',
+      admitted: true
+    };
+    const command = {
+      type: 'upsert' as const,
+      pageId: 'page-1',
+      element: { id: 'stroke-1', type: 'stroke', points: [{ x: 1, y: 2 }] }
+    };
+    const normalizedCommand = {
+      type: 'upsert' as const,
+      element: command.element,
+      pageId: 'page-1'
+    };
+    classSessions.findOne.mockResolvedValue({
+      id: 'session-1',
+      batchId: 'batch-1',
+      roomId: 'room-1',
+      whiteboardChannelId: 'whiteboard-1',
+      status: 'live'
+    });
+    participants.findOne.mockResolvedValue(teacher);
+    whiteboardOperations.findOne.mockReturnValue({
+      exec: jest.fn(async () => ({
+        operationId: 'op-1',
+        operationSeq: 7,
+        commandHash: (service as any).whiteboardCommandHash(normalizedCommand),
+        createdAt: new Date('2026-06-22T10:00:00.000Z')
+      }))
+    });
+
+    const delivery = await service.sendWhiteboardCommand('room-1', 'teacher-participant', command, 'op-1', 0);
+
+    expect(delivery.idempotentReplay).toBe(true);
+    expect(delivery.event.idempotentReplay).toBe(true);
+    expect(delivery.event.operationSeq).toBe(7);
+    expect(delivery.targets).toEqual([]);
+    expect(whiteboardOperations.create).not.toHaveBeenCalled();
+    expect(whiteboardStates.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('allows a student to raise their own hand during a live class session', async () => {
@@ -4472,6 +4906,8 @@ function createService(): {
   chatAttachments: { create: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   chat: { create: jest.Mock; find: jest.Mock; countDocuments: jest.Mock };
   chatReadStates: { find: jest.Mock; findOneAndUpdate: jest.Mock };
+  whiteboardOperations: { findOne: jest.Mock; create: jest.Mock };
+  whiteboardStates: { findOne: jest.Mock; findOneAndUpdate: jest.Mock };
   redis: { markPresence: jest.Mock; removePresence: jest.Mock; participantPresence: jest.Mock; participantsPresence: jest.Mock };
   media: {
     onConsumerLayerEvent: jest.Mock;
@@ -4665,6 +5101,27 @@ function createService(): {
   const chatReadStates = {
     find: jest.fn(async () => []),
     findOneAndUpdate: jest.fn()
+  };
+  const whiteboardOperations = {
+    findOne: jest.fn(() => ({
+      exec: jest.fn(async () => null)
+    })),
+    create: jest.fn(async (payload: Record<string, unknown>) => ({
+      id: payload.operationId,
+      ...payload,
+      createdAt: new Date('2026-06-22T10:00:00.000Z')
+    }))
+  };
+  const whiteboardStates = {
+    findOne: jest.fn(() => ({
+      exec: jest.fn(async () => null)
+    })),
+    findOneAndUpdate: jest.fn(async (_filter: Record<string, unknown>, update: { $set: Record<string, unknown> }) => ({
+      id: 'whiteboard-state-1',
+      ...update.$set,
+      createdAt: new Date('2026-06-22T10:00:00.000Z'),
+      updatedAt: new Date('2026-06-22T10:00:00.000Z')
+    }))
   };
   const redis = {
     markPresence: jest.fn(async () => undefined),
@@ -4891,7 +5348,11 @@ function createService(): {
       platformEvents as never,
       studentEnrollments as never,
       recordings as never,
-      config as never
+      config as never,
+      undefined,
+      undefined,
+      whiteboardOperations as never,
+      whiteboardStates as never
     ),
     rooms,
     batches,
@@ -4906,6 +5367,8 @@ function createService(): {
     chatAttachments,
     chat,
     chatReadStates,
+    whiteboardOperations,
+    whiteboardStates,
     redis,
     media,
     nodeRegistry,

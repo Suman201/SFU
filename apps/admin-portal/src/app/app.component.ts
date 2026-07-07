@@ -2,11 +2,12 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { AuthService } from './core/services/auth.service';
 import { ThemeService } from './core/services/theme.service';
+import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.component';
 
 @Component({
   selector: 'sfu-admin-root',
   standalone: true,
-  imports: [RouterOutlet],
+  imports: [ConfirmDialogComponent, RouterOutlet],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @if (auth.checking()) {
@@ -19,6 +20,7 @@ import { ThemeService } from './core/services/theme.service';
       </main>
     }
     <router-outlet />
+    <sfu-admin-confirm-dialog />
   `
 })
 export class AppComponent {

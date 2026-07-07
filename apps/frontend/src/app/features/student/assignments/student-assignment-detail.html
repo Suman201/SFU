@@ -1,0 +1,93 @@
+<sfu-header />
+<main class="assignment-detail-shell">
+  @if (loading()) {
+    <section class="assignment-state">
+      <h1>Loading assignment</h1>
+      <p>Preparing your instructions and submission state.</p>
+    </section>
+  } @else if (error() && !assignment()) {
+    <section class="assignment-state error">
+      <h1>Unable to open assignment</h1>
+      <p>{{ error() }}</p>
+      <a class="button" routerLink="/student/dashboard">Back to dashboard</a>
+    </section>
+  } @else if (assignment(); as assignment) {
+    <section class="assignment-heading">
+      <div>
+        <p class="eyebrow">Assignment</p>
+        <h1>{{ assignment.title }}</h1>
+        <p>{{ assignment.batchName || 'Batch' }} · Due {{ formatDate(assignment.dueAt) }}</p>
+      </div>
+      <span class="status-pill">{{ statusLabel() }}</span>
+    </section>
+
+    <section class="assignment-grid">
+      <article class="assignment-card">
+        <header>
+          <p class="eyebrow">Instructions</p>
+          <h2>Teacher brief</h2>
+        </header>
+        <p>{{ assignment.instructions }}</p>
+        @if (assignment.attachments.length) {
+          <div class="attachment-list">
+            @for (attachment of assignment.attachments; track attachment.id) {
+              <a [href]="attachmentHref(attachment)" [attr.target]="attachment.url ? '_blank' : null" [attr.rel]="attachment.url ? 'noopener noreferrer' : null">
+                <strong>{{ attachment.title }}</strong>
+                <small>{{ attachment.type }} {{ attachment.fileName ? '· ' + attachment.fileName : '' }}</small>
+              </a>
+            }
+          </div>
+        }
+      </article>
+
+      <article class="assignment-card submit-card">
+        <header>
+          <p class="eyebrow">Your work</p>
+          <h2>Submit response</h2>
+        </header>
+        @if (submission()?.feedback) {
+          <div class="feedback">
+            <strong>Teacher feedback</strong>
+            <p>{{ submission()?.feedback }}</p>
+          </div>
+        }
+        @if (notice()) {
+          <p class="notice">{{ notice() }}</p>
+        }
+        @if (error()) {
+          <p class="form-alert">{{ error() }}</p>
+        }
+        <form (submit)="submit($event)">
+          @if (canUse('text')) {
+            <label>
+              <span>Answer text</span>
+              <textarea rows="7" [value]="text()" (input)="updateText($event)" placeholder="Write your response"></textarea>
+            </label>
+          }
+          @if (canUse('link')) {
+            <div class="link-grid">
+              <label>
+                <span>Link title</span>
+                <input type="text" [value]="linkTitle()" (input)="updateLinkTitle($event)" placeholder="Notebook, doc, reference" />
+              </label>
+              <label>
+                <span>Link URL</span>
+                <input type="url" [value]="linkUrl()" (input)="updateLinkUrl($event)" placeholder="https://..." />
+              </label>
+            </div>
+          }
+          @if (canUse('file')) {
+            <label>
+              <span>Files</span>
+              <input type="file" multiple (change)="updateFiles($event)" />
+            </label>
+          }
+          <button class="button primary" type="submit" [disabled]="saving()">
+            {{ saving() ? 'Submitting...' : submission()?.status === 'returned' ? 'Submit revision' : 'Submit assignment' }}
+          </button>
+        </form>
+      </article>
+    </section>
+  }
+</main>
+<sfu-footer />

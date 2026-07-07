@@ -13,16 +13,24 @@ import {
   Role
 } from '@native-sfu/contracts';
 import type { LiveClassSettings, LiveClassSettingsPatch } from '@native-sfu/contracts';
+import type { ClassSessionTimelineCategory, ClassSessionTimelineEventVisibility } from '@native-sfu/contracts';
+import type { AssignmentAttachment, AssignmentStatus, AssignmentSubmissionStatus, AssignmentSubmissionType } from '@native-sfu/contracts';
+import type { WhiteboardCommand } from '@native-sfu/contracts';
 
 export type UserMongoDocument = HydratedDocument<UserDocument>;
 export type BatchMongoDocument = HydratedDocument<BatchDocument>;
 export type StudentEnrollmentMongoDocument = HydratedDocument<StudentEnrollmentDocument>;
 export type BatchScheduleMongoDocument = HydratedDocument<BatchScheduleDocument>;
 export type ClassSessionMongoDocument = HydratedDocument<ClassSessionDocument>;
+export type ClassSessionActivityEventMongoDocument = HydratedDocument<ClassSessionActivityEventDocument>;
 export type ClassSessionAttendanceSnapshotMongoDocument = HydratedDocument<ClassSessionAttendanceSnapshotDocument>;
 export type ClassSessionMaterialMongoDocument = HydratedDocument<ClassSessionMaterialDocument>;
+export type ClassSessionPostClassThreadStateMongoDocument = HydratedDocument<ClassSessionPostClassThreadStateDocument>;
 export type ClassSessionWhiteboardStateMongoDocument = HydratedDocument<ClassSessionWhiteboardStateDocument>;
+export type ClassSessionWhiteboardOperationMongoDocument = HydratedDocument<ClassSessionWhiteboardOperationDocument>;
 export type ClassSessionWhiteboardVersionMongoDocument = HydratedDocument<ClassSessionWhiteboardVersionDocument>;
+export type AssignmentMongoDocument = HydratedDocument<AssignmentDocument>;
+export type AssignmentSubmissionMongoDocument = HydratedDocument<AssignmentSubmissionDocument>;
 export type RoomMongoDocument = HydratedDocument<RoomDocument>;
 export type RoomIncidentEventMongoDocument = HydratedDocument<RoomIncidentEventDocument>;
 export type RoomSnapshotBundleMongoDocument = HydratedDocument<RoomSnapshotBundleDocument>;
@@ -477,6 +485,95 @@ ClassSessionSchema.index(
   }
 );
 
+const CLASS_SESSION_ACTIVITY_CATEGORIES: ClassSessionTimelineCategory[] = [
+  'lifecycle',
+  'attendance',
+  'moderation',
+  'media',
+  'chat',
+  'whiteboard',
+  'materials',
+  'recording',
+  'support'
+];
+
+const CLASS_SESSION_ACTIVITY_VISIBILITIES: ClassSessionTimelineEventVisibility[] = ['full', 'student_safe', 'actor_only'];
+
+@Schema({ collection: 'class_session_activity_events' })
+export class ClassSessionActivityEventDocument {
+  @Prop({ type: String, default: () => randomUUID() })
+  _id!: string;
+
+  @Prop({ required: true, index: true })
+  sessionId!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ index: true })
+  roomId?: string;
+
+  @Prop({ required: true, trim: true, maxlength: 120, index: true })
+  eventType!: string;
+
+  @Prop({ required: true, enum: CLASS_SESSION_ACTIVITY_CATEGORIES, index: true })
+  category!: ClassSessionTimelineCategory;
+
+  @Prop({ required: true, trim: true, maxlength: 240 })
+  summary!: string;
+
+  @Prop({ index: true })
+  actorId?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  actorName?: string;
+
+  @Prop({ trim: true, lowercase: true, maxlength: 320 })
+  actorEmail?: string;
+
+  @Prop({ type: [String], default: [] })
+  actorRoles!: string[];
+
+  @Prop({ index: true })
+  targetId?: string;
+
+  @Prop({ index: true })
+  targetUserId?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  targetName?: string;
+
+  @Prop({ trim: true, maxlength: 80 })
+  targetRole?: string;
+
+  @Prop({ trim: true, maxlength: 80 })
+  targetType?: string;
+
+  @Prop({ trim: true, maxlength: 80 })
+  sourceCollection?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  sourceId?: string;
+
+  @Prop({ required: true, enum: CLASS_SESSION_ACTIVITY_VISIBILITIES, default: 'full', index: true })
+  visibility!: ClassSessionTimelineEventVisibility;
+
+  @Prop({ type: Object })
+  metadata?: Record<string, unknown>;
+
+  @Prop({ required: true, type: Date, default: Date.now, index: true })
+  createdAt!: Date;
+}
+
+export const ClassSessionActivityEventSchema = SchemaFactory.createForClass(ClassSessionActivityEventDocument);
+ClassSessionActivityEventSchema.index({ sessionId: 1, createdAt: -1 });
+ClassSessionActivityEventSchema.index({ sessionId: 1, category: 1, createdAt: -1 });
+ClassSessionActivityEventSchema.index({ sessionId: 1, visibility: 1, createdAt: -1 });
+ClassSessionActivityEventSchema.index({ batchId: 1, createdAt: -1 });
+ClassSessionActivityEventSchema.index({ roomId: 1, createdAt: -1 });
+ClassSessionActivityEventSchema.index({ actorId: 1, createdAt: -1 });
+ClassSessionActivityEventSchema.index({ targetUserId: 1, createdAt: -1 });
+
 @Schema({ collection: 'class_session_attendance_snapshots', timestamps: true })
 export class ClassSessionAttendanceSnapshotDocument {
   @Prop({ type: String, default: () => randomUUID() })
@@ -594,6 +691,15 @@ export class ClassSessionMaterialDocument {
   sharedByUserId?: string;
 
   @Prop({ type: Date, index: true })
+  publishedAt?: Date;
+
+  @Prop({ index: true })
+  publishedByUserId?: string;
+
+  @Prop({ type: Date, index: true })
+  unpublishedAt?: Date;
+
+  @Prop({ type: Date, index: true })
   deletedAt?: Date;
 
   createdAt!: Date;
@@ -606,6 +712,45 @@ ClassSessionMaterialSchema.index({ sessionId: 1, shared: 1, deletedAt: 1 });
 ClassSessionMaterialSchema.index({ batchId: 1, deletedAt: 1, createdAt: -1 });
 ClassSessionMaterialSchema.index({ roomId: 1, shared: 1, deletedAt: 1 });
 ClassSessionMaterialSchema.index({ uploadedByUserId: 1, createdAt: -1 });
+
+@Schema({ collection: 'class_session_post_class_thread_states', timestamps: true })
+export class ClassSessionPostClassThreadStateDocument {
+  @Prop({ required: true, index: true })
+  sessionId!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ required: true, index: true })
+  teacherId!: string;
+
+  @Prop({ required: true, index: true })
+  studentId!: string;
+
+  @Prop({ required: true, unique: true, index: true })
+  threadKey!: string;
+
+  @Prop({ required: true, default: false, index: true })
+  important!: boolean;
+
+  @Prop({ required: true, default: false, index: true })
+  answered!: boolean;
+
+  @Prop({ required: true, default: false, index: true })
+  followUp!: boolean;
+
+  @Prop({ index: true })
+  updatedByUserId?: string;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const ClassSessionPostClassThreadStateSchema = SchemaFactory.createForClass(ClassSessionPostClassThreadStateDocument);
+ClassSessionPostClassThreadStateSchema.index({ sessionId: 1, studentId: 1 }, { unique: true });
+ClassSessionPostClassThreadStateSchema.index({ sessionId: 1, important: 1, updatedAt: -1 });
+ClassSessionPostClassThreadStateSchema.index({ sessionId: 1, answered: 1, updatedAt: -1 });
+ClassSessionPostClassThreadStateSchema.index({ batchId: 1, studentId: 1, updatedAt: -1 });
 
 @Schema({ _id: false })
 export class ClassSessionWhiteboardPageMetaDocument {
@@ -659,6 +804,18 @@ export class ClassSessionWhiteboardStateDocument {
   @Prop({ min: 0, default: 0 })
   elementCount!: number;
 
+  @Prop({ required: true, min: 0, default: 0 })
+  lastOperationSeq!: number;
+
+  @Prop({ trim: true })
+  lastOperationId?: string;
+
+  @Prop({ required: true, min: 0, default: 0 })
+  operationCount!: number;
+
+  @Prop({ min: 0, default: 0 })
+  compactedThroughSeq?: number;
+
   @Prop({ trim: true })
   latestVersionId?: string;
 
@@ -668,6 +825,15 @@ export class ClassSessionWhiteboardStateDocument {
   @Prop({ trim: true })
   updatedByUserId?: string;
 
+  @Prop({ type: Date, index: true })
+  publishedAt?: Date;
+
+  @Prop({ index: true })
+  publishedByUserId?: string;
+
+  @Prop({ type: Date, index: true })
+  unpublishedAt?: Date;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
@@ -675,6 +841,56 @@ export class ClassSessionWhiteboardStateDocument {
 export const ClassSessionWhiteboardStateSchema = SchemaFactory.createForClass(ClassSessionWhiteboardStateDocument);
 ClassSessionWhiteboardStateSchema.index({ batchId: 1, updatedAt: -1 });
 ClassSessionWhiteboardStateSchema.index({ batchId: 1, 'pages.title': 1, 'pages.tags': 1, updatedAt: -1 });
+
+@Schema({ collection: 'class_session_whiteboard_operations', timestamps: { createdAt: true, updatedAt: false } })
+export class ClassSessionWhiteboardOperationDocument {
+  @Prop({ required: true, trim: true })
+  operationId!: string;
+
+  @Prop({ required: true, index: true })
+  sessionId!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ required: true, index: true })
+  roomId!: string;
+
+  @Prop({ required: true, index: true })
+  whiteboardChannelId!: string;
+
+  @Prop({ required: true, min: 1, index: true })
+  operationSeq!: number;
+
+  @Prop({ min: 0 })
+  baseSnapshotVersion?: number;
+
+  @Prop({ required: true, trim: true })
+  actorParticipantId!: string;
+
+  @Prop({ trim: true })
+  actorUserId?: string;
+
+  @Prop({ required: true, enum: Object.values(Role), index: true })
+  actorRole!: Role;
+
+  @Prop({ required: true, trim: true, maxlength: 180 })
+  actorName!: string;
+
+  @Prop({ required: true, type: Object })
+  command!: WhiteboardCommand;
+
+  @Prop({ required: true, trim: true, maxlength: 128 })
+  commandHash!: string;
+
+  createdAt!: Date;
+}
+
+export const ClassSessionWhiteboardOperationSchema = SchemaFactory.createForClass(ClassSessionWhiteboardOperationDocument);
+ClassSessionWhiteboardOperationSchema.index({ sessionId: 1, operationId: 1 }, { unique: true });
+ClassSessionWhiteboardOperationSchema.index({ sessionId: 1, operationSeq: 1 }, { unique: true });
+ClassSessionWhiteboardOperationSchema.index({ roomId: 1, operationSeq: 1 });
+ClassSessionWhiteboardOperationSchema.index({ actorUserId: 1, createdAt: -1 });
 
 @Schema({ collection: 'class_session_whiteboard_versions', timestamps: true })
 export class ClassSessionWhiteboardVersionDocument {
@@ -724,6 +940,184 @@ export class ClassSessionWhiteboardVersionDocument {
 export const ClassSessionWhiteboardVersionSchema = SchemaFactory.createForClass(ClassSessionWhiteboardVersionDocument);
 ClassSessionWhiteboardVersionSchema.index({ sessionId: 1, createdAt: -1 });
 ClassSessionWhiteboardVersionSchema.index({ batchId: 1, createdAt: -1 });
+
+export const ASSIGNMENT_SUBMISSION_TYPES: AssignmentSubmissionType[] = ['text', 'file', 'link'];
+export const ASSIGNMENT_STATUSES: AssignmentStatus[] = ['published', 'archived'];
+export const ASSIGNMENT_SUBMISSION_STATUSES: AssignmentSubmissionStatus[] = [
+  'assigned',
+  'viewed',
+  'submitted',
+  'late',
+  'reviewed',
+  'returned',
+  'completed'
+];
+export const ASSIGNMENT_ATTACHMENT_TYPES = ['file', 'link', 'material'] as const;
+
+@Schema({ _id: false })
+export class AssignmentAttachmentDocument {
+  @Prop({ required: true, trim: true })
+  id!: string;
+
+  @Prop({ required: true, enum: ASSIGNMENT_ATTACHMENT_TYPES })
+  type!: 'file' | 'link' | 'material';
+
+  @Prop({ required: true, trim: true, maxlength: 180 })
+  title!: string;
+
+  @Prop({ trim: true, maxlength: 2048 })
+  url?: string;
+
+  @Prop({ trim: true })
+  materialId?: string;
+
+  @Prop({ trim: true, maxlength: 180 })
+  fileName?: string;
+
+  @Prop({ trim: true, maxlength: 120 })
+  mimeType?: string;
+
+  @Prop({ min: 0 })
+  size?: number;
+
+  @Prop({ enum: ['local', 's3'] })
+  storageProvider?: 'local' | 's3';
+
+  @Prop({ trim: true, maxlength: 1024 })
+  storageKey?: string;
+
+  @Prop({ trim: true, maxlength: 2048 })
+  path?: string;
+
+  @Prop({ type: Date })
+  createdAt?: Date;
+}
+
+export const AssignmentAttachmentSchema = SchemaFactory.createForClass(AssignmentAttachmentDocument);
+
+@Schema({ collection: 'assignments', timestamps: true })
+export class AssignmentDocument {
+  @Prop({ type: String, default: () => randomUUID() })
+  _id!: string;
+
+  @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
+  assignmentId!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ trim: true, maxlength: 120 })
+  batchName?: string;
+
+  @Prop({ index: true })
+  sessionId?: string;
+
+  @Prop({ trim: true, maxlength: 180 })
+  sessionTitle?: string;
+
+  @Prop({ required: true, index: true })
+  teacherId!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 180 })
+  title!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 5000 })
+  instructions!: string;
+
+  @Prop({ type: Date, index: true })
+  dueAt?: Date;
+
+  @Prop({ type: [AssignmentAttachmentSchema], default: [] })
+  attachments!: AssignmentAttachmentDocument[];
+
+  @Prop({ type: [String], enum: ASSIGNMENT_SUBMISSION_TYPES, default: ['text'] })
+  allowedSubmissionTypes!: AssignmentSubmissionType[];
+
+  @Prop({ required: true, enum: ASSIGNMENT_STATUSES, default: 'published', index: true })
+  status!: AssignmentStatus;
+
+  @Prop({ type: Date, index: true })
+  deletedAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const AssignmentSchema = SchemaFactory.createForClass(AssignmentDocument);
+AssignmentSchema.index({ batchId: 1, deletedAt: 1, dueAt: 1 });
+AssignmentSchema.index({ teacherId: 1, deletedAt: 1, createdAt: -1 });
+AssignmentSchema.index({ sessionId: 1, deletedAt: 1, dueAt: 1 });
+
+@Schema({ collection: 'assignment_submissions', timestamps: true })
+export class AssignmentSubmissionDocument {
+  @Prop({ type: String, default: () => randomUUID() })
+  _id!: string;
+
+  @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
+  submissionId!: string;
+
+  @Prop({ required: true, index: true })
+  assignmentId!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ index: true })
+  sessionId?: string;
+
+  @Prop({ required: true, index: true })
+  studentId!: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  studentName?: string;
+
+  @Prop({ lowercase: true, trim: true, maxlength: 254 })
+  studentEmail?: string;
+
+  @Prop({ trim: true, maxlength: 10000 })
+  text?: string;
+
+  @Prop({ type: [AssignmentAttachmentSchema], default: [] })
+  links!: AssignmentAttachmentDocument[];
+
+  @Prop({ type: [AssignmentAttachmentSchema], default: [] })
+  files!: AssignmentAttachmentDocument[];
+
+  @Prop({ required: true, enum: ASSIGNMENT_SUBMISSION_STATUSES, default: 'assigned', index: true })
+  status!: AssignmentSubmissionStatus;
+
+  @Prop({ type: Date })
+  viewedAt?: Date;
+
+  @Prop({ type: Date })
+  submittedAt?: Date;
+
+  @Prop({ type: Date })
+  reviewedAt?: Date;
+
+  @Prop({ type: Date })
+  returnedAt?: Date;
+
+  @Prop({ type: Date })
+  completedAt?: Date;
+
+  @Prop({ trim: true, maxlength: 5000 })
+  feedback?: string;
+
+  @Prop({ type: Date, index: true })
+  deletedAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const AssignmentSubmissionSchema = SchemaFactory.createForClass(AssignmentSubmissionDocument);
+AssignmentSubmissionSchema.index(
+  { assignmentId: 1, studentId: 1 },
+  { unique: true, partialFilterExpression: { deletedAt: { $exists: false } } }
+);
+AssignmentSubmissionSchema.index({ batchId: 1, studentId: 1, status: 1, updatedAt: -1 });
+AssignmentSubmissionSchema.index({ assignmentId: 1, status: 1, updatedAt: -1 });
 
 @Schema({ collection: 'roles', timestamps: true })
 export class RoleDocument {
@@ -1973,6 +2367,9 @@ export class ChatAttachmentDocument {
   type!: 'image' | 'pdf' | 'link';
 
   @Prop({ trim: true, maxlength: 180 })
+  originalName?: string;
+
+  @Prop({ trim: true, maxlength: 180 })
   fileName?: string;
 
   @Prop({ trim: true, maxlength: 180 })
@@ -1984,8 +2381,17 @@ export class ChatAttachmentDocument {
   @Prop({ min: 0 })
   size?: number;
 
+  @Prop({ min: 0 })
+  sizeBytes?: number;
+
   @Prop({ enum: ['local', 's3'] })
   storageProvider?: 'local' | 's3';
+
+  @Prop({ trim: true, maxlength: 128 })
+  checksum?: string;
+
+  @Prop({ trim: true, maxlength: 1024 })
+  storageKey?: string;
 
   @Prop({ trim: true, maxlength: 2048 })
   downloadUrl?: string;
@@ -2044,6 +2450,9 @@ export class ChatAttachmentFileDocument {
   type!: 'image' | 'pdf';
 
   @Prop({ required: true, trim: true, maxlength: 180 })
+  originalName!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 180 })
   fileName!: string;
 
   @Prop({ trim: true, maxlength: 180 })
@@ -2055,8 +2464,14 @@ export class ChatAttachmentFileDocument {
   @Prop({ required: true, min: 0 })
   size!: number;
 
+  @Prop({ required: true, min: 0 })
+  sizeBytes!: number;
+
   @Prop({ required: true, enum: ['local', 's3'], default: 'local' })
   storageProvider!: 'local' | 's3';
+
+  @Prop({ required: true, trim: true, maxlength: 128 })
+  checksum!: string;
 
   @Prop({ required: true, trim: true, maxlength: 1024 })
   storageKey!: string;
@@ -2110,6 +2525,9 @@ export class ChatMessageDocument {
   @Prop({ required: true, enum: ['private', 'broadcast'], default: 'broadcast', index: true })
   scope!: 'private' | 'broadcast';
 
+  @Prop({ required: true, enum: ['live', 'post_class'], default: 'live', index: true })
+  context!: 'live' | 'post_class';
+
   @Prop({ index: true })
   threadKey?: string;
 
@@ -2135,6 +2553,7 @@ ChatMessageSchema.index({ sessionId: 1, createdAt: -1 });
 ChatMessageSchema.index({ chatChannelId: 1, createdAt: -1 });
 ChatMessageSchema.index({ sessionId: 1, senderId: 1, recipientId: 1, createdAt: -1 });
 ChatMessageSchema.index({ sessionId: 1, threadKey: 1, createdAt: -1 });
+ChatMessageSchema.index({ sessionId: 1, context: 1, threadKey: 1, createdAt: -1 });
 ChatMessageSchema.index({ roomId: 1, senderId: 1, createdAt: -1 });
 ChatMessageSchema.index({ roomId: 1, recipientId: 1, createdAt: -1 });
 ChatMessageSchema.index({ roomId: 1, scope: 1, createdAt: -1 });
@@ -2248,6 +2667,15 @@ export class RecordingDocument {
 
   @Prop({ index: true })
   retentionExpiresAt?: Date;
+
+  @Prop({ type: Date, index: true })
+  publishedAt?: Date;
+
+  @Prop({ index: true })
+  publishedByUserId?: string;
+
+  @Prop({ type: Date, index: true })
+  unpublishedAt?: Date;
 
   @Prop()
   consentVersion?: string;

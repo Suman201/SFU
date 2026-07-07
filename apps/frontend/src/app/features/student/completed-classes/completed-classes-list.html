@@ -1,0 +1,94 @@
+<sfu-header />
+<main class="student-history-shell">
+  <section class="history-heading">
+    <div>
+      <p class="eyebrow">Past classes</p>
+      <h1>Class history</h1>
+      <p>Review completed sessions, shared materials, recordings, notes, and your private teacher Q&A.</p>
+    </div>
+    <a class="button" routerLink="/student/dashboard">Dashboard</a>
+  </section>
+
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <p class="eyebrow">Completed sessions</p>
+        <h2>Your completed classes</h2>
+      </div>
+      <button class="table-action" type="button" [disabled]="loading()" (click)="load()">Refresh</button>
+    </div>
+
+    @if (error()) {
+      <div class="history-alert" role="alert">{{ error() }}</div>
+    }
+
+    @if (loading()) {
+      <div class="history-empty">
+        <h3>Loading class history</h3>
+        <p>Fetching completed sessions from your enrolled batches.</p>
+      </div>
+    } @else if (!rows().length) {
+      <div class="history-empty">
+        <h3>No completed classes yet</h3>
+        <p>Completed sessions will appear here after your teacher ends class.</p>
+      </div>
+    } @else {
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Class</th>
+              <th>Batch / Course</th>
+              <th>Teacher</th>
+              <th>Completed</th>
+              <th>Recording</th>
+              <th>Notes / Materials</th>
+              <th>Q&A</th>
+              <th>Attendance</th>
+              <th class="row-menu-cell">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of rows(); track row.sessionId) {
+              <tr>
+                <td>
+                  <strong>{{ row.title }}</strong>
+                  <small>Session {{ row.sessionNumber }} · {{ formatDate(row.scheduledAt) }}</small>
+                </td>
+                <td>
+                  <strong>{{ row.batchName }}</strong>
+                  <small>{{ row.courseName || row.courseId || 'Course' }}</small>
+                </td>
+                <td>{{ row.teacherName || row.teacherId }}</td>
+                <td>{{ formatDate(row.completedAt) }}</td>
+                <td>
+                  <span class="data-pill" [class.success]="row.recordingAvailable" [class.warning]="row.recordingStatus && !row.recordingAvailable">
+                    {{ recordingLabel(row) }}
+                  </span>
+                </td>
+                <td>{{ artifactLabel(row) }}</td>
+                <td>
+                  @if (row.qnaUnreadCount) {
+                    <span class="data-pill warning">{{ row.qnaUnreadCount }} new</span>
+                  } @else {
+                    <span class="data-pill">Up to date</span>
+                  }
+                </td>
+                <td>
+                  <span class="data-pill" [class.success]="row.attendance.status === 'present'">{{ attendanceLabel(row) }}</span>
+                </td>
+                <td class="row-menu-cell">
+                  <a class="table-action primary" [routerLink]="['/student/classes/completed', row.sessionId]" [queryParams]="{ batchId: row.batchId }">
+                    View
+                  </a>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <footer class="history-footer">Showing {{ rows().length }} of {{ response()?.total ?? rows().length }} completed sessions</footer>
+    }
+  </section>
+</main>
+<sfu-footer />

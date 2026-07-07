@@ -1,6 +1,13 @@
 import { Controller, Get, Header, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { AdminClassSessionReportQuery, AdminClassSessionReportResponse, AdminClassSessionReportRow } from '@native-sfu/contracts';
+import type {
+  AdminClassSessionReportQuery,
+  AdminClassSessionReportResponse,
+  AdminClassSessionReportRow,
+  ClassSessionReport,
+  ClassSessionTimelineCategory,
+  ClassSessionTimelineResponse
+} from '@native-sfu/contracts';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AuthenticatedUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -16,6 +23,12 @@ interface AdminClassSessionReportQueryParams {
   dateTo?: string;
   page?: string;
   limit?: string;
+}
+
+interface AdminClassSessionTimelineQueryParams {
+  before?: string;
+  limit?: string;
+  category?: ClassSessionTimelineCategory | 'all';
 }
 
 @ApiTags('admin class sessions')
@@ -42,6 +55,38 @@ export class AdminClassSessionsController {
   @ApiOperation({ summary: 'Download class session attendance CSV as an administrator' })
   downloadAttendance(@Param('sessionId') sessionId: string, @CurrentUser() user: AuthenticatedUser): Promise<string> {
     return this.classSessions.exportAttendanceCsv(sessionId, undefined, user);
+  }
+
+  @Get(':sessionId/timeline')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get class session activity timeline as an administrator' })
+  getTimeline(
+    @Param('sessionId') sessionId: string,
+    @Query() query: AdminClassSessionTimelineQueryParams,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionTimelineResponse> {
+    const parsedLimit = query.limit ? Number(query.limit) : undefined;
+    return this.classSessions.getTimeline(sessionId, undefined, user, {
+      before: query.before,
+      ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {}),
+      ...(query.category ? { category: query.category } : {})
+    });
+  }
+
+  @Get(':sessionId/report')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get a completed class session recap report as an administrator' })
+  getDetailedReport(@Param('sessionId') sessionId: string, @CurrentUser() user: AuthenticatedUser): Promise<ClassSessionReport> {
+    return this.classSessions.getClassSessionReport(sessionId, undefined, user);
+  }
+
+  @Get(':sessionId/report/export.csv')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="class-session-report.csv"')
+  @ApiOperation({ summary: 'Download a completed class session recap report CSV as an administrator' })
+  downloadReport(@Param('sessionId') sessionId: string, @CurrentUser() user: AuthenticatedUser): Promise<string> {
+    return this.classSessions.exportClassSessionReportCsv(sessionId, undefined, user);
   }
 
   @Get(':sessionId')

@@ -10,6 +10,8 @@ import type {
 } from '@native-sfu/contracts';
 import { finalize } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
+import { AdminLookupService } from '../../../core/services/admin-lookup.service';
+import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 
 type EnrollmentStatusFilter = AdminEnrollmentStatus | 'all';
 
@@ -24,6 +26,8 @@ type EnrollmentStatusFilter = AdminEnrollmentStatus | 'all';
 export class EnrollmentsList implements OnInit {
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
+  protected readonly lookup = inject(AdminLookupService);
+  private readonly confirmDialog = inject(ConfirmDialogService);
 
   protected readonly rows = signal<AdminEnrollmentListItem[]>([]);
   protected readonly summary = signal<AdminEnrollmentSummary | null>(null);
@@ -52,6 +56,8 @@ export class EnrollmentsList implements OnInit {
   });
 
   ngOnInit(): void {
+    this.lookup.loadCourseTeacherBatchLookups();
+    this.lookup.loadStudents();
     this.load();
   }
 
@@ -103,12 +109,21 @@ export class EnrollmentsList implements OnInit {
       });
   }
 
-  protected transition(row: AdminEnrollmentListItem, action: 'cancel' | 'suspend' | 'reactivate' | 'complete'): void {
+  protected async transition(row: AdminEnrollmentListItem, action: 'cancel' | 'suspend' | 'reactivate' | 'complete'): Promise<void> {
     if (this.pendingEnrollmentId()) {
       return;
     }
-    if ((action === 'cancel' || action === 'suspend') && !confirm(this.confirmMessage(row, action))) {
-      return;
+    if (action === 'cancel' || action === 'suspend') {
+      const confirmed = await this.confirmDialog.confirm({
+        title: action === 'suspend' ? `Suspend ${row.studentName}?` : `Cancel ${row.studentName}'s enrollment?`,
+        message: this.confirmMessage(row, action),
+        confirmLabel: action === 'suspend' ? 'Suspend' : 'Cancel enrollment',
+        pendingLabel: 'Updating...',
+        variant: action === 'suspend' ? 'warning' : 'danger'
+      });
+      if (!confirmed) {
+        return;
+      }
     }
     this.pendingEnrollmentId.set(row.id);
     this.error.set('');

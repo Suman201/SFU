@@ -20,6 +20,13 @@
   justify-content: space-between;
 }
 
+.heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .dashboard-heading p,
 .dashboard-heading h1,
 .summary-grid p,
@@ -145,6 +152,44 @@
 .enrolled-list {
   display: grid;
   gap: 12px;
+}
+
+.assignment-list {
+  display: grid;
+  gap: 10px;
+}
+
+.assignment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.assignment-row div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.assignment-row strong,
+.assignment-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assignment-row strong {
+  color: var(--text);
+}
+
+.assignment-row small {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .enrolled-row {

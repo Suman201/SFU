@@ -74,6 +74,31 @@ export const routes: Routes = [
     loadComponent: () => import('./features/student/dashboard/dashboard').then((route) => route.StudentDashboard)
   },
   {
+    path: 'student/classes/completed',
+    canActivate: [roleGuard],
+    data: { role: 'student' },
+    loadComponent: () =>
+      import('./features/student/completed-classes/completed-classes-list').then((route) => route.StudentCompletedClassesList)
+  },
+  {
+    path: 'student/classes/completed/:sessionId',
+    canActivate: [roleGuard],
+    data: { role: 'student' },
+    loadComponent: () =>
+      import('./features/student/completed-classes/completed-class-detail').then((route) => route.StudentCompletedClassDetail)
+  },
+  {
+    path: 'class-library',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/class-library/class-library').then((route) => route.ClassLibrary)
+  },
+  {
+    path: 'student/assignments/:assignmentId',
+    canActivate: [roleGuard],
+    data: { role: 'student' },
+    loadComponent: () => import('./features/student/assignments/student-assignment-detail').then((route) => route.StudentAssignmentDetail)
+  },
+  {
     path: 'student/profile',
     canActivate: [roleGuard],
     data: { role: 'student' },

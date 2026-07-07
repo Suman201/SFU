@@ -4,6 +4,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import type { AdminEnrollmentDetail } from '@native-sfu/contracts';
 import { finalize } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
+import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 
 @Component({
   selector: 'sfu-admin-enrollment-detail',
@@ -16,6 +17,7 @@ import { AdminApiService } from '../../../core/services/admin-api.service';
 export class EnrollmentDetail implements OnInit {
   private readonly api = inject(AdminApiService);
   private readonly route = inject(ActivatedRoute);
+  private readonly confirmDialog = inject(ConfirmDialogService);
 
   protected readonly enrollment = signal<AdminEnrollmentDetail | null>(null);
   protected readonly loading = signal(false);
@@ -27,13 +29,22 @@ export class EnrollmentDetail implements OnInit {
     this.load();
   }
 
-  protected transition(action: 'cancel' | 'suspend' | 'reactivate' | 'complete'): void {
+  protected async transition(action: 'cancel' | 'suspend' | 'reactivate' | 'complete'): Promise<void> {
     const enrollment = this.enrollment();
     if (!enrollment || this.pendingAction()) {
       return;
     }
-    if ((action === 'cancel' || action === 'suspend') && !confirm(this.confirmMessage(enrollment, action))) {
-      return;
+    if (action === 'cancel' || action === 'suspend') {
+      const confirmed = await this.confirmDialog.confirm({
+        title: action === 'suspend' ? `Suspend ${enrollment.studentName}?` : `Cancel ${enrollment.studentName}'s enrollment?`,
+        message: this.confirmMessage(enrollment, action),
+        confirmLabel: action === 'suspend' ? 'Suspend' : 'Cancel enrollment',
+        pendingLabel: 'Updating...',
+        variant: action === 'suspend' ? 'warning' : 'danger'
+      });
+      if (!confirmed) {
+        return;
+      }
     }
     this.pendingAction.set(action);
     this.error.set('');

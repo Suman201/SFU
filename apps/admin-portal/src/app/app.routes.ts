@@ -38,6 +38,10 @@ export const routes: Routes = [
         loadComponent: () => import('./features/class-sessions/detail/class-session-detail').then((route) => route.ClassSessionDetail)
       },
       {
+        path: 'class-library',
+        loadComponent: () => import('./features/class-library/class-library').then((route) => route.AdminClassLibrary)
+      },
+      {
         path: 'attendance',
         loadComponent: () => import('./features/attendance/list/attendance-list').then((route) => route.AttendanceList)
       },

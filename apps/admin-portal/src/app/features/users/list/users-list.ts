@@ -12,6 +12,7 @@ import type {
 } from '@native-sfu/contracts';
 import { finalize } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
+import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 
 type UserRoleFilter = AdminUserRole | 'all';
 type UserStatusFilter = AdminUserStatus | 'all';
@@ -29,6 +30,7 @@ export class UsersList implements OnInit {
   private readonly formBuilder = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly confirmDialog = inject(ConfirmDialogService);
 
   protected readonly rows = signal<AdminUserListItem[]>([]);
   protected readonly summary = signal<AdminUserSummary | null>(null);
@@ -74,8 +76,15 @@ export class UsersList implements OnInit {
     this.runAction(row, 'activate');
   }
 
-  protected deactivate(row: AdminUserListItem): void {
-    if (!confirm(`Deactivate ${row.name}? They will be signed out and blocked from logging in until reactivated.`)) {
+  protected async deactivate(row: AdminUserListItem): Promise<void> {
+    const confirmed = await this.confirmDialog.confirm({
+      title: `Deactivate ${row.name}?`,
+      message: 'They will be signed out and blocked from logging in until reactivated.',
+      confirmLabel: 'Deactivate',
+      pendingLabel: 'Deactivating...',
+      variant: 'danger'
+    });
+    if (!confirmed) {
       return;
     }
     this.runAction(row, 'deactivate');

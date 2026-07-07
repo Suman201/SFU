@@ -38,6 +38,10 @@ export interface WhiteboardMemoryState {
   whiteboardChannelId: string;
   schemaVersion: 1;
   snapshotVersion: number;
+  lastOperationSeq?: number;
+  lastOperationId?: string;
+  operationCount?: number;
+  compactedThroughSeq?: number;
   snapshot: WhiteboardMemorySnapshot;
   summary: WhiteboardMemorySummary;
   latestVersionId?: string;

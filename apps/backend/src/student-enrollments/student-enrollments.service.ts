@@ -64,6 +64,7 @@ const ACTIVE_ACCESS_FILTER = {
   deletedAt: { $exists: false }
 } as const;
 
+const HISTORICAL_CLASS_ACCESS_STATUSES: StudentEnrollmentStatus[] = ['active', 'completed'];
 const ADMIN_ENROLLMENT_STATUSES = new Set<StudentEnrollmentStatus>(['active', 'pending', 'completed', 'cancelled', 'suspended']);
 const ADMIN_RECENT_ENROLLMENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -352,6 +353,29 @@ export class StudentEnrollmentsService {
 
   async isStudentEnrolledInBatch(studentId: string, batchId: string): Promise<boolean> {
     return Boolean(await this.enrollments.exists({ studentId, batchId, ...ACTIVE_ACCESS_FILTER }));
+  }
+
+  async isStudentHistoricallyEnrolledInBatch(studentId: string, batchId: string): Promise<boolean> {
+    return Boolean(
+      await this.enrollments.exists({
+        studentId,
+        batchId,
+        deletedAt: { $exists: false },
+        status: { $in: HISTORICAL_CLASS_ACCESS_STATUSES }
+      })
+    );
+  }
+
+  async listStudentClassHistoryBatchIds(studentId: string): Promise<string[]> {
+    const enrollments = await this.enrollments
+      .find({
+        studentId,
+        deletedAt: { $exists: false },
+        status: { $in: HISTORICAL_CLASS_ACCESS_STATUSES }
+      })
+      .select({ batchId: 1 })
+      .exec();
+    return [...new Set(enrollments.map((enrollment) => enrollment.batchId).filter(Boolean))];
   }
 
   async assertStudentEnrolledInBatch(studentId: string, batchId: string): Promise<void> {

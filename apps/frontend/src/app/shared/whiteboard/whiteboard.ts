@@ -1592,6 +1592,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   readonly title = input('Whiteboard');
   readonly eyebrow = input('Teacher session');
   readonly readOnly = input(false);
+  readonly initialState = input<WhiteboardMemorySnapshot | null>(null);
   readonly allowedTools = input<readonly WhiteboardTool[] | null>(null);
   readonly allowPageManagement = input(true);
   readonly allowAssetImport = input(true);
@@ -1830,6 +1831,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       this.activeTool.set('pan');
     }
     this.setupWhiteboard();
+    const initialState = this.initialState();
+    if (initialState) {
+      this.importBoardState(initialState);
+    }
   }
 
   ngOnDestroy(): void {

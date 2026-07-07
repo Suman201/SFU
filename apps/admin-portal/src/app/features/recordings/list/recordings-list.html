@@ -50,9 +50,9 @@
         <option value="expired">Expired</option>
       </select>
       <input type="search" formControlName="sessionId" placeholder="Session ID" aria-label="Session ID" />
-      <input type="search" formControlName="batchId" placeholder="Batch ID" aria-label="Batch ID" />
-      <input type="search" formControlName="courseId" placeholder="Course ID" aria-label="Course ID" />
-      <input type="search" formControlName="teacherId" placeholder="Teacher ID" aria-label="Teacher ID" />
+      <input type="search" formControlName="batchId" list="recording-batch-options" placeholder="Batch name or ID" aria-label="Batch ID" />
+      <input type="search" formControlName="courseId" list="recording-course-options" placeholder="Course name or ID" aria-label="Course ID" />
+      <input type="search" formControlName="teacherId" list="recording-teacher-options" placeholder="Teacher name or ID" aria-label="Teacher ID" />
       <input type="date" formControlName="dateFrom" aria-label="Date from" />
       <input type="date" formControlName="dateTo" aria-label="Date to" />
       <select formControlName="sort" aria-label="Sort recordings">
@@ -65,6 +65,21 @@
       <input type="search" formControlName="search" placeholder="Search recording, session, batch" aria-label="Search recordings" />
       <button type="submit" class="table-action primary">Apply</button>
       <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+      <datalist id="recording-course-options">
+        @for (option of lookup.courses(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
+      <datalist id="recording-batch-options">
+        @for (option of lookup.batches(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
+      <datalist id="recording-teacher-options">
+        @for (option of lookup.teachers(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
     </form>
   </div>
 

@@ -476,6 +476,17 @@ h1 {
   padding: 10px;
 }
 
+.math-tools-hint {
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--wb-control-border);
+  background: color-mix(in srgb, var(--wb-live) 8%, var(--panel));
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
 .math-tools-panel {
   display: grid;
   gap: 10px;

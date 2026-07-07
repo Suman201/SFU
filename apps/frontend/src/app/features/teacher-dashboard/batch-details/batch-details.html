@@ -217,6 +217,7 @@
             }
             @if (selectedSession.status === 'completed') {
               <button class="button" type="button" (click)="openSession(selectedSession)">Review class</button>
+              <button class="button" type="button" (click)="openPostClassQa(selectedSession)">Post-class Q&A</button>
             }
           </footer>
         </aside>
@@ -797,6 +798,154 @@
       }
     </section>
 
+    <section class="panel assignments-panel">
+      <header>
+        <div>
+          <p class="eyebrow">Homework</p>
+          <h2>Assignments</h2>
+        </div>
+        <div class="live-settings-actions">
+          <button class="button primary" type="button" (click)="openAssignmentForm()">New assignment</button>
+        </div>
+      </header>
+
+      @if (assignmentError()) {
+        <div class="action-notice danger" role="alert">{{ assignmentError() }}</div>
+      }
+      @if (assignmentNotice()) {
+        <div class="action-notice">{{ assignmentNotice() }}</div>
+      }
+
+      @if (assignmentFormOpen()) {
+        <form class="assignment-form" (submit)="createAssignment($event)">
+          <label>
+            <span>Title</span>
+            <input type="text" [value]="assignmentForm().title" (input)="updateAssignmentField('title', assignmentInputValue($event))" />
+          </label>
+          <label>
+            <span>Related session</span>
+            <select [value]="assignmentForm().sessionId" (change)="updateAssignmentField('sessionId', assignmentInputValue($event))">
+              <option value="">Batch-level assignment</option>
+              @for (session of sessions(); track session.id) {
+                <option [value]="session.id">{{ session.title }} · {{ calendarSessionStatusLabel(session) }}</option>
+              }
+            </select>
+          </label>
+          <label>
+            <span>Due date</span>
+            <input type="datetime-local" [value]="assignmentForm().dueAt" (input)="updateAssignmentField('dueAt', assignmentInputValue($event))" />
+          </label>
+          <label class="wide">
+            <span>Instructions</span>
+            <textarea rows="4" [value]="assignmentForm().instructions" (input)="updateAssignmentField('instructions', assignmentInputValue($event))"></textarea>
+          </label>
+          <div class="submission-type-row wide">
+            <label>
+              <input type="checkbox" [checked]="typeChecked('text')" (change)="toggleSubmissionType('text', checkedValue($event))" />
+              <span>Text</span>
+            </label>
+            <label>
+              <input type="checkbox" [checked]="typeChecked('file')" (change)="toggleSubmissionType('file', checkedValue($event))" />
+              <span>Files</span>
+            </label>
+            <label>
+              <input type="checkbox" [checked]="typeChecked('link')" (change)="toggleSubmissionType('link', checkedValue($event))" />
+              <span>Links</span>
+            </label>
+          </div>
+          <label>
+            <span>Optional link title</span>
+            <input type="text" [value]="assignmentForm().linkTitle" (input)="updateAssignmentField('linkTitle', assignmentInputValue($event))" />
+          </label>
+          <label>
+            <span>Optional link URL</span>
+            <input type="url" [value]="assignmentForm().linkUrl" (input)="updateAssignmentField('linkUrl', assignmentInputValue($event))" />
+          </label>
+          <footer class="wide">
+            <button class="button" type="button" (click)="closeAssignmentForm()">Cancel</button>
+            <button class="button primary" type="submit" [disabled]="assignmentSaving()">{{ assignmentSaving() ? 'Creating...' : 'Create assignment' }}</button>
+          </footer>
+        </form>
+      }
+
+      @if (assignmentsLoading()) {
+        <div class="empty-state compact">
+          <h3>Loading assignments</h3>
+          <p>Fetching homework for this batch.</p>
+        </div>
+      } @else if (assignments().length) {
+        <div class="assignment-table">
+          @for (assignment of assignments(); track assignment.assignmentId) {
+            <article class="assignment-table-row">
+              <div>
+                <strong>{{ assignment.title }}</strong>
+                <small>
+                  {{ assignment.sessionTitle || 'Batch-level' }}
+                  · Due {{ assignment.dueAt ? formatDateTime(assignment.dueAt) : 'No due date' }}
+                </small>
+              </div>
+              <span class="data-pill">Submitted {{ assignmentStatusCount(assignment, 'submitted') + assignmentStatusCount(assignment, 'late') }}</span>
+              <span class="data-pill">Completed {{ assignmentStatusCount(assignment, 'completed') }}</span>
+              <button class="table-action" type="button" (click)="openAssignmentSubmissions(assignment)">Review</button>
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="empty-state compact">
+          <h3>No assignments yet</h3>
+          <p>Create homework for this batch or link it to a class session.</p>
+        </div>
+      }
+
+      @if (selectedAssignment(); as selectedAssignment) {
+        <aside class="assignment-review-panel">
+          <header>
+            <div>
+              <p class="eyebrow">Review submissions</p>
+              <h3>{{ selectedAssignment.title }}</h3>
+            </div>
+            <button class="icon-button" type="button" aria-label="Close assignment review" (click)="closeAssignmentSubmissions()">×</button>
+          </header>
+          @if (assignmentSubmissions().length) {
+            <div class="assignment-submission-list">
+              @for (submission of assignmentSubmissions(); track submission.submissionId) {
+                <article class="assignment-submission">
+                  <header>
+                    <strong>{{ submission.studentName || submission.studentId }}</strong>
+                    <span class="data-pill">{{ submission.status }}</span>
+                  </header>
+                  @if (submission.text) {
+                    <p>{{ submission.text }}</p>
+                  }
+                  @if (submission.links.length || submission.files.length) {
+                    <div class="submission-assets">
+                      @for (link of submission.links; track link.id) {
+                        <a [href]="link.url" target="_blank" rel="noopener noreferrer">{{ link.title }}</a>
+                      }
+                      @for (file of submission.files; track file.id) {
+                        <a [href]="file.downloadUrl" target="_blank" rel="noopener noreferrer">{{ file.fileName || file.title }}</a>
+                      }
+                    </div>
+                  }
+                  <textarea rows="2" placeholder="Feedback" [value]="submission.feedback || ''" (input)="updateSubmissionFeedback(submission, $event)"></textarea>
+                  <footer>
+                    <button class="table-action" type="button" (click)="reviewSubmission(submission, 'reviewed')">Reviewed</button>
+                    <button class="table-action" type="button" (click)="reviewSubmission(submission, 'returned')">Return</button>
+                    <button class="table-action primary" type="button" (click)="reviewSubmission(submission, 'completed')">Complete</button>
+                  </footer>
+                </article>
+              }
+            </div>
+          } @else {
+            <div class="empty-state compact">
+              <h3>No submissions yet</h3>
+              <p>Submissions will appear after students view or submit this assignment.</p>
+            </div>
+          }
+        </aside>
+      }
+    </section>
+
     <section class="panel students-panel">
       <header>
         <div>
@@ -1005,6 +1154,441 @@
         </div>
       }
     </section>
+
+    @if (reportSession(); as completedSession) {
+      <section class="panel session-report-panel" aria-label="Completed session report">
+        <header>
+          <div>
+            <p class="eyebrow">Session report</p>
+            <h2>{{ completedSession.title }}</h2>
+          </div>
+          <div class="report-panel-actions">
+            <button class="button" type="button" [disabled]="reportExporting()" (click)="downloadSessionReportCsv()">
+              {{ reportExporting() ? 'Downloading...' : 'Download CSV' }}
+            </button>
+            <button class="button" type="button" [disabled]="!sessionReport()" (click)="printSessionReport()">Print</button>
+            <button class="button" type="button" (click)="closeSessionReport()">Close</button>
+          </div>
+        </header>
+
+        @if (reportError()) {
+          <div class="action-notice danger" role="alert">{{ reportError() }}</div>
+        } @else if (reportLoading() && !sessionReport()) {
+          <div class="empty-state compact">
+            <h3>Building report</h3>
+            <p>Combining attendance, artifacts, activity, assignments, and Q&A status.</p>
+          </div>
+        } @else if (sessionReport(); as report) {
+          <div class="report-summary-grid">
+            <article>
+              <span>Attendance</span>
+              <strong>{{ report.attendance.present }}/{{ report.attendance.enrolled }}</strong>
+              <small>{{ report.attendance.attendanceRate }}% · {{ report.attendance.source }}</small>
+            </article>
+            <article>
+              <span>Average time</span>
+              <strong>{{ reportDuration(report.attendance.averageDurationSeconds) }}</strong>
+              <small>{{ report.attendance.reconnects }} reconnects</small>
+            </article>
+            <article>
+              <span>Artifacts</span>
+              <strong>{{ report.artifacts.recordings.length + report.artifacts.materials.length + (report.artifacts.whiteboard.available ? 1 : 0) }}</strong>
+              <small>{{ report.artifacts.recordings.length }} recordings · {{ report.artifacts.materials.length }} materials</small>
+            </article>
+            <article>
+              <span>Q&A</span>
+              <strong>{{ report.qna.unanswered }}</strong>
+              <small>{{ report.qna.threads }} threads · {{ report.qna.unreadForTeacher }} unread</small>
+            </article>
+          </div>
+
+          <div class="report-section-grid">
+            <article class="report-card">
+              <h3>Participation</h3>
+              <dl>
+                <div><dt>Joins</dt><dd>{{ report.participation.joins }}</dd></div>
+                <div><dt>Leaves</dt><dd>{{ report.participation.leaves }}</dd></div>
+                <div><dt>Hand raises</dt><dd>{{ report.participation.handRaises }}</dd></div>
+                <div><dt>Allowed speak</dt><dd>{{ report.participation.allowedSpeaks }}</dd></div>
+                <div><dt>Mic moderations</dt><dd>{{ report.participation.mutedMics }}</dd></div>
+                <div><dt>Camera stops</dt><dd>{{ report.participation.stoppedCameras }}</dd></div>
+              </dl>
+            </article>
+
+            <article class="report-card">
+              <h3>Class artifacts</h3>
+              <dl>
+                <div><dt>Recordings</dt><dd>{{ report.artifacts.recordings.length }}</dd></div>
+                <div><dt>Materials</dt><dd>{{ report.artifacts.materials.length }}</dd></div>
+                <div><dt>Whiteboard</dt><dd>{{ report.artifacts.whiteboard.available ? 'Available' : 'No snapshot' }}</dd></div>
+                <div><dt>Assignments</dt><dd>{{ report.assignments.total }}</dd></div>
+                <div><dt>Submissions</dt><dd>{{ reportSubmissionTotal(report) }}</dd></div>
+                <div><dt>Broadcasts</dt><dd>{{ report.broadcasts.count }}</dd></div>
+              </dl>
+            </article>
+
+            <article class="report-card wide">
+              <h3>Latest activity highlights</h3>
+              @if (report.incidents.latest.length) {
+                <div class="report-incident-list">
+                  @for (incident of report.incidents.latest; track incident.id) {
+                    <div>
+                      <span class="status-pill">{{ incident.category }}</span>
+                      <strong>{{ incident.summary }}</strong>
+                      <small>{{ reportTime(incident.createdAt) }}</small>
+                    </div>
+                  }
+                </div>
+              } @else {
+                <p>No support or incident highlights were recorded.</p>
+              }
+            </article>
+          </div>
+
+          @if (postClassWorkspace(); as workspace) {
+            @if (postClassWorkspaceNotice()) {
+              <div class="action-notice success">{{ postClassWorkspaceNotice() }}</div>
+            }
+
+            <div class="post-class-workspace-grid">
+              <article class="report-card wide post-class-announcement-card">
+                <div class="report-card-header">
+                  <div>
+                    <h3>Announcement</h3>
+                    <p>Send a post-class broadcast into the student recap feed.</p>
+                  </div>
+                </div>
+                <form class="post-class-announcement-form" (submit)="sendPostClassAnnouncement($event)">
+                  <textarea
+                    rows="3"
+                    [value]="postClassAnnouncementDraft()"
+                    (input)="updatePostClassAnnouncementDraft($event)"
+                    placeholder="Share recap notes, next steps, or reminders for everyone in this class."
+                  ></textarea>
+                  <button class="button primary" type="submit" [disabled]="postClassWorkspacePendingId() === 'announcement' || !postClassAnnouncementDraft().trim()">
+                    {{ postClassWorkspacePendingId() === 'announcement' ? 'Posting...' : 'Post announcement' }}
+                  </button>
+                </form>
+              </article>
+
+              <article class="report-card post-class-artifact-card">
+                <h3>Recordings</h3>
+                @if (workspace.recordings.length) {
+                  <div class="post-class-artifact-list">
+                    @for (recording of workspace.recordings; track recording.recordingId || recording.id) {
+                      <div class="post-class-artifact-row">
+                        <div>
+                          <strong>{{ recording.status | titlecase }}</strong>
+                          <small>{{ recording.durationSeconds ? reportDuration(recording.durationSeconds) : 'Duration pending' }}</small>
+                        </div>
+                        <span class="status-pill" [class.success]="postClassArtifactPublished(recording)">
+                          {{ postClassArtifactPublished(recording) ? 'Published' : 'Teacher only' }}
+                        </span>
+                        <button
+                          class="table-action"
+                          type="button"
+                          [disabled]="recording.status !== 'stopped' || postClassWorkspacePendingId() === 'recording:' + (recording.recordingId || recording.id)"
+                          (click)="togglePostClassRecording(recording)"
+                        >
+                          {{ postClassWorkspacePendingId() === 'recording:' + (recording.recordingId || recording.id) ? 'Saving...' : postClassArtifactPublished(recording) ? 'Unpublish' : 'Publish' }}
+                        </button>
+                      </div>
+                    }
+                  </div>
+                } @else {
+                  <p>No recordings are available for this session yet.</p>
+                }
+              </article>
+
+              <article class="report-card post-class-artifact-card">
+                <h3>Materials</h3>
+                @if (workspace.materials.length) {
+                  <div class="post-class-artifact-list">
+                    @for (material of workspace.materials; track material.materialId) {
+                      <div class="post-class-artifact-row">
+                        <div>
+                          <strong>{{ material.title }}</strong>
+                          <small>{{ material.kind | titlecase }} · {{ material.source | titlecase }}</small>
+                        </div>
+                        <span class="status-pill" [class.success]="postClassArtifactPublished(material)">
+                          {{ postClassArtifactPublished(material) ? 'Published' : 'Teacher only' }}
+                        </span>
+                        <button
+                          class="table-action"
+                          type="button"
+                          [disabled]="postClassWorkspacePendingId() === 'material:' + material.materialId"
+                          (click)="togglePostClassMaterial(material)"
+                        >
+                          {{ postClassWorkspacePendingId() === 'material:' + material.materialId ? 'Saving...' : postClassArtifactPublished(material) ? 'Unpublish' : 'Publish' }}
+                        </button>
+                      </div>
+                    }
+                  </div>
+                } @else {
+                  <p>No materials were attached to this session.</p>
+                }
+              </article>
+
+              <article class="report-card">
+                <h3>Whiteboard notes</h3>
+                @if (workspace.whiteboard.available) {
+                  <dl>
+                    <div><dt>Pages</dt><dd>{{ workspace.whiteboard.summary?.pageCount ?? 0 }}</dd></div>
+                    <div><dt>Elements</dt><dd>{{ workspace.whiteboard.summary?.elementCount ?? 0 }}</dd></div>
+                    <div><dt>Status</dt><dd>{{ postClassArtifactPublished(workspace.whiteboard) ? 'Published' : 'Teacher only' }}</dd></div>
+                  </dl>
+                  <button
+                    class="table-action"
+                    type="button"
+                    [disabled]="postClassWorkspacePendingId() === 'whiteboard'"
+                    (click)="togglePostClassWhiteboard()"
+                  >
+                    {{ postClassWorkspacePendingId() === 'whiteboard' ? 'Saving...' : postClassArtifactPublished(workspace.whiteboard) ? 'Unpublish notes' : 'Publish notes' }}
+                  </button>
+                } @else {
+                  <p>No saved whiteboard snapshot was found for this class.</p>
+                }
+              </article>
+
+              <article class="report-card wide">
+                <div class="report-card-header">
+                  <div>
+                    <h3>Q&A triage</h3>
+                    <p>Flag private follow-ups without exposing student questions broadly.</p>
+                  </div>
+                  <button class="table-action" type="button" (click)="openPostClassQa(completedSession)">Open threads</button>
+                </div>
+                @if (workspace.qna.threads.length) {
+                  <div class="post-class-qna-list">
+                    @for (thread of workspace.qna.threads; track thread.workflow.studentId) {
+                      <div class="post-class-qna-row">
+                        <div class="table-avatar">{{ initials(thread.summary.participantName || 'Student') }}</div>
+                        <div>
+                          <strong>{{ thread.summary.participantName || 'Student' }}</strong>
+                          <small>{{ thread.summary.lastMessagePreview || 'No preview available' }}</small>
+                        </div>
+                        <button class="data-pill" type="button" [class.active]="thread.workflow.important" (click)="togglePostClassQuestionFlag(thread, 'important')">
+                          Important
+                        </button>
+                        <button class="data-pill" type="button" [class.active]="thread.workflow.answered" (click)="togglePostClassQuestionFlag(thread, 'answered')">
+                          Answered
+                        </button>
+                        <button class="data-pill" type="button" [class.active]="thread.workflow.followUp" (click)="togglePostClassQuestionFlag(thread, 'followUp')">
+                          Follow-up
+                        </button>
+                      </div>
+                    }
+                  </div>
+                } @else {
+                  <p>No private post-class questions have been asked yet.</p>
+                }
+              </article>
+
+              <article class="report-card wide">
+                <div class="report-card-header">
+                  <div>
+                    <h3>Follow-up assignments</h3>
+                    <p>{{ workspace.assignments.length }} assignments are linked to this session.</p>
+                  </div>
+                  <button class="table-action" type="button" (click)="openAssignmentForm(completedSession)">Create follow-up</button>
+                </div>
+                @if (workspace.assignments.length) {
+                  <div class="post-class-assignment-list">
+                    @for (assignment of workspace.assignments; track assignment.assignmentId) {
+                      <div>
+                        <strong>{{ assignment.title }}</strong>
+                        <small>
+                          {{ assignment.status | titlecase }} ·
+                          {{ assignment.submissionSummary?.submitted ?? 0 }} submitted ·
+                          {{ assignment.submissionSummary?.completed ?? 0 }} completed
+                        </small>
+                      </div>
+                    }
+                  </div>
+                } @else {
+                  <p>Create a follow-up assignment when the recap shows a gap or unanswered topic.</p>
+                }
+              </article>
+            </div>
+          }
+
+          <div class="report-footer">
+            <span>Completed {{ reportTime(report.session.completedAt) }}</span>
+            @if (report.broadcasts.latestPreview) {
+              <span>Latest broadcast: {{ report.broadcasts.latestPreview }}</span>
+            }
+            @if (report.qna.latestAt) {
+              <span>Latest Q&A activity: {{ reportTime(report.qna.latestAt) }}</span>
+            }
+            <button class="table-action" type="button" (click)="openTimeline(completedSession)">Open timeline</button>
+            <button class="table-action" type="button" (click)="openPostClassQa(completedSession)">Open Q&A</button>
+          </div>
+        }
+      </section>
+    }
+
+    @if (postClassSession(); as qaSession) {
+      <section class="panel post-class-qa-panel" aria-label="Post-class private Q and A">
+        <header>
+          <div>
+            <p class="eyebrow">Post-class Q&A</p>
+            <h2>{{ qaSession.title }}</h2>
+          </div>
+          <button class="button" type="button" (click)="closePostClassQa()">Close</button>
+        </header>
+
+        @if (postClassError()) {
+          <div class="action-notice danger" role="alert">{{ postClassError() }}</div>
+        }
+
+        <div class="post-class-qa-layout">
+          <aside class="post-class-thread-list" aria-label="Student question threads">
+            @if (postClassThreads().length) {
+              @for (thread of postClassThreads(); track thread.id) {
+                <button
+                  type="button"
+                  [class.active]="postClassSelectedStudentId() === thread.id"
+                  (click)="selectPostClassThread(thread.id)"
+                >
+                  <span class="thread-avatar">{{ thread.initials }}</span>
+                  <span class="thread-copy">
+                    <strong>{{ thread.name }}</strong>
+                    <small>{{ thread.preview }}</small>
+                  </span>
+                  @if (thread.unreadCount) {
+                    <em>{{ thread.unreadCount }}</em>
+                  }
+                </button>
+              }
+            } @else {
+              <div class="empty-state compact">
+                <h3>No students</h3>
+                <p>Enrolled students will appear here for private post-class replies.</p>
+              </div>
+            }
+          </aside>
+
+          <div class="post-class-thread">
+            @if (selectedPostClassThread(); as selectedThread) {
+              <div class="post-class-thread-header">
+                <div>
+                  <span class="thread-avatar">{{ selectedThread.initials }}</span>
+                  <strong>{{ selectedThread.name }}</strong>
+                </div>
+                <small>Private teacher-student thread</small>
+              </div>
+
+              <div class="post-class-message-list" aria-live="polite">
+                @if (postClassLoading()) {
+                  <div class="empty-state compact">
+                    <h3>Loading thread</h3>
+                    <p>Fetching the private conversation.</p>
+                  </div>
+                } @else if (!postClassMessages().length) {
+                  <div class="empty-state compact">
+                    <h3>No questions yet</h3>
+                    <p>Reply here when {{ selectedThread.name }} asks a post-class question.</p>
+                  </div>
+                } @else {
+                  @for (message of postClassMessages(); track message.id) {
+                    <article class="post-class-message" [class.mine]="message.senderRole !== 'student'">
+                      <header>
+                        <strong>{{ messageSenderLabel(message) }}</strong>
+                        <time [attr.datetime]="message.createdAt">{{ postClassMessageTime(message.createdAt) }}</time>
+                      </header>
+                      <p>{{ message.message }}</p>
+                    </article>
+                  }
+                }
+              </div>
+
+              <form class="post-class-reply-form" (submit)="submitPostClassReply($event)">
+                <label>
+                  <span>Reply privately</span>
+                  <textarea
+                    rows="3"
+                    maxlength="2000"
+                    placeholder="Write a private answer for this student"
+                    [value]="postClassDraft()"
+                    (input)="updatePostClassDraft($event)"
+                  ></textarea>
+                </label>
+                <button class="primary" type="submit" [disabled]="postClassSending() || !postClassDraft().trim()">
+                  {{ postClassSending() ? 'Sending...' : 'Send reply' }}
+                </button>
+              </form>
+            } @else {
+              <div class="empty-state compact">
+                <h3>Select a student</h3>
+                <p>Choose a student thread to review and reply privately.</p>
+              </div>
+            }
+          </div>
+        </div>
+      </section>
+    }
+
+    @if (timelineSession(); as activitySession) {
+      <section class="panel class-timeline-panel" aria-label="Class activity timeline">
+        <header>
+          <div>
+            <p class="eyebrow">Activity timeline</p>
+            <h2>{{ activitySession.title }}</h2>
+          </div>
+          <button class="button" type="button" (click)="closeTimeline()">Close</button>
+        </header>
+
+        <div class="timeline-filter-row" aria-label="Timeline filters">
+          @for (category of timelineCategories; track category.value) {
+            <button
+              type="button"
+              class="status-pill"
+              [class.active]="timelineCategory() === category.value"
+              (click)="setTimelineCategory(category.value)"
+            >
+              {{ category.label }}
+            </button>
+          }
+        </div>
+
+        @if (timelineError()) {
+          <div class="action-notice danger" role="alert">{{ timelineError() }}</div>
+        } @else if (timelineLoading() && !timelineEvents().length) {
+          <div class="empty-state compact">
+            <h3>Loading timeline</h3>
+            <p>Fetching class activity for this session.</p>
+          </div>
+        } @else if (!timelineEvents().length) {
+          <div class="empty-state compact">
+            <h3>No activity yet</h3>
+            <p>Lifecycle, attendance, moderation, materials, and recording events will appear here.</p>
+          </div>
+        } @else {
+          <div class="class-timeline-list">
+            @for (event of timelineEvents(); track event.id) {
+              <article class="class-timeline-row">
+                <time [attr.datetime]="event.createdAt">{{ timelineTime(event.createdAt) }}</time>
+                <div>
+                  <span class="status-pill">{{ event.category }}</span>
+                  <strong>{{ event.summary }}</strong>
+                  <p>
+                    <span>{{ timelineActor(event) }}</span>
+                    @if (timelineTarget(event)) {
+                      <span>→ {{ timelineTarget(event) }}</span>
+                    }
+                  </p>
+                </div>
+              </article>
+            }
+          </div>
+          @if (timelineHasMore()) {
+            <button type="button" class="button" [disabled]="timelineLoading()" (click)="loadMoreTimeline()">
+              {{ timelineLoading() ? 'Loading...' : 'Load older activity' }}
+            </button>
+          }
+        }
+      </section>
+    }
   } @else {
     <section class="empty-state">
       <h1>Batch not found</h1>

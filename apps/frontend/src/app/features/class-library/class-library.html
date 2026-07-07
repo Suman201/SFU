@@ -1,0 +1,116 @@
+<sfu-header />
+<main class="class-library-shell">
+  <section class="library-hero">
+    <div>
+      <p class="eyebrow">Class library</p>
+      <h1>Search learning artifacts</h1>
+      <p>Find authorized sessions, notes, materials, recordings, assignments, announcements, and Q&A status.</p>
+    </div>
+    <a class="button" [routerLink]="dashboardLink()">Dashboard</a>
+  </section>
+
+  <section class="data-table-shell library-search">
+    <form class="data-table-toolbar library-toolbar" (submit)="submit($event)">
+      <div>
+        <h2>Search</h2>
+        <p>Results only include artifacts you are allowed to access.</p>
+      </div>
+      <div class="library-search-row">
+        <input type="search" placeholder="Search title, topic, artifact metadata..." [value]="q()" (input)="updateText('q', $event)" />
+        <button class="table-action primary" type="submit" [disabled]="loading()">{{ loading() ? 'Searching...' : 'Search' }}</button>
+        <button class="table-action" type="button" (click)="clearFilters()">Clear</button>
+      </div>
+    </form>
+
+    <div class="data-table-filters library-filters" aria-label="Library filters">
+      <label>
+        <span>Type</span>
+        <select [value]="artifactType()" (change)="updateArtifactType($event)">
+          @for (type of artifactTypes; track type.value) {
+            <option [value]="type.value">{{ type.label }}</option>
+          }
+        </select>
+      </label>
+      <label>
+        <span>Course</span>
+        <input type="text" placeholder="courseId" [value]="courseId()" (input)="updateText('courseId', $event)" />
+      </label>
+      <label>
+        <span>Batch</span>
+        <input type="text" placeholder="batchId" [value]="batchId()" (input)="updateText('batchId', $event)" />
+      </label>
+      <label>
+        <span>Status</span>
+        <input type="text" placeholder="published, stopped..." [value]="status()" (input)="updateText('status', $event)" />
+      </label>
+      <label>
+        <span>From</span>
+        <input type="date" [value]="dateFrom()" (input)="updateText('dateFrom', $event)" />
+      </label>
+      <label>
+        <span>To</span>
+        <input type="date" [value]="dateTo()" (input)="updateText('dateTo', $event)" />
+      </label>
+    </div>
+  </section>
+
+  @if (error()) {
+    <section class="library-state danger" role="alert">{{ error() }}</section>
+  } @else if (loading() && !results().length) {
+    <section class="library-state">
+      <h2>Searching library</h2>
+      <p>Checking your authorized class artifacts.</p>
+    </section>
+  } @else if (results().length) {
+    <section class="data-table-shell">
+      <div class="data-table-toolbar">
+        <div>
+          <h2>{{ total() }} results</h2>
+          <p>Page {{ page() }}</p>
+        </div>
+      </div>
+      <div class="library-results">
+        @for (result of results(); track result.id) {
+          <article class="library-result-card">
+            <div class="result-main">
+              <span class="data-pill">{{ typeLabel(result.artifactType) }}</span>
+              <h3>{{ result.title }}</h3>
+              @if (result.description) {
+                <p>{{ result.description }}</p>
+              }
+              <small>
+                {{ result.batchName || result.batchId || 'Class' }}
+                @if (result.courseName || result.courseId) {
+                  · {{ result.courseName || result.courseId }}
+                }
+                · {{ resultDate(result) | date: 'mediumDate' }}
+              </small>
+            </div>
+            <div class="result-meta">
+              @if (result.status) {
+                <span class="data-pill status">{{ result.status | titlecase }}</span>
+              }
+              @if (result.detailUrl) {
+                <a class="table-action" [routerLink]="result.detailUrl">View context</a>
+              }
+              @if (result.targetUrl) {
+                <a class="table-action primary" [href]="result.targetUrl" target="_blank" rel="noopener">{{ targetLabel(result) }}</a>
+              }
+            </div>
+          </article>
+        }
+      </div>
+      <footer class="library-pagination">
+        <button class="table-action" type="button" [disabled]="page() <= 1 || loading()" (click)="previousPage()">Previous</button>
+        <span>Showing {{ results().length }} of {{ total() }}</span>
+        <button class="table-action" type="button" [disabled]="!hasMore() || loading()" (click)="nextPage()">Next</button>
+      </footer>
+    </section>
+  } @else {
+    <section class="library-state">
+      <h2>No artifacts found</h2>
+      <p>Try a different keyword or clear filters. You will only see classes and assets you are authorized to open.</p>
+    </section>
+  }
+</main>
+<sfu-footer />

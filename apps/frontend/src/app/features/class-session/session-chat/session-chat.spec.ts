@@ -246,6 +246,7 @@ describe('SessionChat delivery state', () => {
           title: 'lesson.pdf',
           mimeType: 'application/pdf',
           size: 5,
+          sizeBytes: 5,
           storageProvider: 'local'
         }
       ])
@@ -269,6 +270,7 @@ describe('SessionChat delivery state', () => {
             fileName: 'lesson.pdf',
             mimeType: 'application/pdf',
             size: 5,
+            sizeBytes: 5,
             storageProvider: 'local'
           }
         ],
@@ -297,9 +299,26 @@ describe('SessionChat delivery state', () => {
       jasmine.objectContaining({
         attachmentId: 'attachment-1',
         fileName: 'lesson.pdf',
+        sizeBytes: 5,
         type: 'pdf'
       })
     );
     expect(request.attachments?.[0]?.dataUrl).toBeUndefined();
+  });
+
+  it('rejects unsupported GIF chat uploads before calling the backend', async () => {
+    fixture.componentRef.setInput('batchId', 'batch-1');
+    fixture.componentRef.setInput('live', true);
+    fixture.componentRef.setInput('joined', true);
+    fixture.detectChanges();
+
+    const component = fixture.componentInstance as unknown as {
+      addFileAttachment(file: File): Promise<void>;
+      chatError(): string;
+    };
+    await component.addFileAttachment(new File(['gif'], 'animation.gif', { type: 'image/gif' }));
+
+    expect(classSessions.uploadChatAttachments).not.toHaveBeenCalled();
+    expect(component.chatError()).toBe('Only PDF, JPEG, PNG, and WebP attachments are allowed.');
   });
 });

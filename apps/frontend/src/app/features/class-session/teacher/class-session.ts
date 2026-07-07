@@ -738,12 +738,20 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   protected handleTeacherWhiteboardCommand(command: WhiteboardCommand): void {
     this.scheduleWhiteboardAutosave();
+    if (this.whiteboardMemoryApplying) {
+      return;
+    }
     const roomId = this.currentRoomId();
-    if (!roomId || !this.sessionLive() || !this.roomJoined() || !this.whiteboardControlActive()) {
+    if (!roomId || !this.sessionLive() || !this.roomJoined()) {
       return;
     }
     void this.socket
-      .emitAck('whiteboard:command', { roomId, command: this.toWireWhiteboardCommand(command) })
+      .emitAck('whiteboard:command', {
+        roomId,
+        operationId: this.createWhiteboardOperationId(),
+        baseSnapshotVersion: this.whiteboardMemoryState()?.snapshotVersion,
+        command: this.toWireWhiteboardCommand(command)
+      })
       .catch((error) => this.mediaError.set(error instanceof Error ? error.message : 'Unable to sync whiteboard command.'));
   }
 
@@ -2484,7 +2492,12 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   private async sendWhiteboardSnapshot(roomId: string): Promise<void> {
     const commands = this.whiteboard?.snapshotCommands() ?? [];
     for (const command of commands) {
-      await this.socket.emitAck('whiteboard:command', { roomId, command: this.toWireWhiteboardCommand(command) });
+      await this.socket.emitAck('whiteboard:command', {
+        roomId,
+        operationId: this.createWhiteboardOperationId(),
+        baseSnapshotVersion: this.whiteboardMemoryState()?.snapshotVersion,
+        command: this.toWireWhiteboardCommand(command)
+      });
     }
   }
 
@@ -2503,6 +2516,11 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   private toWireWhiteboardCommand(command: WhiteboardCommand): WireWhiteboardCommand {
     return this.normalizeWhiteboardCommand(command) as unknown as WireWhiteboardCommand;
+  }
+
+  private createWhiteboardOperationId(): string {
+    const random = globalThis.crypto?.randomUUID?.();
+    return random || `wb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 
   private clearWhiteboardControlState(): void {

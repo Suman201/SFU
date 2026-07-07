@@ -1,4 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { WhiteboardMemorySnapshot } from '@native-sfu/contracts';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ClassSessionsService } from './class-sessions.service';
@@ -456,6 +459,80 @@ describe('ClassSessionsService', () => {
     expect(thrown).toBeInstanceOf(ForbiddenException);
   });
 
+  it('loads a full class-session activity timeline for the owning teacher', async () => {
+    const { service, classSessions, activity } = createService();
+    const expected = {
+      sessionId,
+      batchId: 'batch-1',
+      visibility: 'full' as const,
+      items: [],
+      limit: 25,
+      hasMore: false
+    };
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        startedAt: new Date('2026-06-22T10:01:00.000Z'),
+        completedAt: new Date('2026-06-22T11:01:00.000Z')
+      })
+    );
+    activity.listTimeline.mockResolvedValue(expected);
+
+    const response = await service.getTimeline(sessionId, 'batch-1', teacher, { limit: 25, category: 'moderation' });
+    expect(response).toBe(expected);
+    const call = activity.listTimeline.mock.calls[0]?.[0];
+    expect(call.sessionId).toBe(sessionId);
+    expect(call.batchId).toBe('batch-1');
+    expect(call.limit).toBe(25);
+    expect(call.category).toBe('moderation');
+    expect(call.visibility).toBe('full');
+    expect(call.audienceIds).toEqual(['teacher-1']);
+  });
+
+  it('loads only student-safe timeline events for enrolled students', async () => {
+    const { service, classSessions, studentEnrollments, activity } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'live',
+        roomId: 'room-1',
+        startedAt: new Date('2026-06-22T10:01:00.000Z')
+      })
+    );
+    studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(true);
+
+    await service.getTimeline(sessionId, undefined, student(), { limit: 10 });
+
+    const call = activity.listTimeline.mock.calls[0]?.[0];
+    expect(call.sessionId).toBe(sessionId);
+    expect(call.batchId).toBe('batch-1');
+    expect(call.limit).toBe(10);
+    expect(call.visibility).toBe('student_safe');
+    expect(call.audienceIds).toEqual(['student-1']);
+  });
+
+  it('blocks non-enrolled students from class-session activity timeline', async () => {
+    const { service, classSessions, studentEnrollments, activity } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'live',
+        roomId: 'room-1',
+        startedAt: new Date('2026-06-22T10:01:00.000Z')
+      })
+    );
+    studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(false);
+
+    let thrown: unknown;
+    try {
+      await service.getTimeline(sessionId, undefined, student());
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(activity.listTimeline).not.toHaveBeenCalled();
+  });
+
   it('blocks joining before a session is live', async () => {
     const { service, classSessions, auditLogs, metrics } = createService();
     classSessions.findById.mockResolvedValue(
@@ -731,6 +808,586 @@ describe('ClassSessionsService', () => {
     expect(rooms.markClassSessionChatRead).not.toHaveBeenCalled();
   });
 
+  it('lists completed class history only from the student historical batches', async () => {
+    const { service, classSessions, studentEnrollments, rooms, recordings, materials, whiteboardStates } = createService();
+    const completed = persistedSession({
+      status: 'completed',
+      roomId: 'room-1',
+      startedAt: new Date('2026-06-22T10:00:00.000Z'),
+      completedAt: new Date('2026-06-22T11:00:00.000Z')
+    });
+    const latestRecording = {
+      id: 'recording-1',
+      roomId: 'room-1',
+      scope: 'screen',
+      status: 'stopped',
+      storageDriver: 'local',
+      publishedAt: '2026-06-22T11:05:00.000Z',
+      startedAt: '2026-06-22T10:00:00.000Z'
+    };
+    studentEnrollments.listStudentClassHistoryBatchIds.mockResolvedValue(['batch-1']);
+    classSessions.find.mockReturnValueOnce(sessionFindResult([completed]));
+    classSessions.countDocuments.mockReturnValue(execResult(1));
+    recordings.getClassSessionRecordingSummary.mockResolvedValue({ latest: latestRecording });
+    materials.find.mockReturnValue({
+      sort: jest.fn(() => execResult([materialDoc({ shared: true })]))
+    });
+    whiteboardStates.findOne.mockResolvedValue(whiteboardStateDoc({ publishedAt: new Date('2026-06-22T11:05:00.000Z') }));
+    rooms.getClassSessionPostClassStudentChatSummary.mockResolvedValue({
+      sessionId,
+      roomId: 'room-1',
+      threads: [],
+      studentThread: { id: 'private:student-1', scope: 'private', unreadCount: 2, lastMessageAt: '2026-06-22T11:05:00.000Z' }
+    });
+    rooms.classSessionAttendanceRows.mockResolvedValue(attendanceRows());
+
+    const response = await service.listStudentCompletedSessions(student(), { limit: 10 });
+
+    expect(response.total).toBe(1);
+    const row = response.items[0];
+    expect(row?.sessionId).toBe(sessionId);
+    expect(row?.batchId).toBe('batch-1');
+    expect(row?.batchName).toBe('Native SFU');
+    expect(row?.teacherName).toBe('Ada Teacher');
+    expect(row?.recordingAvailable).toBe(true);
+    expect(row?.materialCount).toBe(1);
+    expect(row?.notesAvailable).toBe(true);
+    expect(row?.notesPageCount).toBe(1);
+    expect(row?.qnaUnreadCount).toBe(2);
+    expect(row?.attendance.status).toBe('present');
+    expect(row?.attendance.source).toBe('inferred');
+    expect(classSessions.find.mock.calls[0]?.[0]).toEqual({
+      batchId: { $in: ['batch-1'] },
+      status: 'completed'
+    });
+  });
+
+  it('blocks non-enrolled students from guessed completed class details', async () => {
+    const { service, classSessions, studentEnrollments, rooms } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        completedAt: new Date('2026-06-22T11:00:00.000Z')
+      })
+    );
+    studentEnrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(false);
+
+    let thrown: unknown;
+    try {
+      await service.getStudentCompletedSessionDetail(sessionId, undefined, student());
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(rooms.getClassSessionPostClassStudentChatHistory).not.toHaveBeenCalled();
+  });
+
+  it('loads student-safe completed class details with only own private chat context', async () => {
+    const { service, classSessions, rooms, recordings, materials, whiteboardStates } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        completedAt: new Date('2026-06-22T11:00:00.000Z')
+      })
+    );
+    recordings.listAuthorizedClassSessionRecordings.mockResolvedValue([
+      { id: 'recording-1', roomId: 'room-1', scope: 'screen', status: 'stopped', publishedAt: '2026-06-22T11:05:00.000Z' }
+    ]);
+    materials.find.mockReturnValue({
+      sort: jest.fn(() => execResult([materialDoc({ shared: true })]))
+    });
+    whiteboardStates.findOne.mockResolvedValue(whiteboardStateDoc({ publishedAt: new Date('2026-06-22T11:05:00.000Z') }));
+    rooms.getClassSessionPostClassStudentChatHistory
+      .mockResolvedValueOnce({ messages: [{ id: 'broadcast-1', message: 'Review page 2', scope: 'broadcast' }] })
+      .mockResolvedValueOnce({ messages: [{ id: 'private-1', message: 'My question', scope: 'private' }] });
+    rooms.getClassSessionPostClassStudentChatSummary.mockResolvedValue({
+      sessionId,
+      roomId: 'room-1',
+      threads: [],
+      studentThread: { id: 'private:student-1', scope: 'private', unreadCount: 0 }
+    });
+    rooms.classSessionAttendanceRows.mockResolvedValue(attendanceRows());
+
+    const detail = await service.getStudentCompletedSessionDetail(sessionId, undefined, student());
+
+    expect(detail.materials.length).toBe(1);
+    expect(detail.whiteboard.available).toBe(true);
+    expect(detail.announcements[0]?.id).toBe('broadcast-1');
+    expect(detail.announcements[0]?.message).toBe('Review page 2');
+    expect(detail.privateThread.messages[0]?.id).toBe('private-1');
+    expect(detail.privateThread.messages[0]?.message).toBe('My question');
+    const privateHistoryCall = rooms.getClassSessionPostClassStudentChatHistory.mock.calls[1]?.[0];
+    expect(privateHistoryCall.studentId).toBe('student-1');
+    expect(privateHistoryCall.scope).toBe('private');
+  });
+
+  it('sends post-class questions as private teacher-student chat and rejects spoofed student recipients', async () => {
+    const { service, classSessions, rooms } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        completedAt: new Date('2026-06-22T11:00:00.000Z')
+      })
+    );
+    rooms.sendClassSessionPostClassPrivateMessage.mockResolvedValue({ id: 'chat-1', message: 'Can you review problem 3?' });
+
+    const sent = await service.sendPostClassQuestion(sessionId, undefined, student(), { message: 'Can you review problem 3?' });
+
+    expect(sent.id).toBe('chat-1');
+    const sendCall = rooms.sendClassSessionPostClassPrivateMessage.mock.calls[0]?.[0];
+    expect(sendCall.sessionId).toBe(sessionId);
+    expect(sendCall.batchId).toBe('batch-1');
+    expect(sendCall.roomId).toBe('room-1');
+    expect(sendCall.channelId).toBe(`classroom:${sessionId}:chat`);
+    expect(sendCall.teacherId).toBe('teacher-1');
+    expect(sendCall.senderId).toBe('student-1');
+    expect(sendCall.senderName).toBe('Student One');
+    expect(sendCall.senderRole).toBe('student');
+    expect(sendCall.studentId).toBe('student-1');
+    expect(sendCall.message).toBe('Can you review problem 3?');
+
+    let thrown: unknown;
+    try {
+      await service.sendPostClassQuestion(sessionId, undefined, student(), { recipientId: 'student-2', message: 'Leak this' });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+  });
+
+  it('lets the batch teacher review and reply to private post-class Q&A threads', async () => {
+    const { service, classSessions, rooms, studentEnrollments } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        completedAt: new Date('2026-06-22T11:00:00.000Z')
+      })
+    );
+    studentEnrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(true);
+    rooms.getClassSessionPostClassTeacherChatSummary.mockResolvedValue({
+      sessionId,
+      roomId: 'room-1',
+      threads: [
+        {
+          id: 'private:student-1',
+          scope: 'private',
+          participantId: 'student-1',
+          participantName: 'Student One',
+          unreadCount: 1,
+          lastMessagePreview: 'Can you review problem 3?'
+        }
+      ]
+    });
+    rooms.getClassSessionPostClassTeacherChatHistory.mockResolvedValue({
+      messages: [{ id: 'question-1', message: 'Can you review problem 3?', scope: 'private' }]
+    });
+    rooms.sendClassSessionPostClassPrivateMessage.mockResolvedValue({ id: 'reply-1', message: 'Yes, check the second step.' });
+
+    const summary = await service.getPostClassChatSummary(sessionId, undefined, teacher);
+    const thread = summary.threads[0];
+    expect(thread?.participantId).toBe('student-1');
+    expect(thread?.unreadCount).toBe(1);
+
+    const history = await service.getPostClassChatHistory(sessionId, undefined, teacher, { participantId: 'student-1' });
+    expect(history.messages[0]?.id).toBe('question-1');
+    const historyCall = rooms.getClassSessionPostClassTeacherChatHistory.mock.calls[0]?.[0];
+    expect(historyCall.sessionId).toBe(sessionId);
+    expect(historyCall.batchId).toBe('batch-1');
+    expect(historyCall.teacherId).toBe('teacher-1');
+    expect(historyCall.participantId).toBe('student-1');
+
+    const reply = await service.sendPostClassQuestion(sessionId, undefined, teacher, {
+      recipientId: 'student-1',
+      message: 'Yes, check the second step.'
+    });
+    expect(reply.id).toBe('reply-1');
+    const sendCall = rooms.sendClassSessionPostClassPrivateMessage.mock.calls[0]?.[0];
+    expect(sendCall.senderId).toBe('teacher-1');
+    expect(sendCall.senderRole).toBe('teacher');
+    expect(sendCall.studentId).toBe('student-1');
+    expect(sendCall.message).toBe('Yes, check the second step.');
+  });
+
+  it('returns a completed-session report for the owning teacher without private Q&A bodies', async () => {
+    const {
+      service,
+      classSessions,
+      attendanceSnapshots,
+      rooms,
+      recordings,
+      materials,
+      whiteboardStates,
+      assignments,
+      assignmentSubmissions,
+      activity
+    } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        startedAt: new Date('2026-06-22T10:01:00.000Z'),
+        completedAt: new Date('2026-06-22T11:00:00.000Z')
+      })
+    );
+    attendanceSnapshots.find.mockReturnValue({
+      sort: jest.fn(() =>
+        execResult([
+          {
+            studentId: 'student-1',
+            studentName: 'Student One',
+            studentEmail: 'student@example.test',
+            firstJoinAt: new Date('2026-06-22T10:04:00.000Z'),
+            lastLeaveAt: new Date('2026-06-22T10:58:00.000Z'),
+            totalDurationSeconds: 3240,
+            reconnectCount: 1,
+            status: 'present',
+            rosterSource: 'roster'
+          },
+          {
+            studentId: 'student-2',
+            studentName: 'Student Two',
+            studentEmail: 'student2@example.test',
+            totalDurationSeconds: 0,
+            reconnectCount: 0,
+            status: 'absent',
+            rosterSource: 'roster'
+          }
+        ])
+      )
+    });
+    rooms.getClassSessionChatHistory.mockResolvedValue({
+      messages: [
+        {
+          id: 'broadcast-1',
+          sessionId,
+          senderId: 'teacher-1',
+          senderName: 'Ada Teacher',
+          senderRole: 'teacher',
+          roomId: 'room-1',
+          scope: 'broadcast',
+          message: 'Review the whiteboard notes before homework.',
+          shadowMuted: false,
+          createdAt: '2026-06-22T10:40:00.000Z'
+        }
+      ]
+    });
+    rooms.getClassSessionPostClassTeacherChatSummary.mockResolvedValue({
+      sessionId,
+      roomId: 'room-1',
+      threads: [
+        {
+          id: 'private:student-1',
+          scope: 'private',
+          participantId: 'student-1',
+          participantName: 'Student One',
+          unreadCount: 1,
+          lastMessageAt: '2026-06-22T11:20:00.000Z',
+          lastMessagePreview: 'Can you review problem 3?',
+          lastMessage: {
+            id: 'question-1',
+            senderId: 'student-1',
+            senderName: 'Student One',
+            senderRole: 'student',
+            roomId: 'room-1',
+            scope: 'private',
+            message: 'Can you review problem 3?',
+            shadowMuted: false,
+            createdAt: '2026-06-22T11:20:00.000Z'
+          }
+        }
+      ]
+    });
+    recordings.listAuthorizedClassSessionRecordings.mockResolvedValue([{ id: 'recording-1', roomId: 'room-1', scope: 'screen', status: 'stopped' }]);
+    materials.find.mockReturnValue({
+      sort: jest.fn(() => execResult([materialDoc({ shared: true })]))
+    });
+    whiteboardStates.findOne.mockResolvedValue({
+      snapshotVersion: 3,
+      updatedAt: new Date('2026-06-22T10:55:00.000Z'),
+      pageCount: 1,
+      elementCount: 4,
+      pages: [{ pageId: 'page-1', title: 'Main', order: 0, elementCount: 4 }]
+    });
+    assignments.find.mockReturnValue(
+      execResult([
+        {
+          assignmentId: 'assignment-1',
+          status: 'published'
+        }
+      ])
+    );
+    assignmentSubmissions.find.mockReturnValue(execResult([{ assignmentId: 'assignment-1', status: 'submitted' }]));
+    activity.listTimeline.mockResolvedValue({
+      sessionId,
+      batchId: 'batch-1',
+      visibility: 'full',
+      limit: 200,
+      hasMore: false,
+      items: [
+        {
+          id: 'join-1',
+          sessionId,
+          batchId: 'batch-1',
+          eventType: 'participant.joined',
+          category: 'attendance',
+          summary: 'Student One joined',
+          visibility: 'full',
+          createdAt: '2026-06-22T10:04:00.000Z'
+        },
+        {
+          id: 'hand-1',
+          sessionId,
+          batchId: 'batch-1',
+          eventType: 'hand.raised',
+          category: 'moderation',
+          summary: 'Student One raised hand',
+          visibility: 'full',
+          createdAt: '2026-06-22T10:20:00.000Z'
+        },
+        {
+          id: 'media-1',
+          sessionId,
+          batchId: 'batch-1',
+          eventType: 'recording.failed',
+          category: 'support',
+          summary: 'Recording failed to start',
+          visibility: 'full',
+          createdAt: '2026-06-22T10:30:00.000Z'
+        }
+      ]
+    });
+
+    const report = await service.getClassSessionReport(sessionId, undefined, teacher);
+
+    expect(report.audience).toBe('teacher');
+    expect(report.session.sessionId).toBe(sessionId);
+    expect(report.attendance.source).toBe('snapshot');
+    expect(report.attendance.present).toBe(1);
+    expect(report.attendance.absent).toBe(1);
+    expect(report.participation.joins).toBe(1);
+    expect(report.participation.handRaises).toBe(1);
+    expect(report.broadcasts.count).toBe(1);
+    expect(report.artifacts.recordings.length).toBe(1);
+    expect(report.artifacts.materials.length).toBe(1);
+    expect(report.artifacts.whiteboard.available).toBe(true);
+    expect(report.assignments.total).toBe(1);
+    expect(report.assignments.submissions.submitted).toBe(1);
+    expect(report.qna.unanswered).toBe(1);
+    expect(report.incidents.total).toBe(1);
+    expect(JSON.stringify(report)).not.toContain('Can you review problem 3?');
+
+    const csv = await service.exportClassSessionReportCsv(sessionId, undefined, teacher);
+    expect(csv).toContain('Section,Field,Value,Notes');
+    expect(csv).toContain('Attendance,Present students,1,');
+    expect(csv).toContain('Post-class Q&A,Unanswered,1,');
+    expect(csv).toContain('Incident,recording.failed,Recording failed to start,support; 2026-06-22T10:30:00.000Z');
+    expect(csv).not.toContain('Can you review problem 3?');
+  });
+
+  it('allows admins to open completed-session reports and blocks non-owner teachers', async () => {
+    const { service, classSessions, rooms } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        completedAt: new Date('2026-06-22T11:00:00.000Z')
+      })
+    );
+    rooms.getClassSessionChatHistory.mockResolvedValue({ messages: [] });
+
+    const adminReport = await service.getClassSessionReport(sessionId, undefined, admin());
+    expect(adminReport.audience).toBe('admin');
+    const adminCsv = await service.exportClassSessionReportCsv(sessionId, undefined, admin());
+    expect(adminCsv).toContain('Report,Audience,admin,');
+
+    let thrown: unknown;
+    try {
+      await service.getClassSessionReport(sessionId, undefined, {
+        sub: 'teacher-2',
+        email: 'teacher2@example.test',
+        roles: ['TEACHER'],
+        permissions: [],
+        tokenId: 'token-4'
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+
+    thrown = undefined;
+    try {
+      await service.exportClassSessionReportCsv(sessionId, undefined, student());
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+  });
+
+  it('builds a teacher post-class workspace with Q&A workflow state and assignments', async () => {
+    const {
+      service,
+      classSessions,
+      rooms,
+      materials,
+      recordings,
+      whiteboardStates,
+      assignments,
+      assignmentSubmissions,
+      postClassThreadStates
+    } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        completedAt: new Date('2026-06-22T11:00:00.000Z')
+      })
+    );
+    rooms.getClassSessionChatHistory.mockResolvedValue({ messages: [] });
+    rooms.getClassSessionPostClassTeacherChatSummary.mockResolvedValue({
+      sessionId,
+      roomId: 'room-1',
+      threads: [
+        {
+          id: 'private:student-1',
+          participantId: 'student-1',
+          participantName: 'Student One',
+          scope: 'private',
+          unreadCount: 1,
+          lastMessagePreview: 'Can you review problem 3?',
+          lastMessageAt: '2026-06-22T11:05:00.000Z',
+          lastMessage: { senderRole: 'student' }
+        }
+      ]
+    });
+    materials.find.mockReturnValue({ sort: jest.fn(() => execResult([materialDoc({ shared: true })])) });
+    recordings.listAuthorizedClassSessionRecordings.mockResolvedValue([{ id: 'recording-1', roomId: 'room-1', scope: 'screen', status: 'stopped' }]);
+    whiteboardStates.findOne.mockResolvedValue(whiteboardStateDoc());
+    const assignmentRows = [
+      {
+        id: 'assignment-1',
+        assignmentId: 'assignment-1',
+        batchId: 'batch-1',
+        sessionId,
+        teacherId: 'teacher-1',
+        title: 'Follow-up limits',
+        instructions: 'Review worksheet 2.',
+        attachments: [],
+        allowedSubmissionTypes: ['text'],
+        status: 'published',
+        createdAt: new Date('2026-06-22T11:10:00.000Z'),
+        updatedAt: new Date('2026-06-22T11:10:00.000Z')
+      }
+    ];
+    assignments.find.mockReturnValue({
+      exec: jest.fn(async () => assignmentRows),
+      sort: jest.fn(() => execResult(assignmentRows))
+    });
+    assignmentSubmissions.find.mockReturnValue(execResult([{ assignmentId: 'assignment-1', status: 'submitted' }]));
+    postClassThreadStates.find.mockReturnValue(
+      execResult([
+        {
+          sessionId,
+          batchId: 'batch-1',
+          teacherId: 'teacher-1',
+          studentId: 'student-1',
+          threadKey: `${sessionId}:teacher:teacher-1:student:student-1`,
+          important: true,
+          answered: false,
+          followUp: true,
+          updatedAt: new Date('2026-06-22T11:15:00.000Z'),
+          updatedByUserId: 'teacher-1'
+        }
+      ])
+    );
+
+    const workspace = await service.getPostClassWorkspace(sessionId, undefined, teacher);
+
+    expect(workspace.report.session.sessionId).toBe(sessionId);
+    expect(workspace.qna.threads[0]?.workflow.important).toBe(true);
+    expect(workspace.qna.threads[0]?.workflow.followUp).toBe(true);
+    expect(workspace.assignments[0]?.title).toBe('Follow-up limits');
+    expect(workspace.assignments[0]?.submissionSummary?.submitted).toBe(1);
+    expect(JSON.stringify(workspace.report)).not.toContain('Can you review problem 3?');
+  });
+
+  it('updates post-class Q&A workflow state for an enrolled student', async () => {
+    const { service, classSessions, studentEnrollments, postClassThreadStates } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        completedAt: new Date('2026-06-22T11:00:00.000Z')
+      })
+    );
+    studentEnrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(true);
+    postClassThreadStates.findOneAndUpdate.mockResolvedValue({
+      sessionId,
+      batchId: 'batch-1',
+      teacherId: 'teacher-1',
+      studentId: 'student-1',
+      threadKey: `${sessionId}:teacher:teacher-1:student:student-1`,
+      important: true,
+      answered: true,
+      followUp: false,
+      updatedAt: new Date('2026-06-22T11:20:00.000Z'),
+      updatedByUserId: 'teacher-1'
+    });
+
+    const workflow = await service.updatePostClassQuestionState(sessionId, undefined, teacher, {
+      participantId: 'student-1',
+      important: true,
+      answered: true
+    });
+
+    expect(workflow.important).toBe(true);
+    expect(workflow.answered).toBe(true);
+    expect(studentEnrollments.isStudentHistoricallyEnrolledInBatch).toHaveBeenCalledWith('student-1', 'batch-1');
+    const [query, update, options] = postClassThreadStates.findOneAndUpdate.mock.calls[0];
+    expect(query).toEqual({ sessionId, batchId: 'batch-1', studentId: 'student-1' });
+    expect(update.$set.important).toBe(true);
+    expect(update.$set.answered).toBe(true);
+    expect(update.$set.updatedByUserId).toBe('teacher-1');
+    expect(update.$setOnInsert.threadKey).toBe(`${sessionId}:teacher:teacher-1:student:student-1`);
+    expect(options).toEqual({ new: true, upsert: true });
+  });
+
+  it('publishes post-class materials, recordings, and whiteboard notes for students', async () => {
+    const { service, classSessions, materials, recordings, whiteboardStates } = createService();
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        completedAt: new Date('2026-06-22T11:00:00.000Z')
+      })
+    );
+    materials.findOneAndUpdate.mockResolvedValue(materialDoc({ shared: true, publishedAt: new Date('2026-06-22T11:20:00.000Z') }));
+    recordings.updateClassSessionRecordingPublication.mockResolvedValue({
+      id: 'recording-1',
+      recordingId: 'recording-1',
+      roomId: 'room-1',
+      scope: 'screen',
+      status: 'stopped',
+      publishedAt: '2026-06-22T11:20:00.000Z'
+    });
+    whiteboardStates.findOneAndUpdate.mockResolvedValue(whiteboardStateDoc({ publishedAt: new Date('2026-06-22T11:20:00.000Z') }));
+    whiteboardStates.findOne.mockResolvedValue(whiteboardStateDoc({ publishedAt: new Date('2026-06-22T11:20:00.000Z') }));
+
+    const material = await service.publishPostClassMaterial(sessionId, 'material-1', undefined, teacher);
+    const recording = await service.publishPostClassRecording(sessionId, 'recording-1', undefined, teacher);
+    const whiteboard = await service.publishPostClassWhiteboard(sessionId, undefined, teacher);
+
+    expect(material.publishedAt).toBe('2026-06-22T11:20:00.000Z');
+    expect(recording.publishedAt).toBe('2026-06-22T11:20:00.000Z');
+    expect(whiteboard.available).toBe(true);
+    expect(recordings.updateClassSessionRecordingPublication).toHaveBeenCalledWith(sessionId, 'recording-1', 'teacher-1', true);
+  });
+
   it('attaches link materials for the batch teacher', async () => {
     const { service, classSessions, materials } = createService();
     classSessions.findById.mockResolvedValue(
@@ -787,6 +1444,53 @@ describe('ClassSessionsService', () => {
 
     expect(thrown).toBeInstanceOf(ForbiddenException);
     expect(materials.find).not.toHaveBeenCalled();
+  });
+
+  it('allows historically enrolled students to download completed-session materials', async () => {
+    const { service, classSessions, studentEnrollments, materials } = createService();
+    const tempDir = await mkdtemp(join(tmpdir(), 'native-sfu-material-download-'));
+    const materialPath = join(tempDir, 'lesson.pdf');
+    await writeFile(materialPath, 'lesson');
+    classSessions.findById.mockResolvedValue(
+      persistedSession({
+        status: 'completed',
+        roomId: 'room-1',
+        startedAt: new Date('2026-06-22T10:00:00.000Z'),
+        completedAt: new Date('2026-06-22T11:00:00.000Z')
+      })
+    );
+    studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(false);
+    studentEnrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(true);
+    materials.findOne.mockResolvedValue(
+      materialDoc({
+        kind: 'pdf',
+        source: 'upload',
+        fileName: 'lesson.pdf',
+        mimeType: 'application/pdf',
+        path: materialPath,
+        size: 6,
+        shared: false,
+        publishedAt: new Date('2026-06-22T11:05:00.000Z')
+      })
+    );
+
+    try {
+      const download = await service.downloadMaterial(sessionId, 'material-1', undefined, student());
+      download.stream.destroy();
+
+      expect(studentEnrollments.isStudentHistoricallyEnrolledInBatch).toHaveBeenCalledWith('student-1', 'batch-1');
+      expect(materials.findOne).toHaveBeenCalledWith({
+        materialId: 'material-1',
+        sessionId,
+        batchId: 'batch-1',
+        deletedAt: { $exists: false }
+      });
+      expect(download.fileName).toBe('lesson.pdf');
+      expect(download.mimeType).toBe('application/pdf');
+      expect(download.size).toBe(6);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('shares one live material and emits a targeted session material event', async () => {
@@ -936,6 +1640,18 @@ describe('ClassSessionsService', () => {
     expect(state.summary.elementCount).toBe(1);
     expect(loaded?.snapshot.pages[0]?.title).toBe('Limits warmup');
     expect(whiteboardVersions.create).not.toHaveBeenCalled();
+  });
+
+  it('lets a historically enrolled student load completed-session whiteboard memory read-only', async () => {
+    const { service, classSessions, studentEnrollments, whiteboardStates } = createService();
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'completed', roomId: 'room-1', completedAt: new Date('2026-06-22T11:00:00.000Z') }));
+    studentEnrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(true);
+    whiteboardStates.findOne.mockResolvedValue(whiteboardStateDoc({ publishedAt: new Date('2026-06-22T11:05:00.000Z') }));
+
+    const state = await service.getWhiteboardMemory(sessionId, 'batch-1', student());
+
+    expect(studentEnrollments.isStudentHistoricallyEnrolledInBatch).toHaveBeenCalledWith('student-1', 'batch-1');
+    expect(state?.snapshot.pages[0]?.title).toBe('Limits warmup');
   });
 
   it('creates a bounded whiteboard checkpoint version for the batch teacher', async () => {
@@ -1225,6 +1941,10 @@ describe('ClassSessionsService', () => {
       findOneAndUpdate: jest.Mock;
       updateMany: jest.Mock;
     };
+    postClassThreadStates: {
+      find: jest.Mock;
+      findOneAndUpdate: jest.Mock;
+    };
     whiteboardStates: {
       findOne: jest.Mock;
       findOneAndUpdate: jest.Mock;
@@ -1236,8 +1956,16 @@ describe('ClassSessionsService', () => {
       find: jest.Mock;
       deleteMany: jest.Mock;
     };
+    assignments: {
+      find: jest.Mock;
+    };
+    assignmentSubmissions: {
+      find: jest.Mock;
+    };
     studentEnrollments: {
       isStudentEnrolledInBatch: jest.Mock;
+      isStudentHistoricallyEnrolledInBatch: jest.Mock;
+      listStudentClassHistoryBatchIds: jest.Mock;
       listBatchRoster: jest.Mock;
     };
     rooms: {
@@ -1247,7 +1975,13 @@ describe('ClassSessionsService', () => {
       emitClassSessionLifecycleEvent: jest.Mock;
       emitClassSessionMaterialEvent: jest.Mock;
       getClassSessionChatHistory: jest.Mock;
+      getClassSessionPostClassStudentChatHistory: jest.Mock;
+      getClassSessionPostClassTeacherChatHistory: jest.Mock;
       getClassSessionChatSummary: jest.Mock;
+      getClassSessionPostClassStudentChatSummary: jest.Mock;
+      getClassSessionPostClassTeacherChatSummary: jest.Mock;
+      sendClassSessionPostClassPrivateMessage: jest.Mock;
+      sendClassSessionPostClassBroadcastMessage: jest.Mock;
       markClassSessionChatRead: jest.Mock;
       exportClassSessionAttendanceCsv: jest.Mock;
       classSessionAttendanceRows: jest.Mock;
@@ -1259,10 +1993,17 @@ describe('ClassSessionsService', () => {
       startClassSessionRecording: jest.Mock;
       stopClassSessionRecording: jest.Mock;
       listClassSessionRecordings: jest.Mock;
+      listAuthorizedClassSessionRecordings: jest.Mock;
       readClassSessionRecordingDownload: jest.Mock;
+      readAuthorizedClassSessionRecordingDownload: jest.Mock;
+      updateClassSessionRecordingPublication: jest.Mock;
     };
     auditLogs: {
       record: jest.Mock;
+    };
+    activity: {
+      record: jest.Mock;
+      listTimeline: jest.Mock;
     };
     metrics: {
       classSessionLifecycleTransitions: { labels: jest.Mock };
@@ -1316,6 +2057,10 @@ describe('ClassSessionsService', () => {
       findOneAndUpdate: jest.fn(async () => null),
       updateMany: jest.fn(async () => ({ modifiedCount: 0 }))
     };
+    const postClassThreadStates = {
+      find: jest.fn(() => execResult([])),
+      findOneAndUpdate: jest.fn(async () => null)
+    };
     const whiteboardStates = {
       findOne: jest.fn(async () => null),
       findOneAndUpdate: jest.fn(async () => null),
@@ -1345,8 +2090,16 @@ describe('ClassSessionsService', () => {
       })),
       deleteMany: jest.fn(async () => ({ deletedCount: 0 }))
     };
+    const assignments = {
+      find: jest.fn(() => execResult([]))
+    };
+    const assignmentSubmissions = {
+      find: jest.fn(() => execResult([]))
+    };
     const studentEnrollments = {
       isStudentEnrolledInBatch: jest.fn(async () => true),
+      isStudentHistoricallyEnrolledInBatch: jest.fn(async () => true),
+      listStudentClassHistoryBatchIds: jest.fn(async () => ['batch-1']),
       listBatchRoster: jest.fn(async () => [])
     };
     const rooms = {
@@ -1356,7 +2109,13 @@ describe('ClassSessionsService', () => {
       emitClassSessionLifecycleEvent: jest.fn(),
       emitClassSessionMaterialEvent: jest.fn(),
       getClassSessionChatHistory: jest.fn(),
+      getClassSessionPostClassStudentChatHistory: jest.fn(async () => ({ messages: [] })),
+      getClassSessionPostClassTeacherChatHistory: jest.fn(async () => ({ messages: [] })),
       getClassSessionChatSummary: jest.fn(),
+      getClassSessionPostClassStudentChatSummary: jest.fn(async () => ({ sessionId, roomId: 'room-1', threads: [] })),
+      getClassSessionPostClassTeacherChatSummary: jest.fn(async () => ({ sessionId, roomId: 'room-1', threads: [] })),
+      sendClassSessionPostClassPrivateMessage: jest.fn(),
+      sendClassSessionPostClassBroadcastMessage: jest.fn(),
       markClassSessionChatRead: jest.fn(),
       exportClassSessionAttendanceCsv: jest.fn(),
       classSessionAttendanceRows: jest.fn(async () => []),
@@ -1374,7 +2133,10 @@ describe('ClassSessionsService', () => {
       startClassSessionRecording: jest.fn(),
       stopClassSessionRecording: jest.fn(),
       listClassSessionRecordings: jest.fn(async () => []),
-      readClassSessionRecordingDownload: jest.fn()
+      listAuthorizedClassSessionRecordings: jest.fn(async () => []),
+      readClassSessionRecordingDownload: jest.fn(),
+      readAuthorizedClassSessionRecordingDownload: jest.fn(),
+      updateClassSessionRecordingPublication: jest.fn()
     };
     const liveSettings = {
       media: {
@@ -1440,6 +2202,14 @@ describe('ClassSessionsService', () => {
             email: 'teacher@example.test'
           }
         ])
+      ),
+      findById: jest.fn(() =>
+        execResult({
+          id: 'student-1',
+          displayName: 'Student One',
+          name: 'Student One',
+          email: 'student@example.test'
+        })
       )
     };
     const config = {
@@ -1463,6 +2233,17 @@ describe('ClassSessionsService', () => {
     const auditLogs = {
       record: jest.fn(async () => undefined)
     };
+    const activity = {
+      record: jest.fn(async () => undefined),
+      listTimeline: jest.fn(async () => ({
+        sessionId,
+        batchId: 'batch-1',
+        visibility: 'full',
+        items: [],
+        limit: 50,
+        hasMore: false
+      }))
+    };
 
     return {
       service: new ClassSessionsService(
@@ -1471,8 +2252,11 @@ describe('ClassSessionsService', () => {
         classSessions as never,
         attendanceSnapshots as never,
         materials as never,
+        postClassThreadStates as never,
         whiteboardStates as never,
         whiteboardVersions as never,
+        assignments as never,
+        assignmentSubmissions as never,
         studentEnrollments as never,
         rooms as never,
         recordings as never,
@@ -1480,18 +2264,23 @@ describe('ClassSessionsService', () => {
         config as never,
         users as never,
         auditLogs as never,
+        activity as never,
         metrics as never
       ),
       batches,
       classSessions,
       attendanceSnapshots,
       materials,
+      postClassThreadStates,
       whiteboardStates,
       whiteboardVersions,
+      assignments,
+      assignmentSubmissions,
       studentEnrollments,
       rooms,
       recordings,
       auditLogs,
+      activity,
       metrics
     };
   }

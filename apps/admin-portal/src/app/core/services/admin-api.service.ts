@@ -13,6 +13,9 @@ import type {
   AdminClassSessionReportQuery,
   AdminClassSessionReportResponse,
   AdminClassSessionReportRow,
+  ClassLibrarySearchQuery,
+  ClassLibrarySearchResponse,
+  ClassSessionReport,
   AdminBatchCreateRequest,
   AdminBatchDetail,
   AdminBatchListQuery,
@@ -39,7 +42,9 @@ import type {
   AdminUserDetail,
   AdminUserListQuery,
   AdminUserListResponse,
-  AdminUserUpdateRequest
+  AdminUserUpdateRequest,
+  ClassSessionTimelineCategory,
+  ClassSessionTimelineResponse
 } from '@native-sfu/contracts';
 import { Observable, catchError, map, throwError } from 'rxjs';
 import { API_BASE_URL } from './app-environment';
@@ -160,6 +165,49 @@ export class AdminApiService {
     return this.http
       .get<AdminClassSessionReportRow | ApiEnvelope<AdminClassSessionReportRow>>(
         `${API_BASE_URL}/admin/class-sessions/${encodeURIComponent(sessionId)}`
+      )
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  getClassSessionReport(sessionId: string): Observable<ClassSessionReport> {
+    return this.http
+      .get<ClassSessionReport | ApiEnvelope<ClassSessionReport>>(
+        `${API_BASE_URL}/admin/class-sessions/${encodeURIComponent(sessionId)}/report`
+      )
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  downloadClassSessionReportCsv(sessionId: string): Observable<Blob> {
+    return this.http
+      .get(`${API_BASE_URL}/admin/class-sessions/${encodeURIComponent(sessionId)}/report/export.csv`, { responseType: 'blob' })
+      .pipe(catchError((error) => throwError(() => this.toApiError(error))));
+  }
+
+  searchClassLibrary(query: ClassLibrarySearchQuery = {}): Observable<ClassLibrarySearchResponse> {
+    return this.http
+      .get<ClassLibrarySearchResponse | ApiEnvelope<ClassLibrarySearchResponse>>(`${API_BASE_URL}/admin/class-library/search`, {
+        params: this.toParams(query)
+      })
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  getClassSessionTimeline(
+    sessionId: string,
+    options: { before?: string; limit?: number; category?: ClassSessionTimelineCategory | 'all' } = {}
+  ): Observable<ClassSessionTimelineResponse> {
+    return this.http
+      .get<ClassSessionTimelineResponse | ApiEnvelope<ClassSessionTimelineResponse>>(
+        `${API_BASE_URL}/admin/class-sessions/${encodeURIComponent(sessionId)}/timeline`,
+        { params: this.toParams(options) }
       )
       .pipe(
         map((response) => this.unwrapResponse(response)),

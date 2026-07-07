@@ -13,6 +13,7 @@ import type {
 } from '@native-sfu/contracts';
 import { finalize, forkJoin } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
+import { AdminLookupService } from '../../../core/services/admin-lookup.service';
 
 type AttendanceStatusFilter = AdminClassSessionStatus | 'all';
 type AttendanceTab = 'sessions' | 'students';
@@ -30,6 +31,7 @@ export class AttendanceList implements OnInit {
   private readonly formBuilder = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  protected readonly lookup = inject(AdminLookupService);
 
   protected readonly sessionRows = signal<AdminAttendanceSessionRow[]>([]);
   protected readonly studentRows = signal<AdminAttendanceStudentRow[]>([]);
@@ -59,6 +61,7 @@ export class AttendanceList implements OnInit {
 
   ngOnInit(): void {
     this.readQueryParams();
+    this.lookup.loadCourseTeacherBatchLookups();
     this.load(this.page());
   }
 

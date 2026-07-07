@@ -148,6 +148,8 @@ export interface WhiteboardLockEvent {
 
 export interface WhiteboardCommandRequest {
   roomId: string;
+  operationId?: string;
+  baseSnapshotVersion?: number;
   command: WhiteboardCommand;
 }
 
@@ -155,6 +157,10 @@ export interface WhiteboardCommandEvent {
   roomId: string;
   participantId: string;
   displayName: string;
+  operationId?: string;
+  operationSeq?: number;
+  createdAt?: string;
+  idempotentReplay?: boolean;
   command: WhiteboardCommand;
 }
 

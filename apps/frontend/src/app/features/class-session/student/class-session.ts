@@ -10,6 +10,7 @@ import type {
   RoomOwnerRedirect,
   ServerToClientEvents,
   StudentMediaModerationEvent,
+  WhiteboardMemoryState,
   WhiteboardCommand as WireWhiteboardCommand,
   WhiteboardCommandEvent,
   WhiteboardControlEvent,
@@ -181,6 +182,8 @@ export class StudentClassSession implements OnInit, OnDestroy {
   private lastActivitySentAt = 0;
   private readonly whiteboardCursorTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private pendingWhiteboardCommands: WhiteboardCommand[] = [];
+  private whiteboardMemoryLoadedSessionId = '';
+  private whiteboardMemoryApplying = false;
 
   @ViewChild(Whiteboard) private readonly interactiveWhiteboard?: Whiteboard;
 
@@ -215,6 +218,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
   protected readonly whiteboardLocked = signal(false);
   protected readonly whiteboardDrawerOpen = signal(false);
   protected readonly whiteboardControlNotice = signal('');
+  protected readonly liveWhiteboardState = signal<WhiteboardMemoryState | null>(null);
   protected readonly whiteboardCursors = signal<WhiteboardCursor[]>([]);
   protected readonly returnedRemoteStreams = signal<Record<string, MediaStream>>({});
   protected readonly mediaRecoveryError = this.webrtc.lastMediaError;
@@ -228,6 +232,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
   protected readonly studentWhiteboardReadOnly = computed(
     () => !this.whiteboardControlGranted() || !this.sessionLive() || this.whiteboardLocked() || this.whiteboardPermissionLevel() === 'view_only'
   );
+  protected readonly whiteboardAvailable = computed(() => this.whiteboardControlGranted() || Boolean(this.liveWhiteboardState()));
   protected readonly studentWhiteboardPermissionLabel = computed(() => this.whiteboardPermissionLabel(this.whiteboardPermissionLevel()));
   protected readonly studentWhiteboardTools = computed<readonly WhiteboardTool[]>(() => {
     switch (this.whiteboardPermissionLevel()) {
@@ -464,7 +469,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
   }
 
   protected toggleWhiteboardDrawer(): void {
-    if (!this.whiteboardControlGranted()) {
+    if (!this.whiteboardAvailable()) {
       return;
     }
     this.whiteboardDrawerOpen.update((open) => {
@@ -475,7 +480,10 @@ export class StudentClassSession implements OnInit, OnDestroy {
       }
       return nextOpen;
     });
-    window.setTimeout(() => this.flushPendingWhiteboardCommands(), 0);
+    window.setTimeout(() => {
+      this.applyLiveWhiteboardStateToDrawer();
+      this.flushPendingWhiteboardCommands();
+    }, 0);
   }
 
   protected closeWhiteboardDrawer(): void {
@@ -566,7 +574,11 @@ export class StudentClassSession implements OnInit, OnDestroy {
       return;
     }
     void this.socket
-      .emitAck('whiteboard:command', { roomId, command: this.toWireWhiteboardCommand(normalizedCommand) })
+      .emitAck('whiteboard:command', {
+        roomId,
+        operationId: this.createWhiteboardOperationId(),
+        command: this.toWireWhiteboardCommand(normalizedCommand)
+      })
       .catch((error) => {
         this.whiteboardControlNotice.set(error instanceof Error ? error.message : 'Unable to sync whiteboard change.');
       });
@@ -767,6 +779,8 @@ export class StudentClassSession implements OnInit, OnDestroy {
     this.session.set(payload);
     this.watchSession(payload.sessionId, payload.batchId);
     if (payload.status !== 'live') {
+      this.liveWhiteboardState.set(null);
+      this.whiteboardMemoryLoadedSessionId = '';
       if (payload.status === 'scheduled') {
         this.startLifecyclePolling();
       } else {
@@ -779,10 +793,45 @@ export class StudentClassSession implements OnInit, OnDestroy {
     }
 
     this.stopLifecyclePolling();
+    this.loadLiveWhiteboardMemory(payload);
     this.preparePrejoinDevices();
     if (allowMediaJoin && payload.status === 'live' && payload.canJoin && this.joinedRoomId) {
       void this.joinClassroomRoom(payload, forceMediaRejoin);
     }
+  }
+
+  private loadLiveWhiteboardMemory(payload: ClassroomPayload, force = false): void {
+    if (this.destroyed || payload.status !== 'live' || (!force && this.whiteboardMemoryLoadedSessionId === payload.sessionId)) {
+      return;
+    }
+    this.whiteboardMemoryLoadedSessionId = payload.sessionId;
+    this.classSessions.getWhiteboardMemory(payload.sessionId, { batchId: payload.batchId }).subscribe({
+      next: (state) => {
+        this.liveWhiteboardState.set(state);
+        if (state) {
+          window.setTimeout(() => this.applyLiveWhiteboardStateToDrawer());
+        }
+      },
+      error: () => {
+        this.liveWhiteboardState.set(null);
+      }
+    });
+  }
+
+  private applyLiveWhiteboardStateToDrawer(): void {
+    const state = this.liveWhiteboardState();
+    const whiteboard = this.interactiveWhiteboard;
+    if (!state || !whiteboard) {
+      return;
+    }
+    this.whiteboardMemoryApplying = true;
+    try {
+      whiteboard.importBoardState(state.snapshot);
+      whiteboard.requestCaptureFrame();
+    } finally {
+      this.whiteboardMemoryApplying = false;
+    }
+    this.flushPendingWhiteboardCommands();
   }
 
   protected downloadLatestRecording(): void {
@@ -1978,7 +2027,7 @@ export class StudentClassSession implements OnInit, OnDestroy {
   }
 
   private applyRemoteWhiteboardCommand(event: WhiteboardCommandEvent): void {
-    if (!this.isWhiteboardEventForCurrentRoom(event.roomId) || event.participantId === this.store.localParticipantId() || !this.whiteboardControlGranted()) {
+    if (!this.isWhiteboardEventForCurrentRoom(event.roomId) || event.participantId === this.store.localParticipantId()) {
       return;
     }
     const command = this.normalizeWhiteboardCommand(event.command);
@@ -1986,6 +2035,9 @@ export class StudentClassSession implements OnInit, OnDestroy {
     if (!whiteboard) {
       this.pendingWhiteboardCommands.push(command);
       window.setTimeout(() => this.flushPendingWhiteboardCommands(), 0);
+      return;
+    }
+    if (this.whiteboardMemoryApplying) {
       return;
     }
     whiteboard.applyCommand(command);
@@ -2036,6 +2088,11 @@ export class StudentClassSession implements OnInit, OnDestroy {
 
   private toWireWhiteboardCommand(command: WhiteboardCommand): WireWhiteboardCommand {
     return this.normalizeWhiteboardCommand(command) as unknown as WireWhiteboardCommand;
+  }
+
+  private createWhiteboardOperationId(): string {
+    const random = globalThis.crypto?.randomUUID?.();
+    return random || `wb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 
   private clearWhiteboardControlState(message = ''): void {

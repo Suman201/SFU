@@ -3,11 +3,12 @@ import { RouterOutlet } from '@angular/router';
 import { AuthService } from './core/services/auth.service';
 import { ProfileService } from './core/services/profile.service';
 import { ThemeService } from './core/services/theme.service';
+import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.component';
 
 @Component({
   selector: 'sfu-root',
   standalone: true,
-  imports: [RouterOutlet],
+  imports: [ConfirmDialogComponent, RouterOutlet],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @if (auth.checking()) {
@@ -20,6 +21,7 @@ import { ThemeService } from './core/services/theme.service';
       </main>
     }
     <router-outlet />
+    <sfu-confirm-dialog />
   `,
   styles: [
     `

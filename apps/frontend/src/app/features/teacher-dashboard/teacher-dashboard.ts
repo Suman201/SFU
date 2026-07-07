@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { ConfirmDialogService } from '../../shared/confirm-dialog/confirm-dialog.service';
 import { Footer } from '../../shared/footer/footer';
 import { Header } from '../../shared/header/header';
 import {
@@ -54,6 +55,7 @@ interface NextBatchAction {
 })
 export class TeacherDashboard {
   private readonly router = inject(Router);
+  private readonly confirmDialog = inject(ConfirmDialogService);
   protected readonly dashboard = inject(TeacherDashboardStore);
 
   protected readonly createDrawerOpen = signal(false);
@@ -234,8 +236,15 @@ export class TeacherDashboard {
     void this.openSession(session);
   }
 
-  protected endSession(session: TeacherSession): void {
-    if (!confirm(`End ${session.title} for everyone?`)) {
+  protected async endSession(session: TeacherSession): Promise<void> {
+    const confirmed = await this.confirmDialog.confirm({
+      title: 'End class for everyone?',
+      message: `${session.title} will be completed now. Students will leave the live classroom and the session cannot be joined again.`,
+      confirmLabel: 'End class',
+      pendingLabel: 'Ending...',
+      variant: 'danger'
+    });
+    if (!confirmed) {
       return;
     }
     this.dashboard.completeSession(session).subscribe();

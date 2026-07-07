@@ -37,7 +37,7 @@ interface ChatComposerFormModel {
 
 const CHAT_ATTACHMENT_MAX_COUNT = 3;
 const CHAT_ATTACHMENT_MAX_SIZE_BYTES = 2 * 1024 * 1024;
-const CHAT_ATTACHMENT_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const CHAT_ATTACHMENT_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const CHAT_ATTACHMENT_FILE_MIME_TYPES = new Set([...CHAT_ATTACHMENT_IMAGE_MIME_TYPES, 'application/pdf']);
 const CHAT_ENDED_MESSAGE = 'Class ended. Chat is now read-only.';
 
@@ -601,7 +601,7 @@ export class SessionChat {
       return;
     }
     if (!CHAT_ATTACHMENT_FILE_MIME_TYPES.has(file.type)) {
-      this.chatError.set('Only PDF, JPEG, PNG, GIF, and WebP attachments are allowed.');
+      this.chatError.set('Only PDF, JPEG, PNG, and WebP attachments are allowed.');
       return;
     }
     if (file.size > CHAT_ATTACHMENT_MAX_SIZE_BYTES) {
@@ -670,6 +670,7 @@ export class SessionChat {
       ...(attachment.title ? { title: attachment.title } : {}),
       ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
       ...(typeof attachment.size === 'number' ? { size: attachment.size } : {}),
+      ...(typeof attachment.sizeBytes === 'number' ? { sizeBytes: attachment.sizeBytes } : {}),
       ...(attachment.url ? { url: attachment.url } : {})
     };
   }
@@ -711,7 +712,7 @@ export class SessionChat {
     if (attachment.type === 'link' && attachment.url) {
       return this.linkHost(attachment.url);
     }
-    const parts = [attachment.mimeType ?? (attachment.type === 'pdf' ? 'PDF' : attachment.type), this.formatAttachmentSize(attachment.size)];
+    const parts = [attachment.mimeType ?? (attachment.type === 'pdf' ? 'PDF' : attachment.type), this.formatAttachmentSize(attachment.sizeBytes ?? attachment.size)];
     return parts.filter(Boolean).join(' · ');
   }
 

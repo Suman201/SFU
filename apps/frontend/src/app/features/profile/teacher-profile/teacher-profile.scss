@@ -352,6 +352,13 @@ h3 {
   color: var(--text);
 }
 
+.settings-note {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .settings-group .toggle-row {
   justify-content: space-between;
 }

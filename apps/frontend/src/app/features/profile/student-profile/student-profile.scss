@@ -248,6 +248,12 @@
   color: var(--text);
 }
 
+.settings-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;

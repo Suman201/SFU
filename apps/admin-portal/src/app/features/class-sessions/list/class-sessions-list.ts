@@ -10,6 +10,7 @@ import type {
 } from '@native-sfu/contracts';
 import { finalize } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
+import { AdminLookupService } from '../../../core/services/admin-lookup.service';
 
 type SessionStatusFilter = AdminClassSessionStatus | 'all';
 
@@ -24,6 +25,7 @@ type SessionStatusFilter = AdminClassSessionStatus | 'all';
 export class ClassSessionsList implements OnInit {
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
+  protected readonly lookup = inject(AdminLookupService);
 
   protected readonly rows = signal<AdminClassSessionReportRow[]>([]);
   protected readonly summary = signal<AdminClassSessionReportSummary | null>(null);
@@ -43,6 +45,7 @@ export class ClassSessionsList implements OnInit {
   });
 
   ngOnInit(): void {
+    this.lookup.loadCourseTeacherBatchLookups();
     this.load();
   }
 

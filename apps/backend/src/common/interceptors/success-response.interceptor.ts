@@ -13,6 +13,7 @@ export class SuccessResponseInterceptor implements NestInterceptor {
       pathname.endsWith('.csv') ||
       pathname.includes('/recordings/') && pathname.endsWith('/download') ||
       pathname.includes('/materials/') && pathname.endsWith('/download') ||
+      pathname.includes('/chat/attachments/') ||
       path === '/metrics' ||
       path.startsWith('/health') ||
       path.startsWith('/api/health')

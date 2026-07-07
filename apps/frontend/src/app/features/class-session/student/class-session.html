@@ -363,13 +363,13 @@
   }
 
   @if (roomJoined()) {
-  @if (whiteboardControlGranted()) {
+  @if (whiteboardAvailable()) {
     <button
       class="student-whiteboard-button"
       type="button"
       aria-controls="student-whiteboard-control"
       [attr.aria-expanded]="whiteboardDrawerOpen()"
-      title="Whiteboard control"
+      [title]="whiteboardControlGranted() ? 'Whiteboard control' : 'Open saved whiteboard'"
       (click)="toggleWhiteboardDrawer()"
     >
       <span class="board-icon" aria-hidden="true"></span>
@@ -436,7 +436,7 @@
     </aside>
   }
 
-  @if (whiteboardDrawerOpen() && whiteboardControlGranted()) {
+  @if (whiteboardDrawerOpen() && whiteboardAvailable()) {
     <button class="student-whiteboard-backdrop" type="button" aria-label="Close whiteboard control" (click)="closeWhiteboardDrawer()"></button>
     <aside
       id="student-whiteboard-control"
@@ -446,8 +446,8 @@
       <header>
         <div>
           <p>Whiteboard</p>
-          <h1>Your turn</h1>
-          <span>{{ whiteboardLocked() ? 'Board locked' : studentWhiteboardPermissionLabel() }}</span>
+          <h1>{{ whiteboardControlGranted() ? 'Your turn' : 'Shared board' }}</h1>
+          <span>{{ whiteboardControlGranted() ? (whiteboardLocked() ? 'Board locked' : studentWhiteboardPermissionLabel()) : 'Read only' }}</span>
         </div>
         <button type="button" class="close-button" title="Close whiteboard" aria-label="Close whiteboard" (click)="closeWhiteboardDrawer()">
           <span aria-hidden="true"></span>
@@ -460,6 +460,7 @@
         title="Whiteboard control"
         [eyebrow]="studentWhiteboardPermissionLabel()"
         [readOnly]="studentWhiteboardReadOnly()"
+        [initialState]="liveWhiteboardState()?.snapshot ?? null"
         [allowedTools]="studentWhiteboardTools()"
         [allowPageManagement]="false"
         [allowAssetImport]="false"

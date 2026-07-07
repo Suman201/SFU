@@ -12,6 +12,8 @@ import type {
 } from '@native-sfu/contracts';
 import { finalize } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
+import { AdminLookupService } from '../../../core/services/admin-lookup.service';
+import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 
 type BatchStatusFilter = AdminBatchStatus | 'all';
 
@@ -28,6 +30,8 @@ export class BatchesList implements OnInit {
   private readonly formBuilder = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  protected readonly lookup = inject(AdminLookupService);
+  private readonly confirmDialog = inject(ConfirmDialogService);
 
   protected readonly rows = signal<AdminBatchListItem[]>([]);
   protected readonly summary = signal<AdminBatchSummary | null>(null);
@@ -64,6 +68,8 @@ export class BatchesList implements OnInit {
 
   ngOnInit(): void {
     this.readQueryParams();
+    this.lookup.loadCourses();
+    this.lookup.loadTeachers();
     this.load(this.page());
   }
 
@@ -117,12 +123,21 @@ export class BatchesList implements OnInit {
       });
   }
 
-  protected transition(row: AdminBatchListItem, action: 'activate' | 'pause' | 'complete' | 'cancel'): void {
+  protected async transition(row: AdminBatchListItem, action: 'activate' | 'pause' | 'complete' | 'cancel'): Promise<void> {
     if (this.pendingBatchId()) {
       return;
     }
-    if ((action === 'complete' || action === 'cancel') && !confirm(`Mark ${row.name} as ${action}?`)) {
-      return;
+    if (action === 'complete' || action === 'cancel') {
+      const confirmed = await this.confirmDialog.confirm({
+        title: `Mark ${row.name} as ${action}?`,
+        message: action === 'cancel' ? 'This batch will be cancelled and future sessions will no longer be available.' : 'This batch will be marked completed.',
+        confirmLabel: action === 'cancel' ? 'Cancel batch' : 'Complete batch',
+        pendingLabel: 'Updating...',
+        variant: action === 'cancel' ? 'danger' : 'warning'
+      });
+      if (!confirmed) {
+        return;
+      }
     }
     this.pendingBatchId.set(row.id);
     this.error.set('');

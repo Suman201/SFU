@@ -19,6 +19,8 @@
 
 .detail-head h1,
 .detail-head p,
+.report-toolbar h2,
+.report-toolbar p,
 .attendance-card h2,
 .attendance-card p,
 .data-table-toolbar h2,
@@ -130,6 +132,118 @@
   color: var(--text);
 }
 
+.report-grid,
+.report-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.report-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.report-toolbar h2 {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.report-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.report-grid article,
+.report-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.report-grid article {
+  display: grid;
+  gap: 6px;
+  padding: 15px;
+}
+
+.report-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.report-grid strong {
+  color: var(--text);
+  font-size: 24px;
+}
+
+.report-grid small,
+.report-card dt {
+  color: var(--muted);
+}
+
+.report-sections {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.report-card h2,
+.report-card dl {
+  margin: 0;
+}
+
+.report-card h2 {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.report-card dl {
+  display: grid;
+  gap: 8px;
+}
+
+.report-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 7px;
+  border-bottom: 1px solid var(--line);
+}
+
+.report-card dl div:last-child {
+  border-bottom: 0;
+}
+
+.report-card dt {
+  font-weight: 800;
+}
+
+.report-card dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 900;
+}
+
 .metadata-grid {
   display: grid;
   grid-template-columns: 140px minmax(0, 1fr);
@@ -148,6 +262,69 @@ code {
   color: var(--text);
 }
 
+.timeline-shell {
+  gap: 12px;
+}
+
+.timeline-shell .data-table-filters {
+  padding-inline: 16px;
+}
+
+.timeline-shell .data-pill {
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.timeline-shell .data-pill.active {
+  border-color: color-mix(in srgb, var(--product-green) 42%, var(--line));
+  background: color-mix(in srgb, var(--product-green) 12%, transparent);
+  color: var(--product-green);
+}
+
+.timeline-list {
+  display: grid;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.timeline-row time {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.timeline-row div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.timeline-row strong {
+  color: var(--text);
+}
+
+.timeline-row p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.timeline-more {
+  margin: 0 16px 16px;
+}
+
 .detail-state {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -162,19 +339,60 @@ code {
 }
 
 @media (max-width: 980px) {
-  .detail-grid {
+  .detail-grid,
+  .report-grid,
+  .report-sections {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 700px) {
   .detail-head,
-  .attendance-card {
+  .attendance-card,
+  .report-toolbar {
     flex-direction: column;
   }
 
+  .report-actions {
+    justify-content: flex-start;
+  }
+
   .detail-grid,
-  .metadata-grid {
+  .metadata-grid,
+  .timeline-row,
+  .report-grid,
+  .report-sections {
     grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  .back-link,
+  .detail-head,
+  .detail-grid,
+  .attendance-card,
+  .report-actions,
+  .timeline-shell,
+  .data-table-shell {
+    display: none !important;
+  }
+
+  .report-toolbar,
+  .report-grid article,
+  .report-card {
+    border-color: #d7dce0;
+    box-shadow: none;
+    background: #fff;
+  }
+
+  .report-toolbar,
+  .report-grid,
+  .report-sections {
+    break-inside: avoid;
+  }
+
+  .report-grid,
+  .report-sections {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

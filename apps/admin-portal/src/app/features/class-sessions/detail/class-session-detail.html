@@ -48,6 +48,120 @@
     </div>
   </section>
 
+  @if (reportLoading() && !report()) {
+    <section class="detail-state">Loading completed-session recap...</section>
+  } @else if (reportError()) {
+    <section class="detail-state">{{ reportError() }}</section>
+  } @else if (report(); as recap) {
+    <section class="report-toolbar" aria-label="Completed report actions">
+      <div>
+        <p class="eyebrow">Completed-session recap</p>
+        <h2>Report export</h2>
+      </div>
+      <div class="report-actions">
+        <button type="button" class="table-action" [disabled]="reportDownloading()" (click)="downloadReportCsv()">
+          {{ reportDownloading() ? 'Downloading...' : 'Download CSV' }}
+        </button>
+        <button type="button" class="table-action" (click)="printReport()">Print</button>
+      </div>
+    </section>
+
+    <section class="report-grid" aria-label="Completed session recap">
+      <article>
+        <span>Attendance source</span>
+        <strong>{{ recap.attendance.source }}</strong>
+        <small>{{ recap.attendance.lateJoins }} late · {{ recap.attendance.earlyLeaves }} early leaves</small>
+      </article>
+      <article>
+        <span>Average time</span>
+        <strong>{{ durationLabel(recap.attendance.averageDurationSeconds) }}</strong>
+        <small>{{ recap.attendance.reconnects }} reconnects</small>
+      </article>
+      <article>
+        <span>Artifacts</span>
+        <strong>{{ recap.artifacts.recordings.length + recap.artifacts.materials.length + (recap.artifacts.whiteboard.available ? 1 : 0) }}</strong>
+        <small>{{ recap.artifacts.recordings.length }} recordings · {{ recap.artifacts.materials.length }} materials</small>
+      </article>
+      <article>
+        <span>Q&A status</span>
+        <strong>{{ recap.qna.unanswered }}</strong>
+        <small>{{ recap.qna.threads }} threads · {{ recap.qna.unreadForTeacher }} unread</small>
+      </article>
+    </section>
+
+    <section class="report-sections">
+      <article class="report-card">
+        <h2>Participation</h2>
+        <dl>
+          <div><dt>Joins</dt><dd>{{ recap.participation.joins }}</dd></div>
+          <div><dt>Leaves</dt><dd>{{ recap.participation.leaves }}</dd></div>
+          <div><dt>Hand raises</dt><dd>{{ recap.participation.handRaises }}</dd></div>
+          <div><dt>Allowed speak</dt><dd>{{ recap.participation.allowedSpeaks }}</dd></div>
+          <div><dt>Muted mics</dt><dd>{{ recap.participation.mutedMics }}</dd></div>
+          <div><dt>Stopped cameras</dt><dd>{{ recap.participation.stoppedCameras }}</dd></div>
+        </dl>
+      </article>
+
+      <article class="report-card">
+        <h2>Artifacts and work</h2>
+        <dl>
+          <div><dt>Broadcasts</dt><dd>{{ recap.broadcasts.count }}</dd></div>
+          <div><dt>Whiteboard</dt><dd>{{ recap.artifacts.whiteboard.available ? 'Available' : 'No snapshot' }}</dd></div>
+          <div><dt>Assignments</dt><dd>{{ recap.assignments.total }}</dd></div>
+          <div><dt>Submissions</dt><dd>{{ submissionTotal(recap) }}</dd></div>
+          <div><dt>Published assignments</dt><dd>{{ recap.assignments.published }}</dd></div>
+          <div><dt>Archived assignments</dt><dd>{{ recap.assignments.archived }}</dd></div>
+        </dl>
+      </article>
+    </section>
+  }
+
+  <section class="data-table-shell timeline-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Activity timeline</h2>
+        <p>Lifecycle, attendance, moderation, materials, recording, and support-safe class events.</p>
+      </div>
+    </div>
+    <div class="data-table-filters" aria-label="Timeline filters">
+      @for (category of timelineCategories; track category.value) {
+        <button type="button" class="data-pill" [class.active]="timelineCategory() === category.value" (click)="setTimelineCategory(category.value)">
+          {{ category.label }}
+        </button>
+      }
+    </div>
+    @if (timelineError()) {
+      <div class="detail-state error" role="alert">{{ timelineError() }}</div>
+    } @else if (timelineLoading() && !timeline().length) {
+      <div class="detail-state">Loading activity timeline...</div>
+    } @else if (timeline().length) {
+      <div class="timeline-list">
+        @for (event of timeline(); track event.id) {
+          <article class="timeline-row">
+            <time [attr.datetime]="event.createdAt">{{ event.createdAt | date: 'medium' }}</time>
+            <div>
+              <span class="data-pill">{{ event.category }}</span>
+              <strong>{{ event.summary }}</strong>
+              <p>
+                <span>{{ timelineActor(event) }}</span>
+                @if (timelineTarget(event)) {
+                  <span>→ {{ timelineTarget(event) }}</span>
+                }
+              </p>
+            </div>
+          </article>
+        }
+      </div>
+      @if (timelineHasMore()) {
+        <button type="button" class="table-action timeline-more" [disabled]="timelineLoading()" (click)="loadMoreTimeline()">
+          {{ timelineLoading() ? 'Loading...' : 'Load older activity' }}
+        </button>
+      }
+    } @else {
+      <div class="detail-state">No activity has been recorded for this session yet.</div>
+    }
+  </section>
+
   <section class="data-table-shell">
     <div class="data-table-toolbar">
       <div>

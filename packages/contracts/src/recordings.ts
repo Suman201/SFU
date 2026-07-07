@@ -36,6 +36,9 @@ export interface Recording {
   stoppedBy?: string;
   failureReason?: string;
   retentionExpiresAt?: string;
+  publishedAt?: string;
+  publishedByUserId?: string;
+  unpublishedAt?: string;
   consentVersion?: string;
   consentRequired?: boolean;
   tracks?: RecordingTrackManifestEntry[];

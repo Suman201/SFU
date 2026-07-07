@@ -1,6 +1,6 @@
 # Class Session Production Readiness Gaps
 
-Updated: 2026-06-25
+Updated: 2026-07-07
 
 This document tracks the remaining gap between the current class-session implementation and production readiness.
 
@@ -46,6 +46,7 @@ These items were listed as gaps in older versions of this document, but code now
 - Teacher participant cards with student media and moderation controls.
 - Bulk teacher controls such as mute all, stop cameras, lock class, end for everyone, and attendance export.
 - Class materials, lesson-asset whiteboard import/export, board-note attachments, recording records/playback manifests, and attendance snapshots.
+- Student completed-session history, guarded post-class artifacts, private post-class teacher Q&A, and the teacher post-class workspace.
 - Selective student whiteboard control and whiteboard command events.
 - Admin modules for attendance, recordings, enrollments, users, courses, batches, dashboard, and audit-style operational surfaces.
 
@@ -337,6 +338,132 @@ Verification completed:
 - **Done**: ~~Broad scan residue was reviewed. Done: remaining `sample`, `placeholder`, and `static` matches are math sampling variables, form input placeholders, camera-off/prejoin placeholders, and CSS positioning, not production demo data.~~
 - **Done**: ~~Whitespace check. Done: `git diff --check` passed.~~
 
+### P1: Student Post-Class Access And Private Q&A
+
+Status: **Done** for the implemented 2026-07-07 scope.
+
+Every completed checklist item below is fully struck through and marked **Done**. Remaining polish is listed separately as **Tracked**.
+
+Completed scope:
+
+- **Done**: ~~Enrolled students can open completed-session history. Done: student completed-session list/detail routes load backend data for historically enrolled batches only.~~
+- **Done**: ~~Completed-session detail is student-safe. Done: the student page aggregates authorized recordings, read-only whiteboard state, shared materials, teacher broadcasts, own attendance, related assignments, and the student's own private teacher thread.~~
+- **Done**: ~~Post-class questions are private. Done: student follow-up questions use the teacher-student private chat thread and are never broadcast to the room or other students.~~
+- **Done**: ~~Teacher replies are private and session-scoped. Done: teacher batch detail exposes a Post-class Q&A panel with private per-student thread summaries, history, and replies.~~
+- **Done**: ~~Post-class Q&A is distinguishable from live private chat. Done: chat messages now support `context: live | post_class`, post-class writes persist `context: post_class`, and post-class history/summary filters use that context.~~
+- **Done**: ~~Student1 cannot see Student2's private Q&A. Done: post-class student history resolves only the authenticated student's teacher-student thread key; teacher history validates the selected student against the historical roster.~~
+- **Done**: ~~Non-enrolled students cannot access guessed completed-session artifacts. Done: completed detail and Q&A reuse historical enrollment authorization before loading artifacts or chat history.~~
+- **Done**: ~~Completed-session material downloads match completed detail authorization. Done: material downloads now use resolution-aware completed-session access so historically enrolled students can download allowed completed-session materials.~~
+
+Verification:
+
+- **Done**: ~~Contracts build. Done: `npm run build --workspace @native-sfu/contracts` passed.~~
+- **Done**: ~~Backend build. Done: `npm run build --workspace @native-sfu/backend` passed.~~
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed.~~
+- **Done**: ~~Focused backend class-session/chat tests. Done: `npm test --workspace @native-sfu/backend -- class-sessions.service.spec.ts rooms.service.spec.ts` passed with 180 tests.~~
+- **Done**: ~~Whitespace check. Done: `git diff --check` passed.~~
+
+Tracked follow-ups:
+
+- **Tracked**: Post-class Q&A read-state clearing is not fully completed-session-aware yet; unread counts may require refresh/read-state hardening.
+- **Tracked**: Student Q&A does not auto-refresh teacher replies after initial page load.
+
+### P1: Teacher Post-Class Workflow
+
+Status: **Done** for the implemented 2026-07-07 teacher workflow scope.
+
+Every completed checklist item below is fully struck through and marked **Done**. Remaining polish is listed separately as **Tracked**.
+
+Completed scope:
+
+- **Done**: ~~Teacher can open one completed-session workspace for owned sessions. Done: completed session row actions open the post-class workspace from teacher batch detail, backed by `GET /api/v1/class-sessions/:sessionId/post-class-workspace`.~~
+- **Done**: ~~Workspace composes recap and operational context. Done: it includes the completed-session report, attendance/participation summaries, broadcasts, materials, recordings, whiteboard notes, private Q&A summaries, and assignments linked to the session.~~
+- **Done**: ~~Teacher can mark post-class questions important, answered, or follow-up. Done: Q&A workflow flags persist in `class_session_post_class_thread_states` without copying private message bodies into workflow records.~~
+- **Done**: ~~Teacher can publish selected artifacts explicitly. Done: post-class publish/unpublish actions exist for individual materials, recordings, and whiteboard notes.~~
+- **Done**: ~~Unpublished artifacts remain hidden from students. Done: student completed-session recording/material/whiteboard list, download, and whiteboard memory access now check explicit post-class publication state.~~
+- **Done**: ~~Teacher can create a post-class announcement. Done: the workspace announcement composer writes a post-class broadcast and does not auto-copy private student question content.~~
+- **Done**: ~~Teacher can start follow-up homework from completed-session context. Done: the workspace `Create follow-up` action opens the existing assignment form with the completed session preselected.~~
+- **Done**: ~~Private student questions are not exposed broadly. Done: broad report/workspace data excludes private Q&A message bodies; private replies remain in the existing teacher-student Q&A thread UI.~~
+
+Verification:
+
+- **Done**: ~~Contracts build. Done: `npm run build --workspace @native-sfu/contracts` passed.~~
+- **Done**: ~~Backend build. Done: `npm run build --workspace @native-sfu/backend` passed.~~
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed.~~
+- **Done**: ~~Focused backend class-session tests. Done: `npm test --workspace @native-sfu/backend -- class-sessions.service.spec.ts` passed with 55 tests.~~
+- **Done**: ~~Whitespace check. Done: `git diff --check` passed.~~
+
+Tracked follow-ups:
+
+- **Tracked**: Add a dedicated sanitized "promote selected Q&A into announcement" flow only after copy/privacy review.
+- **Tracked**: Add focused frontend unit coverage for the new workspace once batch-detail tests are split into smaller test surfaces.
+
+### P1: Post-Class Report And Recap
+
+Status: **Done** for the implemented 2026-07-07 teacher/admin recap scope.
+
+Every completed checklist item below is fully struck through and marked **Done**. Remaining polish is listed separately as **Tracked**.
+
+Completed scope:
+
+- **Done**: ~~Teacher/admin completed-session report endpoint. Done: `GET /api/v1/class-sessions/:sessionId/report` is available for owning teachers/admins, and `GET /api/v1/admin/class-sessions/:sessionId/report` is available for admins.~~
+- **Done**: ~~Report combines session metadata and attendance. Done: the report includes session timing/status, batch/course/teacher metadata, attendance totals, attendance rate, average duration, reconnects, late joins, early leaves, and snapshot/inferred attendance source.~~
+- **Done**: ~~Report combines participation and support highlights. Done: participation counts are derived from class-session timeline events, and support/media/moderation incident highlights are included from safe timeline records.~~
+- **Done**: ~~Report combines learning artifacts. Done: recording metadata, shared materials, whiteboard snapshot summary, assignments, and assignment submission status totals are included.~~
+- **Done**: ~~Report summarizes broadcasts and post-class Q&A without leaking private chat bodies. Done: public teacher broadcast count/latest preview is included, while private Q&A appears only as thread/activity/unanswered/unread counts.~~
+- **Done**: ~~Teacher UI can open the report. Done: teacher batch detail completed-session actions now open the post-class workspace, which includes the compact report panel plus artifact publishing, announcements, Q&A triage, and assignment shortcut.~~
+- **Done**: ~~Admin UI can inspect the report. Done: admin class-session detail loads the recap and shows attendance, artifact, participation, assignment, and Q&A cards.~~
+- **Done**: ~~Report remains available after room closure. Done: the report reads persisted completed-session, attendance, artifact, assignment, timeline, and chat metadata rather than active room state.~~
+- **Done**: ~~Teacher/admin can export the completed-session report. Done: CSV exports are available from `GET /api/v1/class-sessions/:sessionId/report/export.csv` and `GET /api/v1/admin/class-sessions/:sessionId/report/export.csv`, and they reuse the safe `ClassSessionReport` data without private Q&A/chat bodies.~~
+- **Done**: ~~Teacher/admin can print the completed-session report. Done: teacher batch detail and admin class-session detail include Print actions with report-focused print styles.~~
+
+Verification:
+
+- **Done**: ~~Contracts build. Done: `npm run build --workspace @native-sfu/contracts` passed.~~
+- **Done**: ~~Backend build. Done: `npm run build --workspace @native-sfu/backend` passed.~~
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed.~~
+- **Done**: ~~Admin portal build. Done: `npm run build --workspace @native-sfu/admin-portal` passed.~~
+- **Done**: ~~Focused backend report tests. Done: `npm test --workspace @native-sfu/backend -- class-sessions.service.spec.ts` passed with 55 tests, including CSV export/privacy checks.~~
+- **Done**: ~~Whitespace check. Done: `git diff --check` passed.~~
+
+Tracked follow-ups:
+
+- **Tracked**: Report currently shows aggregate assignment/Q&A status; per-student drilldowns should stay behind explicit privacy-reviewed UI.
+- **Tracked**: Student-facing completed-session detail remains separate and student-safe; no broad student report was added in this pass.
+
+### P1: Search And Library
+
+Status: **Done** for the implemented 2026-07-07 metadata-search scope.
+
+Every completed checklist item below is fully struck through and marked **Done**. Remaining expansion is listed separately as **Tracked**.
+
+Completed scope:
+
+- **Done**: ~~Shared class-library contract. Done: `packages/contracts/src/class-library.ts` defines artifact types, result metadata, filters, pagination, and summary response types shared by backend, frontend, and admin portal.~~
+- **Done**: ~~Student search is enrollment-protected. Done: `GET /api/v1/class-library/search` scopes student results to historically enrolled batches, completed sessions, and student-visible published/shared artifacts.~~
+- **Done**: ~~Teacher search is ownership-protected. Done: teacher results are limited to batches owned by the authenticated teacher.~~
+- **Done**: ~~Admin search is admin-only. Done: `GET /api/v1/admin/class-library/search` is protected for admin/super-admin users and can search platform artifact metadata.~~
+- **Done**: ~~Search covers learning artifacts without adding a parallel search system. Done: results include sessions, recordings, materials, whiteboard pages, assignments, teacher announcements, and Q&A status metadata from existing collections.~~
+- **Done**: ~~Search filters are wired. Done: course, batch, teacher, date range, artifact type, status, page, and limit filters are supported by the shared query contract.~~
+- **Done**: ~~Private and sensitive fields are excluded. Done: private chat/Q&A bodies, assignment submission bodies, raw storage keys, and raw file paths are not returned in broad library search results.~~
+- **Done**: ~~Frontend library page exists. Done: `/class-library` is available in the frontend portal and linked from student and teacher dashboards.~~
+- **Done**: ~~Admin library page exists. Done: `/class-library` is available in the admin portal and linked from the admin sidebar.~~
+
+Verification:
+
+- **Done**: ~~Contracts build. Done: `npm run build --workspace @native-sfu/contracts` passed.~~
+- **Done**: ~~Focused backend class-library tests. Done: `npm test --workspace @native-sfu/backend -- class-library.service.spec.ts` passed with 4 tests.~~
+- **Done**: ~~Backend build. Done: `npm run build --workspace @native-sfu/backend` passed.~~
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed.~~
+- **Done**: ~~Admin portal build. Done: `npm run build --workspace @native-sfu/admin-portal` passed.~~
+- **Done**: ~~Whitespace check. Done: `git diff --check` passed.~~
+
+Tracked follow-ups:
+
+- **Tracked**: Add richer full-text ranking or a dedicated search index only if metadata search becomes insufficient at production scale.
+- **Tracked**: Keep private Q&A body search limited to explicit authorized teacher-student thread views, not broad library search.
+- **Tracked**: Add richer lookup selectors for course/batch/teacher filters if admins need friendlier discovery than raw ids.
+
 ### P1: Whiteboard Production Teaching UX
 
 Status: **Done** for the listed production-teaching checklist.
@@ -543,14 +670,16 @@ Intentional limits:
 
 ### P1: Whiteboard Academic Session Memory
 
-The 2026-06-25 Phase 8 pass added persisted academic board memory. Keep this section as a regression checklist for live teaching continuity and reusable lesson records.
+The 2026-06-25 Phase 8 pass added persisted academic board memory. The 2026-07-07 persisted realtime pass extended it from snapshot-only memory to operation-backed sync for late joins, refreshes, and completed-session review. Keep this section as a regression checklist for live teaching continuity and reusable lesson records.
 
 Status: **Done** for implemented scope. Every completed checklist item below is fully struck through, so the Done note is part of the completed item. Unstruck items remain intentional future work.
 
 Priority items:
 
-- **Done**: ~~persist board state per class session. Done: session-scoped whiteboard memory stores bounded schema-versioned board snapshots with page metadata.~~
+- **Done**: ~~persist board state per class session. Done: session-scoped whiteboard memory stores bounded schema-versioned snapshots plus accepted realtime operation records with operation ids, sequence metadata, and current-state cursor fields.~~
 - **Done**: ~~resume board after teacher reconnect or page reload. Done: teacher live classroom loads saved board memory and debounced autosave keeps recoverable state current.~~
+- **Done**: ~~load board state for late joins and student refreshes. Done: live students load the authorized saved board into a read-only board drawer and apply realtime whiteboard command updates.~~
+- **Done**: ~~show completed-session whiteboard read-only. Done: completed class detail loads the final saved board for authorized historical students without enabling edit tools.~~
 - **Done**: ~~restore board from a previous session in the same batch. Done: teacher can list previous batch boards and restore one into the current live board.~~
 - **Done**: ~~manual checkpoints and version history. Done: teacher checkpoints create bounded whiteboard versions and can be restored.~~
 - **Done**: ~~page title and tag metadata. Done: whiteboard pages can be titled/tagged, and backend search queries saved page titles/tags.~~
@@ -571,7 +700,7 @@ Verification:
 
 Intentional Phase 8 limits:
 
-- Whiteboard memory stores bounded full-board snapshots/checkpoints, not a durable per-operation edit log.
+- Whiteboard memory now stores accepted live operations for sync/idempotency and keeps bounded snapshots/checkpoints as the compact read model; it still does not expose a full collaborative CRDT, branching history, or user-facing per-step replay UI.
 - Search is title/tag based for saved pages; deeper full-text note search remains future work.
 - Students can read authorized saved board state through class-session access rules, but teacher/admin owns mutation and restore operations.
 

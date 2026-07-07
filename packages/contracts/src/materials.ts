@@ -20,6 +20,9 @@ export interface ClassSessionMaterial {
   shared: boolean;
   sharedAt?: string;
   sharedByUserId?: string;
+  publishedAt?: string;
+  publishedByUserId?: string;
+  unpublishedAt?: string;
   uploadedByUserId: string;
   createdAt: string;
   updatedAt: string;

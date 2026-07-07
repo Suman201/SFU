@@ -33,17 +33,27 @@
     <div>
       <p class="eyebrow">New enrollment</p>
       <h2 id="create-enrollment-title">Add a student to a batch</h2>
-      <p>Use the student and batch IDs from the admin user and batch records.</p>
+      <p>Search by name, then keep the selected ID so enrollment authorization remains exact.</p>
     </div>
     <form [formGroup]="createForm" (ngSubmit)="createEnrollment()">
-      <input type="search" formControlName="studentId" placeholder="Student ID" aria-label="Student ID" />
-      <input type="search" formControlName="batchId" placeholder="Batch ID" aria-label="Batch ID" />
+      <input type="search" formControlName="studentId" list="enrollment-create-student-options" placeholder="Student name or ID" aria-label="Student ID" />
+      <input type="search" formControlName="batchId" list="enrollment-create-batch-options" placeholder="Batch name or ID" aria-label="Batch ID" />
       <select formControlName="status" aria-label="Initial status">
         <option value="active">Active</option>
         <option value="pending">Pending</option>
         <option value="suspended">Suspended</option>
       </select>
       <button type="submit" class="table-action primary" [disabled]="saving()">{{ saving() ? 'Adding...' : 'Add' }}</button>
+      <datalist id="enrollment-create-student-options">
+        @for (option of lookup.students(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
+      <datalist id="enrollment-create-batch-options">
+        @for (option of lookup.batches(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
     </form>
   </section>
 }
@@ -64,11 +74,26 @@
         <option value="completed">Completed</option>
       </select>
       <input type="search" formControlName="search" placeholder="Search student, email, batch" aria-label="Search" />
-      <input type="search" formControlName="courseId" placeholder="Course ID" aria-label="Course ID" />
-      <input type="search" formControlName="batchId" placeholder="Batch ID" aria-label="Batch ID" />
-      <input type="search" formControlName="studentId" placeholder="Student ID" aria-label="Student ID" />
+      <input type="search" formControlName="courseId" list="enrollment-course-options" placeholder="Course name or ID" aria-label="Course ID" />
+      <input type="search" formControlName="batchId" list="enrollment-batch-options" placeholder="Batch name or ID" aria-label="Batch ID" />
+      <input type="search" formControlName="studentId" list="enrollment-student-options" placeholder="Student name or ID" aria-label="Student ID" />
       <button type="submit" class="table-action primary">Apply</button>
       <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+      <datalist id="enrollment-course-options">
+        @for (option of lookup.courses(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
+      <datalist id="enrollment-batch-options">
+        @for (option of lookup.batches(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
+      <datalist id="enrollment-student-options">
+        @for (option of lookup.students(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
     </form>
   </div>
 

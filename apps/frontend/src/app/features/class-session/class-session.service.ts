@@ -7,15 +7,39 @@ import type {
   ChatMessageScope,
   ChatReadState,
   ChatThreadSummaryResponse,
+  Assignment,
+  AssignmentDetailResponse,
+  AssignmentSubmission,
+  AssignmentSubmissionListResponse,
   ClassSessionMaterial,
+  ClassLibrarySearchQuery,
+  ClassLibrarySearchResponse,
+  ClassSessionPostClassThreadWorkflow,
+  ClassSessionPostClassWorkspace,
+  ClassSessionReport,
+  ClassSessionTimelineCategory,
+  ClassSessionTimelineResponse,
+  CreateAssignmentRequest,
   CreateClassSessionMaterialLinkRequest,
+  CreatePostClassAnnouncementRequest,
   CreateWhiteboardMemoryCheckpointRequest,
   LiveClassSettings,
+  PostClassAnnouncementResponse,
+  PostClassArtifactPublishRequest,
   PreviousWhiteboardMemoryListResponse,
   Recording,
   RestorePreviousWhiteboardMemoryRequest,
   RestoreWhiteboardMemoryVersionRequest,
   SaveWhiteboardMemoryRequest,
+  SendPostClassQuestionRequest,
+  StudentAssignmentListResponse,
+  StudentCompletedClassDetailResponse,
+  StudentCompletedClassSessionListResponse,
+  SubmitAssignmentRequest,
+  TeacherAssignmentListResponse,
+  UpdateAssignmentRequest,
+  UpdatePostClassQuestionStateRequest,
+  ReviewAssignmentSubmissionRequest,
   WhiteboardMemoryPageSearchResponse,
   WhiteboardMemoryState,
   WhiteboardMemoryVersion,
@@ -84,6 +108,265 @@ export class ClassSessionService {
       url.searchParams.set('batchId', batchId);
     }
     return this.http.get<ClassroomPayload | ApiEnvelope<ClassroomPayload>>(url.toString()).pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  getTimeline(
+    sessionId: string,
+    options: { batchId?: string; before?: string; limit?: number; category?: ClassSessionTimelineCategory | 'all' } = {}
+  ): Observable<ClassSessionTimelineResponse> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/timeline`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    if (options.before) {
+      url.searchParams.set('before', options.before);
+    }
+    if (options.limit) {
+      url.searchParams.set('limit', String(options.limit));
+    }
+    if (options.category && options.category !== 'all') {
+      url.searchParams.set('category', options.category);
+    }
+    return this.http
+      .get<ClassSessionTimelineResponse | ApiEnvelope<ClassSessionTimelineResponse>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  getClassSessionReport(sessionId: string, options: { batchId?: string } = {}): Observable<ClassSessionReport> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/report`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    return this.http.get<ClassSessionReport | ApiEnvelope<ClassSessionReport>>(url.toString()).pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  downloadClassSessionReportCsv(sessionId: string, options: { batchId?: string } = {}): Observable<Blob> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/report/export.csv`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    return this.http.get(url.toString(), { responseType: 'blob' });
+  }
+
+  searchClassLibrary(query: ClassLibrarySearchQuery = {}): Observable<ClassLibrarySearchResponse> {
+    const url = new URL(`${API_BASE_URL}/class-library/search`);
+    this.appendQuery(url, query);
+    return this.http
+      .get<ClassLibrarySearchResponse | ApiEnvelope<ClassLibrarySearchResponse>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  getPostClassWorkspace(sessionId: string, options: { batchId?: string } = {}): Observable<ClassSessionPostClassWorkspace> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/post-class-workspace`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    return this.http
+      .get<ClassSessionPostClassWorkspace | ApiEnvelope<ClassSessionPostClassWorkspace>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  updatePostClassQuestionState(sessionId: string, request: UpdatePostClassQuestionStateRequest): Observable<ClassSessionPostClassThreadWorkflow> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/post-class-workspace/questions`);
+    if (request.batchId) {
+      url.searchParams.set('batchId', request.batchId);
+    }
+    return this.http
+      .patch<ClassSessionPostClassThreadWorkflow | ApiEnvelope<ClassSessionPostClassThreadWorkflow>>(url.toString(), request)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  createPostClassAnnouncement(sessionId: string, request: CreatePostClassAnnouncementRequest): Observable<PostClassAnnouncementResponse> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/post-class-workspace/announcements`);
+    if (request.batchId) {
+      url.searchParams.set('batchId', request.batchId);
+    }
+    return this.http
+      .post<PostClassAnnouncementResponse | ApiEnvelope<PostClassAnnouncementResponse>>(url.toString(), request)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  publishPostClassMaterial(sessionId: string, materialId: string, request: PostClassArtifactPublishRequest): Observable<ClassSessionMaterial> {
+    return this.postPostClassArtifact<ClassSessionMaterial>(sessionId, `materials/${encodeURIComponent(materialId)}/publish`, request);
+  }
+
+  unpublishPostClassMaterial(sessionId: string, materialId: string, request: PostClassArtifactPublishRequest): Observable<ClassSessionMaterial> {
+    return this.postPostClassArtifact<ClassSessionMaterial>(sessionId, `materials/${encodeURIComponent(materialId)}/unpublish`, request);
+  }
+
+  publishPostClassRecording(sessionId: string, recordingId: string, request: PostClassArtifactPublishRequest): Observable<Recording> {
+    return this.postPostClassArtifact<Recording>(sessionId, `recordings/${encodeURIComponent(recordingId)}/publish`, request);
+  }
+
+  unpublishPostClassRecording(sessionId: string, recordingId: string, request: PostClassArtifactPublishRequest): Observable<Recording> {
+    return this.postPostClassArtifact<Recording>(sessionId, `recordings/${encodeURIComponent(recordingId)}/unpublish`, request);
+  }
+
+  publishPostClassWhiteboard(sessionId: string, request: PostClassArtifactPublishRequest): Observable<ClassSessionPostClassWorkspace['whiteboard']> {
+    return this.postPostClassArtifact<ClassSessionPostClassWorkspace['whiteboard']>(sessionId, 'whiteboard/publish', request);
+  }
+
+  unpublishPostClassWhiteboard(sessionId: string, request: PostClassArtifactPublishRequest): Observable<ClassSessionPostClassWorkspace['whiteboard']> {
+    return this.postPostClassArtifact<ClassSessionPostClassWorkspace['whiteboard']>(sessionId, 'whiteboard/unpublish', request);
+  }
+
+  listCompletedStudentSessions(options: { page?: number; limit?: number; batchId?: string; courseId?: string } = {}): Observable<StudentCompletedClassSessionListResponse> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/student/completed`);
+    if (options.page) {
+      url.searchParams.set('page', String(options.page));
+    }
+    if (options.limit) {
+      url.searchParams.set('limit', String(options.limit));
+    }
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    if (options.courseId) {
+      url.searchParams.set('courseId', options.courseId);
+    }
+    return this.http
+      .get<StudentCompletedClassSessionListResponse | ApiEnvelope<StudentCompletedClassSessionListResponse>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  getCompletedStudentSessionDetail(sessionId: string, batchId?: string): Observable<StudentCompletedClassDetailResponse> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/student/completed/${encodeURIComponent(sessionId)}`);
+    if (batchId) {
+      url.searchParams.set('batchId', batchId);
+    }
+    return this.http
+      .get<StudentCompletedClassDetailResponse | ApiEnvelope<StudentCompletedClassDetailResponse>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  sendPostClassQuestion(sessionId: string, request: SendPostClassQuestionRequest): Observable<ClassSessionChatMessage> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/student/completed/${encodeURIComponent(sessionId)}/questions`);
+    if (request.batchId) {
+      url.searchParams.set('batchId', request.batchId);
+    }
+    return this.http
+      .post<ClassSessionChatMessage | ApiEnvelope<ClassSessionChatMessage>>(url.toString(), request)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  getPostClassChatSummary(sessionId: string, options: { batchId?: string } = {}): Observable<ChatThreadSummaryResponse> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/post-class-chat/summary`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    return this.http
+      .get<ChatThreadSummaryResponse | ApiEnvelope<ChatThreadSummaryResponse>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  listTeacherAssignments(options: { batchId?: string; sessionId?: string } = {}): Observable<TeacherAssignmentListResponse> {
+    const url = new URL(`${API_BASE_URL}/teacher/assignments`);
+    if (options.batchId) url.searchParams.set('batchId', options.batchId);
+    if (options.sessionId) url.searchParams.set('sessionId', options.sessionId);
+    return this.http.get<TeacherAssignmentListResponse | ApiEnvelope<TeacherAssignmentListResponse>>(url.toString()).pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  createAssignment(request: CreateAssignmentRequest): Observable<Assignment> {
+    return this.http.post<Assignment | ApiEnvelope<Assignment>>(`${API_BASE_URL}/assignments`, request).pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  updateAssignment(assignmentId: string, request: UpdateAssignmentRequest): Observable<Assignment> {
+    return this.http
+      .patch<Assignment | ApiEnvelope<Assignment>>(`${API_BASE_URL}/assignments/${encodeURIComponent(assignmentId)}`, request)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  uploadAssignmentFiles(assignmentId: string, files: File[]): Observable<Assignment> {
+    const form = new FormData();
+    for (const file of files) {
+      form.append('files', file);
+    }
+    return this.http
+      .post<Assignment | ApiEnvelope<Assignment>>(`${API_BASE_URL}/assignments/${encodeURIComponent(assignmentId)}/attachments`, form)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  listAssignmentSubmissions(assignmentId: string): Observable<AssignmentSubmissionListResponse> {
+    return this.http
+      .get<AssignmentSubmissionListResponse | ApiEnvelope<AssignmentSubmissionListResponse>>(
+        `${API_BASE_URL}/assignments/${encodeURIComponent(assignmentId)}/submissions`
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  reviewAssignmentSubmission(
+    assignmentId: string,
+    submissionId: string,
+    request: ReviewAssignmentSubmissionRequest
+  ): Observable<AssignmentSubmission> {
+    return this.http
+      .patch<AssignmentSubmission | ApiEnvelope<AssignmentSubmission>>(
+        `${API_BASE_URL}/assignments/${encodeURIComponent(assignmentId)}/submissions/${encodeURIComponent(submissionId)}/review`,
+        request
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  listStudentAssignments(options: { batchId?: string; sessionId?: string } = {}): Observable<StudentAssignmentListResponse> {
+    const url = new URL(`${API_BASE_URL}/student/assignments`);
+    if (options.batchId) url.searchParams.set('batchId', options.batchId);
+    if (options.sessionId) url.searchParams.set('sessionId', options.sessionId);
+    return this.http.get<StudentAssignmentListResponse | ApiEnvelope<StudentAssignmentListResponse>>(url.toString()).pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  getStudentAssignment(assignmentId: string): Observable<AssignmentDetailResponse> {
+    return this.http
+      .get<AssignmentDetailResponse | ApiEnvelope<AssignmentDetailResponse>>(`${API_BASE_URL}/student/assignments/${encodeURIComponent(assignmentId)}`)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  markAssignmentViewed(assignmentId: string): Observable<AssignmentSubmission> {
+    return this.http
+      .post<AssignmentSubmission | ApiEnvelope<AssignmentSubmission>>(`${API_BASE_URL}/student/assignments/${encodeURIComponent(assignmentId)}/viewed`, {})
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  submitAssignment(assignmentId: string, request: SubmitAssignmentRequest, files: File[] = []): Observable<AssignmentSubmission> {
+    const form = new FormData();
+    if (request.text) form.append('text', request.text);
+    if (request.links?.length) form.append('linksJson', JSON.stringify(request.links));
+    for (const file of files) {
+      form.append('files', file);
+    }
+    return this.http
+      .post<AssignmentSubmission | ApiEnvelope<AssignmentSubmission>>(
+        `${API_BASE_URL}/student/assignments/${encodeURIComponent(assignmentId)}/submission`,
+        form
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  getPostClassChatHistory(
+    sessionId: string,
+    options: { batchId?: string; participantId: string; before?: string; limit?: number }
+  ): Observable<ChatHistoryResponse> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/post-class-chat`);
+    if (options.batchId) {
+      url.searchParams.set('batchId', options.batchId);
+    }
+    url.searchParams.set('participantId', options.participantId);
+    if (options.before) {
+      url.searchParams.set('before', options.before);
+    }
+    if (options.limit) {
+      url.searchParams.set('limit', String(options.limit));
+    }
+    return this.http.get<ChatHistoryResponse | ApiEnvelope<ChatHistoryResponse>>(url.toString()).pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  sendPostClassChat(sessionId: string, request: SendPostClassQuestionRequest): Observable<ClassSessionChatMessage> {
+    const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/post-class-chat`);
+    if (request.batchId) {
+      url.searchParams.set('batchId', request.batchId);
+    }
+    return this.http
+      .post<ClassSessionChatMessage | ApiEnvelope<ClassSessionChatMessage>>(url.toString(), request)
+      .pipe(map((response) => this.unwrapResponse(response)));
   }
 
   startSession(sessionId: string, batchId: string): Observable<ClassroomPayload> {
@@ -352,6 +635,20 @@ export class ClassSessionService {
     return this.http
       .post<ChatReadState | ApiEnvelope<ChatReadState>>(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/chat/read`, request)
       .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  private postPostClassArtifact<T>(sessionId: string, actionPath: string, request: PostClassArtifactPublishRequest): Observable<T> {
+    return this.http
+      .post<T | ApiEnvelope<T>>(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/post-class-workspace/${actionPath}`, request)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  private appendQuery(url: URL, query: object): void {
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') {
+        url.searchParams.set(key, String(value));
+      }
+    }
   }
 
   errorMessage(error: unknown): string {

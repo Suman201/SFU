@@ -5,7 +5,11 @@
       <p class="eyebrow">Student workspace</p>
       <h1>Dashboard</h1>
     </div>
-    <a routerLink="/student/explore">Explore batches</a>
+    <div class="heading-actions">
+      <a routerLink="/student/classes/completed">Class history</a>
+      <a routerLink="/class-library">Library</a>
+      <a routerLink="/student/explore">Explore batches</a>
+    </div>
   </section>
 
   <section class="summary-grid" aria-label="Student dashboard summary">
@@ -25,6 +29,44 @@
       }
       <p>Next teacher</p>
     </article>
+  </section>
+
+  <section class="enrolled-panel assignment-panel">
+    <header>
+      <div>
+        <p class="eyebrow">Homework</p>
+        <h2>Assignments due</h2>
+      </div>
+      <span class="panel-count">{{ dueAssignments().length }} active</span>
+    </header>
+
+    @if (assignmentsError()) {
+      <div class="form-alert">{{ assignmentsError() }}</div>
+    }
+    @if (assignmentsLoading()) {
+      <div class="empty-state compact">
+        <h3>Loading assignments</h3>
+        <p>Checking your active homework.</p>
+      </div>
+    } @else if (dueAssignments().length) {
+      <div class="assignment-list">
+        @for (assignment of dueAssignments().slice(0, 5); track assignment.assignmentId) {
+          <article class="assignment-row">
+            <div>
+              <strong>{{ assignment.title }}</strong>
+              <small>{{ assignmentBatchLabel(assignment) }} · Due {{ assignmentDueLabel(assignment) }}</small>
+            </div>
+            <span class="session-pill">{{ assignmentStatus(assignment) }}</span>
+            <a class="button" [routerLink]="['/student/assignments', assignment.assignmentId]">Open</a>
+          </article>
+        }
+      </div>
+    } @else {
+      <div class="empty-state compact">
+        <h3>No active homework</h3>
+        <p>New assignments from your teachers will appear here.</p>
+      </div>
+    }
   </section>
 
   <section class="enrolled-panel">

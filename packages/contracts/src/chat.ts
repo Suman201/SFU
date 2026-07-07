@@ -1,4 +1,5 @@
 export type ChatMessageScope = 'private' | 'broadcast';
+export type ChatMessageContext = 'live' | 'post_class';
 export type ChatDeliveryState = 'sent' | 'delivered' | 'read';
 export type ChatAttachmentType = 'image' | 'pdf' | 'link';
 
@@ -6,11 +7,14 @@ export interface ChatAttachment {
   id: string;
   attachmentId?: string;
   type: ChatAttachmentType;
+  originalName?: string;
   fileName?: string;
   title?: string;
   mimeType?: string;
   size?: number;
+  sizeBytes?: number;
   storageProvider?: 'local' | 's3';
+  checksum?: string;
   downloadUrl?: string;
   url?: string;
   dataUrl?: string;
@@ -21,10 +25,12 @@ export interface SendChatAttachment {
   id?: string;
   attachmentId?: string;
   type: ChatAttachmentType;
+  originalName?: string;
   fileName?: string;
   title?: string;
   mimeType?: string;
   size?: number;
+  sizeBytes?: number;
   url?: string;
   dataUrl?: string;
 }
@@ -41,6 +47,7 @@ export interface ChatMessage {
   chatChannelId?: string;
   recipientId?: string;
   scope: ChatMessageScope;
+  context?: ChatMessageContext;
   threadKey?: string;
   message: string;
   attachments?: ChatAttachment[];
@@ -127,6 +134,7 @@ export interface ChatHistoryRequest {
   channelId?: string;
   participantId?: string;
   scope?: ChatMessageScope;
+  context?: ChatMessageContext;
   before?: string;
   limit?: number;
 }

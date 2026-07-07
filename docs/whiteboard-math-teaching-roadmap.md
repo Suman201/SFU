@@ -283,11 +283,11 @@ Outcome:
 Notes:
 
 - Clear attempt is intentionally conservative: it removes only new student-authored elements identified during the active turn and does not delete pre-existing teacher elements.
-- Attempt tracking is live client state for the current turn; Phase 8 now persists full-board snapshots/checkpoints, while per-operation durable edit history remains future work.
+- Attempt tracking is live client state for the current turn; Phase 8 now persists full-board snapshots/checkpoints, and the P1 realtime pass persists accepted live operations for sync/idempotency without exposing a full per-step replay UI.
 
 ## Phase 8: Academic Session Memory
 
-Status: Implemented as of 2026-06-25.
+Status: Implemented as of 2026-06-25. Persisted realtime sync was added on 2026-07-07.
 
 Goal: Turn whiteboard work into reusable learning material.
 
@@ -295,8 +295,10 @@ How to read this section: every completed item below is fully struck through, in
 
 Scope:
 
-- ~~Persist board state per class session. Done: added session-scoped whiteboard memory documents with bounded schema-versioned snapshots and page metadata.~~
+- ~~Persist board state per class session. Done: added session-scoped whiteboard memory documents with bounded schema-versioned snapshots, page metadata, accepted realtime operation records, operation ids/sequences, and current-state cursor metadata.~~
 - ~~Resume board after reconnect. Done: teacher live classroom loads saved board memory and debounced autosave keeps the session board recoverable.~~
+- ~~Load board state for late joins and refreshes. Done: live students can load the authorized saved board into a read-only board drawer and apply realtime whiteboard command updates.~~
+- ~~Show completed-session whiteboard read-only. Done: completed class detail renders the final saved board for authorized historical students without enabling edit tools.~~
 - ~~Restore board from previous session. Done: teacher can list previous boards in the same batch and restore one into the current live board.~~
 - ~~Version history. Done: teacher checkpoints create bounded whiteboard versions and can restore saved checkpoints.~~
 - ~~Export selected pages. Done: the whiteboard menu includes a compact page picker and exports selected pages in board order as a PDF.~~
@@ -311,7 +313,7 @@ Scope:
 
 Outcome:
 
-~~The whiteboard becomes part of the learning record, not just a temporary drawing surface. Done: live class boards now persist as recoverable session memory with checkpoints, previous-session restore, and searchable page metadata.~~
+~~The whiteboard becomes part of the learning record, not just a temporary drawing surface. Done: live class boards now persist as recoverable session memory with realtime operation-backed sync, checkpoints, previous-session restore, completed-session read-only review, and searchable page metadata.~~
 
 Verification:
 
@@ -325,7 +327,7 @@ Intentional Phase 8 limits:
 
 - No AI summary or AI extraction is implemented in this phase.
 - Selected-page PDF export is now available from the whiteboard menu, while attached class notes still use the existing all-pages board-note flow.
-- Version history stores bounded full-board snapshots, not a per-operation durable edit log.
+- Accepted live operations are persisted for sync/idempotency and snapshot updates, while version history remains bounded full-board checkpoints rather than a full collaborative CRDT, branching history, or user-facing per-step replay UI.
 
 ## Phase 9: Editable Matrix And Table Objects
 

@@ -5,6 +5,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import type { AdminRecordingDetail, AdminRecordingPlaybackResponse, AdminRecordingStatus } from '@native-sfu/contracts';
 import { finalize } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
+import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 
 @Component({
   selector: 'sfu-admin-recording-detail',
@@ -18,6 +19,7 @@ export class RecordingDetail implements OnInit {
   private readonly api = inject(AdminApiService);
   private readonly route = inject(ActivatedRoute);
   private readonly formBuilder = inject(FormBuilder);
+  private readonly confirmDialog = inject(ConfirmDialogService);
 
   protected readonly recording = signal<AdminRecordingDetail | null>(null);
   protected readonly playback = signal<AdminRecordingPlaybackResponse | null>(null);
@@ -92,9 +94,19 @@ export class RecordingDetail implements OnInit {
       });
   }
 
-  protected archive(): void {
+  protected async archive(): Promise<void> {
     const recording = this.recording();
-    if (!recording || this.archiving() || !confirm('Expire this recording now? Physical storage will not be deleted.')) {
+    if (!recording || this.archiving()) {
+      return;
+    }
+    const confirmed = await this.confirmDialog.confirm({
+      title: 'Expire this recording now?',
+      message: 'Physical storage will not be deleted, but the recording will be marked expired and removed from normal playback.',
+      confirmLabel: 'Expire recording',
+      pendingLabel: 'Expiring...',
+      variant: 'danger'
+    });
+    if (!confirmed) {
       return;
     }
     this.archiving.set(true);

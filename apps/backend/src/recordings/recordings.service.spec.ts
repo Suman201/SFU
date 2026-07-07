@@ -225,7 +225,7 @@ describe('RecordingsService', () => {
       status: 'stopped',
       path: '/private/recordings/session-1/recording-1.json',
       storageKey: 'class-sessions/session-1/recording-1.json',
-      retentionExpiresAt: new Date('2026-07-01T00:00:00.000Z'),
+      retentionExpiresAt: new Date('2026-08-01T00:00:00.000Z'),
       stoppedAt: new Date('2026-06-22T10:30:00.000Z'),
       durationSeconds: 1800,
       size: 512

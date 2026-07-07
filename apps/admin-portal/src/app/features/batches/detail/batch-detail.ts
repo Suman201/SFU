@@ -13,6 +13,7 @@ import type {
 } from '@native-sfu/contracts';
 import { finalize } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
+import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 
 type ScheduleFormValue = { dayOfWeek: AdminBatchWeekday; startTime: string };
 type BatchCalendarView = 'month' | 'week' | 'list';
@@ -45,6 +46,7 @@ export class BatchDetail implements OnInit {
   private readonly api = inject(AdminApiService);
   private readonly route = inject(ActivatedRoute);
   private readonly formBuilder = inject(FormBuilder);
+  private readonly confirmDialog = inject(ConfirmDialogService);
 
   protected readonly batch = signal<AdminBatchDetail | null>(null);
   protected readonly loading = signal(false);
@@ -88,7 +90,7 @@ export class BatchDetail implements OnInit {
     this.load();
   }
 
-  protected save(): void {
+  protected async save(): Promise<void> {
     const batch = this.batch();
     if (!batch || this.form.invalid || this.saving()) {
       this.form.markAllAsTouched();
@@ -117,8 +119,17 @@ export class BatchDetail implements OnInit {
       this.error.set('');
       return;
     }
-    if ((scheduleChanged || request.year !== undefined || request.teacherId !== undefined) && !confirm('Update future planned sessions for this batch?')) {
-      return;
+    if (scheduleChanged || request.year !== undefined || request.teacherId !== undefined) {
+      const confirmed = await this.confirmDialog.confirm({
+        title: 'Update future planned sessions?',
+        message: 'Schedule, year, or teacher changes can affect planned sessions that have not started yet.',
+        confirmLabel: 'Update sessions',
+        pendingLabel: 'Updating...',
+        variant: 'warning'
+      });
+      if (!confirmed) {
+        return;
+      }
     }
     this.saving.set(true);
     this.error.set('');
@@ -166,13 +177,22 @@ export class BatchDetail implements OnInit {
       });
   }
 
-  protected transition(action: 'activate' | 'pause' | 'complete' | 'cancel'): void {
+  protected async transition(action: 'activate' | 'pause' | 'complete' | 'cancel'): Promise<void> {
     const batch = this.batch();
     if (!batch || this.pendingAction()) {
       return;
     }
-    if ((action === 'complete' || action === 'cancel') && !confirm(`Mark ${batch.name} as ${action}?`)) {
-      return;
+    if (action === 'complete' || action === 'cancel') {
+      const confirmed = await this.confirmDialog.confirm({
+        title: `Mark ${batch.name} as ${action}?`,
+        message: action === 'cancel' ? 'This batch will be cancelled and future sessions will no longer be available.' : 'This batch will be marked completed.',
+        confirmLabel: action === 'cancel' ? 'Cancel batch' : 'Complete batch',
+        pendingLabel: 'Updating...',
+        variant: action === 'cancel' ? 'danger' : 'warning'
+      });
+      if (!confirmed) {
+        return;
+      }
     }
     this.pendingAction.set(action);
     this.error.set('');

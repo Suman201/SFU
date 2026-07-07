@@ -7,9 +7,11 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { NestSfuModule, type TurnServerOptions } from '@native-sfu/nest-sfu';
 import { LoggerModule } from 'nestjs-pino';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
+import { AssignmentsModule } from './assignments/assignments.module';
 import { AdminAuditLogsModule } from './audit-logs/admin-audit-logs.module';
 import { AuthModule } from './auth/auth.module';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
+import { ClassLibraryModule } from './class-library/class-library.module';
 import { ClassSessionsModule } from './class-sessions/class-sessions.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { appConfig } from './config/app.config';
@@ -155,8 +157,10 @@ import { UsersModule } from './users/users.module';
     RolesModule,
     PermissionsModule,
     AdminDashboardModule,
+    AssignmentsModule,
     StudentEnrollmentsModule,
     TeacherBatchesModule,
+    ClassLibraryModule,
     ClassSessionsModule,
     SessionsModule,
     RecordingsModule,

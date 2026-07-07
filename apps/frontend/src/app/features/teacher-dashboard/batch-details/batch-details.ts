@@ -1,16 +1,30 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
+import { TitleCasePipe } from '@angular/common';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormField, FormRoot, form as signalForm, maxLength, required } from '@angular/forms/signals';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type {
   AnalyticsVisibility,
+  Assignment,
+  AssignmentSubmission,
+  AssignmentSubmissionType,
   BatchLiveClassSettingsResponse,
+  ChatMessage,
+  ChatThreadSummary,
+  ChatThreadSummaryResponse,
+  ClassSessionMaterial,
+  ClassSessionPostClassQuestionThread,
+  ClassSessionPostClassWorkspace,
+  ClassSessionReport,
+  ClassSessionTimelineCategory,
+  ClassSessionTimelineEvent,
   LiveClassSettings,
   LiveClassSettingsPatch,
   RecordingVisibility,
   ScreenShareQualityLimit,
   StudentVideoQualityLimit
 } from '@native-sfu/contracts';
+import { ClassSessionService } from '../../class-session/class-session.service';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
 import {
@@ -42,6 +56,31 @@ interface BatchCalendarDay {
   muted: boolean;
   today: boolean;
   sessions: TeacherSession[];
+}
+
+interface PostClassThreadItem {
+  id: string;
+  name: string;
+  initials: string;
+  unreadCount: number;
+  preview: string;
+  lastMessageAt?: string;
+  thread?: ChatThreadSummary;
+}
+
+interface TimelineFilterOption {
+  value: ClassSessionTimelineCategory | 'all';
+  label: string;
+}
+
+interface AssignmentFormModel {
+  title: string;
+  instructions: string;
+  dueAt: string;
+  sessionId: string;
+  allowedSubmissionTypes: AssignmentSubmissionType[];
+  linkTitle: string;
+  linkUrl: string;
 }
 
 interface LiveSettingsForm {
@@ -213,7 +252,7 @@ const EMPTY_LIVE_SETTINGS_FORM: LiveSettingsForm = {
 @Component({
   selector: 'sfu-batch-details',
   standalone: true,
-  imports: [Footer, FormField, FormRoot, Header, RouterLink],
+  imports: [Footer, FormField, FormRoot, Header, RouterLink, TitleCasePipe],
   templateUrl: './batch-details.html',
   styleUrl: './batch-details.scss',
   changeDetection: ChangeDetectionStrategy.Eager
@@ -221,6 +260,7 @@ const EMPTY_LIVE_SETTINGS_FORM: LiveSettingsForm = {
 export class BatchDetails {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly classSessions = inject(ClassSessionService);
   protected readonly dashboard = inject(TeacherDashboardStore);
 
   private readonly paramMap = toSignal(this.route.paramMap, { initialValue: this.route.snapshot.paramMap });
@@ -256,6 +296,59 @@ export class BatchDetails {
   protected readonly messageTargetId = signal<string | null>(null);
   protected readonly actionNotice = signal('');
   protected readonly actionError = signal('');
+  protected readonly postClassSession = signal<TeacherSession | null>(null);
+  protected readonly postClassSummary = signal<ChatThreadSummaryResponse | null>(null);
+  protected readonly postClassMessages = signal<ChatMessage[]>([]);
+  protected readonly postClassSelectedStudentId = signal('');
+  protected readonly postClassDraft = signal('');
+  protected readonly postClassLoading = signal(false);
+  protected readonly postClassSending = signal(false);
+  protected readonly postClassError = signal('');
+  protected readonly reportSession = signal<TeacherSession | null>(null);
+  protected readonly sessionReport = signal<ClassSessionReport | null>(null);
+  protected readonly postClassWorkspace = signal<ClassSessionPostClassWorkspace | null>(null);
+  protected readonly postClassAnnouncementDraft = signal('');
+  protected readonly postClassWorkspaceNotice = signal('');
+  protected readonly postClassWorkspacePendingId = signal('');
+  protected readonly reportLoading = signal(false);
+  protected readonly reportExporting = signal(false);
+  protected readonly reportError = signal('');
+  protected readonly timelineSession = signal<TeacherSession | null>(null);
+  protected readonly timelineEvents = signal<ClassSessionTimelineEvent[]>([]);
+  protected readonly timelineCategory = signal<ClassSessionTimelineCategory | 'all'>('all');
+  protected readonly timelineLoading = signal(false);
+  protected readonly timelineError = signal('');
+  protected readonly timelineHasMore = signal(false);
+  protected readonly timelineNextBefore = signal<string | null>(null);
+  protected readonly assignments = signal<Assignment[]>([]);
+  protected readonly assignmentSubmissions = signal<AssignmentSubmission[]>([]);
+  protected readonly selectedAssignment = signal<Assignment | null>(null);
+  protected readonly assignmentsLoading = signal(false);
+  protected readonly assignmentSaving = signal(false);
+  protected readonly assignmentError = signal('');
+  protected readonly assignmentNotice = signal('');
+  protected readonly assignmentFormOpen = signal(false);
+  protected readonly assignmentForm = signal<AssignmentFormModel>({
+    title: '',
+    instructions: '',
+    dueAt: '',
+    sessionId: '',
+    allowedSubmissionTypes: ['text'],
+    linkTitle: '',
+    linkUrl: ''
+  });
+  protected readonly timelineCategories: TimelineFilterOption[] = [
+    { value: 'all', label: 'All' },
+    { value: 'lifecycle', label: 'Lifecycle' },
+    { value: 'attendance', label: 'Attendance' },
+    { value: 'moderation', label: 'Moderation' },
+    { value: 'media', label: 'Media' },
+    { value: 'chat', label: 'Chat/Q&A' },
+    { value: 'whiteboard', label: 'Whiteboard' },
+    { value: 'materials', label: 'Materials' },
+    { value: 'recording', label: 'Recording' },
+    { value: 'support', label: 'Support' }
+  ];
   protected readonly calendarView = signal<BatchCalendarView>('month');
   protected readonly calendarCursor = signal(new Date());
   protected readonly selectedCalendarSession = signal<TeacherSession | null>(null);
@@ -273,6 +366,40 @@ export class BatchDetails {
   protected readonly messageTarget = computed(() => {
     const targetId = this.messageTargetId();
     return targetId ? this.students().find((student) => student.id === targetId) ?? null : null;
+  });
+  protected readonly postClassThreads = computed<PostClassThreadItem[]>(() => {
+    const studentsById = new Map(this.students().map((student) => [student.id, student]));
+    const privateThreads = (this.postClassSummary()?.threads ?? []).filter((thread) => thread.scope === 'private');
+    const fromSummary = privateThreads
+      .map((thread) => {
+        const id = thread.participantId ?? '';
+        const student = studentsById.get(id);
+        const name = thread.participantName ?? student?.displayName ?? 'Student';
+        return {
+          id,
+          name,
+          initials: this.initials(name),
+          unreadCount: thread.unreadCount,
+          preview: thread.lastMessagePreview ?? 'No questions yet',
+          ...(thread.lastMessageAt ? { lastMessageAt: thread.lastMessageAt } : {}),
+          thread
+        };
+      })
+      .filter((item) => Boolean(item.id));
+    if (fromSummary.length) {
+      return fromSummary;
+    }
+    return this.students().map((student) => ({
+      id: student.id,
+      name: student.displayName,
+      initials: this.initials(student.displayName),
+      unreadCount: 0,
+      preview: 'No questions yet'
+    }));
+  });
+  protected readonly selectedPostClassThread = computed(() => {
+    const selectedId = this.postClassSelectedStudentId();
+    return this.postClassThreads().find((thread) => thread.id === selectedId) ?? null;
   });
   protected readonly timezoneLabel = computed(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local timezone');
   protected readonly calendarTitle = computed(() => {
@@ -313,6 +440,7 @@ export class BatchDetails {
   });
 
   private loadedLiveSettingsBatchId = '';
+  private loadedAssignmentsBatchId = '';
 
   constructor() {
     this.dashboard.loadBatches();
@@ -321,6 +449,10 @@ export class BatchDetails {
       if (batchId && batchId !== this.loadedLiveSettingsBatchId) {
         this.loadedLiveSettingsBatchId = batchId;
         this.loadBatchLiveSettings(batchId);
+      }
+      if (batchId && batchId !== this.loadedAssignmentsBatchId) {
+        this.loadedAssignmentsBatchId = batchId;
+        this.loadAssignments(batchId);
       }
     });
   }
@@ -649,6 +781,7 @@ export class BatchDetails {
         this.closeSessionMenu();
         await this.openSession(session);
       }});
+      actions.push({ label: 'Activity timeline', handler: (session) => this.openTimeline(session) });
       actions.push({ label: 'Complete', handler: (session) => {
         this.completeSession(session);
         this.closeSessionMenu();
@@ -665,7 +798,301 @@ export class BatchDetails {
       actions.push({ label: 'Cancel', handler: (session) => this.cancelSession(session) });
     }
 
+    if (session.status === 'completed') {
+      actions.push({ label: 'Post-class workspace', handler: (session) => this.openSessionReport(session) });
+      actions.push({ label: 'Activity timeline', handler: (session) => this.openTimeline(session) });
+      actions.push({ label: 'Post-class Q&A', handler: (session) => this.openPostClassQa(session) });
+    }
+
     return actions;
+  }
+
+  protected openSessionReport(session: TeacherSession): void {
+    this.closeSessionMenu();
+    this.reportSession.set(session);
+    this.sessionReport.set(null);
+    this.postClassWorkspace.set(null);
+    this.postClassWorkspaceNotice.set('');
+    this.postClassAnnouncementDraft.set('');
+    this.reportError.set('');
+    this.loadSessionReport(session);
+  }
+
+  protected closeSessionReport(): void {
+    this.reportSession.set(null);
+    this.sessionReport.set(null);
+    this.postClassWorkspace.set(null);
+    this.postClassWorkspaceNotice.set('');
+    this.postClassAnnouncementDraft.set('');
+    this.postClassWorkspacePendingId.set('');
+    this.reportError.set('');
+  }
+
+  protected openPostClassQa(session: TeacherSession): void {
+    this.closeSessionMenu();
+    this.postClassSession.set(session);
+    this.postClassSelectedStudentId.set('');
+    this.postClassMessages.set([]);
+    this.postClassDraft.set('');
+    this.loadPostClassSummary(session);
+  }
+
+  protected closePostClassQa(): void {
+    this.postClassSession.set(null);
+    this.postClassSummary.set(null);
+    this.postClassMessages.set([]);
+    this.postClassSelectedStudentId.set('');
+    this.postClassDraft.set('');
+    this.postClassError.set('');
+  }
+
+  protected openTimeline(session: TeacherSession): void {
+    this.closeSessionMenu();
+    this.timelineSession.set(session);
+    this.timelineEvents.set([]);
+    this.timelineCategory.set('all');
+    this.timelineNextBefore.set(null);
+    this.loadTimeline(session);
+  }
+
+  protected closeTimeline(): void {
+    this.timelineSession.set(null);
+    this.timelineEvents.set([]);
+    this.timelineError.set('');
+    this.timelineNextBefore.set(null);
+    this.timelineHasMore.set(false);
+  }
+
+  protected setTimelineCategory(category: ClassSessionTimelineCategory | 'all'): void {
+    const session = this.timelineSession();
+    if (!session || this.timelineCategory() === category) {
+      return;
+    }
+    this.timelineCategory.set(category);
+    this.loadTimeline(session);
+  }
+
+  protected loadMoreTimeline(): void {
+    const session = this.timelineSession();
+    const before = this.timelineNextBefore();
+    if (!session || !before || this.timelineLoading()) {
+      return;
+    }
+    this.loadTimeline(session, before, true);
+  }
+
+  protected timelineActor(event: ClassSessionTimelineEvent): string {
+    return event.actor?.name || event.actor?.email || event.actor?.id || 'System';
+  }
+
+  protected timelineTarget(event: ClassSessionTimelineEvent): string {
+    return event.target?.name || event.target?.userId || event.target?.id || '';
+  }
+
+  protected timelineTime(value: string): string {
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    }).format(new Date(value));
+  }
+
+  protected openAssignmentForm(session?: TeacherSession): void {
+    this.assignmentFormOpen.set(true);
+    this.assignmentError.set('');
+    this.assignmentNotice.set('');
+    this.assignmentForm.set({
+      title: '',
+      instructions: '',
+      dueAt: '',
+      sessionId: session?.id ?? '',
+      allowedSubmissionTypes: ['text'],
+      linkTitle: '',
+      linkUrl: ''
+    });
+  }
+
+  protected closeAssignmentForm(): void {
+    this.assignmentFormOpen.set(false);
+  }
+
+  protected updateAssignmentField<K extends keyof AssignmentFormModel>(field: K, value: AssignmentFormModel[K]): void {
+    this.assignmentForm.update((form) => ({ ...form, [field]: value }));
+  }
+
+  protected assignmentInputValue(event: Event): string {
+    return event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement
+      ? event.target.value
+      : '';
+  }
+
+  protected toggleSubmissionType(type: AssignmentSubmissionType, checked: boolean): void {
+    this.assignmentForm.update((form) => {
+      const next = new Set(form.allowedSubmissionTypes);
+      if (checked) {
+        next.add(type);
+      } else {
+        next.delete(type);
+      }
+      return { ...form, allowedSubmissionTypes: next.size ? [...next] : ['text'] };
+    });
+  }
+
+  protected typeChecked(type: AssignmentSubmissionType): boolean {
+    return this.assignmentForm().allowedSubmissionTypes.includes(type);
+  }
+
+  protected createAssignment(event?: Event): void {
+    event?.preventDefault();
+    const batchId = this.batchId();
+    const form = this.assignmentForm();
+    if (!batchId || this.assignmentSaving()) {
+      return;
+    }
+    this.assignmentSaving.set(true);
+    this.assignmentError.set('');
+    this.assignmentNotice.set('');
+    this.classSessions
+      .createAssignment({
+        batchId,
+        title: form.title,
+        instructions: form.instructions,
+        ...(form.dueAt ? { dueAt: new Date(form.dueAt).toISOString() } : {}),
+        ...(form.sessionId ? { sessionId: form.sessionId } : {}),
+        allowedSubmissionTypes: form.allowedSubmissionTypes,
+        ...(form.linkTitle.trim() && form.linkUrl.trim() ? { links: [{ title: form.linkTitle.trim(), url: form.linkUrl.trim() }] } : {})
+      })
+      .subscribe({
+        next: () => {
+          this.assignmentNotice.set('Assignment created.');
+          this.assignmentFormOpen.set(false);
+          this.loadAssignments(batchId);
+        },
+        error: (error) => this.assignmentError.set(this.classSessions.errorMessage(error)),
+        complete: () => this.assignmentSaving.set(false)
+      });
+  }
+
+  protected openAssignmentSubmissions(assignment: Assignment): void {
+    this.selectedAssignment.set(assignment);
+    this.assignmentSubmissions.set([]);
+    this.assignmentError.set('');
+    this.classSessions.listAssignmentSubmissions(assignment.assignmentId).subscribe({
+      next: (response) => {
+        this.selectedAssignment.set(response.assignment);
+        this.assignmentSubmissions.set(response.submissions);
+      },
+      error: (error) => this.assignmentError.set(this.classSessions.errorMessage(error))
+    });
+  }
+
+  protected closeAssignmentSubmissions(): void {
+    this.selectedAssignment.set(null);
+    this.assignmentSubmissions.set([]);
+  }
+
+  protected reviewSubmission(submission: AssignmentSubmission, status: 'reviewed' | 'returned' | 'completed'): void {
+    const assignment = this.selectedAssignment();
+    if (!assignment) {
+      return;
+    }
+    this.assignmentError.set('');
+    this.classSessions
+      .reviewAssignmentSubmission(assignment.assignmentId, submission.submissionId, {
+        status,
+        feedback: submission.feedback ?? ''
+      })
+      .subscribe({
+        next: (updated) => {
+          this.assignmentSubmissions.update((items) => items.map((item) => (item.submissionId === updated.submissionId ? updated : item)));
+          this.loadAssignments(this.batchId());
+        },
+        error: (error) => this.assignmentError.set(this.classSessions.errorMessage(error))
+      });
+  }
+
+  protected updateSubmissionFeedback(submission: AssignmentSubmission, event: Event): void {
+    const feedback = event.target instanceof HTMLTextAreaElement ? event.target.value : '';
+    this.assignmentSubmissions.update((items) => items.map((item) => (item.submissionId === submission.submissionId ? { ...item, feedback } : item)));
+  }
+
+  protected assignmentStatusCount(assignment: Assignment, key: keyof NonNullable<Assignment['submissionSummary']>): number {
+    return assignment.submissionSummary?.[key] ?? 0;
+  }
+
+  protected selectPostClassThread(studentId: string): void {
+    this.postClassSelectedStudentId.set(studentId);
+    this.postClassDraft.set('');
+    this.loadPostClassThread();
+  }
+
+  protected updatePostClassDraft(event: Event): void {
+    this.postClassDraft.set(event.target instanceof HTMLTextAreaElement ? event.target.value : '');
+  }
+
+  protected submitPostClassReply(event?: Event): void {
+    event?.preventDefault();
+    const session = this.postClassSession();
+    const target = this.selectedPostClassThread();
+    const message = this.postClassDraft().trim();
+    if (!session || !target || !message || this.postClassSending()) {
+      return;
+    }
+    this.postClassSending.set(true);
+    this.postClassError.set('');
+    this.classSessions.sendPostClassChat(session.id, { batchId: session.batchId, recipientId: target.id, message }).subscribe({
+      next: (sent) => {
+        this.postClassMessages.update((messages) => [...messages, sent]);
+        this.postClassDraft.set('');
+        this.loadPostClassSummary(session, false);
+      },
+      error: (error) => this.postClassError.set(this.classSessions.errorMessage(error)),
+      complete: () => this.postClassSending.set(false)
+    });
+  }
+
+  protected messageSenderLabel(message: ChatMessage): string {
+    return message.senderRole === 'student' ? message.senderName : 'You';
+  }
+
+  protected postClassMessageTime(value: string): string {
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    }).format(new Date(value));
+  }
+
+  protected reportTime(value?: string): string {
+    if (!value) {
+      return 'Not recorded';
+    }
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    }).format(new Date(value));
+  }
+
+  protected reportDuration(seconds: number): string {
+    if (!seconds) {
+      return '0m';
+    }
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) {
+      return `${minutes}m`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remaining = minutes % 60;
+    return remaining ? `${hours}h ${remaining}m` : `${hours}h`;
+  }
+
+  protected reportSubmissionTotal(report: ClassSessionReport): number {
+    const submissions = report.assignments.submissions;
+    return submissions.submitted + submissions.late + submissions.reviewed + submissions.returned + submissions.completed;
   }
 
   protected closeStudentMenu(): void {
@@ -697,6 +1124,256 @@ export class BatchDetails {
 
     this.actionNotice.set(`Message queued for ${target.displayName}.`);
     this.cancelMessage();
+  }
+
+  private loadSessionReport(session: TeacherSession): void {
+    this.reportLoading.set(true);
+    this.reportError.set('');
+    this.classSessions.getPostClassWorkspace(session.id, { batchId: session.batchId }).subscribe({
+      next: (workspace) => {
+        this.postClassWorkspace.set(workspace);
+        this.sessionReport.set(workspace.report);
+      },
+      error: (error) => {
+        this.reportError.set(this.classSessions.errorMessage(error));
+        this.reportLoading.set(false);
+      },
+      complete: () => this.reportLoading.set(false)
+    });
+  }
+
+  protected downloadSessionReportCsv(): void {
+    const session = this.reportSession();
+    if (!session || this.reportExporting()) {
+      return;
+    }
+    this.reportExporting.set(true);
+    this.reportError.set('');
+    this.classSessions.downloadClassSessionReportCsv(session.id, { batchId: session.batchId }).subscribe({
+      next: (blob) => this.saveBlob(blob, this.reportFileName(session)),
+      error: (error) => {
+        this.reportError.set(this.classSessions.errorMessage(error));
+        this.reportExporting.set(false);
+      },
+      complete: () => this.reportExporting.set(false)
+    });
+  }
+
+  protected printSessionReport(): void {
+    if (typeof window !== 'undefined') {
+      window.print();
+    }
+  }
+
+  protected updatePostClassAnnouncementDraft(event: Event): void {
+    this.postClassAnnouncementDraft.set(event.target instanceof HTMLTextAreaElement ? event.target.value : '');
+  }
+
+  protected sendPostClassAnnouncement(event?: Event): void {
+    event?.preventDefault();
+    const session = this.reportSession();
+    const message = this.postClassAnnouncementDraft().trim();
+    if (!session || !message || this.postClassWorkspacePendingId()) {
+      return;
+    }
+    this.postClassWorkspacePendingId.set('announcement');
+    this.reportError.set('');
+    this.classSessions.createPostClassAnnouncement(session.id, { batchId: session.batchId, message }).subscribe({
+      next: () => {
+        this.postClassAnnouncementDraft.set('');
+        this.postClassWorkspaceNotice.set('Announcement published to the completed-session recap.');
+        this.loadSessionReport(session);
+      },
+      error: (error) => this.reportError.set(this.classSessions.errorMessage(error)),
+      complete: () => this.postClassWorkspacePendingId.set('')
+    });
+  }
+
+  protected togglePostClassMaterial(material: ClassSessionMaterial): void {
+    const session = this.reportSession();
+    if (!session || this.postClassWorkspacePendingId()) {
+      return;
+    }
+    const published = this.postClassArtifactPublished(material);
+    this.postClassWorkspacePendingId.set(`material:${material.materialId}`);
+    const request = { batchId: session.batchId };
+    const action = published
+      ? this.classSessions.unpublishPostClassMaterial(session.id, material.materialId, request)
+      : this.classSessions.publishPostClassMaterial(session.id, material.materialId, request);
+    action.subscribe({
+      next: () => {
+        this.postClassWorkspaceNotice.set(published ? 'Material hidden from students.' : 'Material published for students.');
+        this.loadSessionReport(session);
+      },
+      error: (error) => this.reportError.set(this.classSessions.errorMessage(error)),
+      complete: () => this.postClassWorkspacePendingId.set('')
+    });
+  }
+
+  protected togglePostClassRecording(recording: ClassSessionPostClassWorkspace['recordings'][number]): void {
+    const session = this.reportSession();
+    const recordingId = recording.recordingId ?? recording.id;
+    if (!session || !recordingId || this.postClassWorkspacePendingId()) {
+      return;
+    }
+    const published = this.postClassArtifactPublished(recording);
+    this.postClassWorkspacePendingId.set(`recording:${recordingId}`);
+    const request = { batchId: session.batchId };
+    const action = published
+      ? this.classSessions.unpublishPostClassRecording(session.id, recordingId, request)
+      : this.classSessions.publishPostClassRecording(session.id, recordingId, request);
+    action.subscribe({
+      next: () => {
+        this.postClassWorkspaceNotice.set(published ? 'Recording hidden from students.' : 'Recording published for students.');
+        this.loadSessionReport(session);
+      },
+      error: (error) => this.reportError.set(this.classSessions.errorMessage(error)),
+      complete: () => this.postClassWorkspacePendingId.set('')
+    });
+  }
+
+  protected togglePostClassWhiteboard(): void {
+    const session = this.reportSession();
+    const workspace = this.postClassWorkspace();
+    if (!session || !workspace?.whiteboard.available || this.postClassWorkspacePendingId()) {
+      return;
+    }
+    const published = this.postClassArtifactPublished(workspace.whiteboard);
+    this.postClassWorkspacePendingId.set('whiteboard');
+    const request = { batchId: session.batchId };
+    const action = published
+      ? this.classSessions.unpublishPostClassWhiteboard(session.id, request)
+      : this.classSessions.publishPostClassWhiteboard(session.id, request);
+    action.subscribe({
+      next: () => {
+        this.postClassWorkspaceNotice.set(published ? 'Whiteboard notes hidden from students.' : 'Whiteboard notes published for students.');
+        this.loadSessionReport(session);
+      },
+      error: (error) => this.reportError.set(this.classSessions.errorMessage(error)),
+      complete: () => this.postClassWorkspacePendingId.set('')
+    });
+  }
+
+  protected togglePostClassQuestionFlag(thread: ClassSessionPostClassQuestionThread, flag: 'important' | 'answered' | 'followUp'): void {
+    const session = this.reportSession();
+    const participantId = thread.workflow.studentId || thread.summary.participantId;
+    if (!session || !participantId || this.postClassWorkspacePendingId()) {
+      return;
+    }
+    this.postClassWorkspacePendingId.set(`question:${participantId}:${flag}`);
+    this.classSessions
+      .updatePostClassQuestionState(session.id, {
+        batchId: session.batchId,
+        participantId,
+        [flag]: !thread.workflow[flag]
+      })
+      .subscribe({
+        next: () => {
+          this.postClassWorkspaceNotice.set('Q&A workflow state updated.');
+          this.loadSessionReport(session);
+        },
+        error: (error) => this.reportError.set(this.classSessions.errorMessage(error)),
+        complete: () => this.postClassWorkspacePendingId.set('')
+      });
+  }
+
+  protected postClassArtifactPublished(item: { shared?: boolean; publishedAt?: string; unpublishedAt?: string }): boolean {
+    return Boolean(item.shared || (item.publishedAt && !item.unpublishedAt));
+  }
+
+  private loadPostClassSummary(session: TeacherSession, loadFirstThread = true): void {
+    this.postClassLoading.set(true);
+    this.postClassError.set('');
+    this.classSessions.getPostClassChatSummary(session.id, { batchId: session.batchId }).subscribe({
+      next: (summary) => {
+        this.postClassSummary.set(summary);
+        const threads = this.postClassThreads();
+        const selectedId = this.postClassSelectedStudentId();
+        const nextSelectedId = selectedId && threads.some((thread) => thread.id === selectedId) ? selectedId : threads[0]?.id ?? '';
+        this.postClassSelectedStudentId.set(nextSelectedId);
+        if (loadFirstThread && nextSelectedId) {
+          this.loadPostClassThread();
+        }
+      },
+      error: (error) => this.postClassError.set(this.classSessions.errorMessage(error)),
+      complete: () => this.postClassLoading.set(false)
+    });
+  }
+
+  private loadPostClassThread(): void {
+    const session = this.postClassSession();
+    const participantId = this.postClassSelectedStudentId();
+    if (!session || !participantId) {
+      this.postClassMessages.set([]);
+      return;
+    }
+
+    this.postClassLoading.set(true);
+    this.postClassError.set('');
+    this.classSessions.getPostClassChatHistory(session.id, { batchId: session.batchId, participantId }).subscribe({
+      next: (history) => this.postClassMessages.set(history.messages),
+      error: (error) => this.postClassError.set(this.classSessions.errorMessage(error)),
+      complete: () => this.postClassLoading.set(false)
+    });
+  }
+
+  private loadTimeline(session: TeacherSession, before?: string, append = false): void {
+    this.timelineLoading.set(true);
+    this.timelineError.set('');
+    this.classSessions
+      .getTimeline(session.id, {
+        batchId: session.batchId,
+        limit: 40,
+        ...(before ? { before } : {}),
+        category: this.timelineCategory()
+      })
+      .subscribe({
+        next: (response) => {
+          this.timelineEvents.set(append ? [...this.timelineEvents(), ...response.items] : response.items);
+          this.timelineHasMore.set(response.hasMore);
+          this.timelineNextBefore.set(response.nextBefore ?? null);
+        },
+        error: (error) => {
+          this.timelineError.set(this.classSessions.errorMessage(error));
+          this.timelineLoading.set(false);
+        },
+        complete: () => this.timelineLoading.set(false)
+      });
+  }
+
+  private loadAssignments(batchId: string): void {
+    if (!batchId) {
+      return;
+    }
+    this.assignmentsLoading.set(true);
+    this.assignmentError.set('');
+    this.classSessions.listTeacherAssignments({ batchId }).subscribe({
+      next: (response) => this.assignments.set(response.items),
+      error: (error) => this.assignmentError.set(this.classSessions.errorMessage(error)),
+      complete: () => this.assignmentsLoading.set(false)
+    });
+  }
+
+  private saveBlob(blob: Blob, fileName: string): void {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private reportFileName(session: TeacherSession): string {
+    const safe = `${session.title}-${session.sessionNumber}`.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '');
+    return `${safe || 'class-session'}-report.csv`;
+  }
+
+  protected initials(name: string): string {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) {
+      return 'ST';
+    }
+    return parts.slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('');
   }
 
   protected suspendStudent(student: TeacherBatchStudent): void {

@@ -40,10 +40,10 @@
       <p>Teacher assignment is validated by the backend against active teacher accounts.</p>
     </div>
     <form [formGroup]="createForm" (ngSubmit)="createBatch()">
-      <input type="search" formControlName="courseId" placeholder="Course ID" aria-label="Course ID" />
+      <input type="search" formControlName="courseId" list="batch-create-course-options" placeholder="Course name or ID" aria-label="Course ID" />
       <input type="text" formControlName="courseName" placeholder="Course name" aria-label="Course name" />
       <input type="text" formControlName="name" placeholder="Batch name" aria-label="Batch name" />
-      <input type="search" formControlName="teacherId" placeholder="Teacher ID" aria-label="Teacher ID" />
+      <input type="search" formControlName="teacherId" list="batch-create-teacher-options" placeholder="Teacher name or ID" aria-label="Teacher ID" />
       <input type="number" formControlName="year" placeholder="Year" aria-label="Year" />
       <input type="number" formControlName="maxCapacity" placeholder="Capacity" aria-label="Capacity" />
       <select formControlName="dayOfWeek" aria-label="Weekday">
@@ -57,6 +57,16 @@
       </select>
       <input type="time" formControlName="startTime" aria-label="Start time" />
       <button type="submit" class="table-action primary" [disabled]="saving()">{{ saving() ? 'Creating...' : 'Create' }}</button>
+      <datalist id="batch-create-course-options">
+        @for (option of lookup.courses(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
+      <datalist id="batch-create-teacher-options">
+        @for (option of lookup.teachers(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
     </form>
   </section>
 }
@@ -75,8 +85,8 @@
         <option value="COMPLETED">Completed</option>
         <option value="CANCELLED">Cancelled</option>
       </select>
-      <input type="search" formControlName="courseId" placeholder="Course ID" aria-label="Course ID" />
-      <input type="search" formControlName="teacherId" placeholder="Teacher ID" aria-label="Teacher ID" />
+      <input type="search" formControlName="courseId" list="batch-course-options" placeholder="Course name or ID" aria-label="Course ID" />
+      <input type="search" formControlName="teacherId" list="batch-teacher-options" placeholder="Teacher name or ID" aria-label="Teacher ID" />
       <input type="date" formControlName="dateFrom" aria-label="Date from" />
       <input type="date" formControlName="dateTo" aria-label="Date to" />
       <select formControlName="sort" aria-label="Sort batches">
@@ -90,6 +100,16 @@
       <input type="search" formControlName="search" placeholder="Search batch or course" aria-label="Search batches" />
       <button type="submit" class="table-action primary">Apply</button>
       <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+      <datalist id="batch-course-options">
+        @for (option of lookup.courses(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
+      <datalist id="batch-teacher-options">
+        @for (option of lookup.teachers(); track option.id) {
+          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        }
+      </datalist>
     </form>
   </div>
 

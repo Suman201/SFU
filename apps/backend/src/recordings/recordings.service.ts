@@ -35,6 +35,7 @@ import {
 } from '../database/schemas';
 import { PlatformEventsService } from '../events/platform-events.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { ClassSessionActivityService } from '../class-session-activity/class-session-activity.service';
 import { StudentEnrollmentsService } from '../student-enrollments/student-enrollments.service';
 
 type ClassSessionRecordingEventName = 'recording:started' | 'recording:updated' | 'recording:stopped' | 'recording:failed';
@@ -79,7 +80,8 @@ export class RecordingsService {
     private readonly config: ConfigService,
     private readonly platformEvents: PlatformEventsService,
     private readonly studentEnrollments: StudentEnrollmentsService,
-    @Optional() private readonly auditLogs?: AuditLogsService
+    @Optional() private readonly auditLogs?: AuditLogsService,
+    @Optional() private readonly activity?: ClassSessionActivityService
   ) {}
 
   onClassSessionRecordingEvent(
@@ -236,6 +238,7 @@ export class RecordingsService {
       await recording.save().catch(() => undefined);
       await this.appendClassSessionRecordingPlatformEvent('recording.failed', recording, batch, actor, recording.failureReason);
       this.emitClassSessionRecordingEvent('recording:failed', recording, recording.failureReason);
+      await this.recordClassSessionRecordingActivity('recording.failed', recording, session, batch, actor, recording.failureReason);
       throw error;
     }
 
@@ -250,6 +253,7 @@ export class RecordingsService {
       metadata: { summary: `Started recording for ${session.title}`, sessionId: session.id, batchId: batch.id, roomId: session.roomId },
       after: { status: recording.status, retentionExpiresAt: recording.retentionExpiresAt?.toISOString() }
     });
+    await this.recordClassSessionRecordingActivity('recording.started', recording, session, batch, actor);
     return this.toRecording(recording);
   }
 
@@ -306,6 +310,11 @@ export class RecordingsService {
     return docs.map((doc) => this.toRecording(doc));
   }
 
+  async listAuthorizedClassSessionRecordings(sessionId: string): Promise<Recording[]> {
+    const docs = await this.recordings.find({ sessionId }).sort({ startedAt: -1 });
+    return docs.map((doc) => this.toRecording(doc));
+  }
+
   async getClassSessionRecordingSummary(sessionId: string): Promise<{ active?: Recording; latest?: Recording }> {
     const [active, latest] = await Promise.all([
       this.recordings.findOne({ sessionId, status: { $in: ACTIVE_RECORDING_STATUSES } }).sort({ startedAt: -1 }),
@@ -317,6 +326,30 @@ export class RecordingsService {
     };
   }
 
+  async updateClassSessionRecordingPublication(
+    sessionId: string,
+    recordingId: string,
+    userId: string,
+    published: boolean
+  ): Promise<Recording> {
+    const recording = await this.findClassSessionRecording(sessionId, recordingId);
+    if (!recording) {
+      throw new NotFoundException('Recording not found.');
+    }
+    if (recording.status !== 'stopped') {
+      throw new ConflictException('Only completed recordings can be published.');
+    }
+    if (published) {
+      recording.publishedAt = new Date();
+      recording.publishedByUserId = userId;
+      recording.unpublishedAt = undefined;
+    } else {
+      recording.unpublishedAt = new Date();
+    }
+    await recording.save();
+    return this.toRecording(recording);
+  }
+
   async readClassSessionRecordingDownload(sessionId: string, recordingId: string, user: AuthenticatedUser): Promise<RecordingDownload> {
     const session = await this.classSessions.findById(sessionId);
     if (!session) {
@@ -324,6 +357,14 @@ export class RecordingsService {
     }
     const batch = await this.findBatch(session.batchId);
     await this.assertCanReadClassSession(batch, user);
+    return this.readAuthorizedClassSessionRecordingDownload(session.id, recordingId);
+  }
+
+  async readAuthorizedClassSessionRecordingDownload(sessionId: string, recordingId: string): Promise<RecordingDownload> {
+    const session = await this.classSessions.findById(sessionId);
+    if (!session) {
+      throw new NotFoundException('Class session not found.');
+    }
     const recording = await this.findClassSessionRecording(session.id, recordingId);
     if (!recording) {
       throw new NotFoundException('Recording not found.');
@@ -523,6 +564,7 @@ export class RecordingsService {
       await recording.save().catch(() => undefined);
       await this.appendClassSessionRecordingPlatformEvent('recording.failed', recording, batch, actor, recording.failureReason);
       this.emitClassSessionRecordingEvent('recording:failed', recording, recording.failureReason);
+      await this.recordClassSessionRecordingActivity('recording.failed', recording, session, batch, actor, recording.failureReason);
       return this.toRecording(recording);
     }
     await recording.save();
@@ -537,6 +579,7 @@ export class RecordingsService {
       metadata: { summary: `Stopped recording for ${session.title}`, sessionId: session.id, batchId: batch.id, reason },
       after: { status: recording.status, stoppedAt: recording.stoppedAt?.toISOString(), durationSeconds: recording.durationSeconds }
     });
+    await this.recordClassSessionRecordingActivity('recording.stopped', recording, session, batch, actor, reason);
     return this.toRecording(recording);
   }
 
@@ -964,6 +1007,39 @@ export class RecordingsService {
     });
   }
 
+  private async recordClassSessionRecordingActivity(
+    eventType: 'recording.started' | 'recording.stopped' | 'recording.failed',
+    doc: RecordingMongoDocument,
+    session: ClassSessionMongoDocument,
+    batch: BatchMongoDocument,
+    actor: AuthenticatedUser,
+    reason?: string
+  ): Promise<void> {
+    await this.activity?.record({
+      sessionId: session.id,
+      batchId: batch.id,
+      roomId: doc.roomId,
+      eventType,
+      category: 'recording',
+      summary:
+        eventType === 'recording.started'
+          ? `Started recording for ${session.title}`
+          : eventType === 'recording.stopped'
+            ? `Stopped recording for ${session.title}`
+            : `Recording failed for ${session.title}`,
+      actor: { id: actor.sub, email: actor.email, roles: actor.roles },
+      target: { id: doc.recordingId, type: 'recording' },
+      source: { collection: 'recordings', id: doc.recordingId },
+      visibility: 'student_safe',
+      metadata: {
+        status: doc.status,
+        scope: doc.scope,
+        ...(doc.durationSeconds ? { durationSeconds: doc.durationSeconds } : {}),
+        ...(reason ? { reason } : {})
+      }
+    });
+  }
+
   private sanitizePathSegment(value: string): string {
     return value.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 160) || 'recording';
   }
@@ -995,6 +1071,9 @@ export class RecordingsService {
       stoppedBy: doc.stoppedBy,
       failureReason: doc.failureReason,
       retentionExpiresAt: doc.retentionExpiresAt?.toISOString(),
+      publishedAt: doc.publishedAt?.toISOString(),
+      publishedByUserId: doc.publishedByUserId,
+      unpublishedAt: doc.unpublishedAt?.toISOString(),
       consentVersion: doc.consentVersion,
       consentRequired: doc.consentRequired,
       tracks: (doc.tracks ?? []) as unknown as RecordingTrackManifestEntry[],

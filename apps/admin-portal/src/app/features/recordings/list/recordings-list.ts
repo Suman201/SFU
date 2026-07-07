@@ -11,6 +11,7 @@ import type {
 } from '@native-sfu/contracts';
 import { finalize } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
+import { AdminLookupService } from '../../../core/services/admin-lookup.service';
 
 type RecordingStatusFilter = AdminRecordingStatus | 'all';
 
@@ -27,6 +28,7 @@ export class RecordingsList implements OnInit {
   private readonly formBuilder = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  protected readonly lookup = inject(AdminLookupService);
 
   protected readonly rows = signal<AdminRecordingListItem[]>([]);
   protected readonly summary = signal<AdminRecordingSummary | null>(null);
@@ -52,6 +54,7 @@ export class RecordingsList implements OnInit {
 
   ngOnInit(): void {
     this.readQueryParams();
+    this.lookup.loadCourseTeacherBatchLookups();
     this.load(this.page());
   }
 

@@ -767,8 +767,16 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WsAck() ack: SocketAck<WhiteboardCommandEvent>
   ): Promise<void> {
     return socketAck(ack, async () => {
-      const delivery = await this.rooms.sendWhiteboardCommand(request.roomId, this.requireParticipant(socket), request.command);
-      await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:command', delivery.event);
+      const delivery = await this.rooms.sendWhiteboardCommand(
+        request.roomId,
+        this.requireParticipant(socket),
+        request.command,
+        request.operationId,
+        request.baseSnapshotVersion
+      );
+      if (!delivery.idempotentReplay) {
+        await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:command', delivery.event);
+      }
       return delivery.event;
     });
   }

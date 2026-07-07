@@ -5,6 +5,7 @@ import {
   Get,
   Header,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -19,17 +20,30 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type {
   ChatAttachment,
   ChatHistoryResponse,
+  ChatMessage,
   ChatMessageScope,
   ChatReadState,
   ChatThreadSummaryResponse,
   ClassSessionMaterial,
+  ClassSessionPostClassThreadWorkflow,
+  ClassSessionPostClassWorkspace,
+  ClassSessionReport,
+  ClassSessionTimelineCategory,
+  ClassSessionTimelineResponse,
+  CreatePostClassAnnouncementRequest,
   CreateWhiteboardMemoryCheckpointRequest,
   CreateClassSessionMaterialLinkRequest,
   PreviousWhiteboardMemoryListResponse,
+  PostClassAnnouncementResponse,
+  PostClassArtifactPublishRequest,
   Recording,
   RestorePreviousWhiteboardMemoryRequest,
   RestoreWhiteboardMemoryVersionRequest,
   SaveWhiteboardMemoryRequest,
+  SendPostClassQuestionRequest,
+  StudentCompletedClassDetailResponse,
+  StudentCompletedClassSessionListResponse,
+  UpdatePostClassQuestionStateRequest,
   WhiteboardMemoryPageSearchResponse,
   WhiteboardMemoryState,
   WhiteboardMemoryVersion,
@@ -67,6 +81,27 @@ interface ClassSessionMaterialActionBody {
   batchId?: string;
 }
 
+interface StudentCompletedClassQuery {
+  page?: string;
+  limit?: string;
+  batchId?: string;
+  courseId?: string;
+}
+
+interface PostClassChatQuery {
+  batchId?: string;
+  participantId?: string;
+  before?: string;
+  limit?: string;
+}
+
+interface ClassSessionTimelineQueryParams {
+  batchId?: string;
+  before?: string;
+  limit?: string;
+  category?: ClassSessionTimelineCategory | 'all';
+}
+
 @ApiTags('class sessions')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -81,6 +116,78 @@ export class ClassSessionsController {
     return this.classSessions.getCurrentForBatch(batchId, user);
   }
 
+  @Get('student/completed')
+  @Roles('STUDENT')
+  @ApiOperation({ summary: 'List completed class sessions available to the current student' })
+  listStudentCompletedSessions(
+    @Query() query: StudentCompletedClassQuery,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<StudentCompletedClassSessionListResponse> {
+    return this.classSessions.listStudentCompletedSessions(user, query);
+  }
+
+  @Get('student/completed/:sessionId')
+  @Roles('STUDENT')
+  @ApiOperation({ summary: 'Get student-safe post-class details for a completed session' })
+  getStudentCompletedSessionDetail(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<StudentCompletedClassDetailResponse> {
+    return this.classSessions.getStudentCompletedSessionDetail(sessionId, batchId, user);
+  }
+
+  @Post('student/completed/:sessionId/questions')
+  @Roles('STUDENT')
+  @ApiOperation({ summary: 'Ask the teacher a private post-class question' })
+  sendStudentPostClassQuestion(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @Body() body: SendPostClassQuestionRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ChatMessage> {
+    return this.classSessions.sendPostClassQuestion(sessionId, batchId, user, body);
+  }
+
+  @Post(':sessionId/post-class-chat')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Send a private post-class teacher-student message' })
+  sendPostClassChat(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @Body() body: SendPostClassQuestionRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ChatMessage> {
+    return this.classSessions.sendPostClassQuestion(sessionId, batchId, user, body);
+  }
+
+  @Get(':sessionId/post-class-chat/summary')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get private post-class Q&A thread summaries for a completed session' })
+  getPostClassChatSummary(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ChatThreadSummaryResponse> {
+    return this.classSessions.getPostClassChatSummary(sessionId, batchId, user);
+  }
+
+  @Get(':sessionId/post-class-chat')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get one private post-class Q&A thread for a completed session' })
+  getPostClassChatHistory(
+    @Param('sessionId') sessionId: string,
+    @Query() query: PostClassChatQuery,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ChatHistoryResponse> {
+    const parsedLimit = query.limit ? Number(query.limit) : undefined;
+    return this.classSessions.getPostClassChatHistory(sessionId, query.batchId, user, {
+      participantId: query.participantId,
+      before: query.before,
+      ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {})
+    });
+  }
+
   @Get(':sessionId')
   @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
   @ApiOperation({ summary: 'Get class session metadata' })
@@ -90,6 +197,151 @@ export class ClassSessionsController {
     @CurrentUser() user: AuthenticatedUser
   ): Promise<ClassroomPayload> {
     return this.classSessions.getSession(sessionId, batchId, user);
+  }
+
+  @Get(':sessionId/report')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get a completed class session recap report' })
+  getReport(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionReport> {
+    return this.classSessions.getClassSessionReport(sessionId, batchId, user);
+  }
+
+  @Get(':sessionId/report/export.csv')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="class-session-report.csv"')
+  @ApiOperation({ summary: 'Download a completed class session recap report CSV' })
+  downloadReport(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<string> {
+    return this.classSessions.exportClassSessionReportCsv(sessionId, batchId, user);
+  }
+
+  @Get(':sessionId/post-class-workspace')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get teacher post-class workflow workspace for a completed session' })
+  getPostClassWorkspace(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionPostClassWorkspace> {
+    return this.classSessions.getPostClassWorkspace(sessionId, batchId, user);
+  }
+
+  @Patch(':sessionId/post-class-workspace/questions')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Update post-class private Q&A workflow state' })
+  updatePostClassQuestionState(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @Body() body: UpdatePostClassQuestionStateRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionPostClassThreadWorkflow> {
+    return this.classSessions.updatePostClassQuestionState(sessionId, batchId, user, body);
+  }
+
+  @Post(':sessionId/post-class-workspace/announcements')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Create a teacher post-class announcement for enrolled students' })
+  createPostClassAnnouncement(
+    @Param('sessionId') sessionId: string,
+    @Query('batchId') batchId: string | undefined,
+    @Body() body: CreatePostClassAnnouncementRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<PostClassAnnouncementResponse> {
+    return this.classSessions.createPostClassAnnouncement(sessionId, batchId, user, body);
+  }
+
+  @Post(':sessionId/post-class-workspace/materials/:materialId/publish')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Publish a completed-session material to students' })
+  publishPostClassMaterial(
+    @Param('sessionId') sessionId: string,
+    @Param('materialId') materialId: string,
+    @Body() body: PostClassArtifactPublishRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionMaterial> {
+    return this.classSessions.publishPostClassMaterial(sessionId, materialId, body.batchId, user);
+  }
+
+  @Post(':sessionId/post-class-workspace/materials/:materialId/unpublish')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Unpublish a completed-session material from students' })
+  unpublishPostClassMaterial(
+    @Param('sessionId') sessionId: string,
+    @Param('materialId') materialId: string,
+    @Body() body: PostClassArtifactPublishRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionMaterial> {
+    return this.classSessions.unpublishPostClassMaterial(sessionId, materialId, body.batchId, user);
+  }
+
+  @Post(':sessionId/post-class-workspace/recordings/:recordingId/publish')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Publish a completed-session recording to students' })
+  publishPostClassRecording(
+    @Param('sessionId') sessionId: string,
+    @Param('recordingId') recordingId: string,
+    @Body() body: PostClassArtifactPublishRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<Recording> {
+    return this.classSessions.publishPostClassRecording(sessionId, recordingId, body.batchId, user);
+  }
+
+  @Post(':sessionId/post-class-workspace/recordings/:recordingId/unpublish')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Unpublish a completed-session recording from students' })
+  unpublishPostClassRecording(
+    @Param('sessionId') sessionId: string,
+    @Param('recordingId') recordingId: string,
+    @Body() body: PostClassArtifactPublishRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<Recording> {
+    return this.classSessions.unpublishPostClassRecording(sessionId, recordingId, body.batchId, user);
+  }
+
+  @Post(':sessionId/post-class-workspace/whiteboard/publish')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Publish completed-session whiteboard notes to students' })
+  publishPostClassWhiteboard(
+    @Param('sessionId') sessionId: string,
+    @Body() body: PostClassArtifactPublishRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<StudentCompletedClassDetailResponse['whiteboard']> {
+    return this.classSessions.publishPostClassWhiteboard(sessionId, body.batchId, user);
+  }
+
+  @Post(':sessionId/post-class-workspace/whiteboard/unpublish')
+  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Unpublish completed-session whiteboard notes from students' })
+  unpublishPostClassWhiteboard(
+    @Param('sessionId') sessionId: string,
+    @Body() body: PostClassArtifactPublishRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<StudentCompletedClassDetailResponse['whiteboard']> {
+    return this.classSessions.unpublishPostClassWhiteboard(sessionId, body.batchId, user);
+  }
+
+  @Get(':sessionId/timeline')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get authorized class session activity timeline' })
+  getTimeline(
+    @Param('sessionId') sessionId: string,
+    @Query() query: ClassSessionTimelineQueryParams,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ClassSessionTimelineResponse> {
+    const parsedLimit = query.limit ? Number(query.limit) : undefined;
+    return this.classSessions.getTimeline(sessionId, query.batchId, user, {
+      before: query.before,
+      ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {}),
+      ...(query.category ? { category: query.category } : {})
+    });
   }
 
   @Get(':sessionId/chat')

@@ -1,0 +1,205 @@
+<sfu-header />
+<main class="post-class-shell">
+  @if (loading()) {
+    <section class="post-class-state">
+      <h1>Loading class details</h1>
+      <p>Preparing your recordings, notes, materials, and private Q&A.</p>
+    </section>
+  } @else if (error()) {
+    <section class="post-class-state error">
+      <h1>Unable to open this class</h1>
+      <p>{{ error() }}</p>
+      <a class="button" routerLink="/student/classes/completed">Back to history</a>
+    </section>
+  } @else if (detail(); as detail) {
+    <section class="detail-heading">
+      <div>
+        <p class="eyebrow">Completed class</p>
+        <h1>{{ detail.session.title }}</h1>
+        <p>
+          {{ detail.session.batchName }} · {{ detail.session.courseName || detail.session.courseId || 'Course' }}
+          · completed {{ formatDate(detail.session.completedAt) }}
+        </p>
+      </div>
+      <a class="button ghost" routerLink="/student/classes/completed">Class history</a>
+    </section>
+
+    <section class="summary-grid" aria-label="Completed class summary">
+      <article>
+        <span>{{ detail.attendance.status }}</span>
+        <p>Attendance</p>
+      </article>
+      <article>
+        <span>{{ durationLabel(detail.attendance.totalDurationSeconds) }}</span>
+        <p>Time in class</p>
+      </article>
+      <article>
+        <span>{{ detail.materials.length }}</span>
+        <p>Materials</p>
+      </article>
+      <article>
+        <span>{{ detail.whiteboard.summary?.pageCount ?? 0 }}</span>
+        <p>Whiteboard pages</p>
+      </article>
+    </section>
+
+    <section class="detail-grid">
+      <article class="detail-card recording-card">
+        <header>
+          <p class="eyebrow">Recording</p>
+          <h2>Class playback</h2>
+        </header>
+        @if (detail.recordings.length) {
+          <div class="recording-list">
+            @for (recording of detail.recordings; track recording.id) {
+              <div class="recording-row">
+                <div>
+                  <strong>{{ recordingLabel(recording) }}</strong>
+                  <small>{{ formatDate(recording.stoppedAt || recording.startedAt) }}</small>
+                </div>
+                @if (recording.downloadUrl || recording.playbackUrl || recording.url) {
+                  <a [href]="recording.playbackUrl || recording.downloadUrl || recording.url" target="_blank" rel="noopener noreferrer">Open</a>
+                } @else {
+                  <span>Unavailable</span>
+                }
+              </div>
+            }
+          </div>
+        } @else {
+          <p class="muted">No recording is available for this class yet.</p>
+        }
+      </article>
+
+      <article class="detail-card whiteboard-review-card">
+        <header>
+          <p class="eyebrow">Whiteboard</p>
+          <h2>Shared notes</h2>
+        </header>
+        @if (whiteboardError()) {
+          <p class="form-alert">{{ whiteboardError() }}</p>
+        }
+        @if (detail.whiteboard.available && detail.whiteboard.summary) {
+          <div class="note-list">
+            @for (page of detail.whiteboard.summary.pages; track page.pageId) {
+              <span>
+                <strong>{{ page.title }}</strong>
+                <small>{{ page.elementCount }} items</small>
+              </span>
+            }
+          </div>
+          @if (whiteboardState(); as board) {
+            <div class="whiteboard-review-frame">
+              <sfu-whiteboard
+                title="Class whiteboard"
+                eyebrow="Read only"
+                [readOnly]="true"
+                [allowPageManagement]="false"
+                [allowAssetImport]="false"
+                [allowExport]="false"
+                [allowClear]="false"
+                [initialState]="board.snapshot"
+              />
+            </div>
+          }
+        } @else {
+          <p class="muted">No whiteboard notes were saved for this class.</p>
+        }
+      </article>
+
+      <article class="detail-card">
+        <header>
+          <p class="eyebrow">Materials</p>
+          <h2>Lesson assets</h2>
+        </header>
+        @if (detail.materials.length) {
+          <div class="material-list">
+            @for (material of detail.materials; track material.materialId) {
+              <a [href]="materialHref(material)" [attr.target]="material.url ? '_blank' : null" [attr.rel]="material.url ? 'noopener noreferrer' : null">
+                <strong>{{ material.title }}</strong>
+                <small>{{ material.kind }} · {{ material.fileName || material.description || 'Shared material' }}</small>
+              </a>
+            }
+          </div>
+        } @else {
+          <p class="muted">No materials are shared after this class.</p>
+        }
+      </article>
+
+      <article class="detail-card">
+        <header>
+          <p class="eyebrow">Homework</p>
+          <h2>Related assignments</h2>
+        </header>
+        @if (assignmentsError()) {
+          <p class="form-alert">{{ assignmentsError() }}</p>
+        } @else if (assignments().length) {
+          <div class="material-list">
+            @for (assignment of assignments(); track assignment.assignmentId) {
+              <a [routerLink]="['/student/assignments', assignment.assignmentId]">
+                <strong>{{ assignment.title }}</strong>
+                <small>{{ assignmentStatus(assignment) }} · Due {{ formatDate(assignment.dueAt) }}</small>
+              </a>
+            }
+          </div>
+        } @else {
+          <p class="muted">No homework is linked to this class yet.</p>
+        }
+      </article>
+
+      <article class="detail-card">
+        <header>
+          <p class="eyebrow">Announcements</p>
+          <h2>Teacher broadcasts</h2>
+        </header>
+        @if (detail.announcements.length) {
+          <div class="message-list compact">
+            @for (message of detail.announcements; track message.id) {
+              <div class="message announcement">
+                <strong>{{ message.senderName }}</strong>
+                <p>{{ message.message }}</p>
+                <small>{{ formatDate(message.createdAt) }}</small>
+              </div>
+            }
+          </div>
+        } @else {
+          <p class="muted">No announcements were posted.</p>
+        }
+      </article>
+
+      <article class="detail-card qna-card">
+        <header>
+          <p class="eyebrow">Private Q&A</p>
+          <h2>Ask the teacher</h2>
+        </header>
+        <div class="message-list">
+          @if (privateMessages().length) {
+            @for (message of privateMessages(); track message.id) {
+              <div class="message" [class.mine]="message.senderRole === 'student'">
+                <strong>{{ messageAuthor(message) }}</strong>
+                <p>{{ message.message }}</p>
+                <small>{{ formatDate(message.createdAt) }}</small>
+              </div>
+            }
+          } @else {
+            <p class="muted">No private follow-up questions yet.</p>
+          }
+        </div>
+        @if (sendError()) {
+          <p class="form-alert" role="alert">{{ sendError() }}</p>
+        }
+        <form class="qna-composer" (submit)="sendQuestion($event)">
+          <textarea
+            rows="3"
+            placeholder="Ask a private follow-up question"
+            [value]="draft()"
+            (input)="updateDraft($event)"
+          ></textarea>
+          <button class="button primary" type="submit" [disabled]="sending() || !draft().trim()">
+            {{ sending() ? 'Sending...' : 'Send question' }}
+          </button>
+        </form>
+      </article>
+    </section>
+  }
+</main>
+<sfu-footer />
