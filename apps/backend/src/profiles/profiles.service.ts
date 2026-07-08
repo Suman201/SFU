@@ -2,12 +2,15 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
-  NotFoundException
+  NotFoundException,
+  Optional
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import type {
   BatchLiveClassSettingsResponse,
+  CreateTeacherPublicContentRequest,
+  AdminTeacherPromotionUpdateRequest,
   LiveClassSettings,
   LiveClassSettingsPatch,
   ProfileBatchAssociation,
@@ -17,8 +20,24 @@ import type {
   ProfileSocialLink,
   ProfileSettings,
   ProfileUser,
+  PublicTeacherListItem,
+  PublicTeacherListQuery,
+  PublicTeacherListResponse,
   PublicTeacherProfile,
+  TeacherPromotion,
+  TeacherPromotionBillingStatus,
+  TeacherPromotionListQuery,
+  TeacherPromotionListResponse,
+  TeacherPromotionPlacement,
+  TeacherPromotionRequest,
+  TeacherPromotionStatus,
+  TeacherPublicContentItem,
+  TeacherPublicContentItemType,
+  TeacherPublicContentMediaType,
+  TeacherPublicContentPublishStatus,
+  TeacherPublicContentListResponse,
   TeacherLiveClassSettingsResponse,
+  UpdateTeacherPublicContentRequest,
   UpdateMyProfileRequest,
   UpdateMySettingsRequest
 } from '@native-sfu/contracts';
@@ -35,9 +54,14 @@ import {
   BatchScheduleMongoDocument,
   StudentEnrollmentDocument,
   StudentEnrollmentMongoDocument,
+  TeacherPublicContentDocument,
+  TeacherPublicContentMongoDocument,
+  TeacherPromotionDocument,
+  TeacherPromotionMongoDocument,
   UserDocument,
   UserMongoDocument
 } from '../database/schemas';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { UpdateMyProfileDto } from './dto/profile.dto';
 
 export interface ProfileMediaUploadFile {
@@ -61,6 +85,25 @@ const PROFILE_MEDIA_MIME_TYPES = new Map<string, string>([
 ]);
 
 const PROFILE_MEDIA_MAX_SIZE_BYTES = 2 * 1024 * 1024;
+const PUBLIC_CONTENT_MEDIA_MAX_SIZE_BYTES = 25 * 1024 * 1024;
+const PUBLIC_CONTENT_MEDIA_TYPES = new Map<string, { extension: string; mediaType: TeacherPublicContentMediaType }>([
+  ['image/jpeg', { extension: 'jpg', mediaType: 'image' }],
+  ['image/png', { extension: 'png', mediaType: 'image' }],
+  ['image/webp', { extension: 'webp', mediaType: 'image' }],
+  ['image/gif', { extension: 'gif', mediaType: 'image' }],
+  ['application/pdf', { extension: 'pdf', mediaType: 'pdf' }],
+  ['video/mp4', { extension: 'mp4', mediaType: 'video' }],
+  ['video/webm', { extension: 'webm', mediaType: 'video' }],
+  ['application/msword', { extension: 'doc', mediaType: 'document' }],
+  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', { extension: 'docx', mediaType: 'document' }],
+  ['application/vnd.ms-powerpoint', { extension: 'ppt', mediaType: 'slides' }],
+  ['application/vnd.openxmlformats-officedocument.presentationml.presentation', { extension: 'pptx', mediaType: 'slides' }]
+]);
+const TEACHER_PUBLIC_CONTENT_ITEM_TYPES = new Set<TeacherPublicContentItemType>(['gallery', 'demo_class']);
+const TEACHER_PUBLIC_CONTENT_MEDIA_TYPES = new Set<TeacherPublicContentMediaType>(['image', 'video', 'pdf', 'document', 'slides', 'link']);
+const TEACHER_PROMOTION_STATUSES = new Set<TeacherPromotionStatus>(['requested', 'scheduled', 'active', 'paused', 'expired', 'cancelled', 'rejected']);
+const TEACHER_PROMOTION_PLACEMENTS = new Set<TeacherPromotionPlacement>(['marketplace_featured', 'search_boost', 'profile_badge']);
+const TEACHER_PROMOTION_BILLING_STATUSES = new Set<TeacherPromotionBillingStatus>(['not_required', 'pending', 'paid', 'failed', 'refunded', 'manual']);
 export const SYSTEM_LIVE_CLASS_SETTINGS: LiveClassSettings = {
   media: {
     studentsJoinMuted: true,
@@ -208,10 +251,13 @@ const STUDENT_UPDATE_FIELDS = new Set<keyof UpdateMyProfileRequest>([
 export class ProfilesService {
   constructor(
     @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>,
+    @InjectModel(TeacherPublicContentDocument.name) private readonly publicContents: Model<TeacherPublicContentMongoDocument>,
+    @InjectModel(TeacherPromotionDocument.name) private readonly promotions: Model<TeacherPromotionMongoDocument>,
     @InjectModel(BatchDocument.name) private readonly batches: Model<BatchMongoDocument>,
     @InjectModel(BatchScheduleDocument.name) private readonly schedules: Model<BatchScheduleMongoDocument>,
     @InjectModel(StudentEnrollmentDocument.name) private readonly enrollments: Model<StudentEnrollmentMongoDocument>,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    @Optional() private readonly auditLogs?: AuditLogsService
   ) {}
 
   async getMyProfile(user: AuthenticatedUser): Promise<ProfileUser> {
@@ -327,7 +373,7 @@ export class ProfilesService {
         _id: teacherId,
         deletedAt: { $exists: false },
         disabled: false,
-        status: 'active',
+        status: { $in: ['active', 'scheduled'] },
         roles: 'TEACHER',
         publicProfileEnabled: true
       })
@@ -335,6 +381,7 @@ export class ProfilesService {
     if (!teacher) {
       throw new NotFoundException('Teacher profile is not available.');
     }
+    const publicContent = await this.publicContentForTeacher(teacher.id, { publishedOnly: true });
     return {
       id: teacher.id,
       displayName: teacher.displayName || teacher.name || 'Teacher',
@@ -351,7 +398,392 @@ export class ProfilesService {
       experience: this.experience(teacher.experience),
       socialLinks: this.socialLinks(teacher.socialLinks),
       ...(teacher.availability ? { availability: teacher.availability } : {}),
+      gallery: publicContent.filter((item) => item.itemType === 'gallery'),
+      demoClasses: publicContent.filter((item) => item.itemType === 'demo_class'),
       batches: await this.teacherBatchAssociations(teacher.id, { publicOnly: true })
+    };
+  }
+
+  async listPublicTeachers(query: PublicTeacherListQuery = {}): Promise<PublicTeacherListResponse> {
+    const page = this.normalizePage(query.page);
+    const limit = this.normalizeLimit(query.limit);
+    const filter: Record<string, unknown> = {
+      deletedAt: { $exists: false },
+      disabled: false,
+      status: 'active',
+      roles: 'TEACHER',
+      publicProfileEnabled: true
+    };
+    const andFilters: Record<string, unknown>[] = [];
+
+    const teacherIdFilters: string[][] = [];
+    const subject = this.optionalTrim(query.subject);
+    if (subject) {
+      const subjectRegex = this.searchRegex(subject);
+      const batches = await this.batches
+        .find({
+          deletedAt: { $exists: false },
+          status: 'ACTIVE',
+          $or: [{ courseName: subjectRegex }, { name: subjectRegex }]
+        })
+        .select({ teacherId: 1 })
+        .exec();
+      teacherIdFilters.push([...new Set(batches.map((batch) => batch.teacherId).filter(Boolean))]);
+    }
+
+    const availability = this.optionalTrim(query.availability);
+    if (availability && /^(open|available|has_batches|with_batches)$/i.test(availability)) {
+      const batches = await this.batches
+        .find({ deletedAt: { $exists: false }, status: 'ACTIVE' })
+        .select({ teacherId: 1 })
+        .exec();
+      teacherIdFilters.push([...new Set(batches.map((batch) => batch.teacherId).filter(Boolean))]);
+    } else if (availability) {
+      const availabilityRegex = this.searchRegex(availability);
+      andFilters.push({ $or: [{ availability: availabilityRegex }, { timezone: availabilityRegex }, { location: availabilityRegex }] });
+    }
+
+    const allowedTeacherIds = this.intersectTeacherIds(teacherIdFilters);
+    if (allowedTeacherIds && !allowedTeacherIds.length) {
+      return { teachers: [], page, limit, total: 0, totalPages: 0 };
+    }
+    if (allowedTeacherIds) {
+      filter._id = { $in: allowedTeacherIds };
+    }
+
+    const search = this.optionalTrim(query.q);
+    if (search) {
+      const searchRegex = this.searchRegex(search);
+      andFilters.push({
+        $or: [
+          { displayName: searchRegex },
+          { name: searchRegex },
+          { headline: searchRegex },
+          { bio: searchRegex },
+          { skills: searchRegex },
+          { languages: searchRegex },
+          { location: searchRegex },
+          { timezone: searchRegex },
+          { availability: searchRegex }
+        ]
+      });
+    }
+
+    const skill = this.optionalTrim(query.skill ?? query.topic);
+    if (skill) {
+      const skillRegex = this.searchRegex(skill);
+      andFilters.push({ $or: [{ skills: skillRegex }, { headline: skillRegex }, { bio: skillRegex }] });
+    }
+
+    const language = this.optionalTrim(query.language);
+    if (language) {
+      andFilters.push({ languages: this.searchRegex(language) });
+    }
+
+    if (andFilters.length) {
+      filter.$and = andFilters;
+    }
+
+    const activePromotionMap = await this.activePromotionMap();
+    const promotedTeacherIds = [...activePromotionMap.keys()];
+    const promotedFilter = this.withTeacherIdFilter(filter, promotedTeacherIds, 'in');
+    const nonPromotedFilter = this.withTeacherIdFilter(filter, promotedTeacherIds, 'not-in');
+    const [total, promotedTotal] = await Promise.all([
+      this.users.countDocuments(filter).exec(),
+      promotedTeacherIds.length ? this.users.countDocuments(promotedFilter).exec() : Promise.resolve(0)
+    ]);
+    const skip = (page - 1) * limit;
+    let promotedTeachers: UserMongoDocument[] = [];
+    let nonPromotedTeachers: UserMongoDocument[] = [];
+    if (promotedTeacherIds.length && skip < promotedTotal) {
+      promotedTeachers = await this.users
+        .find(promotedFilter)
+        .sort({ displayName: 1, name: 1 })
+        .skip(skip)
+        .limit(limit)
+        .exec();
+    }
+    const remaining = limit - promotedTeachers.length;
+    if (remaining > 0) {
+      const nonPromotedSkip = Math.max(0, skip - promotedTotal);
+      nonPromotedTeachers = await this.users
+        .find(nonPromotedFilter)
+        .sort({ displayName: 1, name: 1 })
+        .skip(nonPromotedSkip)
+        .limit(remaining)
+        .exec();
+    }
+    const teachers = [...promotedTeachers, ...nonPromotedTeachers];
+    const teacherIds = teachers.map((teacher) => teacher.id);
+    const [batchSummaryMap, contentSummaryMap] = await Promise.all([
+      this.publicBatchSummaryMap(teacherIds),
+      this.publicContentSummaryMap(teacherIds)
+    ]);
+    return {
+      teachers: teachers.map((teacher) => this.toPublicTeacherListItem(teacher, batchSummaryMap, contentSummaryMap, activePromotionMap)),
+      page,
+      limit,
+      total,
+      totalPages: total > 0 ? Math.ceil(total / limit) : 0
+    };
+  }
+
+  async listMyPublicContent(user: AuthenticatedUser): Promise<TeacherPublicContentListResponse> {
+    const doc = await this.findActiveUser(user.sub);
+    this.assertCanManageTeacherPublicContent(doc);
+    return { items: await this.publicContentForTeacher(doc.id, { publishedOnly: false }) };
+  }
+
+  async requestMyPromotion(user: AuthenticatedUser, request: TeacherPromotionRequest): Promise<TeacherPromotion> {
+    const teacher = await this.findActiveUser(user.sub);
+    this.assertCanManageTeacherPublicContent(teacher);
+    this.assertPromotionEligibleTeacher(teacher);
+    const range = this.promotionDateRange(request.startsAt, request.endsAt);
+    const placement = this.promotionPlacement(request.placement);
+    await this.assertNoOverlappingPromotion(teacher.id, placement, range.startsAt, range.endsAt);
+    const promotion = await this.promotions.create({
+      promotionId: randomUUID(),
+      teacherId: teacher.id,
+      teacherName: teacher.displayName || teacher.name || 'Teacher',
+      status: 'requested',
+      placement,
+      startsAt: range.startsAt,
+      endsAt: range.endsAt,
+      requestedByUserId: user.sub,
+      billingStatus: 'manual',
+      ...(request.paymentReference ? { paymentReference: this.shortTrim(request.paymentReference, 160) } : {}),
+      ...(request.reason ? { reason: this.shortTrim(request.reason, 500) } : {})
+    });
+    await this.recordPromotionAudit('teacher_promotions.requested', user, promotion);
+    return this.toPromotion(promotion);
+  }
+
+  async listMyPromotions(user: AuthenticatedUser): Promise<TeacherPromotionListResponse> {
+    const teacher = await this.findActiveUser(user.sub);
+    this.assertCanManageTeacherPublicContent(teacher);
+    const items = await this.promotions
+      .find({ teacherId: teacher.id, deletedAt: { $exists: false } })
+      .sort({ createdAt: -1 })
+      .exec();
+    return {
+      items: items.map((item) => this.toPromotion(item)),
+      page: 1,
+      limit: items.length,
+      total: items.length
+    };
+  }
+
+  async listAdminPromotions(query: TeacherPromotionListQuery, actor: AuthenticatedUser): Promise<TeacherPromotionListResponse> {
+    this.assertAdmin(actor);
+    const page = this.normalizePage(query.page);
+    const limit = this.normalizeLimit(query.limit);
+    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    if (query.status && query.status !== 'all') {
+      filter.status = this.promotionStatus(query.status);
+    }
+    if (query.placement && query.placement !== 'all') {
+      filter.placement = this.promotionPlacement(query.placement);
+    }
+    if (query.teacherId) {
+      filter.teacherId = this.requiredTrim(query.teacherId, 'Teacher id');
+    }
+    const search = this.optionalTrim(query.search);
+    if (search) {
+      const expression = this.searchRegex(search);
+      filter.$or = [{ teacherName: expression }, { teacherId: expression }, { promotionId: expression }, { paymentReference: expression }];
+    }
+    const [items, total] = await Promise.all([
+      this.promotions
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .exec(),
+      this.promotions.countDocuments(filter).exec()
+    ]);
+    return { items: items.map((item) => this.toPromotion(item)), page, limit, total };
+  }
+
+  async approvePromotion(
+    promotionId: string,
+    request: AdminTeacherPromotionUpdateRequest,
+    actor: AuthenticatedUser
+  ): Promise<TeacherPromotion> {
+    this.assertAdmin(actor);
+    const promotion = await this.findPromotion(promotionId);
+    const teacher = await this.findPromotionTeacher(promotion.teacherId);
+    this.assertPromotionEligibleTeacher(teacher);
+    const range = this.promotionDateRange(request.startsAt ?? promotion.startsAt.toISOString(), request.endsAt ?? promotion.endsAt.toISOString());
+    await this.assertNoOverlappingPromotion(promotion.teacherId, promotion.placement, range.startsAt, range.endsAt, promotion.promotionId);
+    promotion.startsAt = range.startsAt;
+    promotion.endsAt = range.endsAt;
+    promotion.status = this.activeOrScheduledStatus(range.startsAt, range.endsAt);
+    promotion.approvedByUserId = actor.sub;
+    if (request.billingStatus) promotion.billingStatus = this.promotionBillingStatus(request.billingStatus);
+    if (request.paymentReference !== undefined) promotion.paymentReference = this.optionalTrim(request.paymentReference);
+    if (request.adminNote !== undefined) promotion.adminNote = this.optionalTrim(request.adminNote);
+    await promotion.save();
+    await this.recordPromotionAudit('teacher_promotions.approved', actor, promotion);
+    return this.toPromotion(promotion);
+  }
+
+  async pausePromotion(
+    promotionId: string,
+    request: AdminTeacherPromotionUpdateRequest,
+    actor: AuthenticatedUser
+  ): Promise<TeacherPromotion> {
+    return this.adminPromotionTransition(promotionId, actor, 'paused', 'teacher_promotions.paused', request);
+  }
+
+  async cancelPromotion(
+    promotionId: string,
+    request: AdminTeacherPromotionUpdateRequest,
+    actor: AuthenticatedUser
+  ): Promise<TeacherPromotion> {
+    return this.adminPromotionTransition(promotionId, actor, 'cancelled', 'teacher_promotions.cancelled', request);
+  }
+
+  async rejectPromotion(
+    promotionId: string,
+    request: AdminTeacherPromotionUpdateRequest,
+    actor: AuthenticatedUser
+  ): Promise<TeacherPromotion> {
+    return this.adminPromotionTransition(promotionId, actor, 'rejected', 'teacher_promotions.rejected', request);
+  }
+
+  async createMyPublicContent(
+    user: AuthenticatedUser,
+    request: CreateTeacherPublicContentRequest
+  ): Promise<TeacherPublicContentItem> {
+    const doc = await this.findActiveUser(user.sub);
+    this.assertCanManageTeacherPublicContent(doc);
+    const content = await this.publicContents.create({
+      contentId: randomUUID(),
+      teacherId: doc.id,
+      ...this.publicContentCreate(request),
+      publishStatus: 'draft'
+    });
+    return this.toPublicContentItem(content);
+  }
+
+  async updateMyPublicContent(
+    user: AuthenticatedUser,
+    contentId: string,
+    request: UpdateTeacherPublicContentRequest
+  ): Promise<TeacherPublicContentItem> {
+    const doc = await this.findActiveUser(user.sub);
+    this.assertCanManageTeacherPublicContent(doc);
+    const content = await this.findTeacherPublicContent(doc.id, contentId);
+    Object.assign(content, this.publicContentUpdate(request));
+    await content.save();
+    return this.toPublicContentItem(content);
+  }
+
+  async publishMyPublicContent(user: AuthenticatedUser, contentId: string): Promise<TeacherPublicContentItem> {
+    const doc = await this.findActiveUser(user.sub);
+    this.assertCanManageTeacherPublicContent(doc);
+    const content = await this.findTeacherPublicContent(doc.id, contentId);
+    if (content.mediaType === 'link' && !content.externalUrl) {
+      throw new BadRequestException('Link content requires a public URL before publishing.');
+    }
+    content.publishStatus = 'published';
+    content.publishedAt = new Date();
+    await content.save();
+    return this.toPublicContentItem(content);
+  }
+
+  async unpublishMyPublicContent(user: AuthenticatedUser, contentId: string): Promise<TeacherPublicContentItem> {
+    const doc = await this.findActiveUser(user.sub);
+    this.assertCanManageTeacherPublicContent(doc);
+    const content = await this.findTeacherPublicContent(doc.id, contentId);
+    content.publishStatus = 'unpublished';
+    content.publishedAt = undefined;
+    await content.save();
+    return this.toPublicContentItem(content);
+  }
+
+  async deleteMyPublicContent(user: AuthenticatedUser, contentId: string): Promise<{ contentId: string; deleted: true }> {
+    const doc = await this.findActiveUser(user.sub);
+    this.assertCanManageTeacherPublicContent(doc);
+    const content = await this.findTeacherPublicContent(doc.id, contentId);
+    content.deletedAt = new Date();
+    content.publishStatus = 'unpublished';
+    content.publishedAt = undefined;
+    await content.save();
+    return { contentId: content.contentId, deleted: true };
+  }
+
+  async uploadPublicContentMedia(
+    user: AuthenticatedUser,
+    contentId: string,
+    file: ProfileMediaUploadFile | undefined
+  ): Promise<TeacherPublicContentItem> {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Public profile content upload is empty.');
+    }
+    const mimeType = file.mimetype?.trim().toLowerCase();
+    const media = mimeType ? PUBLIC_CONTENT_MEDIA_TYPES.get(mimeType) : undefined;
+    if (!mimeType || !media) {
+      throw new BadRequestException('Only image, PDF, document, slide, and MP4/WebM demo files are allowed.');
+    }
+    if ((file.size ?? file.buffer.length) > PUBLIC_CONTENT_MEDIA_MAX_SIZE_BYTES) {
+      throw new BadRequestException('Public profile content files cannot exceed 25 MB.');
+    }
+
+    const doc = await this.findActiveUser(user.sub);
+    this.assertCanManageTeacherPublicContent(doc);
+    const content = await this.findTeacherPublicContent(doc.id, contentId);
+    const directory = join(this.profileMediaStorageRoot(), this.safeStorageSegment(doc.id), 'public-content');
+    await mkdir(directory, { recursive: true });
+    const fileName = `${this.safeStorageSegment(content.contentId)}-${Date.now()}-${randomUUID()}.${media.extension}`;
+    await writeFile(join(directory, fileName), file.buffer);
+    const url = this.publicContentMediaUrl(doc.id, content.contentId, fileName);
+    content.mediaType = media.mediaType;
+    content.publicUrl = url;
+    content.mimeType = mimeType;
+    content.size = file.size ?? file.buffer.length;
+    content.storageKey = `${doc.id}/public-content/${fileName}`;
+    content.storagePath = join(this.safeStorageSegment(doc.id), 'public-content', fileName);
+    if (media.mediaType === 'image' && !content.thumbnailUrl) {
+      content.thumbnailUrl = url;
+    }
+    await content.save();
+    return this.toPublicContentItem(content);
+  }
+
+  async readPublicContentMedia(teacherId: string, contentId: string, fileName: string): Promise<ProfileMediaDownload> {
+    const safeTeacherId = this.safeStorageSegment(teacherId);
+    const safeContentId = this.safeStorageSegment(contentId);
+    const safeFileName = this.safeStorageSegment(fileName);
+    if (safeTeacherId !== teacherId || safeContentId !== contentId || safeFileName !== fileName) {
+      throw new NotFoundException('Public teacher content media not found.');
+    }
+    const content = await this.publicContents
+      .findOne({
+        teacherId,
+        contentId,
+        publishStatus: 'published',
+        deletedAt: { $exists: false },
+        publicUrl: this.publicContentMediaUrl(teacherId, contentId, fileName)
+      })
+      .exec();
+    if (!content) {
+      throw new NotFoundException('Public teacher content media not found.');
+    }
+    const path = join(this.profileMediaStorageRoot(), safeTeacherId, 'public-content', safeFileName);
+    let fileStat: Awaited<ReturnType<typeof stat>>;
+    try {
+      fileStat = await stat(path);
+    } catch {
+      throw new NotFoundException('Public teacher content media not found.');
+    }
+    if (!fileStat.isFile()) {
+      throw new NotFoundException('Public teacher content media not found.');
+    }
+    return {
+      stream: createReadStream(path),
+      mimeType: content.mimeType ?? this.publicContentMimeTypeForFile(fileName) ?? 'application/octet-stream',
+      size: fileStat.size
     };
   }
 
@@ -1303,6 +1735,467 @@ export class ProfilesService {
     }, new Map<string, number>());
   }
 
+  private async publicContentForTeacher(
+    teacherId: string,
+    options: { publishedOnly: boolean }
+  ): Promise<TeacherPublicContentItem[]> {
+    const filter: Record<string, unknown> = {
+      teacherId,
+      deletedAt: { $exists: false }
+    };
+    if (options.publishedOnly) {
+      filter.publishStatus = 'published';
+    }
+    const docs = await this.publicContents.find(filter).sort({ sortOrder: 1, createdAt: -1 }).exec();
+    return docs.map((doc) => this.toPublicContentItem(doc));
+  }
+
+  private async publicBatchSummaryMap(
+    teacherIds: readonly string[]
+  ): Promise<Map<string, { activePublicBatchCount: number; nextPublicBatchStartAt?: string }>> {
+    if (!teacherIds.length) {
+      return new Map();
+    }
+    const batches = await this.batches
+      .find({ teacherId: { $in: [...new Set(teacherIds)] }, status: 'ACTIVE', deletedAt: { $exists: false } })
+      .sort({ startDate: 1 })
+      .exec();
+    const summaries = new Map<string, { activePublicBatchCount: number; nextPublicBatchStartAt?: string }>();
+    for (const batch of batches) {
+      const summary = summaries.get(batch.teacherId) ?? { activePublicBatchCount: 0 };
+      summary.activePublicBatchCount += 1;
+      if (!summary.nextPublicBatchStartAt && batch.startDate) {
+        summary.nextPublicBatchStartAt = batch.startDate.toISOString();
+      }
+      summaries.set(batch.teacherId, summary);
+    }
+    return summaries;
+  }
+
+  private async publicContentSummaryMap(
+    teacherIds: readonly string[]
+  ): Promise<Map<string, { galleryCount: number; demoClassCount: number }>> {
+    if (!teacherIds.length) {
+      return new Map();
+    }
+    const contents = await this.publicContents
+      .find({
+        teacherId: { $in: [...new Set(teacherIds)] },
+        publishStatus: 'published',
+        deletedAt: { $exists: false }
+      })
+      .select({ teacherId: 1, itemType: 1 })
+      .exec();
+    const summaries = new Map<string, { galleryCount: number; demoClassCount: number }>();
+    for (const content of contents) {
+      const summary = summaries.get(content.teacherId) ?? { galleryCount: 0, demoClassCount: 0 };
+      if (content.itemType === 'demo_class') {
+        summary.demoClassCount += 1;
+      } else if (content.itemType === 'gallery') {
+        summary.galleryCount += 1;
+      }
+      summaries.set(content.teacherId, summary);
+    }
+    return summaries;
+  }
+
+  private async activePromotionMap(): Promise<Map<string, TeacherPromotionMongoDocument>> {
+    const now = new Date();
+    const promotions = await this.promotions
+      .find({
+        status: { $in: ['active', 'scheduled'] },
+        startsAt: { $lte: now },
+        endsAt: { $gt: now },
+        deletedAt: { $exists: false }
+      })
+      .sort({ placement: 1, startsAt: 1, createdAt: 1 })
+      .exec();
+    const map = new Map<string, TeacherPromotionMongoDocument>();
+    for (const promotion of promotions) {
+      if (!map.has(promotion.teacherId)) {
+        map.set(promotion.teacherId, promotion);
+      }
+    }
+    return map;
+  }
+
+  private withTeacherIdFilter(filter: Record<string, unknown>, teacherIds: readonly string[], mode: 'in' | 'not-in'): Record<string, unknown> {
+    const next = { ...filter };
+    const current = next._id;
+    if (mode === 'in') {
+      const ids = current && typeof current === 'object' && '$in' in (current as Record<string, unknown>)
+        ? this.intersectTeacherIds([teacherIds as string[], ((current as { $in?: string[] }).$in ?? [])]) ?? []
+        : [...teacherIds];
+      next._id = { $in: ids };
+      return next;
+    }
+    if (teacherIds.length) {
+      next._id = current && typeof current === 'object' && '$in' in (current as Record<string, unknown>)
+        ? { $in: (((current as { $in?: string[] }).$in ?? []) as string[]).filter((id) => !teacherIds.includes(id)) }
+        : { $nin: [...teacherIds] };
+    }
+    return next;
+  }
+
+  private toPublicTeacherListItem(
+    teacher: UserMongoDocument,
+    batchSummaryMap: Map<string, { activePublicBatchCount: number; nextPublicBatchStartAt?: string }>,
+    contentSummaryMap: Map<string, { galleryCount: number; demoClassCount: number }>,
+    activePromotionMap: Map<string, TeacherPromotionMongoDocument>
+  ): PublicTeacherListItem {
+    const batchSummary = batchSummaryMap.get(teacher.id) ?? { activePublicBatchCount: 0 };
+    const contentSummary = contentSummaryMap.get(teacher.id) ?? { galleryCount: 0, demoClassCount: 0 };
+    const highlightedCredential = this.credentials(teacher.credentials)[0];
+    const promotion = activePromotionMap.get(teacher.id);
+    return {
+      teacherId: teacher.id,
+      displayName: teacher.displayName || teacher.name || 'Teacher',
+      ...(teacher.headline ? { headline: teacher.headline } : {}),
+      ...(teacher.avatarUrl ? { avatarUrl: teacher.avatarUrl } : {}),
+      ...(teacher.location ? { location: teacher.location } : {}),
+      ...(teacher.timezone ? { timezone: teacher.timezone } : {}),
+      ...(teacher.availability ? { availability: teacher.availability } : {}),
+      skills: this.stringArray(teacher.skills).slice(0, 8),
+      languages: this.stringArray(teacher.languages).slice(0, 6),
+      ...(highlightedCredential ? { highlightedCredential } : {}),
+      activePublicBatchCount: batchSummary.activePublicBatchCount,
+      ...(batchSummary.nextPublicBatchStartAt ? { nextPublicBatchStartAt: batchSummary.nextPublicBatchStartAt } : {}),
+      galleryCount: contentSummary.galleryCount,
+      demoClassCount: contentSummary.demoClassCount,
+      promoted: Boolean(promotion),
+      ...(promotion ? { promotionPlacement: promotion.placement, promotionLabel: this.promotionLabel(promotion.placement) } : {})
+    };
+  }
+
+  private async findPromotion(promotionId: string): Promise<TeacherPromotionMongoDocument> {
+    const safePromotionId = this.safeStorageSegment(promotionId);
+    if (!promotionId || safePromotionId !== promotionId) {
+      throw new NotFoundException('Teacher promotion not found.');
+    }
+    const promotion = await this.promotions.findOne({ promotionId, deletedAt: { $exists: false } }).exec();
+    if (!promotion) {
+      throw new NotFoundException('Teacher promotion not found.');
+    }
+    return promotion;
+  }
+
+  private async findPromotionTeacher(teacherId: string): Promise<UserMongoDocument> {
+    const teacher = await this.users
+      .findOne({
+        _id: teacherId,
+        deletedAt: { $exists: false },
+        roles: 'TEACHER'
+      })
+      .exec();
+    if (!teacher) {
+      throw new NotFoundException('Promotion teacher not found.');
+    }
+    return teacher;
+  }
+
+  private assertPromotionEligibleTeacher(teacher: UserMongoDocument): void {
+    if (!this.normalizedRoles(teacher.roles).includes('TEACHER')) {
+      throw new ForbiddenException('Only teacher profiles can be promoted.');
+    }
+    if (teacher.disabled || teacher.status !== 'active' || !teacher.publicProfileEnabled || teacher.deletedAt) {
+      throw new ForbiddenException('Only active public teacher profiles can be promoted.');
+    }
+  }
+
+  private async assertNoOverlappingPromotion(
+    teacherId: string,
+    placement: TeacherPromotionPlacement,
+    startsAt: Date,
+    endsAt: Date,
+    excludePromotionId?: string
+  ): Promise<void> {
+    const filter: Record<string, unknown> = {
+      teacherId,
+      placement,
+      status: { $in: ['requested', 'scheduled', 'active', 'paused'] },
+      deletedAt: { $exists: false },
+      startsAt: { $lt: endsAt },
+      endsAt: { $gt: startsAt }
+    };
+    if (excludePromotionId) {
+      filter.promotionId = { $ne: excludePromotionId };
+    }
+    const existing = await this.promotions.findOne(filter).exec();
+    if (existing) {
+      throw new BadRequestException('This teacher already has an overlapping promotion for that placement.');
+    }
+  }
+
+  private async adminPromotionTransition(
+    promotionId: string,
+    actor: AuthenticatedUser,
+    status: TeacherPromotionStatus,
+    action: string,
+    request: AdminTeacherPromotionUpdateRequest
+  ): Promise<TeacherPromotion> {
+    this.assertAdmin(actor);
+    const promotion = await this.findPromotion(promotionId);
+    promotion.status = status;
+    if (status === 'cancelled') {
+      promotion.cancelledByUserId = actor.sub;
+    }
+    if (request.adminNote !== undefined) promotion.adminNote = this.optionalTrim(request.adminNote);
+    if (request.reason !== undefined) promotion.reason = this.optionalTrim(request.reason);
+    if (request.billingStatus) promotion.billingStatus = this.promotionBillingStatus(request.billingStatus);
+    if (request.paymentReference !== undefined) promotion.paymentReference = this.optionalTrim(request.paymentReference);
+    await promotion.save();
+    await this.recordPromotionAudit(action, actor, promotion);
+    return this.toPromotion(promotion);
+  }
+
+  private promotionDateRange(startsAtValue: string, endsAtValue: string): { startsAt: Date; endsAt: Date } {
+    const startsAt = this.parsePromotionDate(startsAtValue, 'startsAt');
+    const endsAt = this.parsePromotionDate(endsAtValue, 'endsAt');
+    if (endsAt <= startsAt) {
+      throw new BadRequestException('Promotion end date must be after start date.');
+    }
+    return { startsAt, endsAt };
+  }
+
+  private parsePromotionDate(value: string | undefined, label: string): Date {
+    const date = new Date(value ?? '');
+    if (!value || Number.isNaN(date.getTime())) {
+      throw new BadRequestException(`Promotion ${label} must be a valid date.`);
+    }
+    return date;
+  }
+
+  private activeOrScheduledStatus(startsAt: Date, endsAt: Date): TeacherPromotionStatus {
+    const now = Date.now();
+    if (endsAt.getTime() <= now) {
+      return 'expired';
+    }
+    return startsAt.getTime() <= now ? 'active' : 'scheduled';
+  }
+
+  private promotionPlacement(value: TeacherPromotionPlacement | undefined): TeacherPromotionPlacement {
+    if (!value || !TEACHER_PROMOTION_PLACEMENTS.has(value)) {
+      throw new BadRequestException('Promotion placement is invalid.');
+    }
+    return value;
+  }
+
+  private promotionStatus(value: TeacherPromotionStatus | undefined): TeacherPromotionStatus {
+    if (!value || !TEACHER_PROMOTION_STATUSES.has(value)) {
+      throw new BadRequestException('Promotion status is invalid.');
+    }
+    return value;
+  }
+
+  private promotionBillingStatus(value: TeacherPromotionBillingStatus): TeacherPromotionBillingStatus {
+    if (!TEACHER_PROMOTION_BILLING_STATUSES.has(value)) {
+      throw new BadRequestException('Promotion billing status is invalid.');
+    }
+    return value;
+  }
+
+  private promotionLabel(placement: TeacherPromotionPlacement): string {
+    switch (placement) {
+      case 'marketplace_featured':
+        return 'Featured';
+      case 'profile_badge':
+        return 'Promoted profile';
+      default:
+        return 'Promoted';
+    }
+  }
+
+  private toPromotion(promotion: TeacherPromotionMongoDocument): TeacherPromotion {
+    return {
+      promotionId: promotion.promotionId,
+      teacherId: promotion.teacherId,
+      ...(promotion.teacherName ? { teacherName: promotion.teacherName } : {}),
+      status: this.promotionStatus(promotion.status),
+      placement: this.promotionPlacement(promotion.placement),
+      startsAt: this.dateIso(promotion.startsAt),
+      endsAt: this.dateIso(promotion.endsAt),
+      requestedByUserId: promotion.requestedByUserId,
+      ...(promotion.approvedByUserId ? { approvedByUserId: promotion.approvedByUserId } : {}),
+      ...(promotion.cancelledByUserId ? { cancelledByUserId: promotion.cancelledByUserId } : {}),
+      billingStatus: this.promotionBillingStatus(promotion.billingStatus),
+      ...(promotion.paymentReference ? { paymentReference: promotion.paymentReference } : {}),
+      ...(promotion.reason ? { reason: promotion.reason } : {}),
+      ...(promotion.adminNote ? { adminNote: promotion.adminNote } : {}),
+      createdAt: this.dateIso(promotion.createdAt),
+      updatedAt: this.dateIso(promotion.updatedAt ?? promotion.createdAt)
+    };
+  }
+
+  private async recordPromotionAudit(action: string, actor: AuthenticatedUser, promotion: TeacherPromotionMongoDocument): Promise<void> {
+    await this.auditLogs?.record({
+      actor,
+      action,
+      resourceType: 'teacher_promotion',
+      resourceId: promotion.promotionId,
+      targetUserId: promotion.teacherId,
+      metadata: {
+        teacherId: promotion.teacherId,
+        placement: promotion.placement,
+        status: promotion.status,
+        startsAt: this.dateIso(promotion.startsAt),
+        endsAt: this.dateIso(promotion.endsAt),
+        billingStatus: promotion.billingStatus
+      }
+    });
+  }
+
+  private async findTeacherPublicContent(teacherId: string, contentId: string): Promise<TeacherPublicContentMongoDocument> {
+    const safeContentId = this.safeStorageSegment(contentId);
+    if (!contentId || safeContentId !== contentId) {
+      throw new NotFoundException('Public teacher content not found.');
+    }
+    const content = await this.publicContents
+      .findOne({ teacherId, contentId, deletedAt: { $exists: false } })
+      .exec();
+    if (!content) {
+      throw new NotFoundException('Public teacher content not found.');
+    }
+    return content;
+  }
+
+  private assertCanManageTeacherPublicContent(user: UserMongoDocument): void {
+    if (!this.isTeacherRole(this.normalizedRoles(user.roles))) {
+      throw new ForbiddenException('Only teachers can manage public profile content.');
+    }
+  }
+
+  private assertAdmin(user: AuthenticatedUser): void {
+    const roles = this.normalizedRoles(user.roles);
+    if (!roles.includes('ADMIN') && !roles.includes('SUPER_ADMIN')) {
+      throw new ForbiddenException('Only administrators can manage teacher promotions.');
+    }
+  }
+
+  private publicContentCreate(request: CreateTeacherPublicContentRequest): Partial<TeacherPublicContentDocument> {
+    const mediaType = this.publicContentMediaType(request.mediaType);
+    const externalUrl = request.externalUrl !== undefined ? this.optionalExternalUrl(request.externalUrl, 'Public content URL') : undefined;
+    if (mediaType === 'link' && !externalUrl) {
+      throw new BadRequestException('Link content requires a public URL.');
+    }
+    return {
+      itemType: this.publicContentItemType(request.itemType),
+      title: this.requiredTrim(request.title, 'Public content title').slice(0, 160),
+      ...(request.description !== undefined ? { description: this.optionalTrim(request.description) } : {}),
+      mediaType,
+      ...(externalUrl ? { externalUrl } : {}),
+      tags: this.normalizeStringArray(Array.isArray(request.tags) ? request.tags : [], 12, 40),
+      topics: this.normalizeStringArray(Array.isArray(request.topics) ? request.topics : [], 12, 60),
+      sortOrder: this.normalizeSortOrder(request.sortOrder)
+    };
+  }
+
+  private publicContentUpdate(request: UpdateTeacherPublicContentRequest): Partial<TeacherPublicContentDocument> {
+    const update: Partial<TeacherPublicContentDocument> = {};
+    if (request.title !== undefined) update.title = this.requiredTrim(request.title, 'Public content title').slice(0, 160);
+    if (request.description !== undefined) update.description = this.optionalTrim(request.description);
+    if (request.mediaType !== undefined) update.mediaType = this.publicContentMediaType(request.mediaType);
+    if (request.externalUrl !== undefined) update.externalUrl = this.optionalExternalUrl(request.externalUrl, 'Public content URL');
+    if (request.tags !== undefined) update.tags = this.normalizeStringArray(Array.isArray(request.tags) ? request.tags : [], 12, 40);
+    if (request.topics !== undefined) update.topics = this.normalizeStringArray(Array.isArray(request.topics) ? request.topics : [], 12, 60);
+    if (request.sortOrder !== undefined) update.sortOrder = this.normalizeSortOrder(request.sortOrder);
+    return update;
+  }
+
+  private publicContentItemType(value: TeacherPublicContentItemType | undefined): TeacherPublicContentItemType {
+    if (!value || !TEACHER_PUBLIC_CONTENT_ITEM_TYPES.has(value)) {
+      throw new BadRequestException('Public content item type is invalid.');
+    }
+    return value;
+  }
+
+  private publicContentMediaType(value: TeacherPublicContentMediaType | undefined): TeacherPublicContentMediaType {
+    if (!value || !TEACHER_PUBLIC_CONTENT_MEDIA_TYPES.has(value)) {
+      throw new BadRequestException('Public content media type is invalid.');
+    }
+    return value;
+  }
+
+  private normalizeSortOrder(value: number | undefined): number {
+    if (value === undefined || !Number.isFinite(value)) {
+      return 0;
+    }
+    return Math.max(-999, Math.min(999, Math.trunc(value)));
+  }
+
+  private normalizePage(value: number | undefined): number {
+    const page = Number(value);
+    return Number.isFinite(page) ? Math.max(1, Math.trunc(page)) : 1;
+  }
+
+  private normalizeLimit(value: number | undefined): number {
+    const limit = Number(value);
+    return Number.isFinite(limit) ? Math.max(1, Math.min(48, Math.trunc(limit))) : 12;
+  }
+
+  private searchRegex(value: string): RegExp {
+    return new RegExp(this.escapeRegex(value.trim().slice(0, 80)), 'i');
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private intersectTeacherIds(lists: string[][]): string[] | undefined {
+    if (!lists.length) {
+      return undefined;
+    }
+    return [...lists.reduce((current, list) => {
+      const next = new Set(list);
+      return new Set([...current].filter((id) => next.has(id)));
+    }, new Set(lists[0] ?? []))];
+  }
+
+  private optionalExternalUrl(value: string, label: string): string | undefined {
+    const trimmed = this.optionalTrim(value);
+    return trimmed ? this.normalizeExternalUrl(trimmed, label) : undefined;
+  }
+
+  private shortTrim(value: string | undefined, maxLength: number): string | undefined {
+    const trimmed = this.optionalTrim(value);
+    return trimmed ? trimmed.slice(0, maxLength) : undefined;
+  }
+
+  private toPublicContentItem(content: TeacherPublicContentMongoDocument): TeacherPublicContentItem {
+    return {
+      contentId: content.contentId,
+      teacherId: content.teacherId,
+      itemType: content.itemType,
+      title: content.title,
+      ...(content.description ? { description: content.description } : {}),
+      mediaType: content.mediaType,
+      ...(content.thumbnailUrl ? { thumbnailUrl: content.thumbnailUrl } : {}),
+      ...(content.publicUrl ? { publicUrl: content.publicUrl } : {}),
+      ...(content.externalUrl ? { externalUrl: content.externalUrl } : {}),
+      tags: this.stringArray(content.tags),
+      topics: this.stringArray(content.topics),
+      sortOrder: Number.isFinite(content.sortOrder) ? content.sortOrder : 0,
+      publishStatus: this.publicContentPublishStatus(content.publishStatus),
+      ...(content.publishedAt ? { publishedAt: this.dateIso(content.publishedAt) } : {}),
+      createdAt: this.dateIso(content.createdAt),
+      updatedAt: this.dateIso(content.updatedAt ?? content.createdAt)
+    };
+  }
+
+  private publicContentPublishStatus(value: string | undefined): TeacherPublicContentPublishStatus {
+    return value === 'published' || value === 'unpublished' || value === 'draft' ? value : 'draft';
+  }
+
+  private dateIso(value: Date | string | undefined): string {
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+    if (typeof value === 'string' && value) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? new Date(0).toISOString() : date.toISOString();
+    }
+    return new Date(0).toISOString();
+  }
+
   private async teacherNameMap(teacherIds: readonly string[]): Promise<Map<string, string>> {
     const ids = [...new Set(teacherIds.filter(Boolean))];
     if (!ids.length) {
@@ -1507,10 +2400,24 @@ export class ProfilesService {
     return `/api/v1/profile/media/${encodeURIComponent(userId)}/${encodeURIComponent(fileName)}`;
   }
 
+  private publicContentMediaUrl(teacherId: string, contentId: string, fileName: string): string {
+    return `/api/v1/profile/public-content/${encodeURIComponent(teacherId)}/${encodeURIComponent(contentId)}/${encodeURIComponent(fileName)}`;
+  }
+
   private profileMediaMimeTypeForFile(fileName: string): string | undefined {
     const extension = fileName.split('.').pop()?.toLowerCase();
     for (const [mimeType, candidateExtension] of PROFILE_MEDIA_MIME_TYPES.entries()) {
       if (candidateExtension === extension) {
+        return mimeType;
+      }
+    }
+    return undefined;
+  }
+
+  private publicContentMimeTypeForFile(fileName: string): string | undefined {
+    const extension = fileName.split('.').pop()?.toLowerCase();
+    for (const [mimeType, candidate] of PUBLIC_CONTENT_MEDIA_TYPES.entries()) {
+      if (candidate.extension === extension) {
         return mimeType;
       }
     }

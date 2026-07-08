@@ -19,17 +19,20 @@
     <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Home</a>
     @if (auth.role() === 'teacher') {
       <a routerLink="/teacher/dashboard" routerLinkActive="active">Dashboard</a>
+      <a routerLink="/teacher/analytics" routerLinkActive="active">Analytics</a>
       <a routerLink="/teacher/live-settings" routerLinkActive="active">Live Settings</a>
       <a routerLink="/teacher/profile" routerLinkActive="active">Profile</a>
       <a routerLink="/sfu-forms" routerLinkActive="active">Class forms</a>
     } @else if (auth.role() === 'student') {
       <a routerLink="/student/explore" routerLinkActive="active">Explore</a>
+      <a routerLink="/teachers" routerLinkActive="active">Teachers</a>
       <a routerLink="/student/dashboard" routerLinkActive="active">Dashboard</a>
       <a routerLink="/student/profile" routerLinkActive="active">Profile</a>
       <a routerLink="/sfu-forms" routerLinkActive="active">Class forms</a>
     } @else {
       <a routerLink="/" fragment="teachers">For Teachers</a>
       <a routerLink="/" fragment="learners">For Learners</a>
+      <a routerLink="/teachers">Teachers</a>
       <a routerLink="/student/explore">Courses</a>
       <a routerLink="/" fragment="how-it-works">How It Works</a>
       <a routerLink="/" fragment="pricing">Pricing</a>

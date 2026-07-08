@@ -1,12 +1,17 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import type { ProfileBatchAssociation, ProfileCredential, PublicTeacherProfile as PublicTeacherProfileData } from '@native-sfu/contracts';
+import type {
+  ProfileBatchAssociation,
+  ProfileCredential,
+  PublicTeacherProfile as PublicTeacherProfileData,
+  TeacherPublicContentItem
+} from '@native-sfu/contracts';
 import { ProfileService } from '../../../core/services/profile.service';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
 
-type TeacherProfileTab = 'credentials' | 'experience' | 'links' | 'batches';
+type TeacherProfileTab = 'gallery' | 'demos' | 'credentials' | 'experience' | 'links' | 'batches';
 
 interface TeacherProfileTabItem {
   id: TeacherProfileTab;
@@ -14,6 +19,8 @@ interface TeacherProfileTabItem {
 }
 
 const PROFILE_TABS: TeacherProfileTabItem[] = [
+  { id: 'gallery', label: 'Gallery' },
+  { id: 'demos', label: 'Demo classes' },
   { id: 'credentials', label: 'Credentials' },
   { id: 'experience', label: 'Experience' },
   { id: 'links', label: 'Links' },
@@ -37,7 +44,7 @@ export class PublicTeacherProfile implements OnInit {
   protected readonly teacher = signal<PublicTeacherProfileData | null>(null);
   protected readonly loading = signal(false);
   protected readonly error = signal('');
-  protected readonly activeTab = signal<TeacherProfileTab>('batches');
+  protected readonly activeTab = signal<TeacherProfileTab>('gallery');
   protected readonly tabs = PROFILE_TABS;
   protected readonly totalCapacity = computed(() => this.teacher()?.batches.reduce((total, batch) => total + (batch.capacity ?? 0), 0) ?? 0);
   protected readonly totalEnrolled = computed(() => this.teacher()?.batches.reduce((total, batch) => total + (batch.enrolledCount ?? 0), 0) ?? 0);
@@ -72,6 +79,10 @@ export class PublicTeacherProfile implements OnInit {
     switch (tab) {
       case 'credentials':
         return teacher.credentials.length + teacher.education.length;
+      case 'gallery':
+        return teacher.gallery.length;
+      case 'demos':
+        return teacher.demoClasses.length;
       case 'experience':
         return teacher.experience.length;
       case 'links':
@@ -119,6 +130,27 @@ export class PublicTeacherProfile implements OnInit {
 
   protected credentialLabel(item: ProfileCredential): string {
     return [item.issuer, item.year].filter(Boolean).join(' - ') || 'Credential';
+  }
+
+  protected publicContentUrl(item: TeacherPublicContentItem): string {
+    return this.profiles.resolveMediaUrl(item.externalUrl || item.publicUrl || item.thumbnailUrl);
+  }
+
+  protected contentIcon(item: TeacherPublicContentItem): string {
+    switch (item.mediaType) {
+      case 'video':
+        return 'VID';
+      case 'pdf':
+        return 'PDF';
+      case 'document':
+        return 'DOC';
+      case 'slides':
+        return 'SLD';
+      case 'link':
+        return 'URL';
+      default:
+        return 'IMG';
+    }
   }
 
   private initialsImage(name: string, width: number, height: number): string {

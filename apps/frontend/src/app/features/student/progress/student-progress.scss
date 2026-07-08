@@ -1,0 +1,445 @@
+.student-progress-shell {
+  display: grid;
+  gap: 22px;
+  min-height: calc(100vh - 132px);
+  padding: 28px 32px 36px;
+}
+
+.progress-heading,
+.progress-panel header,
+.batch-card-head,
+.heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.progress-heading,
+.progress-panel header,
+.batch-card-head {
+  justify-content: space-between;
+}
+
+.progress-heading h1,
+.progress-heading p,
+.progress-panel h2,
+.batch-card h3,
+.batch-card p,
+.metric-card p,
+.progress-empty h2,
+.progress-empty h3,
+.progress-empty p,
+.signal-row p,
+.signal-meta,
+.availability-list p {
+  margin: 0;
+}
+
+.progress-heading h1 {
+  color: var(--text);
+  font-size: 36px;
+  line-height: 1.05;
+}
+
+.progress-heading p,
+.batch-card p,
+.metric-card p,
+.signal-row p,
+.availability-list p {
+  color: var(--muted);
+}
+
+.heading-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.heading-actions a,
+.progress-empty a,
+.progress-panel button {
+  min-height: 40px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--panel-elevated);
+  color: var(--accent);
+  padding: 10px 14px;
+  text-decoration: none;
+  font: inherit;
+  font-weight: 850;
+  box-shadow: var(--shadow-sm);
+}
+
+.progress-panel button {
+  cursor: pointer;
+}
+
+.progress-panel button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-card,
+.progress-panel,
+.batch-card {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.metric-card {
+  display: grid;
+  gap: 7px;
+  min-height: 126px;
+  padding: 16px;
+  border-top: 3px solid #458B73;
+}
+
+.metric-card.tone-rose {
+  border-top-color: #F26076;
+}
+
+.metric-card.tone-coral {
+  border-top-color: #FF9760;
+}
+
+.metric-card.tone-amber {
+  border-top-color: #FFD150;
+}
+
+.metric-card span {
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.metric-card strong {
+  color: var(--text);
+}
+
+.metric-card p {
+  font-size: 13px;
+}
+
+.progress-panel {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.progress-panel h2 {
+  color: var(--text);
+  font-size: 24px;
+}
+
+.batch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.batch-card {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.batch-card-head h3 {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.batch-card-head span {
+  flex: 0 0 auto;
+  border: 1px solid rgb(69 139 115 / .32);
+  border-radius: var(--radius);
+  background: rgb(69 139 115 / .12);
+  color: #2d6a56;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.progress-bars {
+  display: grid;
+  gap: 10px;
+}
+
+.progress-bars > div {
+  display: grid;
+  gap: 6px;
+}
+
+.progress-bars span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel-soft);
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #458B73, #FF9760);
+}
+
+.batch-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.batch-stats div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  padding: 10px;
+}
+
+.batch-stats dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.batch-stats dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.attendance-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.attendance-strip a {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  padding: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.attendance-strip a.present {
+  border-color: rgb(69 139 115 / .32);
+  background: rgb(69 139 115 / .1);
+}
+
+.attendance-strip a.absent {
+  border-color: rgb(242 96 118 / .32);
+  background: rgb(242 96 118 / .1);
+}
+
+.attendance-strip strong {
+  color: var(--text);
+  text-transform: capitalize;
+}
+
+.attendance-strip span,
+.attendance-strip small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr);
+  gap: 16px;
+}
+
+.signal-list,
+.availability-list {
+  display: grid;
+  gap: 10px;
+}
+
+.signal-row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  padding: 12px;
+}
+
+.signal-row > span {
+  border-radius: var(--radius);
+  background: rgb(69 139 115 / .12);
+  color: #2d6a56;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+.signal-row.warning > span {
+  background: rgb(255 209 80 / .18);
+  color: #7b5a00;
+}
+
+.signal-row.danger > span {
+  background: rgb(242 96 118 / .12);
+  color: #a12f43;
+}
+
+.signal-row strong,
+.availability-list strong {
+  color: var(--text);
+}
+
+.signal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.signal-meta small {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid rgb(69 139 115 / .22);
+  border-radius: 999px;
+  background: rgb(69 139 115 / .08);
+  color: #2d6a56;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.availability-list div {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  padding: 12px;
+}
+
+.progress-alert {
+  border: 1px solid rgba(242, 96, 118, .28);
+  border-radius: var(--radius);
+  background: rgba(242, 96, 118, .1);
+  color: #F26076;
+  padding: 12px 14px;
+  font-weight: 800;
+}
+
+.progress-empty {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-height: 220px;
+  align-content: center;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  padding: 24px;
+}
+
+.progress-empty.compact {
+  min-height: 140px;
+}
+
+.progress-empty h2,
+.progress-empty h3 {
+  color: var(--text);
+}
+
+@media (max-width: 1180px) {
+  .metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .batch-grid,
+  .progress-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .student-progress-shell {
+    padding: 20px 16px 28px;
+  }
+
+  .progress-heading {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .heading-actions {
+    justify-content: start;
+  }
+
+  .progress-heading h1 {
+    font-size: 32px;
+  }
+
+  .metric-grid,
+  .batch-stats,
+  .attendance-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .batch-card-head {
+    align-items: start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 430px) {
+  .student-progress-shell {
+    padding: 18px 12px calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .metric-grid,
+  .batch-stats,
+  .attendance-strip,
+  .signal-row {
+    grid-template-columns: 1fr;
+  }
+
+  .heading-actions,
+  .heading-actions a,
+  .progress-panel button {
+    width: 100%;
+  }
+}

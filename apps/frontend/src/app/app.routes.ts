@@ -34,6 +34,12 @@ export const routes: Routes = [
     loadComponent: () => import('./features/teacher-dashboard/batch-details/batch-details').then((route) => route.BatchDetails)
   },
   {
+    path: 'teacher/analytics',
+    canActivate: [roleGuard],
+    data: { role: 'teacher' },
+    loadComponent: () => import('./features/teacher-dashboard/analytics/teacher-analytics').then((route) => route.TeacherAnalytics)
+  },
+  {
     path: 'teacher/profile',
     canActivate: [roleGuard],
     data: { role: 'teacher' },
@@ -50,6 +56,10 @@ export const routes: Routes = [
     canActivate: [roleGuard],
     data: { role: 'teacher' },
     loadComponent: () => import('./features/teacher-dashboard/live-settings/teacher-live-settings').then((route) => route.TeacherLiveSettings)
+  },
+  {
+    path: 'teachers',
+    loadComponent: () => import('./features/profile/teacher-marketplace/teacher-marketplace').then((route) => route.TeacherMarketplace)
   },
   {
     path: 'teachers/:teacherId',
@@ -72,6 +82,18 @@ export const routes: Routes = [
     canActivate: [roleGuard],
     data: { role: 'student' },
     loadComponent: () => import('./features/student/dashboard/dashboard').then((route) => route.StudentDashboard)
+  },
+  {
+    path: 'student/support',
+    canActivate: [roleGuard],
+    data: { role: 'student' },
+    loadComponent: () => import('./features/student/support/student-support').then((route) => route.StudentSupport)
+  },
+  {
+    path: 'student/progress',
+    canActivate: [roleGuard],
+    data: { role: 'student' },
+    loadComponent: () => import('./features/student/progress/student-progress').then((route) => route.StudentProgress)
   },
   {
     path: 'student/classes/completed',

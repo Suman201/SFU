@@ -34,6 +34,7 @@ import {
   type RtcpPacket
 } from '@native-sfu/sfu-core';
 import { DtlsService } from './dtls.service';
+import type { TrustedIngestTransportRegistration } from './ingest/ingest-transport.types';
 import { IceService } from './ice.service';
 import { MediaPacketBridge, type MediaPacketBridgeCounters } from './media/media-packet-bridge';
 import type { PipeTransportAdapter } from './pipe-transport.adapter';
@@ -61,6 +62,12 @@ interface ManagedPipeTransport {
   consumerIds: Set<string>;
 }
 
+interface ManagedTrustedIngestTransport extends TrustedIngestTransportRegistration {
+  producerRtp?: RtpParameters;
+  inboundSsrcs: number[];
+  closed: boolean;
+}
+
 export interface MediaRoomCleanupSummary {
   participantIds: string[];
   transportCount: number;
@@ -73,6 +80,7 @@ export interface MediaRoomCleanupSummary {
 export class MediaService {
   private readonly transports = new Map<string, ManagedTransport>();
   private readonly pipeTransports = new Map<string, ManagedPipeTransport>();
+  private readonly trustedIngestTransports = new Map<string, ManagedTrustedIngestTransport>();
   private readonly producers = new Map<string, Producer>();
   private readonly consumers = new Map<string, Consumer>();
   private readonly consumerLayerStates = new Map<string, ConsumerLayerState>();
@@ -287,10 +295,31 @@ export class MediaService {
     return transport.options;
   }
 
+  async registerTrustedIngestTransport(transport: TrustedIngestTransportRegistration): Promise<void> {
+    this.trustedIngestTransports.set(transport.id, {
+      ...transport,
+      inboundSsrcs: [],
+      closed: false
+    });
+  }
+
+  async unregisterTrustedIngestTransport(transportId: string): Promise<void> {
+    this.trustedIngestTransports.delete(transportId);
+  }
+
   async bindProducer(transportId: string, participantId: string, rtpParameters: RtpParameters): Promise<void> {
+    const inboundSsrcs = rtpSsrcs(rtpParameters);
+    const trustedIngestTransport = this.trustedIngestTransports.get(transportId);
+    if (trustedIngestTransport && !trustedIngestTransport.closed) {
+      if (trustedIngestTransport.participantId !== participantId) {
+        throw new ForbiddenException('Transport belongs to another participant');
+      }
+      trustedIngestTransport.producerRtp = rtpParameters;
+      trustedIngestTransport.inboundSsrcs = inboundSsrcs;
+      return;
+    }
     const transport = this.requireTransport(transportId, participantId);
     transport.producerRtp = rtpParameters;
-    const inboundSsrcs = rtpSsrcs(rtpParameters);
     transport.inboundSsrcs = inboundSsrcs;
     const session = this.srtp.getSession(transportId);
     if (session) {
@@ -299,8 +328,7 @@ export class MediaService {
   }
 
   async registerProducer(producer: Producer): Promise<void> {
-    const transport = this.transports.get(producer.transportId);
-    if (!transport || transport.closed) {
+    if (!this.hasActiveProducerTransport(producer.transportId)) {
       throw new NotFoundException('Producer transport not found');
     }
     this.producers.set(producer.id, producer);
@@ -437,6 +465,24 @@ export class MediaService {
     const transport = this.requireTransport(transportId, participantId);
     const feedback = this.rtcp.process(transport.roomId, participantId, packet);
     const forwarded = await this.router.routeRtcp(packet, { sourceTransportId: transportId, sourceParticipantId: participantId });
+    return { feedback, forwarded };
+  }
+
+  async handleTrustedIngestRtp(transportId: string, packet: Buffer): Promise<number> {
+    const transport = this.requireTrustedIngestTransport(transportId);
+    return this.router.route(packet, {
+      sourceTransportId: transportId,
+      sourceParticipantId: transport.participantId
+    });
+  }
+
+  async handleTrustedIngestRtcp(transportId: string, packet: Buffer): Promise<{ feedback: RtcpFeedback; forwarded: number }> {
+    const transport = this.requireTrustedIngestTransport(transportId);
+    const feedback = this.rtcp.process(transport.roomId, transport.participantId, packet);
+    const forwarded = await this.router.routeRtcp(packet, {
+      sourceTransportId: transportId,
+      sourceParticipantId: transport.participantId
+    });
     return { feedback, forwarded };
   }
 
@@ -649,6 +695,13 @@ export class MediaService {
         this.consumerQualityStates.delete(consumerId);
       }
     }
+    for (const [transportId, transport] of [...this.trustedIngestTransports]) {
+      if (transport.participantId === participantId) {
+        this.trustedIngestTransports.delete(transportId);
+        transport.closed = true;
+        await transport.onClose?.();
+      }
+    }
     this.router.removeParticipant(participantId);
   }
 
@@ -672,6 +725,15 @@ export class MediaService {
         this.ice.closeAgent(transport.id);
         this.transportQualityStates.delete(transport.id);
         this.transports.delete(transport.id);
+      }
+    }
+    for (const [transportId, transport] of [...this.trustedIngestTransports]) {
+      if (transport.roomId === roomId) {
+        summary.transportCount += 1;
+        participantIds.add(transport.participantId);
+        this.trustedIngestTransports.delete(transportId);
+        transport.closed = true;
+        await transport.onClose?.();
       }
     }
     for (const [producerId, producer] of this.producers) {
@@ -791,6 +853,11 @@ export class MediaService {
     await transport.bridge.sendRtcp(packet, { transportId });
   }
 
+  private async sendRtcpToTrustedIngestTransport(transportId: string, packet: Buffer): Promise<void> {
+    const transport = this.requireTrustedIngestTransport(transportId);
+    await transport.onRtcp(packet);
+  }
+
   private async maybeRequestPipeConsumerKeyframe(consumer: Consumer, pipeTransportId: string): Promise<void> {
     const producer = this.producers.get(consumer.producerId);
     if (!producer || producer.kind !== 'video' || producer.transportId === pipeTransportId || !this.transports.has(producer.transportId)) {
@@ -818,6 +885,10 @@ export class MediaService {
   }
 
   private async sendProducerRtcpToTransport(transportId: string, packet: Buffer): Promise<void> {
+    if (this.trustedIngestTransports.has(transportId)) {
+      await this.sendRtcpToTrustedIngestTransport(transportId, packet);
+      return;
+    }
     if (!isKeyframeControlPacket(packet)) {
       await this.sendRtcpToTransport(transportId, packet);
       return;
@@ -895,6 +966,23 @@ export class MediaService {
       throw new NotFoundException('Pipe transport service not available');
     }
     return this.pipe;
+  }
+
+  private hasActiveProducerTransport(transportId: string): boolean {
+    const transport = this.transports.get(transportId);
+    if (transport && !transport.closed) {
+      return true;
+    }
+    const trustedIngestTransport = this.trustedIngestTransports.get(transportId);
+    return Boolean(trustedIngestTransport && !trustedIngestTransport.closed);
+  }
+
+  private requireTrustedIngestTransport(transportId: string): ManagedTrustedIngestTransport {
+    const transport = this.trustedIngestTransports.get(transportId);
+    if (!transport || transport.closed) {
+      throw new NotFoundException('Trusted ingest transport not found');
+    }
+    return transport;
   }
 
   private requirePipeTransport(pipeTransportId: string) {

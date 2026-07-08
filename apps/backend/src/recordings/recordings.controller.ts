@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Recording, RecordingScope } from '@native-sfu/contracts';
+import { Recording, RecordingPlaybackProgress, RecordingPlaybackProgressUpdateRequest, RecordingScope } from '@native-sfu/contracts';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { RecordingsService } from './recordings.service';
@@ -20,6 +20,15 @@ export class RecordingsController {
   @Post(':recordingId/stop')
   stop(@CurrentUser() user: AuthenticatedUser, @Param('recordingId') recordingId: string): Promise<Recording> {
     return this.recordings.stop(user.sub, recordingId);
+  }
+
+  @Post(':recordingId/playback-progress')
+  updatePlaybackProgress(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('recordingId') recordingId: string,
+    @Body() body: RecordingPlaybackProgressUpdateRequest
+  ): Promise<RecordingPlaybackProgress> {
+    return this.recordings.updatePlaybackProgress(recordingId, body, user);
   }
 
   @Get('rooms/:roomId')

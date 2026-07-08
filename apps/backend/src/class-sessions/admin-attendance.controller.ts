@@ -18,7 +18,10 @@ interface AdminAttendanceQueryParams {
   courseId?: string;
   batchId?: string;
   teacherId?: string;
+  studentId?: string;
   status?: AdminAttendanceQuery['status'];
+  attendanceStatus?: AdminAttendanceQuery['attendanceStatus'];
+  source?: AdminAttendanceQuery['source'];
   dateFrom?: string;
   dateTo?: string;
   page?: string;
@@ -84,7 +87,10 @@ export class AdminAttendanceController {
     const limit = query.limit ? Number(query.limit) : undefined;
     return {
       ...(query.status ? { status: query.status } : {}),
+      ...(query.attendanceStatus ? { attendanceStatus: query.attendanceStatus } : {}),
+      ...(query.source ? { source: query.source } : {}),
       ...(query.teacherId ? { teacherId: query.teacherId } : {}),
+      ...(query.studentId ? { studentId: query.studentId } : {}),
       ...(query.batchId ? { batchId: query.batchId } : {}),
       ...(query.courseId ? { courseId: query.courseId } : {}),
       ...(query.dateFrom ? { dateFrom: query.dateFrom } : {}),

@@ -7,6 +7,7 @@
 
 .detail-head,
 .detail-grid article,
+.engagement-grid article,
 .metadata-grid article,
 .manifest-panel {
   border: 1px solid var(--line);
@@ -55,6 +56,7 @@
 }
 
 .detail-grid,
+.engagement-grid,
 .metadata-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -62,6 +64,7 @@
 }
 
 .detail-grid article,
+.engagement-grid article,
 .metadata-grid article,
 .manifest-panel {
   display: grid;
@@ -70,6 +73,7 @@
 }
 
 .detail-grid span,
+.engagement-grid span,
 .metadata-grid span,
 .retention-form span {
   color: var(--muted);
@@ -79,6 +83,7 @@
 }
 
 .detail-grid strong,
+.engagement-grid strong,
 .metadata-grid strong,
 .metadata-grid a {
   min-width: 0;
@@ -86,6 +91,15 @@
   color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.engagement-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.engagement-grid strong {
+  color: var(--product-rose);
+  font-size: 26px;
 }
 
 .metadata-grid a {
@@ -186,6 +200,7 @@
 
 @media (max-width: 980px) {
   .detail-grid,
+  .engagement-grid,
   .metadata-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -197,6 +212,7 @@
   }
 
   .detail-grid,
+  .engagement-grid,
   .metadata-grid {
     grid-template-columns: 1fr;
   }

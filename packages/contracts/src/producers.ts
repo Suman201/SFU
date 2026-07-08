@@ -2,7 +2,8 @@ import type { ProducerQualityState } from './metrics.js';
 import type { RoomAutopilotDecision } from './rooms.js';
 
 export type ProducerKind = 'audio' | 'video' | 'screen';
-export type ProducerSource = 'screen' | 'whiteboard';
+export const PRODUCER_SOURCES = ['screen', 'whiteboard', 'ingest'] as const;
+export type ProducerSource = (typeof PRODUCER_SOURCES)[number];
 export type ProducerStatus = 'live' | 'paused' | 'closed';
 export type SimulcastLayerName = 'low' | 'medium' | 'high';
 

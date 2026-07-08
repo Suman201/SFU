@@ -1,6 +1,6 @@
 # Class Session Production Readiness Gaps
 
-Updated: 2026-07-07
+Updated: 2026-07-08
 
 This document tracks the remaining gap between the current class-session implementation and production readiness.
 
@@ -338,6 +338,77 @@ Verification completed:
 - **Done**: ~~Broad scan residue was reviewed. Done: remaining `sample`, `placeholder`, and `static` matches are math sampling variables, form input placeholders, camera-off/prejoin placeholders, and CSS positioning, not production demo data.~~
 - **Done**: ~~Whitespace check. Done: `git diff --check` passed.~~
 
+### P1: Public Teacher Profile Gallery And Demo Classes
+
+Status: **Done** for the implemented 2026-07-08 scope.
+
+Every completed checklist item below is fully struck through and marked **Done**. Admin moderation/review workflow remains a later marketplace/promotion expansion, not a blocker for the current gallery/demo baseline.
+
+- **Done**: ~~Teacher-managed public gallery exists. Done: teachers can create, edit, archive, upload media for, publish, and unpublish public gallery items from the teacher profile page.~~
+- **Done**: ~~Teacher-managed demo/sample class entries exist. Done: demo class items use the same backend-backed public content workflow and appear separately from gallery items.~~
+- **Done**: ~~Public teacher profile shows only published gallery/demo items. Done: public profile response includes published-only `gallery` and `demoClasses` arrays, while draft/unpublished items stay out of the public page.~~
+- **Done**: ~~Private enrolled-class artifacts are not reused as public demos by default. Done: gallery/demo items live in a dedicated `teacher_public_contents` collection instead of class-session material, recording, or whiteboard artifact records.~~
+- **Done**: ~~Public demo URLs do not expose raw storage keys. Done: uploaded files are served through backend public profile media URLs, and local storage path/key fields are not returned in the public contract.~~
+- **Done**: ~~Disabled/private teacher profiles do not expose gallery or demo content. Done: the existing public teacher profile availability check still hides the full public profile unless the teacher is active, enabled, and public-profile enabled.~~
+
+Verification completed:
+
+- **Done**: ~~Contracts build. Done: `npm run build --workspace @native-sfu/contracts` passed.~~
+- **Done**: ~~Backend build. Done: `npm run build --workspace @native-sfu/backend` passed.~~
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed.~~
+- **Done**: ~~Focused profile service tests. Done: `npm test --workspace @native-sfu/backend -- profiles.service.spec.ts` passed with published-only and teacher-management authorization coverage.~~
+- **Done**: ~~Whitespace check. Done: `git diff --check` passed.~~
+
+### P1: Teacher Marketplace And Discovery
+
+Status: **Done** for the implemented 2026-07-08 P1 baseline.
+
+Every completed checklist item below is fully struck through and marked **Done**. Paid promotion, rating/price filters, featured placements, and admin editorial ordering remain tracked as marketplace expansion work.
+
+- **Done**: ~~Public teacher marketplace exists. Done: `/teachers` now provides a compact teacher-first discovery page with search/filter controls, teacher cards, pagination/load-more, loading/error/empty states, and links to public teacher profiles.~~
+- **Done**: ~~Marketplace API returns only active public teachers. Done: `GET /api/v1/teachers` filters to active, enabled, public-profile-enabled teacher users.~~
+- **Done**: ~~Teacher cards expose only safe public fields. Done: cards include avatar, display name, headline, public skills/languages, location/timezone/availability, highlighted credential, active public batch count, next batch start, and published gallery/demo counts; email, phone, settings, storage keys, and private artifacts are excluded.~~
+- **Done**: ~~Search and filters work for the P1 data model. Done: the API and UI support query search, skill/topic, subject, language, and availability/open-batch filters.~~
+- **Done**: ~~Gallery/demo availability is visible without leaking private class artifacts. Done: counts are derived only from published `teacher_public_contents`, not class-session materials, recordings, chats, attendance, assignments, or whiteboard artifacts.~~
+- **Done**: ~~Student Explore and public profile navigation connect to marketplace. Done: student header and batch Explore link to `/teachers`, and public teacher profiles link back to the marketplace while keeping batch Explore/enrollment separate.~~
+
+Verification completed:
+
+- **Done**: ~~Contracts build. Done: `npm run build --workspace @native-sfu/contracts` passed.~~
+- **Done**: ~~Backend build. Done: `npm run build --workspace @native-sfu/backend` passed.~~
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed.~~
+- **Done**: ~~Focused profile service tests. Done: `npm test --workspace @native-sfu/backend -- profiles.service.spec.ts` passed with marketplace privacy/filter coverage.~~
+- **Done**: ~~Whitespace check. Done: `git diff --check` passed.~~
+
+### P2: Public Teacher Profile Promotion And Paid Visibility
+
+Status: **Done** for the implemented 2026-07-08 promotion foundation. Payment checkout, impression/click analytics, richer ranking controls, and legal disclosure wording remain tracked future scope.
+
+Completed scope:
+
+- **Done**: ~~Teacher promotion records are separate from public profile publishing. Done: `teacher_promotions` stores lifecycle status, placement, active window, teacher identity snapshot, billing/payment placeholders, request/approval/cancel metadata, admin notes, timestamps, and indexes.~~
+- **Done**: ~~Teacher can request promotion without self-activating it. Done: teachers can list and request their own promotions from the frontend profile page, but requests remain admin-review state.~~
+- **Done**: ~~Only eligible teachers can be promoted. Done: backend checks require an active, enabled, public-profile-enabled teacher before request/approval can affect visibility.~~
+- **Done**: ~~Admin can manage promotion lifecycle. Done: admin portal has a Profile promotions queue with filters and approve, pause, cancel, and reject actions backed by admin-only APIs.~~
+- **Done**: ~~Approved in-window promotions affect public marketplace visibility. Done: active promoted teachers are boosted before organic results and cards include promoted placement metadata.~~
+- **Done**: ~~Expired, cancelled, rejected, private, disabled, or unpublished profiles do not receive public promotion. Done: marketplace promotion metadata is derived only after the safe public-teacher filter.~~
+- **Done**: ~~Promotion events are audit-safe. Done: request/approval/pause/cancel/reject actions write audit entries with safe metadata and no payment secrets or private profile data.~~
+
+Verification completed:
+
+- **Done**: ~~Contracts build. Done: `npm run build --workspace @native-sfu/contracts` passed.~~
+- **Done**: ~~Focused profile service tests. Done: `npm test --workspace @native-sfu/backend -- profiles.service.spec.ts` passed with promotion request, eligibility, overlap, admin approval, marketplace boost, and expired/cancelled coverage.~~
+- **Done**: ~~Backend build. Done: `npm run build --workspace @native-sfu/backend` passed.~~
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed.~~
+- **Done**: ~~Admin portal build. Done: `npm run build --workspace @native-sfu/admin-portal` passed.~~
+
+Tracked follow-ups:
+
+- **Tracked**: Payment checkout/subscription entitlement is not implemented; current `billingStatus` and `paymentReference` fields are placeholders for manual/admin-controlled workflow.
+- **Tracked**: Promotion analytics such as impressions, profile clicks, demo opens, inquiries, and enrollment attribution are not implemented yet.
+- **Tracked**: Explicit rating/price/popularity filters and numeric editorial priority remain future marketplace data/ranking work.
+- **Tracked**: Final sponsored/paid legal disclosure wording should be reviewed before paid campaigns go live.
+
 ### P1: Student Post-Class Access And Private Q&A
 
 Status: **Done** for the implemented 2026-07-07 scope.
@@ -463,6 +534,112 @@ Tracked follow-ups:
 - **Tracked**: Add richer full-text ranking or a dedicated search index only if metadata search becomes insufficient at production scale.
 - **Tracked**: Keep private Q&A body search limited to explicit authorized teacher-student thread views, not broad library search.
 - **Tracked**: Add richer lookup selectors for course/batch/teacher filters if admins need friendlier discovery than raw ids.
+
+### P1: Student Progress Dashboard
+
+Status: **Done** for the implemented 2026-07-08 student self-progress baseline.
+
+Every completed checklist item below is fully struck through and marked **Done**. Remaining expansion is listed separately as **Tracked**.
+
+Completed scope:
+
+- **Done**: ~~Backend-backed student progress page for the authenticated student only. Done: `/student/progress` calls `GET /api/v1/class-sessions/student/progress`, and the backend derives the student id from auth.~~
+- **Done**: ~~Progress summary should reuse enrollment, completed-session history, attendance snapshots, assignments, recordings, private Q&A metadata, and participation/timeline source records. Done: the service aggregates from those existing sources without a parallel analytics store.~~
+- **Done**: ~~Values should cover attendance rate/trend, completed/missed/upcoming classes, assignment due/submitted/reviewed/overdue counts, recording review state where tracking exists, and participation/Q&A status where records exist. Done: the response includes those counts, with recording watch progress marked unavailable because per-student watch tracking is not persisted yet.~~
+- **Done**: ~~Empty states must be honest when recording-watch, attendance, assignment, or participation data is unavailable. Done: availability notes are returned for attendance, assignments, recordings, participation, and Q&A.~~
+- **Done**: ~~The view must not expose class-wide analytics, other-student progress, private Q&A bodies, private chat bodies, assignment submission bodies, raw storage keys, or raw media data. Done: focused backend tests verify peer/private data is absent.~~
+- **Done**: ~~Mobile/tablet layout should be compact and usable in the frontend portal. Done: the progress page uses responsive summary cards, batch panels, and mobile-collapsed grids.~~
+
+Acceptance proof:
+
+- **Done**: ~~Student can load only their own progress. Done: endpoint scope is the authenticated student, and no arbitrary student id is accepted.~~
+- **Done**: ~~Non-students or unauthorized users cannot load student progress unless a separate admin analytics flow explicitly allows it. Done: the route is student-only and tests reject a teacher user.~~
+- **Done**: ~~Student cannot request another student's progress. Done: there is no `studentId` query/body field for this endpoint.~~
+- **Done**: ~~Attendance, assignment, recording, and participation counts match existing source records. Done: the focused service test covers snapshot attendance, student assignment submission, published recording readiness, and student-only activity events.~~
+- **Done**: ~~Private Q&A/chat bodies are not included in summary payloads. Done: progress returns Q&A counts/workflow metadata only.~~
+- **Done**: ~~Frontend progress page builds and shows honest loading, error, and empty states. Done: frontend build passed and the page includes loading/error/empty views.~~
+
+Verification:
+
+- **Done**: ~~Contracts build. Done: `npm run build --workspace @native-sfu/contracts` passed.~~
+- **Done**: ~~Backend build. Done: `npm run build --workspace @native-sfu/backend` passed.~~
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed.~~
+- **Done**: ~~Focused backend tests. Done: `npm test --workspace @native-sfu/backend -- class-sessions.service.spec.ts` passed.~~
+- **Done**: ~~Whitespace check. Done: `git diff --check` passed.~~
+- **Pending Proof**: Frontend Karma test runner still has a local ChromeHeadless disconnect before specs execute, even though the build passed.
+
+Tracked follow-ups:
+
+- **Done**: ~~Persist per-student recording watch/progress events before showing watched/unwatched analytics. Done 2026-07-08: `recording_playback_progress` now stores authorized student progress, and student progress reports watched/unwatched, watched time, and completion rate from persisted playback progress.~~
+- **Done**: ~~Add subject/weak-topic recommendations only after deterministic tagged learning-outcome data exists. Done 2026-07-08: student progress now returns source-linked deterministic recommendations, including existing whiteboard page tag review signals where tags are available. Richer subject taxonomy remains tracked as future content-model work.~~
+
+### P1: Teacher Analytics
+
+Status: **Done** for the implemented 2026-07-08 teacher/admin analytics scope.
+
+Every completed checklist item below is fully struck through and marked **Done**. Remaining expansion is listed separately as **Tracked**.
+
+Completed scope:
+
+- **Done**: ~~Shared teacher analytics contract. Done: `packages/contracts/src/teacher-analytics.ts` defines query filters, availability states, summary cards, per-batch rollups, per-student risk indicators, and privacy-safe source identifiers.~~
+- **Done**: ~~Teacher-owned analytics API. Done: `GET /api/v1/teacher/analytics` returns analytics only for batches owned by the authenticated teacher.~~
+- **Done**: ~~Admin analytics alias. Done: `GET /api/v1/admin/teacher-analytics` lets admin/super-admin users query cross-batch analytics without giving students access.~~
+- **Done**: ~~Attendance and engagement aggregation. Done: analytics reuse attendance snapshots or inferred attendance plus class-session activity/timeline records for attendance rate, missed classes, reconnects, joins, hand raises, and allowed-speaking turns.~~
+- **Done**: ~~Assignment aggregation. Done: analytics include due, submitted, reviewed, overdue, missing/no-submission, and source assignment ids where safe.~~
+- **Done**: ~~Q&A and participation aggregation. Done: private Q&A thread state contributes question counts and unanswered status without exposing private message bodies.~~
+- **Done**: ~~Recording and material usage metadata. Done: recording readiness metadata, persisted playback progress, watched/not-watched counts, average completion, total watch time, material download events, and weak-topic/review signals are reported without private message bodies or raw storage data.~~
+- **Done**: ~~Conservative risk indicators. Done: repeated absences, missing/no submissions, low recorded participation, and unanswered Q&A generate explainable count-based risk labels.~~
+- **Done**: ~~Frontend teacher analytics page. Done: `/teacher/analytics` provides filters, summary cards, per-batch insights, risk indicators, and source links from the frontend portal.~~
+- **Done**: ~~Privacy controls. Done: analytics exclude private chat/Q&A bodies, assignment submission bodies, raw storage keys, raw attachment URLs, and raw media payloads.~~
+
+Verification:
+
+- **Done**: ~~Contracts build. Done: `npm run build --workspace @native-sfu/contracts` passed.~~
+- **Done**: ~~Backend build. Done: `npm run build --workspace @native-sfu/backend` passed.~~
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed.~~
+- **Done**: ~~Admin portal build. Done: `npm run build --workspace @native-sfu/admin-portal` passed.~~
+- **Done**: ~~Focused backend class-session tests. Done: `npm test --workspace @native-sfu/backend -- class-sessions.service.spec.ts` passed with 59 tests.~~
+- **Done**: ~~Whitespace check. Done: `git diff --check` passed.~~
+
+Tracked follow-ups:
+
+- **Done**: ~~Persist normalized recording playback/watch telemetry before reporting per-student recording completion or watch-time analytics. Done 2026-07-08: teacher analytics now uses persisted recording playback progress for watched/not-watched, average completion, and total watch time.~~
+- **Tracked**: Add an admin portal visual teacher-analytics page if admins need a UI beyond the admin API alias.
+- **Done**: ~~Add richer topic, weak-area, and concept analytics only after questions, assignments, or whiteboard artifacts carry reliable tags. Done 2026-07-08: teacher analytics now exposes batch weak-topic/review signals from deterministic counts and existing whiteboard page tags. Richer concept taxonomy remains future scope.~~
+
+### P1: Student Support And Escalation
+
+Status: **Done** for the implemented 2026-07-08 student/admin support scope.
+
+Every completed checklist item below is fully struck through and marked **Done**. Remaining expansion is listed separately as **Tracked**.
+
+Completed scope:
+
+- **Done**: ~~Shared support contracts. Done: `packages/contracts/src/support.ts` defines issue types, statuses, safe diagnostics, request/comment payloads, list query, and admin update request contracts.~~
+- **Done**: ~~Support request persistence. Done: `class_session_support_requests` stores student-owned support tickets with batch/session/room/recording context, status, safe diagnostics, admin responses, and timestamps.~~
+- **Done**: ~~Student support API. Done: `POST /api/v1/support/requests`, `GET /api/v1/support/requests`, and `GET /api/v1/support/requests/:requestId` are student-authenticated and own-ticket scoped.~~
+- **Done**: ~~Admin support queue API. Done: `GET /api/v1/admin/support-requests`, `GET /api/v1/admin/support-requests/:requestId`, and `PATCH /api/v1/admin/support-requests/:requestId` support admin triage and status updates.~~
+- **Done**: ~~Enrollment-protected class context. Done: class/session/recording-linked support requests resolve their batch and require the student to be historically enrolled before persistence.~~
+- **Done**: ~~Student support UI. Done: `/student/support` lets students submit support requests, include safe diagnostics, and see their own request status updates.~~
+- **Done**: ~~Contextual student entry points. Done: dashboard, live class, completed class, and completed-class recording rows link into support with useful prefilled context.~~
+- **Done**: ~~Admin support UI. Done: `/support` in the admin portal shows a compact shared-table support queue with filters, triage detail, status update, student-visible response, and internal-note controls.~~
+- **Done**: ~~Privacy-safe diagnostics. Done: support stores only explicit support messages, safe IDs, userAgent/route/timestamp/platform/permission state, and redacts token-like route parameters.~~
+- **Done**: ~~Audit/timeline integration. Done: support request creation writes audit records and actor-only class-session support timeline events when a session context exists.~~
+
+Verification:
+
+- **Done**: ~~Contracts build. Done: `npm run build --workspace @native-sfu/contracts` passed.~~
+- **Done**: ~~Focused backend support tests. Done: `npm test --workspace @native-sfu/backend -- support.service.spec.ts` passed with 4 tests.~~
+- **Done**: ~~Backend build. Done: `npm run build --workspace @native-sfu/backend` passed.~~
+- **Done**: ~~Frontend build. Done: `npm run build --workspace @native-sfu/frontend` passed.~~
+- **Done**: ~~Admin portal build. Done: `npm run build --workspace @native-sfu/admin-portal` passed.~~
+- **Done**: ~~Whitespace check. Done: `git diff --check` passed.~~
+
+Tracked follow-ups:
+
+- **Tracked**: Add teacher-owned class-related support visibility after product rules define whether teachers can respond, view read-only, or remain excluded from support tickets.
+- **Tracked**: Add richer support assignment to real admin/support users if the product adds a support-role roster beyond admin/super-admin.
+- **Tracked**: Add notification delivery for support status changes once support notification rules are finalized.
 
 ### P1: Whiteboard Production Teaching UX
 

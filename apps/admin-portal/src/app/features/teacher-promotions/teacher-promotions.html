@@ -1,0 +1,127 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Teacher discovery</p>
+    <h1>Profile promotions</h1>
+    <p>Approve, pause, cancel, and inspect paid-visibility placeholders without changing public profile privacy rules.</p>
+  </div>
+</section>
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Promotion queue</h2>
+      <p>{{ total() }} records found</p>
+    </div>
+    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+      <select formControlName="status" aria-label="Status">
+        <option value="all">All statuses</option>
+        <option value="requested">Requested</option>
+        <option value="scheduled">Scheduled</option>
+        <option value="active">Active</option>
+        <option value="paused">Paused</option>
+        <option value="expired">Expired</option>
+        <option value="cancelled">Cancelled</option>
+        <option value="rejected">Rejected</option>
+      </select>
+      <select formControlName="placement" aria-label="Placement">
+        <option value="all">All placements</option>
+        <option value="marketplace_featured">Marketplace featured</option>
+        <option value="search_boost">Search boost</option>
+        <option value="profile_badge">Profile badge</option>
+      </select>
+      <input type="search" formControlName="search" placeholder="Teacher, promotion, payment ref" aria-label="Search promotions" />
+      <input type="search" formControlName="teacherId" placeholder="Teacher ID" aria-label="Teacher ID" />
+      <button type="submit" class="table-action primary">Apply</button>
+      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+    </form>
+  </div>
+
+  <form class="promotion-note" [formGroup]="noteForm">
+    <label>
+      <span>Optional admin note for next action</span>
+      <input type="text" formControlName="adminNote" placeholder="Visible in promotion audit/admin record" />
+    </label>
+  </form>
+
+  @if (error()) {
+    <p class="table-error" role="alert">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="table-success" role="status">{{ success() }}</p>
+  }
+
+  <div class="data-table-wrap" style="--data-table-min-width: 1180px">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Teacher</th>
+          <th>Placement</th>
+          <th>Status</th>
+          <th>Window</th>
+          <th>Billing</th>
+          <th>Reason / note</th>
+          <th class="actions-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr>
+            <td colspan="7" class="empty-state">Loading teacher promotions...</td>
+          </tr>
+        } @else if (!rows().length) {
+          <tr>
+            <td colspan="7" class="empty-state">No teacher promotions match these filters.</td>
+          </tr>
+        } @else {
+          @for (row of rows(); track trackByPromotion($index, row)) {
+            <tr>
+              <td>
+                <div class="primary-cell">
+                  <span class="table-avatar">{{ initials(row) || 'TR' }}</span>
+                  <div>
+                    <strong>{{ row.teacherName || 'Teacher profile' }}</strong>
+                    <small>{{ row.teacherId }}</small>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <strong>{{ placementLabel(row.placement) }}</strong>
+                <small>{{ row.promotionId }}</small>
+              </td>
+              <td><span class="data-pill {{ statusClass(row.status) }}">{{ statusLabel(row.status) }}</span></td>
+              <td>
+                <strong>{{ row.startsAt | date: 'mediumDate' }}</strong>
+                <small>to {{ row.endsAt | date: 'mediumDate' }}</small>
+              </td>
+              <td>
+                <strong>{{ row.billingStatus }}</strong>
+                <small>{{ row.paymentReference || 'No payment reference' }}</small>
+              </td>
+              <td>
+                <strong>{{ row.reason || 'No request reason' }}</strong>
+                <small>{{ row.adminNote || 'No admin note' }}</small>
+              </td>
+              <td class="actions-cell promotion-actions">
+                <a class="table-action" [routerLink]="['/users', row.teacherId]">Teacher</a>
+                <button type="button" class="table-action primary" [disabled]="!canApprove(row) || isSaving(row)" (click)="runAction(row, 'approve')">
+                  {{ isSaving(row) ? 'Saving...' : 'Approve' }}
+                </button>
+                <button type="button" class="table-action" [disabled]="!canPause(row) || isSaving(row)" (click)="runAction(row, 'pause')">Pause</button>
+                <button type="button" class="table-action" [disabled]="!canCancel(row) || isSaving(row)" (click)="runAction(row, 'cancel')">Cancel</button>
+                <button type="button" class="table-action danger" [disabled]="!canReject(row) || isSaving(row)" (click)="runAction(row, 'reject')">Reject</button>
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <footer class="table-footer">
+    <span>Page {{ page() }} · {{ total() }} total</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() === 1" (click)="previousPage()">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+    </div>
+  </footer>
+</section>

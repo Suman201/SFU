@@ -21,7 +21,21 @@
           · completed {{ formatDate(detail.session.completedAt) }}
         </p>
       </div>
-      <a class="button ghost" routerLink="/student/classes/completed">Class history</a>
+      <div class="detail-heading-actions">
+        <a
+          class="button ghost"
+          routerLink="/student/support"
+          [queryParams]="{
+            issueType: 'class_issue',
+            batchId: detail.session.batchId,
+            sessionId: detail.session.sessionId,
+            subject: 'Issue with completed class'
+          }"
+        >
+          Get help
+        </a>
+        <a class="button ghost" routerLink="/student/classes/completed">Class history</a>
+      </div>
     </section>
 
     <section class="summary-grid" aria-label="Completed class summary">
@@ -53,12 +67,44 @@
           <div class="recording-list">
             @for (recording of detail.recordings; track recording.id) {
               <div class="recording-row">
-                <div>
-                  <strong>{{ recordingLabel(recording) }}</strong>
+                <div class="recording-main">
+                  <div>
+                    <strong>{{ recordingLabel(recording) }}</strong>
+                    <span class="recording-progress" [class.watched]="recordingProgressTone(recording) === 'watched'" [class.progress]="recordingProgressTone(recording) === 'progress'">
+                      {{ recordingProgressLabel(recording) }}
+                    </span>
+                  </div>
                   <small>{{ formatDate(recording.stoppedAt || recording.startedAt) }}</small>
                 </div>
-                @if (recording.downloadUrl || recording.playbackUrl || recording.url) {
-                  <a [href]="recording.playbackUrl || recording.downloadUrl || recording.url" target="_blank" rel="noopener noreferrer">Open</a>
+                @if (recordingHref(recording) !== '#') {
+                  <div class="recording-actions">
+                    <a [href]="recordingHref(recording)" target="_blank" rel="noopener noreferrer" (click)="onRecordingOpen(recording)">Open</a>
+                    <a
+                      [routerLink]="['/student/support']"
+                      [queryParams]="{
+                        issueType: recording.status === 'failed' ? 'recording_problem' : 'recording_access',
+                        batchId: detail.session.batchId,
+                        sessionId: detail.session.sessionId,
+                        recordingId: recording.recordingId || recording.id,
+                        subject: 'Recording issue'
+                      }"
+                    >
+                      Report issue
+                    </a>
+                  </div>
+                  @if (isVideoRecording(recording)) {
+                    <video
+                      class="recording-player"
+                      controls
+                      preload="metadata"
+                      [src]="recordingHref(recording)"
+                      (play)="onRecordingMediaEvent(recording, 'play', $event)"
+                      (pause)="onRecordingMediaEvent(recording, 'pause', $event)"
+                      (seeked)="onRecordingMediaEvent(recording, 'seek', $event)"
+                      (timeupdate)="onRecordingTimeUpdate(recording, $event)"
+                      (ended)="onRecordingMediaEvent(recording, 'ended', $event)"
+                    ></video>
+                  }
                 } @else {
                   <span>Unavailable</span>
                 }

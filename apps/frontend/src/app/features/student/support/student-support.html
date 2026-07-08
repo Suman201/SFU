@@ -1,0 +1,109 @@
+<sfu-header />
+<main class="student-support-shell">
+  <section class="support-heading">
+    <div>
+      <p class="eyebrow">Student support</p>
+      <h1>Get help</h1>
+      <p>Report class access, recording, audio/video, assignment, or other learning issues.</p>
+    </div>
+    <a class="button ghost" routerLink="/student/dashboard">Back to dashboard</a>
+  </section>
+
+  @if (error()) {
+    <p class="form-alert" role="alert">{{ error() }}</p>
+  }
+  @if (success()) {
+    <p class="form-success" role="status">{{ success() }}</p>
+  }
+
+  <section class="support-grid">
+    <article class="support-card">
+      <header>
+        <p class="eyebrow">New request</p>
+        <h2>Tell us what happened</h2>
+      </header>
+      <form [formGroup]="form" (ngSubmit)="submit()">
+        <label>
+          <span>Issue type</span>
+          <select formControlName="issueType">
+            <option value="access">Missing access</option>
+            <option value="class_issue">Class issue</option>
+            <option value="recording_access">Recording access</option>
+            <option value="recording_problem">Recording problem</option>
+            <option value="audio_video">Audio / video</option>
+            <option value="assignment">Assignment</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label>
+          <span>Subject</span>
+          <input type="text" formControlName="subject" placeholder="Short summary" />
+        </label>
+        <label>
+          <span>Details</span>
+          <textarea rows="6" formControlName="message" placeholder="Describe the issue. Do not paste passwords, private chat, or payment details."></textarea>
+        </label>
+        <div class="context-grid">
+          <label>
+            <span>Batch ID</span>
+            <input type="text" formControlName="batchId" placeholder="Optional" />
+          </label>
+          <label>
+            <span>Session ID</span>
+            <input type="text" formControlName="sessionId" placeholder="Optional" />
+          </label>
+          <label>
+            <span>Room ID</span>
+            <input type="text" formControlName="roomId" placeholder="Optional" />
+          </label>
+          <label>
+            <span>Recording ID</span>
+            <input type="text" formControlName="recordingId" placeholder="Optional" />
+          </label>
+        </div>
+        <label class="diagnostics-toggle">
+          <input type="checkbox" formControlName="includeDiagnostics" />
+          <span>Include safe browser and route diagnostics</span>
+        </label>
+        <button class="button primary" type="submit" [disabled]="saving()">
+          {{ saving() ? 'Submitting...' : 'Submit request' }}
+        </button>
+      </form>
+    </article>
+
+    <article class="support-card request-list-card">
+      <header>
+        <p class="eyebrow">My requests</p>
+        <h2>Status updates</h2>
+      </header>
+      @if (loading()) {
+        <div class="empty-state compact">
+          <h3>Loading requests</h3>
+          <p>Checking your support history.</p>
+        </div>
+      } @else if (requests().length) {
+        <div class="request-list">
+          @for (request of requests(); track trackByRequest($index, request)) {
+            <article class="request-row">
+              <div>
+                <strong>{{ request.subject }}</strong>
+                <small>{{ contextLabel(request) }} · {{ request.createdAt | date: 'medium' }}</small>
+              </div>
+              <span class="support-pill">{{ statusLabel(request.status) }}</span>
+              <small>{{ issueLabel(request.issueType) }}</small>
+              @if (request.comments.length) {
+                <p>{{ latestCommentMessage(request) }}</p>
+              }
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="empty-state compact">
+          <h3>No support requests yet</h3>
+          <p>When you submit a request, status updates will appear here.</p>
+        </div>
+      }
+    </article>
+  </section>
+</main>
+<sfu-footer />

@@ -11,6 +11,9 @@
       "@native-sfu/contracts": [
         "../../packages/contracts/dist/index.d.ts"
       ],
+      "@native-sfu/media-ingest": [
+        "../../packages/media-ingest/dist/index.d.ts"
+      ],
       "@native-sfu/sfu-core": [
         "../../packages/sfu-core/dist/index.d.ts"
       ],

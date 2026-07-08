@@ -64,6 +64,7 @@ import {
   ParticipantPatch,
   Permissions,
   Producer,
+  ProducerKind,
   ProducerQualityState,
   ProducerDynacastControlFailureReport,
   ProducerDynacastEvent,
@@ -388,9 +389,30 @@ export interface LeaveRoomForSocketResult {
   room?: Room;
 }
 
+export interface CreateIngestParticipantRequest {
+  roomId: string;
+  displayName: string;
+}
+
+export interface CreateIngestProducerRequest {
+  roomId: string;
+  participantId: string;
+  transportId: string;
+  kind: Extract<ProducerKind, 'audio' | 'video'>;
+  rtpParameters: RtpParameters;
+  priority?: number;
+  status?: 'live' | 'paused';
+}
+
 const ROOM_QUALITY_SIGNAL_STALE_MS = 15_000;
 const DISTRIBUTED_QUALITY_STALE_MS = 15_000;
 const OBSERVABILITY_TOMBSTONE_TTL_MS = 60_000;
+const INGEST_PARTICIPANT_PERMISSIONS: Permissions = {
+  canPublishAudio: true,
+  canPublishVideo: true,
+  canShareScreen: false,
+  canChat: false
+};
 const CLASS_SESSION_STUDENT_PERMISSIONS: Permissions = {
   canPublishAudio: true,
   canPublishVideo: true,
@@ -1199,6 +1221,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
           participantCount: 0
         }
       });
+      this.emitRoomClosed(roomId);
       if (classSession) {
         await this.recordClassSessionParticipantActivity(
           classSession,
@@ -1243,6 +1266,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       roomId,
       this.platformActorFromParticipantContext(actor, actorParticipantId, 'operator')
     );
+    this.emitRoomClosed(roomId);
   }
 
   async closeClassSessionRoom(request: CloseClassSessionRoomRequest): Promise<boolean> {
@@ -1268,9 +1292,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       userId: request.actorUserId,
       label: request.actorLabel ?? 'Class session end'
     });
-    for (const listener of this.roomClosedEventListeners) {
-      listener(request.roomId);
-    }
+    this.emitRoomClosed(request.roomId);
     return true;
   }
 
@@ -1500,6 +1522,103 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       this.metrics.roomAdmissionRejections.labels('media_worker_capacity').inc();
       throw error;
     }
+  }
+
+  async createIngestParticipant(request: CreateIngestParticipantRequest): Promise<Participant> {
+    await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
+    const room = await this.findRoomDocumentById(request.roomId);
+    if (!room || room.closedAt) {
+      throw new NotFoundException('Room not found');
+    }
+    const participant = await this.createParticipant(
+      request.roomId,
+      undefined,
+      '',
+      Role.PARTICIPANT,
+      INGEST_PARTICIPANT_PERMISSIONS,
+      true,
+      request.displayName,
+      undefined,
+      'system'
+    );
+    await this.platformEvents.appendEvent({
+      type: 'room.joined',
+      roomId: request.roomId,
+      actor: this.platformActorFromParticipant(participant, 'system'),
+      payload: {
+        room: this.platformRoomReference(room),
+        participant: this.platformParticipantReference(participant),
+        admitted: true,
+        asViewer: false
+      }
+    });
+    return this.toParticipant(participant, INGEST_PARTICIPANT_PERMISSIONS);
+  }
+
+  async createIngestProducer(request: CreateIngestProducerRequest): Promise<Producer> {
+    await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
+    const room = await this.findRoomDocumentById(request.roomId);
+    if (!room || room.closedAt) {
+      throw new NotFoundException('Room not found');
+    }
+    const participant = await this.assertParticipant(request.roomId, request.participantId);
+    const profile = resolveRoomMediaProfile(room.mediaProfile?.id, {
+      updatedAt: room.mediaProfile?.updatedAt?.toISOString(),
+      updatedByParticipantId: room.mediaProfile?.updatedByParticipantId
+    });
+    const rtpParameters = applyProfileBitratePolicy(profile, request.kind, request.rtpParameters);
+    await this.media.bindProducer(request.transportId, request.participantId, rtpParameters);
+    const priority = normalizeConsumerPriority(request.priority ?? defaultProducerPriority(profile, request.kind));
+    const producerDoc = new this.producers({
+      roomId: request.roomId,
+      participantId: request.participantId,
+      kind: request.kind,
+      source: 'ingest',
+      transportId: request.transportId,
+      nodeId: this.nodeRegistry.localNodeId(),
+      priority,
+      rtpParameters,
+      status: request.status ?? 'live'
+    });
+    const producer: Producer = {
+      id: producerDoc.id,
+      roomId: request.roomId,
+      participantId: request.participantId,
+      kind: request.kind,
+      source: 'ingest',
+      transportId: request.transportId,
+      priority,
+      rtpParameters,
+      status: request.status ?? 'live',
+      createdAt: new Date().toISOString()
+    };
+    await this.media.registerProducer(producer);
+    if (producer.dynacast) {
+      producerDoc.dynacastState = producer.dynacast as unknown as Record<string, unknown>;
+    }
+    if (producer.svc) {
+      producerDoc.svcState = producer.svc as unknown as Record<string, unknown>;
+    }
+    await producerDoc.save();
+    this.metrics.activeProducers.labels(request.kind).inc();
+    await this.platformEvents.appendEvent({
+      type: 'producer.created',
+      roomId: request.roomId,
+      actor: this.platformActorFromParticipant(participant, 'system'),
+      payload: {
+        room: {
+          roomId: request.roomId,
+          mediaProfileId: profile.id
+        },
+        producer: this.platformProducerReference(producerDoc),
+        policyAction: 'allow'
+      }
+    });
+    return this.toProducer(producerDoc);
+  }
+
+  async removeIngestParticipant(roomId: string, participantId: string): Promise<void> {
+    await this.leaveRoom(roomId, participantId);
   }
 
   async addIceCandidate(transportId: string, participantId: string, candidate: IceCandidate): Promise<void> {
@@ -6612,21 +6731,23 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
 
   private async createParticipant(
     roomId: string,
-    user: SocketUser,
+    user: SocketUser | undefined,
     socketId: string,
     role: Role,
     permissions: Permissions,
     admitted: boolean,
-    displayName = user.email,
-    participantId?: string
+    displayName = user?.email ?? 'Participant',
+    participantId?: string,
+    origin: 'user' | 'system' = user ? 'user' : 'system'
   ): Promise<ParticipantMongoDocument> {
     const participant = await this.participants.create({
       ...(participantId ? { _id: new Types.ObjectId(participantId) } : {}),
       roomId,
-      userId: user.id,
+      ...(user?.id ? { userId: user.id } : {}),
       displayName,
       socketId,
       nodeId: this.nodeRegistry.localNodeId(),
+      origin,
       role,
       audioEnabled: permissions.canPublishAudio,
       videoEnabled: permissions.canPublishVideo,
@@ -6642,6 +6763,12 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     await this.permissions.create({ roomId, participantId: participant.id, ...permissions });
     this.metrics.activeParticipants.labels(roomId).inc();
     return participant;
+  }
+
+  private emitRoomClosed(roomId: string): void {
+    for (const listener of this.roomClosedEventListeners) {
+      listener(roomId);
+    }
   }
 
   private async deferClassSessionTeacherDisconnect(
@@ -8202,6 +8329,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return {
       id: doc.id,
       userId: doc.userId,
+      origin: doc.origin,
       displayName: doc.displayName,
       socketId: doc.socketId,
       connected: Boolean(doc.socketId),

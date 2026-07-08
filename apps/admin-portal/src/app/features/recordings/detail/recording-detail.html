@@ -49,6 +49,44 @@
     </article>
   </section>
 
+  <section class="data-table-shell engagement-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Engagement</h2>
+        <p>Student playback progress from authorized completed-session recording views.</p>
+      </div>
+    </div>
+    @if (item.engagement; as engagement) {
+      <div class="engagement-grid">
+        <article>
+          <span>Watched</span>
+          <strong>{{ engagement.studentsWatched }}</strong>
+          <small>{{ engagement.studentsUnwatched }} not watched</small>
+        </article>
+        <article>
+          <span>Average completion</span>
+          <strong>{{ engagement.averageCompletionPercent }}%</strong>
+          <small>{{ engagement.recordingsReady }} ready recording{{ engagement.recordingsReady === 1 ? '' : 's' }}</small>
+        </article>
+        <article>
+          <span>Total watch time</span>
+          <strong>{{ duration(engagement.totalWatchedSeconds) }}</strong>
+          <small>{{ engagement.playCount }} plays · {{ engagement.seekCount }} seeks</small>
+        </article>
+        <article>
+          <span>Pauses</span>
+          <strong>{{ engagement.pauseCount }}</strong>
+          <small>Playback controls only; no private chat or storage data.</small>
+        </article>
+      </div>
+    } @else {
+      <div class="manifest-panel">
+        <strong>No engagement yet</strong>
+        <p>Playback engagement appears after enrolled students review a published recording.</p>
+      </div>
+    }
+  </section>
+
   <section class="data-table-shell playback-shell">
     <div class="data-table-toolbar">
       <div>

@@ -50,6 +50,8 @@ import type {
   RestoreWhiteboardMemoryVersionRequest,
   UpdatePostClassQuestionStateRequest,
   Recording,
+  RecordingPlaybackProgress,
+  RecommendationSource,
   SaveWhiteboardMemoryRequest,
   SendPostClassQuestionRequest,
   StudentClassAttendanceSummary,
@@ -57,6 +59,26 @@ import type {
   StudentCompletedClassSessionListItem,
   StudentCompletedClassSessionListResponse,
   StudentCompletedClassWhiteboardSummary,
+  StudentProgressAssignmentSummary,
+  StudentProgressAttendancePoint,
+  StudentProgressBatchSummary,
+  StudentProgressParticipationSummary,
+  StudentProgressRecordingSummary,
+  StudentProgressResponse,
+  StudentProgressReviewSignal,
+  StudentProgressSummary,
+  TeacherAnalyticsAssignmentSummary,
+  TeacherAnalyticsAttendanceSummary,
+  TeacherAnalyticsBatchSummary,
+  TeacherAnalyticsMaterialSummary,
+  TeacherAnalyticsParticipationSummary,
+  TeacherAnalyticsQuery,
+  TeacherAnalyticsRecordingSummary,
+  TeacherAnalyticsResponse,
+  TeacherAnalyticsRiskIndicator,
+  TeacherAnalyticsRiskLevel,
+  TeacherAnalyticsSummary,
+  TeacherWeakTopicSignal,
   WhiteboardMemoryPage,
   WhiteboardMemoryPageSearchResponse,
   WhiteboardMemorySaveReason,
@@ -96,7 +118,7 @@ import {
   UserMongoDocument
 } from '../database/schemas';
 import { MetricsService } from '../metrics/metrics.service';
-import { RecordingsService, type RecordingDownload } from '../recordings/recordings.service';
+import { RecordingsService, type RecordingDownload, type RecordingPlaybackProgressRecord } from '../recordings/recordings.service';
 import {
   RoomsService,
   type ClassSessionAttendanceExportRequest,
@@ -186,11 +208,71 @@ interface AttendanceRowsWithSource {
   source: AdminAttendanceSource;
 }
 
+interface AdminAttendanceExportRow {
+  sessionId: string;
+  title: string;
+  sessionStatus: ClassSessionStatus;
+  batchId: string;
+  batchName: string;
+  courseId?: string;
+  courseName?: string;
+  teacherId: string;
+  teacherName?: string;
+  studentId: string;
+  studentName: string;
+  studentEmail?: string;
+  attendanceStatus: 'present' | 'absent';
+  rosterSource: 'roster' | 'participant';
+  firstJoinAt?: string;
+  lastLeaveAt?: string;
+  totalDurationSeconds: number;
+  reconnectCount: number;
+  attendanceSource: AdminAttendanceSource;
+  scheduledAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
 interface StudentCompletedClassQuery {
   page?: number | string;
   limit?: number | string;
   batchId?: string;
   courseId?: string;
+}
+
+interface BoundedTeacherAnalyticsQuery extends TeacherAnalyticsQuery {
+  dateFrom: string;
+  dateTo: string;
+}
+
+interface TeacherAnalyticsStudentAccumulator {
+  studentId: string;
+  studentName?: string;
+  studentEmail?: string;
+  batchId: string;
+  batchName: string;
+  sessionsEnrolled: number;
+  sessionsAttended: number;
+  missedClasses: number;
+  reconnects: number;
+  handRaises: number;
+  allowedSpeakingTurns: number;
+  questionsAsked: number;
+  unansweredQuestions: number;
+  assignmentsAssigned: number;
+  assignmentsSubmitted: number;
+  assignmentsReviewed: number;
+  assignmentsMissing: number;
+  sourceSessionIds: Set<string>;
+  sourceAssignmentIds: Set<string>;
+}
+
+interface WhiteboardTopicSignalSource {
+  tag: string;
+  sessionId: string;
+  batchId: string;
+  pageId: string;
+  pageTitle: string;
 }
 
 export interface ClassSessionMaterialUploadFile {
@@ -273,6 +355,225 @@ export class ClassSessionsService {
       throw new NotFoundException('Class session not found.');
     }
     return row;
+  }
+
+  async getTeacherAnalytics(query: TeacherAnalyticsQuery, user: AuthenticatedUser): Promise<TeacherAnalyticsResponse> {
+    if (!this.isAdmin(user) && !user.roles.includes('TEACHER')) {
+      throw new ForbiddenException('Teacher analytics are available to teachers and administrators only.');
+    }
+    const bounded = this.boundedTeacherAnalyticsQuery(query);
+    const batchFilter = this.teacherAnalyticsBatchFilter(bounded, user);
+    const batches = await this.batches.find(batchFilter).exec();
+    if (bounded.batchId && !batches.length && !this.isAdmin(user)) {
+      throw new ForbiddenException('You are not allowed to view analytics for this batch.');
+    }
+    if (!batches.length) {
+      return this.emptyTeacherAnalyticsResponse(bounded, this.isAdmin(user) ? 'admin' : 'teacher');
+    }
+
+    const batchIds = batches.map((batch) => batch.id);
+    const dateFrom = this.parseAdminDate(bounded.dateFrom, 'dateFrom');
+    const dateTo = this.parseAdminDate(bounded.dateTo, 'dateTo');
+    const sessionFilter: Record<string, unknown> = {
+      batchId: { $in: batchIds },
+      scheduledAt: { $gte: dateFrom, $lte: dateTo }
+    };
+    const [sessions, assignments, materials, rosterEntries] = await Promise.all([
+      this.classSessions.find(sessionFilter).sort({ scheduledAt: -1 }).exec(),
+      this.assignments.find(this.teacherAnalyticsAssignmentFilter(batchIds, bounded, dateFrom, dateTo)).exec(),
+      this.materials
+        .find({
+          batchId: { $in: batchIds },
+          deletedAt: { $exists: false },
+          createdAt: { $gte: dateFrom, $lte: dateTo }
+        })
+        .exec(),
+      Promise.all(batches.map((batch) => this.studentEnrollments.listBatchRoster(batch.id, { includeInactive: true })))
+    ]);
+    const filteredStudentId = bounded.studentId?.trim();
+    const rosterByBatch = new Map<string, Awaited<ReturnType<StudentEnrollmentsService['listBatchRoster']>>>();
+    batches.forEach((batch, index) => {
+      const roster = rosterEntries[index] ?? [];
+      rosterByBatch.set(batch.id, filteredStudentId ? roster.filter((student) => student.userId === filteredStudentId) : roster);
+    });
+
+    const batchMap = new Map(batches.map((batch) => [batch.id, batch]));
+    const sessionsByBatch = this.groupBy(sessions, (session) => session.batchId);
+    const sessionIds = sessions.map((session) => session.id);
+    const [activityEvents, recordings, postClassStates, whiteboardStates] = await Promise.all([
+      this.activity?.listEventsForAnalytics({ sessionIds, batchIds, dateFrom, dateTo }) ?? Promise.resolve([]),
+      this.recordings.listClassSessionRecordingsForAnalytics(sessionIds, batchIds),
+      this.postClassThreadStates
+        .find({
+          batchId: { $in: batchIds },
+          updatedAt: { $gte: dateFrom, $lte: dateTo },
+          ...(filteredStudentId ? { studentId: filteredStudentId } : {})
+        })
+        .exec(),
+      sessionIds.length
+        ? this.whiteboardStates
+            .find({
+              sessionId: { $in: sessionIds },
+              batchId: { $in: batchIds }
+            })
+            .exec()
+        : Promise.resolve([])
+    ]);
+    const activityByBatch = this.groupBy(activityEvents, (event) => event.batchId ?? '');
+    const recordingsByBatch = this.groupBy(recordings, (recording) => recording.batchId ?? '');
+    const recordingProgress = await this.recordings.listPlaybackProgressForAnalytics(
+      recordings.map((recording) => recording.recordingId ?? recording.id).filter(Boolean)
+    );
+    const recordingProgressByBatch = this.groupBy(recordingProgress, (progress) => progress.batchId);
+    const materialsByBatch = this.groupBy(materials, (material) => material.batchId);
+    const whiteboardTopicsByBatch = this.groupBy(this.whiteboardTopicSources(whiteboardStates), (source) => source.batchId);
+    const assignmentsByBatch = this.groupBy(assignments, (assignment) => assignment.batchId);
+    const assignmentIds = assignments.map((assignment) => assignment.assignmentId);
+    const submissions = assignmentIds.length
+      ? await this.assignmentSubmissions
+          .find({
+            assignmentId: { $in: assignmentIds },
+            deletedAt: { $exists: false },
+            ...(filteredStudentId ? { studentId: filteredStudentId } : {})
+          })
+          .exec()
+      : [];
+    const submissionsByAssignment = this.groupBy(submissions, (submission) => submission.assignmentId);
+    const submissionsByBatch = this.groupBy(submissions, (submission) => submission.batchId);
+    const qnaStatesByBatch = this.groupBy(postClassStates, (state) => state.batchId);
+
+    const batchesPayload: TeacherAnalyticsBatchSummary[] = [];
+    const allRisks: TeacherAnalyticsRiskIndicator[] = [];
+    const allWeakTopicSignals: TeacherWeakTopicSignal[] = [];
+
+    for (const batch of batches) {
+      const batchSessions = sessionsByBatch.get(batch.id) ?? [];
+      const completedSessions = batchSessions.filter((session) => session.status === 'completed');
+      const roster = rosterByBatch.get(batch.id) ?? [];
+      const batchEvents = activityByBatch.get(batch.id) ?? [];
+      const batchAssignments = assignmentsByBatch.get(batch.id) ?? [];
+      const batchSubmissions = submissionsByBatch.get(batch.id) ?? [];
+      const batchRecordings = recordingsByBatch.get(batch.id) ?? [];
+      const batchRecordingProgress = recordingProgressByBatch.get(batch.id) ?? [];
+      const batchMaterials = materialsByBatch.get(batch.id) ?? [];
+      const batchWhiteboardTopics = whiteboardTopicsByBatch.get(batch.id) ?? [];
+      const batchQnaStates = qnaStatesByBatch.get(batch.id) ?? [];
+      const studentAccumulators = new Map<string, TeacherAnalyticsStudentAccumulator>();
+      for (const student of roster) {
+        studentAccumulators.set(student.userId, {
+          studentId: student.userId,
+          studentName: student.displayName,
+          ...(student.email ? { studentEmail: student.email } : {}),
+          batchId: batch.id,
+          batchName: batch.name,
+          sessionsEnrolled: 0,
+          sessionsAttended: 0,
+          missedClasses: 0,
+          reconnects: 0,
+          handRaises: 0,
+          allowedSpeakingTurns: 0,
+          questionsAsked: 0,
+          unansweredQuestions: 0,
+          assignmentsAssigned: 0,
+          assignmentsSubmitted: 0,
+          assignmentsReviewed: 0,
+          assignmentsMissing: 0,
+          sourceSessionIds: new Set<string>(),
+          sourceAssignmentIds: new Set<string>()
+        });
+      }
+
+      const attendance = await this.teacherAnalyticsAttendance(completedSessions, filteredStudentId, studentAccumulators);
+      const participation = this.teacherAnalyticsParticipation(batchEvents, filteredStudentId, studentAccumulators, batchQnaStates);
+      const assignmentSummary = this.teacherAnalyticsAssignments(batchAssignments, batchSubmissions, roster.length, filteredStudentId, studentAccumulators);
+      const recordingsSummary = this.teacherAnalyticsRecordings(batchRecordings, batchRecordingProgress, roster.length);
+      const materialSummary = this.teacherAnalyticsMaterials(batchMaterials, batchEvents);
+      const risks = [...studentAccumulators.values()]
+        .map((student) => this.teacherAnalyticsRisk(student))
+        .filter((risk): risk is TeacherAnalyticsRiskIndicator => Boolean(risk));
+      const weakTopicSignals = this.teacherWeakTopicSignals({
+        batch,
+        attendance,
+        participation,
+        assignments: assignmentSummary,
+        recordings: recordingsSummary,
+        materials: materialSummary,
+        risks,
+        whiteboardTopics: batchWhiteboardTopics,
+        sourceSessionIds: batchSessions.map((session) => session.id),
+        sourceAssignmentIds: batchAssignments.map((assignment) => assignment.assignmentId),
+        generatedAt: new Date()
+      });
+      allRisks.push(...risks);
+      batchesPayload.push({
+        batchId: batch.id,
+        batchName: batch.name,
+        ...(batch.courseId ? { courseId: batch.courseId } : {}),
+        ...(batch.courseName ? { courseName: batch.courseName } : {}),
+        teacherId: batch.teacherId,
+        enrolledStudents: roster.length,
+        totalSessions: batchSessions.length,
+        completedSessions: completedSessions.length,
+        liveSessions: batchSessions.filter((session) => session.status === 'live').length,
+        upcomingSessions: batchSessions.filter((session) => session.status === 'scheduled').length,
+        attendance,
+        participation,
+        assignments: assignmentSummary,
+        recordings: recordingsSummary,
+        materials: materialSummary,
+        riskIndicators: risks,
+        weakTopicSignals,
+        sourceSessionIds: batchSessions.map((session) => session.id),
+        sourceAssignmentIds: batchAssignments.map((assignment) => assignment.assignmentId)
+      });
+      allWeakTopicSignals.push(...weakTopicSignals);
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      query: bounded,
+      audience: this.isAdmin(user) ? 'admin' : 'teacher',
+      summary: this.teacherAnalyticsSummary(batchesPayload),
+      batches: batchesPayload.sort((left, right) => right.riskIndicators.length - left.riskIndicators.length || left.batchName.localeCompare(right.batchName)),
+      risks: allRisks.sort((left, right) => this.riskRank(right.riskLevel) - this.riskRank(left.riskLevel)),
+      weakTopicSignals: allWeakTopicSignals.sort((left, right) => this.signalRank(right.severity) - this.signalRank(left.severity)),
+      availability: {
+        attendance: {
+          available: batchesPayload.some((batch) => batch.attendance.source !== 'none'),
+          source: batchesPayload.some((batch) => batch.attendance.source === 'snapshot') ? 'snapshot' : 'inferred',
+          reason: batchesPayload.some((batch) => batch.attendance.source !== 'none')
+            ? 'Attendance uses final snapshots when present and existing inferred attendance rows otherwise.'
+            : 'No completed session attendance records are available for the selected range.'
+        },
+        participation: {
+          available: activityEvents.length > 0,
+          source: activityEvents.length > 0 ? 'activity' : 'not_tracked',
+          reason: activityEvents.length > 0 ? 'Participation counts are derived from class-session activity events.' : 'No participation events are recorded for the selected range.'
+        },
+        qna: {
+          available: activityEvents.some((event) => event.eventType.startsWith('post_class.question')) || postClassStates.length > 0,
+          source: 'activity',
+          reason: 'Q&A analytics use post-class question activity and workflow state only; message bodies are excluded.'
+        },
+        assignments: {
+          available: assignments.length > 0,
+          source: assignments.length > 0 ? 'metadata' : 'not_tracked',
+          reason: assignments.length > 0 ? 'Assignment counts are derived from assignment and submission records.' : 'No assignments are available for the selected range.'
+        },
+        recordings: {
+          available: recordings.length > 0,
+          source: recordings.length > 0 ? 'progress' : 'not_tracked',
+          reason: recordings.length > 0
+            ? 'Recording readiness and student playback engagement use recording metadata plus persisted playback progress.'
+            : 'No recordings are available for the selected range.'
+        },
+        materials: {
+          available: materials.length > 0 || activityEvents.some((event) => event.eventType === 'material.downloaded'),
+          source: activityEvents.some((event) => event.eventType === 'material.downloaded') ? 'activity' : 'metadata',
+          reason: 'Material counts use material metadata, and downloads use material.downloaded activity events where present.'
+        }
+      }
+    };
   }
 
   async getClassSessionReport(
@@ -620,47 +921,55 @@ export class ClassSessionsService {
 
   async exportAdminAttendanceCsv(query: AdminAttendanceQuery, user: AuthenticatedUser): Promise<string> {
     this.assertAdmin(user);
-    const rows = await this.adminAttendanceSessionRows(query);
+    const rows = await this.adminAttendanceExportRows(query);
     const csvRows = [
       [
-        'Session',
         'Session ID',
+        'Session Title',
+        'Session Status',
         'Course',
+        'Course ID',
         'Batch',
+        'Batch ID',
+        'Teacher',
         'Teacher ID',
-        'Status',
+        'Student',
+        'Student Email',
+        'Student ID',
+        'Attendance Status',
+        'Roster Source',
+        'First Join',
+        'Last Leave',
+        'Duration Seconds',
+        'Reconnect Count',
+        'Attendance Source',
         'Scheduled At',
         'Started At',
-        'Completed At',
-        'Enrolled',
-        'Present',
-        'Absent',
-        'Attendance Rate',
-        'Average Duration Seconds',
-        'Reconnects',
-        'Late Joins',
-        'Early Leaves',
-        'Attendance Source'
+        'Completed At'
       ],
       ...rows.map((row) => [
-        row.title,
         row.sessionId,
-        row.courseName ?? row.courseId ?? '',
+        row.title,
+        row.sessionStatus,
+        row.courseName ?? '',
+        row.courseId ?? '',
         row.batchName,
+        row.batchId,
+        row.teacherName ?? '',
         row.teacherId,
-        row.status,
+        row.studentName,
+        row.studentEmail ?? '',
+        row.studentId,
+        row.attendanceStatus,
+        row.rosterSource,
+        row.firstJoinAt ?? '',
+        row.lastLeaveAt ?? '',
+        String(row.totalDurationSeconds),
+        String(row.reconnectCount),
+        row.attendanceSource,
         row.scheduledAt,
         row.startedAt ?? '',
-        row.completedAt ?? '',
-        String(row.enrolled),
-        String(row.present),
-        String(row.absent),
-        String(row.attendanceRate),
-        String(row.averageDurationSeconds),
-        String(row.reconnects),
-        String(row.lateJoins),
-        String(row.earlyLeaves),
-        row.attendanceSource
+        row.completedAt ?? ''
       ])
     ];
     const csv = `${csvRows.map((row) => row.map((value) => this.csvEscape(value)).join(',')).join('\n')}\n`;
@@ -1036,6 +1345,198 @@ export class ClassSessionsService {
     };
   }
 
+  async getStudentProgress(user: AuthenticatedUser): Promise<StudentProgressResponse> {
+    this.assertStudentUser(user);
+    const generatedAt = new Date();
+    const now = generatedAt.getTime();
+    const batchIds = await this.studentEnrollments.listStudentClassHistoryBatchIds(user.sub);
+    if (!batchIds.length) {
+      return this.emptyStudentProgressResponse(user.sub, generatedAt, 'No enrolled or historical batches are available.');
+    }
+
+    const batchMap = await this.adminBatchMap(batchIds);
+    const visibleBatchIds = batchIds.filter((batchId) => batchMap.has(batchId));
+    if (!visibleBatchIds.length) {
+      return this.emptyStudentProgressResponse(user.sub, generatedAt, 'No accessible enrolled batches are available.');
+    }
+
+    const [sessions, assignments] = await Promise.all([
+      this.classSessions
+        .find({ batchId: { $in: visibleBatchIds }, status: { $in: ['scheduled', 'live', 'completed'] } })
+        .sort({ scheduledAt: -1 })
+        .exec(),
+      this.assignments
+        .find({
+          batchId: { $in: visibleBatchIds },
+          status: 'published',
+          deletedAt: { $exists: false }
+        })
+        .exec()
+    ]);
+    const teacherMap = await this.adminTeacherMap([...new Set([...sessions.map((session) => session.teacherId), ...visibleBatchIds.map((id) => batchMap.get(id)?.teacherId ?? '')])]);
+    const sessionIds = sessions.map((session) => session.id);
+    const completedSessions = sessions.filter((session) => session.status === 'completed');
+    const completedSessionIds = completedSessions.map((session) => session.id);
+    const assignmentIds = assignments.map((assignment) => assignment.assignmentId);
+    const submissionsPromise: Promise<AssignmentSubmissionMongoDocument[]> = assignmentIds.length
+      ? this.assignmentSubmissions
+          .find({
+            assignmentId: { $in: assignmentIds },
+            studentId: user.sub,
+            deletedAt: { $exists: false }
+          })
+          .exec()
+      : Promise.resolve([]);
+    const activityEventsPromise: Promise<ClassSessionTimelineEvent[]> = sessionIds.length
+      ? this.activity?.listEventsForAnalytics({
+          sessionIds,
+          batchIds: visibleBatchIds,
+          limit: 10000
+        }) ?? Promise.resolve([])
+      : Promise.resolve([]);
+    const recordingsPromise: Promise<Recording[]> = completedSessionIds.length
+      ? this.recordings.listClassSessionRecordingsForAnalytics(completedSessionIds, visibleBatchIds)
+      : Promise.resolve([]);
+    const qnaStatesPromise: Promise<ClassSessionPostClassThreadStateMongoDocument[]> = completedSessionIds.length
+      ? this.postClassThreadStates
+          .find({
+            sessionId: { $in: completedSessionIds },
+            batchId: { $in: visibleBatchIds },
+            studentId: user.sub
+          })
+          .exec()
+      : Promise.resolve([]);
+    const whiteboardStatesPromise: Promise<ClassSessionWhiteboardStateMongoDocument[]> = completedSessionIds.length
+      ? this.whiteboardStates
+          .find({
+            sessionId: { $in: completedSessionIds },
+            batchId: { $in: visibleBatchIds },
+            publishedAt: { $exists: true },
+            unpublishedAt: { $exists: false }
+          })
+          .exec()
+      : Promise.resolve([]);
+    const attendancePointsPromise: Promise<StudentProgressAttendancePoint[]> = Promise.all(
+      completedSessions.map((session) => this.studentProgressAttendancePoint(session, user.sub))
+    );
+    const [submissions, activityEvents, recordings, qnaStates, whiteboardStates, attendancePoints] = await Promise.all([
+      submissionsPromise,
+      activityEventsPromise,
+      recordingsPromise,
+      qnaStatesPromise,
+      whiteboardStatesPromise,
+      attendancePointsPromise
+    ]);
+    const publishedRecordings = recordings.filter((recording) => this.isPostClassRecordingPublished(recording));
+    const recordingProgress = await this.recordings.listPlaybackProgressForStudent(
+      publishedRecordings.map((recording) => recording.recordingId ?? recording.id).filter(Boolean),
+      user.sub
+    );
+    const recordingProgressById = new Map(recordingProgress.map((progress) => [progress.recordingId, progress]));
+
+    const sessionsByBatch = this.groupBy(sessions, (session) => session.batchId);
+    const assignmentsByBatch = this.groupBy(assignments, (assignment) => assignment.batchId);
+    const submissionsByAssignment = new Map(submissions.map((submission) => [submission.assignmentId, submission]));
+    const studentEvents = activityEvents.filter((event) => this.isStudentProgressEventForUser(event, user.sub));
+    const eventsByBatch = this.groupBy(studentEvents, (event) => event.batchId ?? '');
+    const recordingsByBatch = this.groupBy(publishedRecordings, (recording) => recording.batchId ?? '');
+    const qnaByBatch = this.groupBy(qnaStates, (state) => state.batchId);
+    const whiteboardTopicsByBatch = this.groupBy(this.whiteboardTopicSources(whiteboardStates), (source) => source.batchId);
+    const attendanceBySession = new Map(attendancePoints.map((point) => [point.sessionId, point]));
+
+    const batches: StudentProgressBatchSummary[] = visibleBatchIds
+      .map((batchId): StudentProgressBatchSummary | null => {
+        const batch = batchMap.get(batchId);
+        if (!batch) return null;
+        const batchSessions = sessionsByBatch.get(batchId) ?? [];
+        const batchCompletedSessions = batchSessions.filter((session) => session.status === 'completed');
+        const batchAttendance = batchCompletedSessions
+          .map((session) => attendanceBySession.get(session.id))
+          .filter((point): point is StudentProgressAttendancePoint => Boolean(point));
+        const recentAttendance = batchAttendance.slice(0, 8);
+        const attendedClasses = batchAttendance.filter((point) => point.status === 'present').length;
+        const missedClasses = batchAttendance.filter((point) => point.status === 'absent').length;
+        const unknownAttendanceClasses = batchAttendance.filter((point) => point.status === 'unknown').length;
+        const attendanceDenominator = attendedClasses + missedClasses;
+        const batchAssignments = assignmentsByBatch.get(batchId) ?? [];
+        const batchAssignmentSummary = this.studentProgressAssignmentSummary(batchAssignments, submissionsByAssignment, now);
+        const batchEvents = eventsByBatch.get(batchId) ?? [];
+        const batchQnaStates = qnaByBatch.get(batchId) ?? [];
+        const batchWhiteboardTopics = whiteboardTopicsByBatch.get(batchId) ?? [];
+        const sourceSessionIds = batchCompletedSessions.map((session) => session.id);
+        const sourceRecordingIds = (recordingsByBatch.get(batchId) ?? []).map((recording) => recording.recordingId ?? recording.id);
+        return {
+          batchId: batch.id,
+          batchName: batch.name,
+          ...(batch.courseId ? { courseId: batch.courseId } : {}),
+          ...(batch.courseName ? { courseName: batch.courseName } : {}),
+          teacherId: batch.teacherId,
+          ...(teacherMap.get(batch.teacherId)?.displayName || teacherMap.get(batch.teacherId)?.name
+            ? { teacherName: teacherMap.get(batch.teacherId)?.displayName ?? teacherMap.get(batch.teacherId)?.name }
+            : {}),
+          ...(batch.status ? { enrollmentStatus: String(batch.status).toLowerCase() } : {}),
+          completedClasses: batchCompletedSessions.length,
+          attendedClasses,
+          missedClasses,
+          unknownAttendanceClasses,
+          liveClasses: batchSessions.filter((session) => session.status === 'live').length,
+          upcomingClasses: batchSessions.filter((session) => session.status === 'scheduled' && session.scheduledAt.getTime() >= now).length,
+          attendanceRate: attendanceDenominator ? Math.round((attendedClasses / attendanceDenominator) * 100) : 0,
+          attendanceSource: this.studentProgressAttendanceSource(batchAttendance),
+          assignments: batchAssignmentSummary,
+          recordings: this.studentProgressRecordingSummary(recordingsByBatch.get(batchId) ?? [], recordingProgressById),
+          participation: this.studentProgressParticipation(batchEvents, batchQnaStates),
+          topicTags: [...new Set(batchWhiteboardTopics.map((topic) => topic.tag))].slice(0, 8),
+          recentAttendance,
+          sourceSessionIds,
+          sourceAssignmentIds: batchAssignments.map((assignment) => assignment.assignmentId),
+          sourceRecordingIds,
+          sourceWhiteboardPageIds: batchWhiteboardTopics.map((topic) => topic.pageId)
+        } satisfies StudentProgressBatchSummary;
+      })
+      .filter((item): item is StudentProgressBatchSummary => Boolean(item));
+
+    return {
+      generatedAt: generatedAt.toISOString(),
+      studentId: user.sub,
+      summary: this.studentProgressSummary(batches),
+      batches,
+      reviewSignals: this.studentProgressReviewSignals(batches, generatedAt),
+      availability: {
+        attendance: {
+          available: completedSessions.length > 0,
+          source: this.studentProgressAttendanceSource(attendancePoints),
+          reason: completedSessions.length
+            ? 'Attendance uses persisted snapshots when present, with existing room attendance inference for legacy sessions.'
+            : 'No completed sessions are available yet.'
+        },
+        assignments: {
+          available: assignments.length > 0,
+          source: assignments.length ? 'metadata' : 'none',
+          reason: assignments.length ? 'Assignment progress uses published assignments and your submission status.' : 'No published assignments are available yet.'
+        },
+        recordings: {
+          available: publishedRecordings.length > 0,
+          source: publishedRecordings.length ? 'progress' : 'none',
+          reason: publishedRecordings.length
+            ? 'Recording progress uses your persisted playback activity for published class recordings.'
+            : 'No published recordings are available yet.'
+        },
+        participation: {
+          available: studentEvents.length > 0,
+          source: studentEvents.length ? 'activity' : 'none',
+          reason: studentEvents.length ? 'Participation uses your class-session activity events.' : 'No participation events are recorded yet.'
+        },
+        qna: {
+          available: qnaStates.length > 0,
+          source: qnaStates.length ? 'metadata' : 'none',
+          reason: qnaStates.length ? 'Q&A progress uses private thread workflow state only; message bodies are excluded.' : 'No post-class Q&A threads are available yet.'
+        }
+      }
+    };
+
+  }
+
   async getStudentCompletedSessionDetail(
     sessionId: string,
     batchId: string | undefined,
@@ -1092,9 +1593,20 @@ export class ClassSessionsService {
     if (!row) {
       throw new NotFoundException('Completed class session not found.');
     }
+    const playbackProgress = await this.recordings.listPlaybackProgressForStudent(
+      recordings.map((recording) => recording.recordingId ?? recording.id).filter(Boolean),
+      user.sub
+    );
+    const playbackProgressById = new Map(playbackProgress.map((progress) => [progress.recordingId, progress]));
+    const recordingsWithProgress = recordings.map((recording) => ({
+      ...recording,
+      ...(playbackProgressById.get(recording.recordingId ?? recording.id)
+        ? { playbackProgress: playbackProgressById.get(recording.recordingId ?? recording.id) }
+        : {})
+    }));
     return {
       session: row,
-      recordings,
+      recordings: recordingsWithProgress,
       materials,
       whiteboard,
       announcements: announcements.messages,
@@ -2289,6 +2801,914 @@ export class ClassSessionsService {
     return Math.min(Math.floor(parsed), max);
   }
 
+  private boundedTeacherAnalyticsQuery(query: TeacherAnalyticsQuery): BoundedTeacherAnalyticsQuery {
+    const now = new Date();
+    const dateTo = query.dateTo?.trim() ? this.parseAdminDate(query.dateTo, 'dateTo') : now;
+    const dateFrom = query.dateFrom?.trim()
+      ? this.parseAdminDate(query.dateFrom, 'dateFrom')
+      : new Date(dateTo.getTime() - ADMIN_ATTENDANCE_DEFAULT_RANGE_DAYS * 24 * 60 * 60 * 1000);
+    if (dateFrom.getTime() > dateTo.getTime()) {
+      throw new BadRequestException('dateFrom must be before dateTo.');
+    }
+    if (dateTo.getTime() - dateFrom.getTime() > ADMIN_ATTENDANCE_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+      throw new BadRequestException(`Teacher analytics date range cannot exceed ${ADMIN_ATTENDANCE_MAX_RANGE_DAYS} days.`);
+    }
+    return {
+      ...(query.batchId?.trim() ? { batchId: query.batchId.trim() } : {}),
+      ...(query.courseId?.trim() ? { courseId: query.courseId.trim() } : {}),
+      ...(query.studentId?.trim() ? { studentId: query.studentId.trim() } : {}),
+      dateFrom: dateFrom.toISOString(),
+      dateTo: dateTo.toISOString()
+    };
+  }
+
+  private teacherAnalyticsBatchFilter(query: BoundedTeacherAnalyticsQuery, user: AuthenticatedUser): Record<string, unknown> {
+    const filter: Record<string, unknown> = {
+      deletedAt: { $exists: false }
+    };
+    if (!this.isAdmin(user)) {
+      filter.teacherId = user.sub;
+    }
+    if (query.batchId) {
+      filter._id = query.batchId;
+    }
+    if (query.courseId) {
+      filter.courseId = query.courseId;
+    }
+    return filter;
+  }
+
+  private teacherAnalyticsAssignmentFilter(
+    batchIds: string[],
+    query: BoundedTeacherAnalyticsQuery,
+    dateFrom: Date,
+    dateTo: Date
+  ): Record<string, unknown> {
+    const range = { $gte: dateFrom, $lte: dateTo };
+    return {
+      batchId: { $in: batchIds },
+      deletedAt: { $exists: false },
+      ...(query.courseId ? {} : {}),
+      $or: [{ dueAt: range }, { dueAt: { $exists: false }, createdAt: range }]
+    };
+  }
+
+  private emptyTeacherAnalyticsResponse(
+    query: BoundedTeacherAnalyticsQuery,
+    audience: TeacherAnalyticsResponse['audience']
+  ): TeacherAnalyticsResponse {
+    return {
+      generatedAt: new Date().toISOString(),
+      query,
+      audience,
+      summary: this.emptyTeacherAnalyticsSummary(),
+      batches: [],
+      risks: [],
+      weakTopicSignals: [],
+      availability: {
+        attendance: { available: false, source: 'not_tracked', reason: 'No matching batches are available.' },
+        participation: { available: false, source: 'not_tracked', reason: 'No matching batches are available.' },
+        qna: { available: false, source: 'not_tracked', reason: 'No matching batches are available.' },
+        assignments: { available: false, source: 'not_tracked', reason: 'No matching batches are available.' },
+        recordings: { available: false, source: 'not_tracked', reason: 'No matching batches are available.' },
+        materials: { available: false, source: 'not_tracked', reason: 'No matching batches are available.' }
+      }
+    };
+  }
+
+  private emptyStudentProgressResponse(studentId: string, generatedAt: Date, reason: string): StudentProgressResponse {
+    return {
+      generatedAt: generatedAt.toISOString(),
+      studentId,
+      summary: this.emptyStudentProgressSummary(),
+      batches: [],
+      reviewSignals: [],
+      availability: {
+        attendance: { available: false, source: 'none', reason },
+        assignments: { available: false, source: 'none', reason },
+        recordings: { available: false, source: 'none', reason: 'No published recordings are available yet.' },
+        participation: { available: false, source: 'none', reason },
+        qna: { available: false, source: 'none', reason }
+      }
+    };
+  }
+
+  private emptyStudentProgressSummary(): StudentProgressSummary {
+    return {
+      enrolledBatches: 0,
+      activeBatches: 0,
+      completedClasses: 0,
+      attendedClasses: 0,
+      missedClasses: 0,
+      unknownAttendanceClasses: 0,
+      liveClasses: 0,
+      upcomingClasses: 0,
+      attendanceRate: 0,
+      assignmentsDue: 0,
+      assignmentsSubmitted: 0,
+      assignmentsReviewed: 0,
+      assignmentsOverdue: 0,
+      assignmentsMissing: 0,
+      recordingsReady: 0,
+      recordingsWatched: 0,
+      recordingsUnwatched: 0,
+      recordingWatchSeconds: 0,
+      recordingCompletionRate: 0,
+      handRaises: 0,
+      allowedSpeakingTurns: 0,
+      questionsAsked: 0,
+      unansweredQuestions: 0
+    };
+  }
+
+  private async studentProgressAttendancePoint(session: ClassSessionMongoDocument, studentId: string): Promise<StudentProgressAttendancePoint> {
+    const attendance = await this.studentAttendanceForSession(session, studentId);
+    return {
+      sessionId: session.id,
+      title: session.title,
+      scheduledAt: session.scheduledAt.toISOString(),
+      ...(session.completedAt ? { completedAt: session.completedAt.toISOString() } : {}),
+      status: attendance.status,
+      totalDurationSeconds: attendance.totalDurationSeconds,
+      reconnectCount: attendance.reconnectCount,
+      source: attendance.source
+    };
+  }
+
+  private studentProgressAssignmentSummary(
+    assignments: AssignmentMongoDocument[],
+    submissionsByAssignment: Map<string, AssignmentSubmissionMongoDocument>,
+    now: number
+  ): StudentProgressAssignmentSummary {
+    const summary: StudentProgressAssignmentSummary = {
+      total: assignments.length,
+      due: 0,
+      submitted: 0,
+      reviewed: 0,
+      overdue: 0,
+      missing: 0
+    };
+    for (const assignment of assignments) {
+      const submission = submissionsByAssignment.get(assignment.assignmentId);
+      const submitted = submission ? this.isSubmittedAssignmentStatus(submission.status) : false;
+      const reviewed = submission ? this.isReviewedAssignmentStatus(submission.status) : false;
+      if (submitted) {
+        summary.submitted += 1;
+      }
+      if (reviewed) {
+        summary.reviewed += 1;
+      }
+      if (!reviewed) {
+        summary.due += 1;
+      }
+      if (!submitted) {
+        summary.missing += 1;
+      }
+      if (!submitted && assignment.dueAt && assignment.dueAt.getTime() < now) {
+        summary.overdue += 1;
+      }
+    }
+    return summary;
+  }
+
+  private studentProgressRecordingSummary(
+    recordings: Recording[],
+    progressByRecordingId: Map<string, RecordingPlaybackProgress> = new Map()
+  ): StudentProgressRecordingSummary {
+    const ready = recordings.filter((recording) => recording.status === 'stopped');
+    const progressRows = ready
+      .map((recording) => progressByRecordingId.get(recording.recordingId ?? recording.id))
+      .filter((progress): progress is RecordingPlaybackProgress => Boolean(progress));
+    const watched = progressRows.filter((progress) => progress.playCount > 0 || progress.completionPercent > 0).length;
+    const completionRate = progressRows.length
+      ? Math.round(progressRows.reduce((total, progress) => total + progress.completionPercent, 0) / progressRows.length)
+      : 0;
+    return {
+      ready: ready.length,
+      processing: recordings.filter((recording) => recording.status === 'starting' || recording.status === 'recording' || recording.status === 'stopping').length,
+      failed: recordings.filter((recording) => recording.status === 'failed').length,
+      watched,
+      unwatched: Math.max(ready.length - watched, 0),
+      totalWatchedSeconds: progressRows.reduce((total, progress) => total + progress.watchedSeconds, 0),
+      completionRate,
+      watchTrackingAvailable: true,
+      usage: {
+        available: ready.length > 0,
+        source: ready.length > 0 ? 'progress' : 'none',
+        reason: ready.length > 0
+          ? 'Recording usage uses your persisted playback progress for published recordings.'
+          : 'No ready published recordings are available for this batch yet.'
+      }
+    };
+  }
+
+  private studentProgressParticipation(
+    events: ClassSessionTimelineEvent[],
+    qnaStates: ClassSessionPostClassThreadStateMongoDocument[]
+  ): StudentProgressParticipationSummary {
+    const questionEvents = events.filter((event) => event.eventType === 'post_class.question.asked').length;
+    return {
+      handRaises: events.filter((event) => event.eventType === 'hand.raised').length,
+      allowedSpeakingTurns: events.filter((event) => event.eventType === 'speak.allowed').length,
+      questionsAsked: Math.max(questionEvents, qnaStates.length),
+      answeredQuestions: qnaStates.filter((state) => state.answered).length,
+      unansweredQuestions: qnaStates.filter((state) => !state.answered).length,
+      qnaThreads: qnaStates.length
+    };
+  }
+
+  private isStudentProgressEventForUser(event: ClassSessionTimelineEvent, studentId: string): boolean {
+    return event.actor?.id === studentId || event.target?.userId === studentId || event.target?.id === studentId;
+  }
+
+  private studentProgressSummary(batches: StudentProgressBatchSummary[]): StudentProgressSummary {
+    const summary = this.emptyStudentProgressSummary();
+    summary.enrolledBatches = batches.length;
+    summary.activeBatches = batches.filter((batch) => !batch.enrollmentStatus || batch.enrollmentStatus === 'active').length;
+    summary.completedClasses = batches.reduce((total, batch) => total + batch.completedClasses, 0);
+    summary.attendedClasses = batches.reduce((total, batch) => total + batch.attendedClasses, 0);
+    summary.missedClasses = batches.reduce((total, batch) => total + batch.missedClasses, 0);
+    summary.unknownAttendanceClasses = batches.reduce((total, batch) => total + batch.unknownAttendanceClasses, 0);
+    summary.liveClasses = batches.reduce((total, batch) => total + batch.liveClasses, 0);
+    summary.upcomingClasses = batches.reduce((total, batch) => total + batch.upcomingClasses, 0);
+    const attendanceDenominator = summary.attendedClasses + summary.missedClasses;
+    summary.attendanceRate = attendanceDenominator ? Math.round((summary.attendedClasses / attendanceDenominator) * 100) : 0;
+    summary.assignmentsDue = batches.reduce((total, batch) => total + batch.assignments.due, 0);
+    summary.assignmentsSubmitted = batches.reduce((total, batch) => total + batch.assignments.submitted, 0);
+    summary.assignmentsReviewed = batches.reduce((total, batch) => total + batch.assignments.reviewed, 0);
+    summary.assignmentsOverdue = batches.reduce((total, batch) => total + batch.assignments.overdue, 0);
+    summary.assignmentsMissing = batches.reduce((total, batch) => total + batch.assignments.missing, 0);
+    summary.recordingsReady = batches.reduce((total, batch) => total + batch.recordings.ready, 0);
+    summary.recordingsWatched = batches.reduce((total, batch) => total + (batch.recordings.watched ?? 0), 0);
+    summary.recordingsUnwatched = batches.reduce((total, batch) => total + (batch.recordings.unwatched ?? 0), 0);
+    summary.recordingWatchSeconds = batches.reduce((total, batch) => total + (batch.recordings.totalWatchedSeconds ?? 0), 0);
+    summary.recordingCompletionRate = summary.recordingsReady
+      ? Math.round(batches.reduce((total, batch) => total + (batch.recordings.completionRate ?? 0) * batch.recordings.ready, 0) / summary.recordingsReady)
+      : 0;
+    summary.handRaises = batches.reduce((total, batch) => total + batch.participation.handRaises, 0);
+    summary.allowedSpeakingTurns = batches.reduce((total, batch) => total + batch.participation.allowedSpeakingTurns, 0);
+    summary.questionsAsked = batches.reduce((total, batch) => total + batch.participation.questionsAsked, 0);
+    summary.unansweredQuestions = batches.reduce((total, batch) => total + batch.participation.unansweredQuestions, 0);
+    return summary;
+  }
+
+  private studentProgressReviewSignals(batches: StudentProgressBatchSummary[], generatedAt: Date): StudentProgressReviewSignal[] {
+    const signals: StudentProgressReviewSignal[] = [];
+    const generated = generatedAt.toISOString();
+    for (const batch of batches) {
+      if (batch.completedClasses >= 3 && batch.attendanceRate < 75) {
+        signals.push({
+          id: this.signalId('student', batch.batchId, 'missed_class', batch.sourceSessionIds),
+          type: 'missed_class',
+          category: 'attendance',
+          severity: 'needs_attention',
+          confidence: 'high',
+          batchId: batch.batchId,
+          batchName: batch.batchName,
+          label: 'Attendance needs attention',
+          explanation: `${batch.missedClasses} missed completed classes and ${batch.attendanceRate}% attendance in ${batch.batchName}.`,
+          detail: `${batch.missedClasses} missed completed classes in ${batch.batchName}.`,
+          sourceRecords: this.recommendationSources('session', batch.sourceSessionIds, batch.batchId),
+          generatedAt: generated,
+          sourceSessionIds: batch.sourceSessionIds
+        });
+      } else if (batch.missedClasses > 0) {
+        signals.push({
+          id: this.signalId('student', batch.batchId, 'missed_class', batch.sourceSessionIds),
+          type: 'missed_class',
+          category: 'attendance',
+          severity: 'watch',
+          confidence: 'high',
+          batchId: batch.batchId,
+          batchName: batch.batchName,
+          label: 'Review missed class',
+          explanation: `${batch.missedClasses} completed class${batch.missedClasses === 1 ? ' was' : 'es were'} marked absent from attendance records.`,
+          detail: `${batch.missedClasses} completed class${batch.missedClasses === 1 ? ' was' : 'es were'} marked absent.`,
+          sourceRecords: this.recommendationSources('session', batch.sourceSessionIds, batch.batchId),
+          generatedAt: generated,
+          sourceSessionIds: batch.sourceSessionIds
+        });
+      }
+      if (batch.assignments.overdue > 0 || batch.assignments.missing >= 2) {
+        signals.push({
+          id: this.signalId('student', batch.batchId, 'overdue_assignment', batch.sourceAssignmentIds),
+          type: batch.assignments.overdue > 0 ? 'overdue_assignment' : 'weak_assignment_area',
+          category: 'assignment',
+          severity: batch.assignments.overdue > 0 ? 'needs_attention' : 'watch',
+          confidence: 'high',
+          batchId: batch.batchId,
+          batchName: batch.batchName,
+          label: 'Assignment follow-up',
+          explanation: `${batch.assignments.overdue} overdue and ${batch.assignments.missing} missing assignment${batch.assignments.missing === 1 ? '' : 's'} are recorded for this batch.`,
+          detail: `${batch.assignments.overdue} overdue and ${batch.assignments.missing} not submitted assignment${batch.assignments.missing === 1 ? '' : 's'}.`,
+          sourceRecords: this.recommendationSources('assignment', batch.sourceAssignmentIds, batch.batchId),
+          generatedAt: generated,
+          sourceAssignmentIds: batch.sourceAssignmentIds
+        });
+      }
+      if ((batch.recordings.unwatched ?? 0) > 0 || (batch.recordings.ready > 0 && (batch.recordings.completionRate ?? 0) < 60)) {
+        signals.push({
+          id: this.signalId('student', batch.batchId, 'low_recording_completion', batch.sourceRecordingIds ?? []),
+          type: 'low_recording_completion',
+          category: 'recording',
+          severity: (batch.recordings.unwatched ?? 0) >= 2 || (batch.recordings.completionRate ?? 0) < 40 ? 'watch' : 'info',
+          confidence: 'medium',
+          batchId: batch.batchId,
+          batchName: batch.batchName,
+          recordingId: batch.sourceRecordingIds?.[0],
+          label: 'Review class recordings',
+          explanation: `${batch.recordings.watched ?? 0} of ${batch.recordings.ready} published recordings have recorded playback progress, with ${batch.recordings.completionRate ?? 0}% average completion.`,
+          detail: `${batch.recordings.unwatched ?? 0} recording${(batch.recordings.unwatched ?? 0) === 1 ? '' : 's'} still need review.`,
+          sourceRecords: this.recommendationSources('recording', batch.sourceRecordingIds ?? [], batch.batchId),
+          generatedAt: generated,
+          sourceRecordingIds: batch.sourceRecordingIds
+        });
+      }
+      if (batch.completedClasses >= 3 && batch.participation.handRaises + batch.participation.allowedSpeakingTurns + batch.participation.questionsAsked === 0) {
+        signals.push({
+          id: this.signalId('student', batch.batchId, 'low_participation', batch.sourceSessionIds),
+          type: 'low_participation',
+          category: 'participation',
+          severity: 'info',
+          confidence: 'medium',
+          batchId: batch.batchId,
+          batchName: batch.batchName,
+          label: 'Low recorded participation',
+          explanation: `${batch.completedClasses} completed classes have no hand raises, speaking turns, or post-class questions recorded for you.`,
+          detail: 'No hand raises, speaking turns, or post-class questions have been recorded for this batch.',
+          sourceRecords: this.recommendationSources('participation', batch.sourceSessionIds, batch.batchId),
+          generatedAt: generated,
+          sourceSessionIds: batch.sourceSessionIds
+        });
+      }
+      if (batch.participation.unansweredQuestions > 0) {
+        signals.push({
+          id: this.signalId('student', batch.batchId, 'unanswered_question', batch.sourceSessionIds),
+          type: 'unanswered_question',
+          category: 'qna',
+          severity: 'watch',
+          confidence: 'high',
+          batchId: batch.batchId,
+          batchName: batch.batchName,
+          label: 'Open Q&A',
+          explanation: `${batch.participation.unansweredQuestions} private post-class question${batch.participation.unansweredQuestions === 1 ? ' is' : 's are'} still marked unanswered.`,
+          detail: `${batch.participation.unansweredQuestions} private post-class question${batch.participation.unansweredQuestions === 1 ? ' is' : 's are'} still unanswered.`,
+          sourceRecords: this.recommendationSources('qna', batch.sourceSessionIds, batch.batchId),
+          generatedAt: generated,
+          sourceSessionIds: batch.sourceSessionIds
+        });
+      }
+      if (batch.recordings.ready === 0 && batch.completedClasses > 0) {
+        signals.push({
+          id: this.signalId('student', batch.batchId, 'recording', batch.sourceSessionIds),
+          type: 'recording',
+          category: 'recording',
+          severity: 'info',
+          confidence: 'medium',
+          batchId: batch.batchId,
+          batchName: batch.batchName,
+          label: 'No published recordings yet',
+          explanation: 'Completed sessions exist, but there is no teacher-published recording source for this batch yet.',
+          detail: 'Completed sessions exist, but no teacher-published recording is available for review.',
+          sourceRecords: this.recommendationSources('session', batch.sourceSessionIds, batch.batchId),
+          generatedAt: generated,
+          sourceSessionIds: batch.sourceSessionIds
+        });
+      }
+      if (batch.topicTags?.length && (batch.missedClasses > 0 || (batch.recordings.unwatched ?? 0) > 0 || batch.assignments.missing > 0)) {
+        const topic = batch.topicTags[0]!;
+        signals.push({
+          id: this.signalId('student', batch.batchId, 'tagged_topic_review', [topic, ...(batch.sourceWhiteboardPageIds ?? [])]),
+          type: 'tagged_topic_review',
+          category: 'topic',
+          severity: batch.assignments.overdue > 0 || batch.missedClasses >= 2 ? 'watch' : 'info',
+          confidence: 'medium',
+          batchId: batch.batchId,
+          batchName: batch.batchName,
+          topic,
+          tag: topic,
+          label: `Review ${topic}`,
+          explanation: `Whiteboard notes include the "${topic}" tag, and this batch has missed, unwatched, or incomplete learning records.`,
+          detail: `Review ${topic} from the linked class notes and related class materials.`,
+          sourceRecords: [
+            ...this.recommendationSources('whiteboard', batch.sourceWhiteboardPageIds ?? [], batch.batchId),
+            ...this.recommendationSources('session', batch.sourceSessionIds, batch.batchId)
+          ],
+          generatedAt: generated,
+          sourceSessionIds: batch.sourceSessionIds,
+          sourceWhiteboardPageIds: batch.sourceWhiteboardPageIds
+        });
+      }
+    }
+    return signals.sort((left, right) => this.signalRank(right.severity) - this.signalRank(left.severity)).slice(0, 8);
+  }
+
+  private recommendationSources(kind: RecommendationSource['kind'], ids: string[], batchId?: string): RecommendationSource[] {
+    return [...new Set(ids.filter(Boolean))].slice(0, 8).map((id) => ({
+      kind,
+      id,
+      ...(batchId ? { batchId } : {}),
+      ...(kind === 'session' || kind === 'qna' ? { sessionId: id } : {})
+    }));
+  }
+
+  private signalId(scope: string, batchId: string, type: string, parts: string[] = []): string {
+    const seed = [scope, batchId, type, ...parts.filter(Boolean).slice(0, 4)].join(':');
+    return seed.toLowerCase().replace(/[^a-z0-9:_-]+/g, '-').slice(0, 180);
+  }
+
+  private signalRank(severity: 'info' | 'watch' | 'needs_attention'): number {
+    if (severity === 'needs_attention') return 3;
+    if (severity === 'watch') return 2;
+    return 1;
+  }
+
+  private whiteboardTopicSources(states: ClassSessionWhiteboardStateMongoDocument[]): WhiteboardTopicSignalSource[] {
+    const sources: WhiteboardTopicSignalSource[] = [];
+    for (const state of states) {
+      for (const page of state.pages ?? []) {
+        for (const tag of page.tags ?? []) {
+          const normalized = this.normalizeTopicTag(tag);
+          if (!normalized) continue;
+          sources.push({
+            tag: normalized,
+            sessionId: state.sessionId,
+            batchId: state.batchId,
+            pageId: page.pageId,
+            pageTitle: page.title
+          });
+        }
+      }
+    }
+    return sources;
+  }
+
+  private normalizeTopicTag(value: unknown): string {
+    return String(value ?? '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, 80);
+  }
+
+  private studentProgressAttendanceSource(points: Array<StudentProgressAttendancePoint | undefined>): StudentProgressBatchSummary['attendanceSource'] {
+    const sources = new Set(points.map((point) => point?.source).filter((source): source is StudentProgressAttendancePoint['source'] => Boolean(source)));
+    sources.delete('none');
+    if (!sources.size) {
+      return 'none';
+    }
+    return sources.size > 1 ? 'mixed' : [...sources][0]!;
+  }
+
+  private emptyTeacherAnalyticsSummary(): TeacherAnalyticsSummary {
+    return {
+      batchCount: 0,
+      enrolledStudents: 0,
+      totalSessions: 0,
+      completedSessions: 0,
+      liveSessions: 0,
+      upcomingSessions: 0,
+      attendanceRate: 0,
+      missedClasses: 0,
+      lateJoins: 0,
+      reconnects: 0,
+      handRaises: 0,
+      allowedSpeakingTurns: 0,
+      questionsAsked: 0,
+      unansweredQuestions: 0,
+      assignmentsDue: 0,
+      assignmentsSubmitted: 0,
+      assignmentsReviewed: 0,
+      assignmentsOverdue: 0,
+      assignmentsMissing: 0,
+      recordingsReady: 0,
+      materialDownloads: 0,
+      riskStudents: 0,
+      weakTopicSignals: 0
+    };
+  }
+
+  private async teacherAnalyticsAttendance(
+    sessions: ClassSessionMongoDocument[],
+    studentId: string | undefined,
+    students: Map<string, TeacherAnalyticsStudentAccumulator>
+  ): Promise<TeacherAnalyticsAttendanceSummary> {
+    const summary: TeacherAnalyticsAttendanceSummary = {
+      enrolledSlots: 0,
+      present: 0,
+      absent: 0,
+      attendanceRate: 0,
+      missedClasses: 0,
+      lateJoins: 0,
+      reconnects: 0,
+      averageDurationSeconds: 0,
+      source: 'none'
+    };
+    if (!sessions.length) {
+      return summary;
+    }
+    let snapshotSessions = 0;
+    let inferredSessions = 0;
+    let totalDuration = 0;
+    let presentDurationRows = 0;
+    for (const session of sessions) {
+      const attendance = await this.adminAttendanceRowsForSession(session);
+      if (attendance.source === 'snapshot') {
+        snapshotSessions += 1;
+      } else {
+        inferredSessions += 1;
+      }
+      const rows = studentId ? attendance.rows.filter((row) => row.studentId === studentId) : attendance.rows;
+      for (const row of rows) {
+        summary.enrolledSlots += 1;
+        const student = students.get(row.studentId);
+        if (student) {
+          student.sessionsEnrolled += 1;
+          student.sourceSessionIds.add(session.id);
+        }
+        if (row.status === 'present') {
+          summary.present += 1;
+          summary.reconnects += row.reconnectCount;
+          totalDuration += row.totalDurationSeconds;
+          presentDurationRows += 1;
+          if (student) {
+            student.sessionsAttended += 1;
+            student.reconnects += row.reconnectCount;
+          }
+          if (row.firstJoinAt && row.firstJoinAt.getTime() - session.scheduledAt.getTime() > this.lateJoinThresholdMs(session)) {
+            summary.lateJoins += 1;
+          }
+        } else {
+          summary.absent += 1;
+          summary.missedClasses += 1;
+          if (student) {
+            student.missedClasses += 1;
+          }
+        }
+      }
+    }
+    summary.attendanceRate = summary.enrolledSlots ? Math.round((summary.present / summary.enrolledSlots) * 100) : 0;
+    summary.averageDurationSeconds = presentDurationRows ? Math.round(totalDuration / presentDurationRows) : 0;
+    summary.source = snapshotSessions && inferredSessions ? 'mixed' : snapshotSessions ? 'snapshot' : inferredSessions ? 'inferred' : 'none';
+    return summary;
+  }
+
+  private teacherAnalyticsParticipation(
+    events: ClassSessionTimelineEvent[],
+    studentId: string | undefined,
+    students: Map<string, TeacherAnalyticsStudentAccumulator>,
+    qnaStates: ClassSessionPostClassThreadStateMongoDocument[]
+  ): TeacherAnalyticsParticipationSummary {
+    const filtered = studentId
+      ? events.filter((event) => event.actor?.id === studentId || event.target?.userId === studentId || event.target?.id === studentId)
+      : events;
+    const summary: TeacherAnalyticsParticipationSummary = {
+      handRaises: filtered.filter((event) => event.eventType === 'hand.raised').length,
+      allowedSpeakingTurns: filtered.filter((event) => event.eventType === 'speak.allowed').length,
+      revokedSpeakingTurns: filtered.filter((event) => event.eventType === 'speak.revoked').length,
+      questionsAsked: filtered.filter((event) => event.eventType === 'post_class.question.asked').length,
+      qnaThreads: qnaStates.length,
+      unansweredQuestions: qnaStates.filter((state) => !state.answered).length
+    };
+    for (const event of filtered) {
+      const actorId = event.actor?.id;
+      const targetId = event.target?.userId ?? event.target?.id;
+      if (event.eventType === 'hand.raised' && actorId && students.has(actorId)) {
+        students.get(actorId)!.handRaises += 1;
+      }
+      if (event.eventType === 'post_class.question.asked' && actorId && students.has(actorId)) {
+        students.get(actorId)!.questionsAsked += 1;
+      }
+      if (event.eventType === 'speak.allowed' && targetId && students.has(targetId)) {
+        students.get(targetId)!.allowedSpeakingTurns += 1;
+      }
+    }
+    for (const state of qnaStates) {
+      const student = students.get(state.studentId);
+      if (student && !state.answered) {
+        student.unansweredQuestions += 1;
+      }
+    }
+    return summary;
+  }
+
+  private teacherAnalyticsAssignments(
+    assignments: AssignmentMongoDocument[],
+    submissions: AssignmentSubmissionMongoDocument[],
+    rosterSize: number,
+    studentId: string | undefined,
+    students: Map<string, TeacherAnalyticsStudentAccumulator>
+  ): TeacherAnalyticsAssignmentSummary {
+    const now = Date.now();
+    const summary: TeacherAnalyticsAssignmentSummary = {
+      total: assignments.length,
+      published: assignments.filter((assignment) => assignment.status === 'published').length,
+      archived: assignments.filter((assignment) => assignment.status === 'archived').length,
+      due: assignments.filter((assignment) => Boolean(assignment.dueAt)).length,
+      overdue: assignments.filter((assignment) => assignment.status === 'published' && assignment.dueAt && assignment.dueAt.getTime() < now).length,
+      missing: 0,
+      submissions: this.emptyAssignmentSubmissionSummary()
+    };
+    for (const submission of submissions) {
+      if (ASSIGNMENT_SUBMISSION_STATUS_KEYS.includes(submission.status as keyof AssignmentSubmissionSummary)) {
+        summary.submissions[submission.status as keyof AssignmentSubmissionSummary] += 1;
+      }
+    }
+    const submissionsByAssignment = this.groupBy(submissions, (submission) => submission.assignmentId);
+    const scopedRosterSize = studentId ? students.size : rosterSize;
+    for (const assignment of assignments) {
+      const assignmentSubmissions = submissionsByAssignment.get(assignment.assignmentId) ?? [];
+      const submittedCount = assignmentSubmissions.filter((submission) => this.isSubmittedAssignmentStatus(submission.status)).length;
+      const missing = Math.max(scopedRosterSize - submittedCount, 0);
+      summary.missing += missing;
+      for (const student of students.values()) {
+        student.assignmentsAssigned += 1;
+        student.sourceAssignmentIds.add(assignment.assignmentId);
+      }
+      for (const submission of assignmentSubmissions) {
+        const student = students.get(submission.studentId);
+        if (!student) continue;
+        if (this.isSubmittedAssignmentStatus(submission.status)) {
+          student.assignmentsSubmitted += 1;
+        }
+        if (this.isReviewedAssignmentStatus(submission.status)) {
+          student.assignmentsReviewed += 1;
+        }
+      }
+      for (const student of students.values()) {
+        if (!assignmentSubmissions.some((submission) => submission.studentId === student.studentId && this.isSubmittedAssignmentStatus(submission.status))) {
+          student.assignmentsMissing += 1;
+        }
+      }
+    }
+    return summary;
+  }
+
+  private teacherAnalyticsRecordings(
+    recordings: Recording[],
+    progress: RecordingPlaybackProgressRecord[] = [],
+    rosterSize = 0
+  ): TeacherAnalyticsRecordingSummary {
+    const ready = recordings.filter((recording) => recording.status === 'stopped');
+    const readyIds = new Set(ready.map((recording) => recording.recordingId ?? recording.id));
+    const progressRows = progress.filter((row) => readyIds.has(row.recordingId));
+    const watchedStudents = new Set(progressRows.filter((row) => row.playCount > 0 || row.completionPercent > 0).map((row) => row.studentId));
+    const averageCompletionPercent = progressRows.length
+      ? Math.round(progressRows.reduce((total, row) => total + row.completionPercent, 0) / progressRows.length)
+      : 0;
+    return {
+      total: recordings.length,
+      ready: ready.length,
+      failed: recordings.filter((recording) => recording.status === 'failed').length,
+      active: recordings.filter((recording) => recording.status === 'starting' || recording.status === 'recording' || recording.status === 'stopping').length,
+      watched: watchedStudents.size,
+      unwatched: Math.max(rosterSize - watchedStudents.size, 0),
+      averageCompletionPercent,
+      totalWatchedSeconds: progressRows.reduce((total, row) => total + row.watchedSeconds, 0),
+      usage: {
+        available: ready.length > 0,
+        source: ready.length > 0 ? 'progress' : 'metadata',
+        reason: ready.length > 0
+          ? 'Recording engagement uses persisted student playback progress for ready recordings.'
+          : 'Only recording readiness metadata is available for this range.'
+      }
+    };
+  }
+
+  private teacherAnalyticsMaterials(
+    materials: ClassSessionMaterialMongoDocument[],
+    events: ClassSessionTimelineEvent[]
+  ): TeacherAnalyticsMaterialSummary {
+    const downloads = events.filter((event) => event.eventType === 'material.downloaded').length;
+    return {
+      total: materials.length,
+      shared: materials.filter((material) => material.shared).length,
+      published: materials.filter((material) => material.publishedAt && !material.unpublishedAt).length,
+      downloads,
+      usage: {
+        available: downloads > 0,
+        source: downloads > 0 ? 'activity' : 'metadata',
+        reason: downloads > 0 ? 'Downloads are counted from material.downloaded activity events.' : 'Material metadata is available; no download events were recorded in this range.'
+      }
+    };
+  }
+
+  private teacherAnalyticsRisk(student: TeacherAnalyticsStudentAccumulator): TeacherAnalyticsRiskIndicator | null {
+    const reasons: string[] = [];
+    const attendanceRate = student.sessionsEnrolled ? Math.round((student.sessionsAttended / student.sessionsEnrolled) * 100) : 100;
+    if (student.missedClasses >= 2 && attendanceRate < 75) {
+      reasons.push(`${student.missedClasses} missed completed classes`);
+    }
+    if (student.assignmentsAssigned >= 2 && student.assignmentsSubmitted === 0) {
+      reasons.push('No submitted assignments');
+    } else if (student.assignmentsMissing >= 2) {
+      reasons.push(`${student.assignmentsMissing} missing assignments`);
+    }
+    if (student.sessionsEnrolled >= 3 && student.handRaises + student.allowedSpeakingTurns + student.questionsAsked === 0) {
+      reasons.push('Low recorded participation');
+    }
+    if (student.unansweredQuestions >= 2) {
+      reasons.push(`${student.unansweredQuestions} unanswered private Q&A threads`);
+    }
+    if (!reasons.length) {
+      return null;
+    }
+    const riskLevel: TeacherAnalyticsRiskLevel =
+      reasons.length >= 2 || student.missedClasses >= 3 || student.assignmentsMissing >= 3 ? 'high' : 'medium';
+    return {
+      studentId: student.studentId,
+      ...(student.studentName ? { studentName: student.studentName } : {}),
+      ...(student.studentEmail ? { studentEmail: student.studentEmail } : {}),
+      batchId: student.batchId,
+      batchName: student.batchName,
+      riskLevel,
+      reasons,
+      sourceSessionIds: [...student.sourceSessionIds],
+      sourceAssignmentIds: [...student.sourceAssignmentIds]
+    };
+  }
+
+  private teacherWeakTopicSignals(options: {
+    batch: BatchMongoDocument;
+    attendance: TeacherAnalyticsAttendanceSummary;
+    participation: TeacherAnalyticsParticipationSummary;
+    assignments: TeacherAnalyticsAssignmentSummary;
+    recordings: TeacherAnalyticsRecordingSummary;
+    materials: TeacherAnalyticsMaterialSummary;
+    risks: TeacherAnalyticsRiskIndicator[];
+    whiteboardTopics: WhiteboardTopicSignalSource[];
+    sourceSessionIds: string[];
+    sourceAssignmentIds: string[];
+    generatedAt: Date;
+  }): TeacherWeakTopicSignal[] {
+    const generatedAt = options.generatedAt.toISOString();
+    const signals: TeacherWeakTopicSignal[] = [];
+    const batchName = options.batch.name;
+    const base = {
+      batchId: options.batch.id,
+      batchName,
+      ...(options.batch.courseId ? { courseId: options.batch.courseId } : {}),
+      ...(options.batch.courseName ? { courseName: options.batch.courseName } : {}),
+      generatedAt
+    };
+    if (options.attendance.missedClasses >= 2) {
+      signals.push({
+        ...base,
+        id: this.signalId('teacher', options.batch.id, 'missed_class', options.sourceSessionIds),
+        type: 'missed_class',
+        severity: options.attendance.attendanceRate < 70 ? 'needs_attention' : 'watch',
+        confidence: 'high',
+        label: 'Attendance review',
+        explanation: `${options.attendance.missedClasses} missed class records and ${options.attendance.attendanceRate}% attendance are recorded for ${batchName}.`,
+        affectedStudentCount: Math.max(options.attendance.absent, 0),
+        sourceRecords: this.recommendationSources('attendance', options.sourceSessionIds, options.batch.id),
+        sourceSessionIds: options.sourceSessionIds,
+        sourceAssignmentIds: []
+      });
+    }
+    if (options.assignments.overdue > 0 || options.assignments.missing >= 2) {
+      signals.push({
+        ...base,
+        id: this.signalId('teacher', options.batch.id, 'weak_assignment_area', options.sourceAssignmentIds),
+        type: options.assignments.overdue > 0 ? 'overdue_assignment' : 'weak_assignment_area',
+        severity: options.assignments.missing >= 3 || options.assignments.overdue > 0 ? 'needs_attention' : 'watch',
+        confidence: 'high',
+        label: 'Assignment gap',
+        explanation: `${options.assignments.missing} missing and ${options.assignments.overdue} overdue assignment slots are recorded for ${batchName}.`,
+        affectedStudentCount: options.assignments.missing,
+        sourceRecords: this.recommendationSources('assignment', options.sourceAssignmentIds, options.batch.id),
+        sourceSessionIds: options.sourceSessionIds,
+        sourceAssignmentIds: options.sourceAssignmentIds
+      });
+    }
+    if (options.recordings.ready > 0 && ((options.recordings.unwatched ?? 0) > 0 || (options.recordings.averageCompletionPercent ?? 0) < 60)) {
+      signals.push({
+        ...base,
+        id: this.signalId('teacher', options.batch.id, 'low_recording_completion', options.sourceSessionIds),
+        type: 'low_recording_completion',
+        severity: (options.recordings.averageCompletionPercent ?? 0) < 40 ? 'watch' : 'info',
+        confidence: 'medium',
+        label: 'Recording review gap',
+        explanation: `${options.recordings.watched ?? 0} students have watched recordings, ${options.recordings.unwatched ?? 0} have no recorded playback, and average completion is ${options.recordings.averageCompletionPercent ?? 0}%.`,
+        affectedStudentCount: options.recordings.unwatched ?? 0,
+        sourceRecords: this.recommendationSources('session', options.sourceSessionIds, options.batch.id),
+        sourceSessionIds: options.sourceSessionIds,
+        sourceAssignmentIds: []
+      });
+    }
+    if (options.participation.unansweredQuestions >= 2) {
+      signals.push({
+        ...base,
+        id: this.signalId('teacher', options.batch.id, 'unanswered_question', options.sourceSessionIds),
+        type: 'unanswered_question',
+        severity: 'watch',
+        confidence: 'high',
+        label: 'Open post-class Q&A',
+        explanation: `${options.participation.unansweredQuestions} private post-class Q&A threads are still unanswered. Message bodies are excluded from analytics.`,
+        affectedStudentCount: options.participation.unansweredQuestions,
+        sourceRecords: this.recommendationSources('qna', options.sourceSessionIds, options.batch.id),
+        sourceSessionIds: options.sourceSessionIds,
+        sourceAssignmentIds: []
+      });
+    }
+    if (options.sourceSessionIds.length >= 3 && options.participation.handRaises + options.participation.allowedSpeakingTurns + options.participation.questionsAsked === 0) {
+      signals.push({
+        ...base,
+        id: this.signalId('teacher', options.batch.id, 'low_participation', options.sourceSessionIds),
+        type: 'low_participation',
+        severity: 'info',
+        confidence: 'medium',
+        label: 'Low participation pattern',
+        explanation: `${batchName} has no recorded hand raises, speaking turns, or questions in the selected range.`,
+        affectedStudentCount: options.risks.filter((risk) => risk.reasons.some((reason) => reason.includes('Low recorded participation'))).length,
+        sourceRecords: this.recommendationSources('participation', options.sourceSessionIds, options.batch.id),
+        sourceSessionIds: options.sourceSessionIds,
+        sourceAssignmentIds: []
+      });
+    }
+    const topicCounts = new Map<string, WhiteboardTopicSignalSource[]>();
+    for (const topic of options.whiteboardTopics) {
+      topicCounts.set(topic.tag, [...(topicCounts.get(topic.tag) ?? []), topic]);
+    }
+    const topic = [...topicCounts.entries()].sort((left, right) => right[1].length - left[1].length)[0];
+    if (topic && (options.assignments.missing > 0 || options.attendance.missedClasses > 0 || (options.recordings.unwatched ?? 0) > 0)) {
+      const [tag, sources] = topic;
+      signals.push({
+        ...base,
+        id: this.signalId('teacher', options.batch.id, 'tagged_topic_review', [tag, ...sources.map((source) => source.pageId)]),
+        type: 'tagged_topic_review',
+        severity: options.assignments.missing >= 2 || options.attendance.missedClasses >= 2 ? 'watch' : 'info',
+        confidence: 'medium',
+        tag,
+        topic: tag,
+        label: `Topic review: ${tag}`,
+        explanation: `Whiteboard pages are tagged "${tag}", and this batch also has missed, incomplete, or unwatched review signals.`,
+        affectedStudentCount: Math.max(options.risks.length, options.assignments.missing, options.attendance.absent, options.recordings.unwatched ?? 0),
+        sourceRecords: [
+          ...this.recommendationSources('whiteboard', sources.map((source) => source.pageId), options.batch.id),
+          ...this.recommendationSources('session', [...new Set(sources.map((source) => source.sessionId))], options.batch.id)
+        ],
+        sourceSessionIds: [...new Set(sources.map((source) => source.sessionId))],
+        sourceAssignmentIds: options.sourceAssignmentIds,
+        sourceWhiteboardPageIds: sources.map((source) => source.pageId)
+      });
+    }
+    return signals.sort((left, right) => this.signalRank(right.severity) - this.signalRank(left.severity)).slice(0, 8);
+  }
+
+  private teacherAnalyticsSummary(batches: TeacherAnalyticsBatchSummary[]): TeacherAnalyticsSummary {
+    const summary = this.emptyTeacherAnalyticsSummary();
+    summary.batchCount = batches.length;
+    summary.enrolledStudents = batches.reduce((total, batch) => total + batch.enrolledStudents, 0);
+    summary.totalSessions = batches.reduce((total, batch) => total + batch.totalSessions, 0);
+    summary.completedSessions = batches.reduce((total, batch) => total + batch.completedSessions, 0);
+    summary.liveSessions = batches.reduce((total, batch) => total + batch.liveSessions, 0);
+    summary.upcomingSessions = batches.reduce((total, batch) => total + batch.upcomingSessions, 0);
+    const enrolledSlots = batches.reduce((total, batch) => total + batch.attendance.enrolledSlots, 0);
+    const present = batches.reduce((total, batch) => total + batch.attendance.present, 0);
+    summary.attendanceRate = enrolledSlots ? Math.round((present / enrolledSlots) * 100) : 0;
+    summary.missedClasses = batches.reduce((total, batch) => total + batch.attendance.missedClasses, 0);
+    summary.lateJoins = batches.reduce((total, batch) => total + batch.attendance.lateJoins, 0);
+    summary.reconnects = batches.reduce((total, batch) => total + batch.attendance.reconnects, 0);
+    summary.handRaises = batches.reduce((total, batch) => total + batch.participation.handRaises, 0);
+    summary.allowedSpeakingTurns = batches.reduce((total, batch) => total + batch.participation.allowedSpeakingTurns, 0);
+    summary.questionsAsked = batches.reduce((total, batch) => total + batch.participation.questionsAsked, 0);
+    summary.unansweredQuestions = batches.reduce((total, batch) => total + batch.participation.unansweredQuestions, 0);
+    summary.assignmentsDue = batches.reduce((total, batch) => total + batch.assignments.due, 0);
+    summary.assignmentsSubmitted = batches.reduce((total, batch) => total + batch.assignments.submissions.submitted + batch.assignments.submissions.late, 0);
+    summary.assignmentsReviewed = batches.reduce((total, batch) => total + batch.assignments.submissions.reviewed + batch.assignments.submissions.completed, 0);
+    summary.assignmentsOverdue = batches.reduce((total, batch) => total + batch.assignments.overdue, 0);
+    summary.assignmentsMissing = batches.reduce((total, batch) => total + batch.assignments.missing, 0);
+    summary.recordingsReady = batches.reduce((total, batch) => total + batch.recordings.ready, 0);
+    summary.materialDownloads = batches.reduce((total, batch) => total + batch.materials.downloads, 0);
+    summary.riskStudents = batches.reduce((total, batch) => total + batch.riskIndicators.length, 0);
+    summary.weakTopicSignals = batches.reduce((total, batch) => total + batch.weakTopicSignals.length, 0);
+    return summary;
+  }
+
+  private isSubmittedAssignmentStatus(status: string): boolean {
+    return status === 'submitted' || status === 'late' || status === 'reviewed' || status === 'returned' || status === 'completed';
+  }
+
+  private isReviewedAssignmentStatus(status: string): boolean {
+    return status === 'reviewed' || status === 'returned' || status === 'completed';
+  }
+
+  private riskRank(level: TeacherAnalyticsRiskLevel): number {
+    if (level === 'high') return 3;
+    if (level === 'medium') return 2;
+    return 1;
+  }
+
+  private groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
+    const groups = new Map<string, T[]>();
+    for (const item of items) {
+      const itemKey = key(item);
+      if (!itemKey) continue;
+      groups.set(itemKey, [...(groups.get(itemKey) ?? []), item]);
+    }
+    return groups;
+  }
+
   private async adminClassSessionFilters(query: AdminClassSessionReportQuery): Promise<Record<string, unknown>> {
     const filters: Record<string, unknown> = {};
     if (query.status && query.status !== 'all') {
@@ -2338,11 +3758,26 @@ export class ClassSessionsService {
   }
 
   private boundedAdminAttendanceQuery(query: AdminAttendanceQuery): AdminAttendanceQuery {
+    const {
+      studentId: rawStudentId,
+      attendanceStatus: rawAttendanceStatus,
+      source: rawSource,
+      ...rest
+    } = query;
     const now = new Date();
-    const dateTo = query.dateTo?.trim() ? this.parseAdminDate(query.dateTo, 'dateTo') : now;
-    const dateFrom = query.dateFrom?.trim()
-      ? this.parseAdminDate(query.dateFrom, 'dateFrom')
+    const dateTo = rest.dateTo?.trim() ? this.parseAdminDate(rest.dateTo, 'dateTo') : now;
+    const dateFrom = rest.dateFrom?.trim()
+      ? this.parseAdminDate(rest.dateFrom, 'dateFrom')
       : new Date(dateTo.getTime() - ADMIN_ATTENDANCE_DEFAULT_RANGE_DAYS * 24 * 60 * 60 * 1000);
+    const attendanceStatus = rawAttendanceStatus?.trim() as AdminAttendanceQuery['attendanceStatus'];
+    if (attendanceStatus && attendanceStatus !== 'all' && attendanceStatus !== 'present' && attendanceStatus !== 'absent') {
+      throw new BadRequestException('Invalid attendance status filter.');
+    }
+    const source = rawSource?.trim() as AdminAttendanceQuery['source'];
+    if (source && source !== 'all' && source !== 'snapshot' && source !== 'inferred') {
+      throw new BadRequestException('Invalid attendance source filter.');
+    }
+    const studentId = rawStudentId?.trim();
     if (dateFrom.getTime() > dateTo.getTime()) {
       throw new BadRequestException('dateFrom must be before dateTo.');
     }
@@ -2350,7 +3785,10 @@ export class ClassSessionsService {
       throw new BadRequestException(`Attendance analytics date range cannot exceed ${ADMIN_ATTENDANCE_MAX_RANGE_DAYS} days.`);
     }
     return {
-      ...query,
+      ...rest,
+      ...(studentId ? { studentId } : {}),
+      ...(attendanceStatus && attendanceStatus !== 'all' ? { attendanceStatus } : {}),
+      ...(source && source !== 'all' ? { source } : {}),
       dateFrom: dateFrom.toISOString(),
       dateTo: dateTo.toISOString()
     };
@@ -2360,21 +3798,30 @@ export class ClassSessionsService {
     const bounded = this.boundedAdminAttendanceQuery(query);
     const filters = await this.adminClassSessionFilters(bounded);
     const sessions = await this.classSessions.find(filters).sort({ scheduledAt: -1 }).exec();
-    return this.toAdminAttendanceSessionRows(sessions);
+    return this.toAdminAttendanceSessionRows(sessions, bounded);
   }
 
-  private async toAdminAttendanceSessionRows(sessions: ClassSessionMongoDocument[]): Promise<AdminAttendanceSessionRow[]> {
+  private async toAdminAttendanceSessionRows(
+    sessions: ClassSessionMongoDocument[],
+    query: AdminAttendanceQuery = {}
+  ): Promise<AdminAttendanceSessionRow[]> {
     if (!sessions.length) {
       return [];
     }
     const batchMap = await this.adminBatchMap(sessions.map((session) => session.batchId));
     const teacherMap = await this.adminTeacherMap(sessions.map((session) => session.teacherId));
-    return Promise.all(
+    const rows = await Promise.all(
       sessions.map(async (session) => {
         const batch = batchMap.get(session.batchId);
         const teacher = teacherMap.get(session.teacherId);
         const attendance = await this.adminAttendanceRowsForSession(session);
-        const attendanceRows = attendance.rows;
+        if (!this.adminAttendanceSourceMatches(attendance.source, query.source)) {
+          return null;
+        }
+        const attendanceRows = this.filterAdminAttendanceRows(attendance.rows, query);
+        if (this.hasAdminAttendanceRowFilter(query) && !attendanceRows.length) {
+          return null;
+        }
         const presentRows = attendanceRows.filter((row) => row.status === 'present');
         const enrolled = attendanceRows.length;
         const present = presentRows.length;
@@ -2417,6 +3864,7 @@ export class ClassSessionsService {
         };
       })
     );
+    return rows.filter((row): row is AdminAttendanceSessionRow => Boolean(row));
   }
 
   private classSessionReportAttendance(
@@ -2882,7 +4330,10 @@ export class ClassSessionsService {
     for (const session of sessions) {
       const batch = batchMap.get(session.batchId);
       const attendance = await this.adminAttendanceRowsForSession(session);
-      const attendanceRows = attendance.rows;
+      if (!this.adminAttendanceSourceMatches(attendance.source, bounded.source)) {
+        continue;
+      }
+      const attendanceRows = this.filterAdminAttendanceRows(attendance.rows, bounded);
       for (const row of attendanceRows) {
         const key = `${session.batchId}:${row.studentId}`;
         const existing = rows.get(key) ?? {
@@ -2931,6 +4382,76 @@ export class ClassSessionsService {
         averageDurationSeconds: attendedDurationRows ? Math.round(totalDurationSeconds / attendedDurationRows) : 0
       }))
       .sort((left, right) => left.studentName.localeCompare(right.studentName));
+  }
+
+  private async adminAttendanceExportRows(query: AdminAttendanceQuery): Promise<AdminAttendanceExportRow[]> {
+    const bounded = this.boundedAdminAttendanceQuery(query);
+    const filters = await this.adminClassSessionFilters(bounded);
+    const sessions = await this.classSessions.find(filters).sort({ scheduledAt: -1 }).exec();
+    if (!sessions.length) {
+      return [];
+    }
+    const batchMap = await this.adminBatchMap(sessions.map((session) => session.batchId));
+    const teacherMap = await this.adminTeacherMap(sessions.map((session) => session.teacherId));
+    const rows: AdminAttendanceExportRow[] = [];
+    for (const session of sessions) {
+      const attendance = await this.adminAttendanceRowsForSession(session);
+      if (!this.adminAttendanceSourceMatches(attendance.source, bounded.source)) {
+        continue;
+      }
+      const batch = batchMap.get(session.batchId);
+      const teacher = teacherMap.get(session.teacherId);
+      const attendanceRows = this.filterAdminAttendanceRows(attendance.rows, bounded).sort((left, right) =>
+        left.displayName.localeCompare(right.displayName)
+      );
+      for (const row of attendanceRows) {
+        rows.push({
+          sessionId: session.id,
+          title: session.title,
+          sessionStatus: session.status,
+          batchId: session.batchId,
+          batchName: batch?.name ?? 'Unknown batch',
+          ...(batch?.courseId ? { courseId: batch.courseId } : {}),
+          ...(batch?.courseName ? { courseName: batch.courseName } : {}),
+          teacherId: session.teacherId,
+          ...(teacher?.displayName || teacher?.name ? { teacherName: teacher.displayName ?? teacher.name } : {}),
+          studentId: row.studentId,
+          studentName: row.displayName,
+          ...(row.email ? { studentEmail: row.email } : {}),
+          attendanceStatus: row.status,
+          rosterSource: row.rosterSource ?? 'roster',
+          ...(row.firstJoinAt ? { firstJoinAt: row.firstJoinAt.toISOString() } : {}),
+          ...(row.lastLeaveAt ? { lastLeaveAt: row.lastLeaveAt.toISOString() } : {}),
+          totalDurationSeconds: row.totalDurationSeconds,
+          reconnectCount: row.reconnectCount,
+          attendanceSource: attendance.source,
+          scheduledAt: session.scheduledAt.toISOString(),
+          ...(session.startedAt ? { startedAt: session.startedAt.toISOString() } : {}),
+          ...(session.completedAt ? { completedAt: session.completedAt.toISOString() } : {})
+        });
+      }
+    }
+    return rows;
+  }
+
+  private adminAttendanceSourceMatches(source: AdminAttendanceSource, filter: AdminAttendanceQuery['source']): boolean {
+    return !filter || filter === 'all' || source === filter;
+  }
+
+  private filterAdminAttendanceRows(rows: ClassSessionAttendanceRow[], query: AdminAttendanceQuery): ClassSessionAttendanceRow[] {
+    return rows.filter((row) => {
+      if (query.studentId && row.studentId !== query.studentId) {
+        return false;
+      }
+      if (query.attendanceStatus && query.attendanceStatus !== 'all' && row.status !== query.attendanceStatus) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  private hasAdminAttendanceRowFilter(query: AdminAttendanceQuery): boolean {
+    return Boolean(query.studentId || (query.attendanceStatus && query.attendanceStatus !== 'all'));
   }
 
   private async adminAttendanceRowsForSession(session: ClassSessionMongoDocument): Promise<AttendanceRowsWithSource> {
@@ -3086,6 +4607,8 @@ export class ClassSessionsService {
     return {
       totalSessions: rows.length,
       completedSessions: rows.filter((row) => row.status === 'completed').length,
+      snapshottedSessions: rows.filter((row) => row.attendanceSource === 'snapshot').length,
+      inferredSessions: rows.filter((row) => row.attendanceSource === 'inferred').length,
       totalEnrolledStudents,
       averageAttendanceRate: totalEnrolledStudents ? Math.round((totalPresent / totalEnrolledStudents) * 100) : 0,
       averageDurationSeconds: attendedRows.length

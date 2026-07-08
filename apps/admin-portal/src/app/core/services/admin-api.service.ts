@@ -37,6 +37,7 @@ import type {
   AdminRecordingListResponse,
   AdminRecordingPlaybackResponse,
   AdminRecordingRetentionUpdateRequest,
+  AdminTeacherPromotionUpdateRequest,
   AdminUpdateEnrollmentRequest,
   AdminUserActionResponse,
   AdminUserDetail,
@@ -44,7 +45,14 @@ import type {
   AdminUserListResponse,
   AdminUserUpdateRequest,
   ClassSessionTimelineCategory,
-  ClassSessionTimelineResponse
+  ClassSessionTimelineResponse,
+  SupportRequest,
+  SupportRequestListQuery,
+  TeacherPromotion,
+  TeacherPromotionListQuery,
+  TeacherPromotionListResponse,
+  SupportRequestListResponse,
+  UpdateSupportRequestRequest
 } from '@native-sfu/contracts';
 import { Observable, catchError, map, throwError } from 'rxjs';
 import { API_BASE_URL } from './app-environment';
@@ -198,6 +206,62 @@ export class AdminApiService {
         map((response) => this.unwrapResponse(response)),
         catchError((error) => throwError(() => this.toApiError(error)))
       );
+  }
+
+  listSupportRequests(query: SupportRequestListQuery): Observable<SupportRequestListResponse> {
+    return this.http
+      .get<SupportRequestListResponse | ApiEnvelope<SupportRequestListResponse>>(`${API_BASE_URL}/admin/support-requests`, {
+        params: this.toParams(query)
+      })
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  getSupportRequest(requestId: string): Observable<SupportRequest> {
+    return this.http
+      .get<SupportRequest | ApiEnvelope<SupportRequest>>(`${API_BASE_URL}/admin/support-requests/${encodeURIComponent(requestId)}`)
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  updateSupportRequest(requestId: string, request: UpdateSupportRequestRequest): Observable<SupportRequest> {
+    return this.http
+      .patch<SupportRequest | ApiEnvelope<SupportRequest>>(`${API_BASE_URL}/admin/support-requests/${encodeURIComponent(requestId)}`, request)
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  listTeacherPromotions(query: TeacherPromotionListQuery): Observable<TeacherPromotionListResponse> {
+    return this.http
+      .get<TeacherPromotionListResponse | ApiEnvelope<TeacherPromotionListResponse>>(`${API_BASE_URL}/admin/teacher-promotions`, {
+        params: this.toParams(query)
+      })
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  approveTeacherPromotion(promotionId: string, request: AdminTeacherPromotionUpdateRequest = {}): Observable<TeacherPromotion> {
+    return this.teacherPromotionAction(promotionId, 'approve', request);
+  }
+
+  pauseTeacherPromotion(promotionId: string, request: AdminTeacherPromotionUpdateRequest = {}): Observable<TeacherPromotion> {
+    return this.teacherPromotionAction(promotionId, 'pause', request);
+  }
+
+  cancelTeacherPromotion(promotionId: string, request: AdminTeacherPromotionUpdateRequest = {}): Observable<TeacherPromotion> {
+    return this.teacherPromotionAction(promotionId, 'cancel', request);
+  }
+
+  rejectTeacherPromotion(promotionId: string, request: AdminTeacherPromotionUpdateRequest = {}): Observable<TeacherPromotion> {
+    return this.teacherPromotionAction(promotionId, 'reject', request);
   }
 
   getClassSessionTimeline(
@@ -515,6 +579,22 @@ export class AdminApiService {
       }
     }
     return response as T;
+  }
+
+  private teacherPromotionAction(
+    promotionId: string,
+    action: 'approve' | 'pause' | 'cancel' | 'reject',
+    request: AdminTeacherPromotionUpdateRequest
+  ): Observable<TeacherPromotion> {
+    return this.http
+      .post<TeacherPromotion | ApiEnvelope<TeacherPromotion>>(
+        `${API_BASE_URL}/admin/teacher-promotions/${encodeURIComponent(promotionId)}/${action}`,
+        request
+      )
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
   }
 
   private attendanceFileName(session: AdminClassSessionReportRow): string {

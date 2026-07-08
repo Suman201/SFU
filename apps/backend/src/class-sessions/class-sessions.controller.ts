@@ -43,6 +43,7 @@ import type {
   SendPostClassQuestionRequest,
   StudentCompletedClassDetailResponse,
   StudentCompletedClassSessionListResponse,
+  StudentProgressResponse,
   UpdatePostClassQuestionStateRequest,
   WhiteboardMemoryPageSearchResponse,
   WhiteboardMemoryState,
@@ -124,6 +125,13 @@ export class ClassSessionsController {
     @CurrentUser() user: AuthenticatedUser
   ): Promise<StudentCompletedClassSessionListResponse> {
     return this.classSessions.listStudentCompletedSessions(user, query);
+  }
+
+  @Get('student/progress')
+  @Roles('STUDENT')
+  @ApiOperation({ summary: 'Get the current student learning progress summary' })
+  getStudentProgress(@CurrentUser() user: AuthenticatedUser): Promise<StudentProgressResponse> {
+    return this.classSessions.getStudentProgress(user);
   }
 
   @Get('student/completed/:sessionId')

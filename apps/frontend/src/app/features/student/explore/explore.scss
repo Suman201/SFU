@@ -36,6 +36,13 @@
   box-shadow: var(--shadow-sm);
 }
 
+.heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .batch-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
@@ -254,6 +261,10 @@
   .page-heading {
     align-items: start;
     flex-direction: column;
+  }
+
+  .heading-actions {
+    justify-content: flex-start;
   }
 
   .page-heading h1 {

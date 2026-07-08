@@ -17,6 +17,7 @@
         @if (nextSession(); as next) {
           <button class="primary" type="button" (click)="startSession(next)">Start next session</button>
         }
+        <a class="button" routerLink="/teacher/analytics" [queryParams]="{ batchId: batch.id }">Analytics</a>
         <a class="button" [routerLink]="['/teacher/batches', batch.id, 'live-settings']">Live Settings</a>
         <a class="button" routerLink="/teacher/dashboard">All batches</a>
       </div>

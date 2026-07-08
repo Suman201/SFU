@@ -1088,6 +1088,27 @@
   font-size: 12px;
 }
 
+.student-support-button {
+  position: fixed;
+  top: calc(var(--student-action-top) + 54px);
+  right: 24px;
+  z-index: 24;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, #F26076 48%, rgba(255, 255, 255, 0.18));
+  border-radius: 999px;
+  background: color-mix(in srgb, #F26076 22%, rgba(10, 16, 14, 0.76));
+  color: var(--video-text);
+  box-shadow: var(--shadow-md);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 900;
+  backdrop-filter: blur(14px);
+}
+
 .list-icon {
   position: relative;
   display: inline-block;

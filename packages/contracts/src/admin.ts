@@ -1,3 +1,5 @@
+import type { RecordingEngagementSummary } from './recordings.js';
+
 export type AdminClassSessionStatus = 'scheduled' | 'live' | 'completed' | 'cancelled';
 
 export interface AdminClassSessionAttendanceSummary {
@@ -395,6 +397,7 @@ export interface AdminRecordingDetail extends AdminRecordingListItem {
   consentRequired?: boolean;
   consentVersion?: string;
   trackCount: number;
+  engagement?: RecordingEngagementSummary;
 }
 
 export interface AdminRecordingListQuery {
@@ -438,7 +441,10 @@ export interface AdminAttendanceQuery {
   courseId?: string;
   batchId?: string;
   teacherId?: string;
+  studentId?: string;
   status?: AdminClassSessionStatus | 'all';
+  attendanceStatus?: AdminAttendanceStatusFilter;
+  source?: AdminAttendanceSourceFilter;
   dateFrom?: string;
   dateTo?: string;
   page?: number;
@@ -446,10 +452,14 @@ export interface AdminAttendanceQuery {
 }
 
 export type AdminAttendanceSource = 'snapshot' | 'inferred';
+export type AdminAttendanceSourceFilter = AdminAttendanceSource | 'all';
+export type AdminAttendanceStatusFilter = 'present' | 'absent' | 'all';
 
 export interface AdminAttendanceSummary {
   totalSessions: number;
   completedSessions: number;
+  snapshottedSessions: number;
+  inferredSessions: number;
   totalEnrolledStudents: number;
   averageAttendanceRate: number;
   averageDurationSeconds: number;

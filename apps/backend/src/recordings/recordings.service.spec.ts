@@ -304,6 +304,112 @@ describe('RecordingsService', () => {
     expect('path' in download.recording).toBe(false);
   });
 
+  it('lets enrolled students update their own recording playback progress with clamped values', async () => {
+    const harness = createHarness();
+    const recording = recordingDoc({
+      recordingId: 'recording-1',
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      status: 'stopped',
+      publishedAt: new Date('2026-06-22T12:00:00.000Z'),
+      durationSeconds: 1800,
+      retentionExpiresAt: new Date('2026-08-01T00:00:00.000Z')
+    });
+    harness.recordings.findOne.mockReturnValue(queryResult(recording));
+    harness.playbackProgress.findOne.mockReturnValue(queryResult(null));
+    harness.playbackProgress.findOneAndUpdate.mockImplementation(async (_filter: unknown, update: any) => playbackProgressDoc(update.$set));
+    harness.studentEnrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(true);
+
+    const progress = await harness.service.updatePlaybackProgress(
+      'recording-1',
+      { event: 'ended', sessionId: 'session-1', batchId: 'batch-1', positionSeconds: 99999, durationSeconds: 1800, completed: true },
+      student()
+    );
+
+    expect(progress.studentId).toBe('student-1');
+    expect(progress.lastPositionSeconds).toBe(1800);
+    expect(progress.watchedSeconds).toBe(1800);
+    expect(progress.completionPercent).toBe(100);
+    expect(progress.completedAt).toBeDefined();
+    const saved = harness.playbackProgress.findOneAndUpdate.mock.calls[0]?.[1].$set;
+    expect(saved.recordingId).toBe('recording-1');
+    expect(saved.sessionId).toBe('session-1');
+    expect(saved.batchId).toBe('batch-1');
+    expect(JSON.stringify(saved)).not.toContain('playbackUrl');
+    expect(JSON.stringify(saved)).not.toContain('storageKey');
+  });
+
+  it('rejects playback progress for non-enrolled students and non-student users', async () => {
+    const harness = createHarness();
+    const recording = recordingDoc({
+      recordingId: 'recording-1',
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      status: 'stopped',
+      publishedAt: new Date('2026-06-22T12:00:00.000Z')
+    });
+    harness.recordings.findOne.mockReturnValue(queryResult(recording));
+    harness.studentEnrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(false);
+
+    let teacherThrown: unknown;
+    try {
+      await harness.service.updatePlaybackProgress('recording-1', { event: 'play' }, teacher());
+    } catch (error) {
+      teacherThrown = error;
+    }
+
+    let studentThrown: unknown;
+    try {
+      await harness.service.updatePlaybackProgress('recording-1', { event: 'play' }, student());
+    } catch (error) {
+      studentThrown = error;
+    }
+
+    expect(teacherThrown).toBeInstanceOf(ForbiddenException);
+    expect(studentThrown).toBeInstanceOf(ForbiddenException);
+    expect(harness.playbackProgress.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('returns admin recording detail with aggregate engagement and no storage internals', async () => {
+    const harness = createHarness();
+    const recording = recordingDoc({
+      recordingId: 'recording-1',
+      sessionId: 'session-1',
+      batchId: 'batch-1',
+      status: 'stopped',
+      durationSeconds: 1800,
+      path: '/private/recordings/session-1/recording-1.json',
+      storageKey: 'class-sessions/session-1/recording-1.json',
+      publishedAt: new Date('2026-06-22T12:00:00.000Z')
+    });
+    harness.recordings.findOne.mockReturnValue(queryResult(recording));
+    harness.classSessions.find.mockReturnValue(queryResult([classSessionDoc()]));
+    harness.batches.find.mockReturnValue(queryResult([batchDoc()]));
+    harness.studentEnrollments.listBatchRoster.mockResolvedValue([
+      { userId: 'student-1', displayName: 'Student One' },
+      { userId: 'student-2', displayName: 'Student Two' }
+    ]);
+    harness.playbackProgress.find.mockReturnValue(
+      queryResult([
+        playbackProgressDoc({
+          watchedSeconds: 900,
+          durationSeconds: 1800,
+          completionPercent: 50,
+          playCount: 1,
+          pauseCount: 1
+        })
+      ])
+    );
+
+    const detail = await harness.service.getAdminRecording('recording-1', admin());
+
+    expect(detail.engagement?.studentsWatched).toBe(1);
+    expect(detail.engagement?.studentsUnwatched).toBe(1);
+    expect(detail.engagement?.averageCompletionPercent).toBe(50);
+    expect(JSON.stringify(detail)).not.toContain('/private/recordings');
+    expect(JSON.stringify(detail)).not.toContain('storageKey');
+  });
+
   it('fails when stopping an unknown generic recording', async () => {
     const harness = createHarness();
     harness.recordings.findById.mockResolvedValue(null);
@@ -330,6 +436,11 @@ function createHarness() {
     find: jest.fn(async () => [])
   };
   const producers: any = { find: jest.fn(async () => []) };
+  const playbackProgress: any = {
+    findOne: jest.fn(() => queryResult(null)),
+    findOneAndUpdate: jest.fn(),
+    find: jest.fn(() => queryResult([]))
+  };
   const recordings: any = {
     create: jest.fn(),
     findById: jest.fn(),
@@ -338,7 +449,11 @@ function createHarness() {
     countDocuments: jest.fn(() => queryResult(0))
   };
   const platformEvents: any = { appendEvent: jest.fn(async () => ({ id: 'event-1' })) };
-  const studentEnrollments: any = { isStudentEnrolledInBatch: jest.fn(async () => true) };
+  const studentEnrollments: any = {
+    isStudentEnrolledInBatch: jest.fn(async () => true),
+    isStudentHistoricallyEnrolledInBatch: jest.fn(async () => true),
+    listBatchRoster: jest.fn(async () => [])
+  };
   const events: Array<{ event: string; status?: string; reason?: string }> = [];
   const service = new RecordingsService(
     rooms as never,
@@ -347,6 +462,7 @@ function createHarness() {
     participants as never,
     producers as never,
     recordings as never,
+    playbackProgress as never,
     {
       get: jest.fn((key: string, fallback?: unknown) => {
         if (key === 'recording.driver') return 'local';
@@ -359,7 +475,7 @@ function createHarness() {
     studentEnrollments as never
   );
   service.onClassSessionRecordingEvent((event, payload) => events.push({ event, status: payload.status, reason: payload.reason }));
-  return { service, rooms, batches, classSessions, participants, producers, recordings, platformEvents, studentEnrollments, events, tempDir };
+  return { service, rooms, batches, classSessions, participants, producers, playbackProgress, recordings, platformEvents, studentEnrollments, events, tempDir };
 }
 
 function sortable(value: any): any {
@@ -499,4 +615,27 @@ function recordingDoc(overrides: Record<string, unknown> = {}): any {
     await writeFile(path, JSON.stringify({ recordingId: doc.recordingId }), 'utf8');
   };
   return doc;
+}
+
+function playbackProgressDoc(overrides: Record<string, unknown> = {}): any {
+  return {
+    recordingId: 'recording-1',
+    sessionId: 'session-1',
+    batchId: 'batch-1',
+    studentId: 'student-1',
+    userId: 'student-1',
+    firstPlayedAt: now,
+    lastPlayedAt: now,
+    lastPositionSeconds: 0,
+    watchedSeconds: 0,
+    durationSeconds: undefined,
+    completionPercent: 0,
+    completedAt: undefined,
+    playCount: 0,
+    pauseCount: 0,
+    seekCount: 0,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides
+  };
 }

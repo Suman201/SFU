@@ -1761,6 +1761,8 @@ describe('ClassSessionsService', () => {
     expect(summary).toEqual({
       totalSessions: 1,
       completedSessions: 1,
+      snapshottedSessions: 0,
+      inferredSessions: 1,
       totalEnrolledStudents: 3,
       averageAttendanceRate: 67,
       averageDurationSeconds: 1200,
@@ -1805,7 +1807,43 @@ describe('ClassSessionsService', () => {
 
     expect(summary.totalEnrolledStudents).toBe(2);
     expect(summary.averageAttendanceRate).toBe(50);
+    expect(summary.snapshottedSessions).toBe(1);
+    expect(summary.inferredSessions).toBe(0);
     expect(rooms.classSessionAttendanceRows).not.toHaveBeenCalled();
+  });
+
+  it('filters admin attendance sessions by snapshot source, student, and attendance status', async () => {
+    const { service, classSessions, attendanceSnapshots } = createService();
+    const completed = persistedSession({
+      status: 'completed',
+      roomId: 'room-1',
+      startedAt: new Date('2026-06-22T10:00:00.000Z'),
+      completedAt: new Date('2026-06-22T11:00:00.000Z')
+    });
+    classSessions.find.mockReturnValueOnce(sessionFindResult([completed]));
+    attendanceSnapshots.find.mockReturnValueOnce({
+      sort: jest.fn(() => execResult(attendanceSnapshotDocs()))
+    });
+
+    const response = await service.listAdminAttendanceSessions(
+      {
+        dateFrom: '2026-06-01',
+        dateTo: '2026-06-30',
+        source: 'snapshot',
+        studentId: 'student-2',
+        attendanceStatus: 'absent'
+      },
+      admin()
+    );
+
+    expect(response.total).toBe(1);
+    expect(response.summary.snapshottedSessions).toBe(1);
+    expect(response.summary.inferredSessions).toBe(0);
+    expect(response.items[0]?.attendanceSource).toBe('snapshot');
+    expect(response.items[0]?.enrolled).toBe(1);
+    expect(response.items[0]?.present).toBe(0);
+    expect(response.items[0]?.absent).toBe(1);
+    expect(response.items[0]?.attendanceRate).toBe(0);
   });
 
   it('returns per-session student attendance rows with source metadata', async () => {
@@ -1869,8 +1907,8 @@ describe('ClassSessionsService', () => {
     expect(response.items[2]?.attendanceRate).toBe(0);
   });
 
-  it('exports filtered admin attendance analytics as CSV', async () => {
-    const { service, classSessions, rooms } = createService();
+  it('exports filtered admin attendance analytics as per-student CSV rows', async () => {
+    const { service, classSessions, attendanceSnapshots, rooms } = createService();
     const completed = persistedSession({
       status: 'completed',
       roomId: 'room-1',
@@ -1878,13 +1916,56 @@ describe('ClassSessionsService', () => {
       completedAt: new Date('2026-06-22T11:00:00.000Z')
     });
     classSessions.find.mockReturnValueOnce(sessionFindResult([completed]));
-    rooms.classSessionAttendanceRows.mockResolvedValue(attendanceRows());
+    attendanceSnapshots.find.mockReturnValueOnce({
+      sort: jest.fn(() => execResult(attendanceSnapshotDocs()))
+    });
 
-    const csv = await service.exportAdminAttendanceCsv({ dateFrom: '2026-06-01', dateTo: '2026-06-30' }, admin());
+    const csv = await service.exportAdminAttendanceCsv(
+      {
+        dateFrom: '2026-06-01',
+        dateTo: '2026-06-30',
+        source: 'snapshot',
+        studentId: 'student-1',
+        attendanceStatus: 'present'
+      },
+      admin()
+    );
 
-    expect(csv).toContain('Session,Session ID,Course,Batch,Teacher ID,Status');
+    expect(csv).toContain('Session ID,Session Title,Session Status,Course,Course ID,Batch,Batch ID,Teacher,Teacher ID,Student,Student Email,Student ID');
     expect(csv).toContain('Native SFU - Session 1');
-    expect(csv).toContain(',3,2,1,67,1200,1,1,1');
+    expect(csv).toContain('Ava Present,ava@example.test,student-1,present,roster,2026-06-22T10:12:00.000Z');
+    expect(csv).toContain(',1800,1,snapshot,');
+    expect(csv).not.toContain('Ben Absent');
+    expect(csv).not.toContain('private message body');
+    expect(rooms.classSessionAttendanceRows).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid admin attendance source and row status filters', async () => {
+    const { service, classSessions } = createService();
+
+    let sourceThrown: unknown;
+    try {
+      await service.getAdminAttendanceSummary(
+        { dateFrom: '2026-06-01', dateTo: '2026-06-30', source: 'broadcast' as never },
+        admin()
+      );
+    } catch (error) {
+      sourceThrown = error;
+    }
+
+    let statusThrown: unknown;
+    try {
+      await service.getAdminAttendanceSummary(
+        { dateFrom: '2026-06-01', dateTo: '2026-06-30', attendanceStatus: 'late' as never },
+        admin()
+      );
+    } catch (error) {
+      statusThrown = error;
+    }
+
+    expect(sourceThrown).toBeInstanceOf(BadRequestException);
+    expect(statusThrown).toBeInstanceOf(BadRequestException);
+    expect(classSessions.find).not.toHaveBeenCalled();
   });
 
   it('rejects admin attendance analytics for non-admin users', async () => {
@@ -1913,6 +1994,453 @@ describe('ClassSessionsService', () => {
 
     expect(thrown).toBeInstanceOf(BadRequestException);
     expect(classSessions.find).not.toHaveBeenCalled();
+  });
+
+  it('returns teacher analytics for owned batches without private message bodies', async () => {
+    const { service, classSessions, attendanceSnapshots, assignments, assignmentSubmissions, materials, activity, recordings, postClassThreadStates, studentEnrollments, whiteboardStates } =
+      createService();
+    const completed = persistedSession({
+      status: 'completed',
+      roomId: 'room-1',
+      startedAt: new Date('2026-06-22T10:01:00.000Z'),
+      completedAt: new Date('2026-06-22T11:01:00.000Z')
+    });
+    classSessions.find.mockReturnValueOnce(sessionFindResult([completed]));
+    attendanceSnapshots.find.mockReturnValueOnce({
+      sort: jest.fn(() => execResult(attendanceSnapshotDocs()))
+    });
+    studentEnrollments.listBatchRoster.mockResolvedValue([
+      {
+        id: 'student-1',
+        enrollmentId: 'enroll-1',
+        userId: 'student-1',
+        displayName: 'Ava Present',
+        email: 'ava@example.test',
+        status: 'active',
+        joinedAt: '2026-06-20T10:00:00.000Z'
+      },
+      {
+        id: 'student-2',
+        enrollmentId: 'enroll-2',
+        userId: 'student-2',
+        displayName: 'Ben Absent',
+        email: 'ben@example.test',
+        status: 'active',
+        joinedAt: '2026-06-20T10:00:00.000Z'
+      }
+    ]);
+    assignments.find.mockReturnValueOnce(
+      execResult([
+        {
+          assignmentId: 'assignment-1',
+          batchId: 'batch-1',
+          teacherId: 'teacher-1',
+          title: 'Practice set',
+          status: 'published',
+          dueAt: new Date('2026-06-24T10:00:00.000Z'),
+          createdAt: new Date('2026-06-22T12:00:00.000Z')
+        },
+        {
+          assignmentId: 'assignment-2',
+          batchId: 'batch-1',
+          teacherId: 'teacher-1',
+          title: 'Follow-up set',
+          status: 'published',
+          dueAt: new Date('2026-06-25T10:00:00.000Z'),
+          createdAt: new Date('2026-06-23T12:00:00.000Z')
+        }
+      ])
+    );
+    assignmentSubmissions.find.mockReturnValueOnce(
+      execResult([
+        {
+          submissionId: 'submission-1',
+          assignmentId: 'assignment-1',
+          batchId: 'batch-1',
+          studentId: 'student-1',
+          status: 'submitted',
+          text: 'private assignment body'
+        }
+      ])
+    );
+    materials.find.mockReturnValueOnce(
+      execResult([
+        {
+          materialId: 'material-1',
+          sessionId,
+          batchId: 'batch-1',
+          title: 'Lesson PDF',
+          shared: true,
+          publishedAt: new Date('2026-06-22T12:00:00.000Z'),
+          createdAt: new Date('2026-06-22T12:00:00.000Z')
+        }
+      ])
+    );
+    recordings.listClassSessionRecordingsForAnalytics.mockResolvedValue([
+      {
+        id: 'recording-1',
+        recordingId: 'recording-1',
+        sessionId,
+        batchId: 'batch-1',
+        roomId: 'room-1',
+        scope: 'room',
+        status: 'stopped',
+        storageDriver: 'local',
+        startedAt: '2026-06-22T10:01:00.000Z'
+      }
+    ]);
+    recordings.listPlaybackProgressForAnalytics.mockResolvedValueOnce([
+      {
+        recordingId: 'recording-1',
+        sessionId,
+        batchId: 'batch-1',
+        studentId: 'student-1',
+        lastPositionSeconds: 600,
+        watchedSeconds: 600,
+        durationSeconds: 1800,
+        completionPercent: 33,
+        playCount: 1,
+        pauseCount: 0,
+        seekCount: 0
+      }
+    ]);
+    activity.listEventsForAnalytics.mockResolvedValue([
+      {
+        id: 'event-1',
+        sessionId,
+        batchId: 'batch-1',
+        eventType: 'hand.raised',
+        category: 'moderation',
+        summary: 'Hand raised',
+        actor: { id: 'student-1', roles: ['STUDENT'] },
+        visibility: 'full',
+        createdAt: '2026-06-22T10:10:00.000Z'
+      },
+      {
+        id: 'event-2',
+        sessionId,
+        batchId: 'batch-1',
+        eventType: 'speak.allowed',
+        category: 'moderation',
+        summary: 'Allowed to speak',
+        target: { userId: 'student-1', role: 'student' },
+        visibility: 'full',
+        createdAt: '2026-06-22T10:12:00.000Z'
+      },
+      {
+        id: 'event-3',
+        sessionId,
+        batchId: 'batch-1',
+        eventType: 'post_class.question.asked',
+        category: 'chat',
+        summary: 'Question asked',
+        actor: { id: 'student-2', roles: ['STUDENT'] },
+        visibility: 'full',
+        createdAt: '2026-06-22T12:10:00.000Z'
+      },
+      {
+        id: 'event-4',
+        sessionId,
+        batchId: 'batch-1',
+        eventType: 'material.downloaded',
+        category: 'materials',
+        summary: 'Downloaded material',
+        visibility: 'full',
+        createdAt: '2026-06-22T12:12:00.000Z'
+      }
+    ]);
+    postClassThreadStates.find.mockReturnValueOnce(
+      execResult([
+        {
+          sessionId,
+          batchId: 'batch-1',
+          teacherId: 'teacher-1',
+          studentId: 'student-2',
+          threadKey: 'thread-private',
+          answered: false,
+          important: false,
+          followUp: false
+        }
+      ])
+    );
+    whiteboardStates.find.mockReturnValueOnce(execResult([whiteboardStateDoc({ publishedAt: new Date('2026-06-22T12:00:00.000Z') })]));
+
+    const result = await service.getTeacherAnalytics({ dateFrom: '2026-06-01', dateTo: '2026-06-30' }, teacher);
+
+    expect(result.audience).toBe('teacher');
+    expect(result.summary.attendanceRate).toBe(50);
+    expect(result.summary.questionsAsked).toBe(1);
+    expect(result.summary.assignmentsSubmitted).toBe(1);
+    expect(result.summary.materialDownloads).toBe(1);
+    expect(result.summary.recordingsReady).toBe(1);
+    expect(result.batches[0]?.recordings.usage.available).toBe(true);
+    expect(result.batches[0]?.recordings.watched).toBe(1);
+    expect(result.batches[0]?.recordings.averageCompletionPercent).toBe(33);
+    expect(result.summary.weakTopicSignals).toBeGreaterThan(0);
+    expect(result.weakTopicSignals.some((signal) => signal.type === 'tagged_topic_review' && signal.topic === 'calculus')).toBe(true);
+    expect(result.weakTopicSignals.every((signal) => signal.sourceRecords.length > 0)).toBe(true);
+    expect(result.risks.some((risk) => risk.studentId === 'student-2')).toBe(true);
+    expect(JSON.stringify(result)).not.toContain('private assignment body');
+  });
+
+  it('forbids teacher analytics for another teacher batch', async () => {
+    const { service, batches, classSessions } = createService();
+    batches.find.mockReturnValueOnce(execResult([]));
+
+    let thrown: unknown;
+    try {
+      await service.getTeacherAnalytics({ batchId: 'other-batch', dateFrom: '2026-06-01', dateTo: '2026-06-30' }, teacher);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(batches.find.mock.calls[0]?.[0]).toEqual({
+      _id: 'other-batch',
+      teacherId: 'teacher-1',
+      deletedAt: { $exists: false }
+    });
+    expect(classSessions.find).not.toHaveBeenCalled();
+  });
+
+  it('allows admin teacher analytics across batches without teacher scoping', async () => {
+    const { service, batches } = createService();
+
+    const result = await service.getTeacherAnalytics({ dateFrom: '2026-06-01', dateTo: '2026-06-30' }, admin());
+
+    expect(result.audience).toBe('admin');
+    expect((batches.find.mock.calls[0]?.[0] as Record<string, unknown>).teacherId).toBeUndefined();
+  });
+
+  it('rejects teacher analytics for students', async () => {
+    const { service, batches } = createService();
+
+    let thrown: unknown;
+    try {
+      await service.getTeacherAnalytics({ dateFrom: '2026-06-01', dateTo: '2026-06-30' }, student());
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(batches.find).not.toHaveBeenCalled();
+  });
+
+  it('returns student-only progress without private peer data', async () => {
+    const { service, classSessions, attendanceSnapshots, assignments, assignmentSubmissions, postClassThreadStates, recordings, activity, whiteboardStates } =
+      createService();
+    const completedAt = new Date('2026-06-22T11:00:00.000Z');
+    classSessions.find.mockReturnValueOnce({
+      sort: jest.fn(() =>
+        execResult([
+          persistedSession({
+            status: 'completed',
+            roomId: 'room-1',
+            startedAt: new Date('2026-06-22T10:01:00.000Z'),
+            completedAt
+          }),
+          {
+            ...persistedSession({
+              status: 'scheduled',
+              roomId: 'room-2'
+            }),
+            id: 'batch-1-MONDAY-2026-07-13',
+            _id: 'batch-1-MONDAY-2026-07-13',
+            sessionNumber: 2,
+            scheduledAt: new Date('2026-07-13T10:00:00.000Z')
+          }
+        ])
+      )
+    });
+    attendanceSnapshots.find.mockReturnValueOnce({
+      sort: jest.fn(() =>
+        execResult([
+          {
+            sessionId,
+            batchId: 'batch-1',
+            roomId: 'room-1',
+            studentId: 'student-1',
+            studentName: 'Student One',
+            totalDurationSeconds: 2400,
+            reconnectCount: 1,
+            rosterSource: 'roster',
+            status: 'present'
+          },
+          {
+            sessionId,
+            batchId: 'batch-1',
+            roomId: 'room-1',
+            studentId: 'student-2',
+            studentName: 'Student Two',
+            totalDurationSeconds: 0,
+            reconnectCount: 0,
+            rosterSource: 'roster',
+            status: 'absent'
+          }
+        ])
+      )
+    });
+    assignments.find.mockReturnValueOnce(
+      execResult([
+        {
+          assignmentId: 'assignment-1',
+          batchId: 'batch-1',
+          teacherId: 'teacher-1',
+          title: 'Practice set',
+          status: 'published',
+          dueAt: new Date('2000-01-01T00:00:00.000Z'),
+          createdAt: new Date('2026-06-22T12:00:00.000Z')
+        },
+        {
+          assignmentId: 'assignment-2',
+          batchId: 'batch-1',
+          teacherId: 'teacher-1',
+          title: 'Follow-up set',
+          status: 'published',
+          dueAt: new Date('2000-01-02T00:00:00.000Z'),
+          createdAt: new Date('2026-06-23T12:00:00.000Z')
+        }
+      ])
+    );
+    assignmentSubmissions.find.mockReturnValueOnce(
+      execResult([
+        {
+          submissionId: 'submission-1',
+          assignmentId: 'assignment-1',
+          batchId: 'batch-1',
+          studentId: 'student-1',
+          status: 'submitted',
+          text: 'private assignment body'
+        }
+      ])
+    );
+    activity.listEventsForAnalytics.mockResolvedValueOnce([
+      {
+        id: 'event-1',
+        sessionId,
+        batchId: 'batch-1',
+        eventType: 'hand.raised',
+        category: 'moderation',
+        summary: 'Hand raised',
+        actor: { id: 'student-1', roles: ['STUDENT'] },
+        visibility: 'full',
+        createdAt: '2026-06-22T10:10:00.000Z'
+      },
+      {
+        id: 'event-2',
+        sessionId,
+        batchId: 'batch-1',
+        eventType: 'post_class.question.asked',
+        category: 'chat',
+        summary: 'Other private question',
+        actor: { id: 'student-2', roles: ['STUDENT'] },
+        visibility: 'full',
+        createdAt: '2026-06-22T12:10:00.000Z'
+      }
+    ]);
+    postClassThreadStates.find.mockReturnValueOnce(
+      execResult([
+        {
+          sessionId,
+          batchId: 'batch-1',
+          teacherId: 'teacher-1',
+          studentId: 'student-1',
+          threadKey: 'thread-private',
+          answered: false,
+          important: false,
+          followUp: false
+        }
+      ])
+    );
+    recordings.listClassSessionRecordingsForAnalytics.mockResolvedValueOnce([
+      {
+        id: 'recording-1',
+        recordingId: 'recording-1',
+        sessionId,
+        batchId: 'batch-1',
+        roomId: 'room-1',
+        scope: 'room',
+        status: 'stopped',
+        storageDriver: 'local',
+        startedAt: '2026-06-22T10:01:00.000Z',
+        publishedAt: '2026-06-22T12:00:00.000Z'
+      },
+      {
+        id: 'recording-hidden',
+        recordingId: 'recording-hidden',
+        sessionId,
+        batchId: 'batch-1',
+        roomId: 'room-1',
+        scope: 'room',
+        status: 'stopped',
+        storageDriver: 'local',
+        startedAt: '2026-06-22T10:01:00.000Z'
+      }
+    ]);
+    recordings.listPlaybackProgressForStudent.mockResolvedValueOnce([
+      {
+        recordingId: 'recording-1',
+        sessionId,
+        batchId: 'batch-1',
+        studentId: 'student-1',
+        lastPositionSeconds: 900,
+        watchedSeconds: 900,
+        durationSeconds: 1800,
+        completionPercent: 50,
+        playCount: 1,
+        pauseCount: 1,
+        seekCount: 0
+      }
+    ]);
+    whiteboardStates.find.mockReturnValueOnce(execResult([whiteboardStateDoc({ publishedAt: new Date('2026-06-22T12:00:00.000Z') })]));
+
+    const result = await service.getStudentProgress(student());
+
+    expect(result.studentId).toBe('student-1');
+    expect(result.summary.enrolledBatches).toBe(1);
+    expect(result.summary.attendanceRate).toBe(100);
+    expect(result.summary.handRaises).toBe(1);
+    expect(result.summary.questionsAsked).toBe(1);
+    expect(result.summary.assignmentsSubmitted).toBe(1);
+    expect(result.summary.assignmentsMissing).toBe(1);
+    expect(result.summary.recordingsReady).toBe(1);
+    expect(result.summary.recordingsWatched).toBe(1);
+    expect(result.summary.recordingCompletionRate).toBe(50);
+    expect(result.batches[0]?.recordings.unwatched).toBe(0);
+    expect(result.batches[0]?.topicTags).toContain('calculus');
+    expect(result.batches[0]?.participation.unansweredQuestions).toBe(1);
+    expect(result.reviewSignals.some((signal) => signal.type === 'overdue_assignment')).toBe(true);
+    expect(result.reviewSignals.some((signal) => signal.type === 'tagged_topic_review' && signal.topic === 'calculus')).toBe(true);
+    expect(result.reviewSignals.every((signal) => signal.sourceRecords.length > 0)).toBe(true);
+    expect(result.availability.recordings.source).toBe('progress');
+    expect(JSON.stringify(result)).not.toContain('student-2');
+    expect(JSON.stringify(result)).not.toContain('private assignment body');
+  });
+
+  it('returns honest empty student progress when no enrollment history exists', async () => {
+    const { service, studentEnrollments, classSessions } = createService();
+    studentEnrollments.listStudentClassHistoryBatchIds.mockResolvedValueOnce([]);
+
+    const result = await service.getStudentProgress(student());
+
+    expect(result.summary.enrolledBatches).toBe(0);
+    expect(result.batches).toEqual([]);
+    expect(result.availability.attendance.available).toBe(false);
+    expect(classSessions.find).not.toHaveBeenCalled();
+  });
+
+  it('rejects student progress for non-students', async () => {
+    const { service, studentEnrollments } = createService();
+
+    let thrown: unknown;
+    try {
+      await service.getStudentProgress(teacher);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ForbiddenException);
+    expect(studentEnrollments.listStudentClassHistoryBatchIds).not.toHaveBeenCalled();
   });
 
   function createService(): {
@@ -1994,6 +2522,9 @@ describe('ClassSessionsService', () => {
       stopClassSessionRecording: jest.Mock;
       listClassSessionRecordings: jest.Mock;
       listAuthorizedClassSessionRecordings: jest.Mock;
+      listClassSessionRecordingsForAnalytics: jest.Mock;
+      listPlaybackProgressForStudent: jest.Mock;
+      listPlaybackProgressForAnalytics: jest.Mock;
       readClassSessionRecordingDownload: jest.Mock;
       readAuthorizedClassSessionRecordingDownload: jest.Mock;
       updateClassSessionRecordingPublication: jest.Mock;
@@ -2004,6 +2535,7 @@ describe('ClassSessionsService', () => {
     activity: {
       record: jest.Mock;
       listTimeline: jest.Mock;
+      listEventsForAnalytics: jest.Mock;
     };
     metrics: {
       classSessionLifecycleTransitions: { labels: jest.Mock };
@@ -2045,7 +2577,8 @@ describe('ClassSessionsService', () => {
     };
     const materials = {
       find: jest.fn(() => ({
-        sort: jest.fn(() => execResult([]))
+        sort: jest.fn(() => execResult([])),
+        exec: jest.fn(async () => [])
       })),
       create: jest.fn(async (payload: Record<string, unknown>) => ({
         id: payload.materialId,
@@ -2065,6 +2598,7 @@ describe('ClassSessionsService', () => {
       findOne: jest.fn(async () => null),
       findOneAndUpdate: jest.fn(async () => null),
       find: jest.fn(() => ({
+        exec: jest.fn(async () => []),
         sort: jest.fn(() => ({
           limit: jest.fn(() => execResult([]))
         }))
@@ -2134,6 +2668,9 @@ describe('ClassSessionsService', () => {
       stopClassSessionRecording: jest.fn(),
       listClassSessionRecordings: jest.fn(async () => []),
       listAuthorizedClassSessionRecordings: jest.fn(async () => []),
+      listClassSessionRecordingsForAnalytics: jest.fn(async () => []),
+      listPlaybackProgressForStudent: jest.fn(async () => []),
+      listPlaybackProgressForAnalytics: jest.fn(async () => []),
       readClassSessionRecordingDownload: jest.fn(),
       readAuthorizedClassSessionRecordingDownload: jest.fn(),
       updateClassSessionRecordingPublication: jest.fn()
@@ -2235,6 +2772,7 @@ describe('ClassSessionsService', () => {
     };
     const activity = {
       record: jest.fn(async () => undefined),
+      listEventsForAnalytics: jest.fn(async () => []),
       listTimeline: jest.fn(async () => ({
         sessionId,
         batchId: 'batch-1',

@@ -1,6 +1,15 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import type { Assignment, AssignmentSubmission, ChatMessage, ClassSessionMaterial, Recording, StudentCompletedClassDetailResponse, WhiteboardMemoryState } from '@native-sfu/contracts';
+import type {
+  Assignment,
+  AssignmentSubmission,
+  ChatMessage,
+  ClassSessionMaterial,
+  Recording,
+  RecordingPlaybackProgressEvent,
+  StudentCompletedClassDetailResponse,
+  WhiteboardMemoryState
+} from '@native-sfu/contracts';
 import { ClassSessionService } from '../../class-session/class-session.service';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
@@ -32,6 +41,7 @@ export class StudentCompletedClassDetail implements OnInit {
 
   private sessionId = '';
   private batchId = '';
+  private readonly lastRecordingHeartbeat = new Map<string, number>();
 
   ngOnInit(): void {
     this.sessionId = this.route.snapshot.paramMap.get('sessionId') ?? '';
@@ -132,6 +142,50 @@ export class StudentCompletedClassDetail implements OnInit {
     return 'Processing';
   }
 
+  protected recordingHref(recording: Recording): string {
+    return recording.playbackUrl ?? recording.downloadUrl ?? recording.url ?? '#';
+  }
+
+  protected isVideoRecording(recording: Recording): boolean {
+    return Boolean(this.recordingHref(recording) !== '#' && (recording.mimeType?.startsWith('video/') || recording.playbackUrl));
+  }
+
+  protected recordingProgressLabel(recording: Recording): string {
+    const progress = recording.playbackProgress;
+    if (!progress) return 'Not started';
+    if (progress.completedAt || progress.completionPercent >= 90) return 'Watched';
+    if (progress.completionPercent > 0 || progress.lastPlayedAt) return `In progress · ${progress.completionPercent}%`;
+    return 'Not started';
+  }
+
+  protected recordingProgressTone(recording: Recording): string {
+    const progress = recording.playbackProgress;
+    if (progress?.completedAt || (progress?.completionPercent ?? 0) >= 90) return 'watched';
+    if ((progress?.completionPercent ?? 0) > 0 || progress?.lastPlayedAt) return 'progress';
+    return 'empty';
+  }
+
+  protected onRecordingOpen(recording: Recording): void {
+    this.sendRecordingProgress(recording, 'play');
+  }
+
+  protected onRecordingMediaEvent(recording: Recording, eventName: RecordingPlaybackProgressEvent, event: Event): void {
+    const media = event.target instanceof HTMLMediaElement ? event.target : undefined;
+    this.sendRecordingProgress(recording, eventName, media);
+  }
+
+  protected onRecordingTimeUpdate(recording: Recording, event: Event): void {
+    const recordingId = recording.recordingId ?? recording.id;
+    const now = Date.now();
+    const last = this.lastRecordingHeartbeat.get(recordingId) ?? 0;
+    if (now - last < 20_000) {
+      return;
+    }
+    this.lastRecordingHeartbeat.set(recordingId, now);
+    const media = event.target instanceof HTMLMediaElement ? event.target : undefined;
+    this.sendRecordingProgress(recording, 'heartbeat', media);
+  }
+
   protected materialHref(material: ClassSessionMaterial): string {
     return material.url ?? material.downloadUrl ?? '#';
   }
@@ -150,5 +204,46 @@ export class StudentCompletedClassDetail implements OnInit {
       next: (response) => this.assignments.set(response.items),
       error: (error) => this.assignmentsError.set(this.classSessions.errorMessage(error))
     });
+  }
+
+  private sendRecordingProgress(recording: Recording, eventName: RecordingPlaybackProgressEvent, media?: HTMLMediaElement): void {
+    const recordingId = recording.recordingId ?? recording.id;
+    const detail = this.detail();
+    if (!recordingId || !detail || recording.status !== 'stopped') {
+      return;
+    }
+    const positionSeconds = this.finiteSeconds(media?.currentTime);
+    const durationSeconds = this.finiteSeconds(media?.duration) ?? this.finiteSeconds(recording.durationSeconds);
+    this.classSessions
+      .updateRecordingPlaybackProgress(recordingId, {
+        sessionId: this.sessionId,
+        batchId: this.batchId || detail.session.batchId,
+        event: eventName,
+        positionSeconds,
+        durationSeconds,
+        watchedSeconds: positionSeconds,
+        completed: eventName === 'ended'
+      })
+      .subscribe({
+        next: (playbackProgress) => {
+          this.detail.update((current) => {
+            if (!current) return current;
+            return {
+              ...current,
+              recordings: current.recordings.map((item) =>
+                (item.recordingId ?? item.id) === playbackProgress.recordingId ? { ...item, playbackProgress } : item
+              )
+            };
+          });
+        },
+        error: () => undefined
+      });
+  }
+
+  private finiteSeconds(value?: number): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      return undefined;
+    }
+    return Math.round(value);
   }
 }

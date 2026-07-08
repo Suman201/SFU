@@ -12,6 +12,7 @@ import { AdminAttendanceController } from './admin-attendance.controller';
 import { AdminClassSessionsController } from './admin-class-sessions.controller';
 import { ClassSessionsController } from './class-sessions.controller';
 import { ClassSessionsService } from './class-sessions.service';
+import { AdminTeacherAnalyticsController, TeacherAnalyticsController } from './teacher-analytics.controller';
 
 @Module({
   imports: [
@@ -25,7 +26,7 @@ import { ClassSessionsService } from './class-sessions.service';
     MetricsModule,
     ProfilesModule
   ],
-  controllers: [ClassSessionsController, AdminClassSessionsController, AdminAttendanceController],
+  controllers: [ClassSessionsController, AdminClassSessionsController, AdminAttendanceController, TeacherAnalyticsController, AdminTeacherAnalyticsController],
   providers: [ClassSessionsService],
   exports: [ClassSessionsService]
 })

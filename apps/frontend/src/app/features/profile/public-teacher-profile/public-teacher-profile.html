@@ -1,6 +1,6 @@
 <sfu-header />
 <main class="public-teacher-shell">
-  <a class="back-link" routerLink="/student/explore">Back to explore</a>
+  <a class="back-link" routerLink="/teachers">Back to teachers</a>
 
   @if (loading()) {
     <section class="empty-state not-found">
@@ -24,7 +24,10 @@
         <span>{{ teacher.headline || 'Class instructor' }}</span>
         <p>{{ teacher.location || 'Location not shared' }}</p>
       </div>
-      <a class="primary-link" routerLink="/student/explore">Explore classes</a>
+      <div class="identity-actions">
+        <a class="primary-link" routerLink="/student/explore">Explore classes</a>
+        <a class="primary-link secondary" routerLink="/teachers">All teachers</a>
+      </div>
     </section>
 
     <section class="metric-grid" aria-label="Teacher public profile summary">
@@ -125,6 +128,64 @@
 
       <div class="tab-content">
         @switch (activeTab()) {
+          @case ('gallery') {
+            @if (teacher.gallery.length) {
+              <div class="gallery-grid">
+                @for (item of teacher.gallery; track item.contentId) {
+                  <article class="gallery-card">
+                    <div class="gallery-visual">
+                      <span>{{ contentIcon(item) }}</span>
+                    </div>
+                    <strong>{{ item.title }}</strong>
+                    <p>{{ item.description || item.mediaType }}</p>
+                    <div class="pill-list subtle">
+                      @for (tag of item.tags; track tag) {
+                        <span>{{ tag }}</span>
+                      }
+                    </div>
+                    @if (publicContentUrl(item)) {
+                      <a class="content-link" [href]="publicContentUrl(item)" target="_blank" rel="noopener">Open</a>
+                    }
+                  </article>
+                }
+              </div>
+            } @else {
+              <div class="empty-state">
+                <h3>No gallery items</h3>
+                <p>This teacher has not published gallery items yet.</p>
+              </div>
+            }
+          }
+
+          @case ('demos') {
+            @if (teacher.demoClasses.length) {
+              <div class="review-grid">
+                @for (item of teacher.demoClasses; track item.contentId) {
+                  <article class="review-card">
+                    <header>
+                      <span>{{ item.mediaType }}</span>
+                      @if (publicContentUrl(item)) {
+                        <a class="content-link" [href]="publicContentUrl(item)" target="_blank" rel="noopener">Open demo</a>
+                      }
+                    </header>
+                    <strong>{{ item.title }}</strong>
+                    <p>{{ item.description || 'Published sample class' }}</p>
+                    <div class="pill-list subtle">
+                      @for (topic of item.topics; track topic) {
+                        <span>{{ topic }}</span>
+                      }
+                    </div>
+                  </article>
+                }
+              </div>
+            } @else {
+              <div class="empty-state">
+                <h3>No demo classes</h3>
+                <p>This teacher has not published sample classes yet.</p>
+              </div>
+            }
+          }
+
           @case ('credentials') {
             <div class="award-list">
               @for (credential of teacher.credentials; track credential.title) {
@@ -223,7 +284,7 @@
     <section class="empty-state not-found">
       <h1>Teacher not available</h1>
       <p>{{ error() || 'This public teacher profile is not available.' }}</p>
-      <a class="primary-link" routerLink="/student/explore">Back to explore</a>
+      <a class="primary-link" routerLink="/teachers">Back to teachers</a>
     </section>
   }
 </main>

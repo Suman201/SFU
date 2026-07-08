@@ -1,6 +1,7 @@
 import { DynamicModule, Global, Module, Provider } from '@nestjs/common';
 import { AudioLevelObserver, BandwidthEstimator, PipeTransportManager, RtcpProcessor, RtpRouter, SimulcastSelector } from '@native-sfu/sfu-core';
 import { DtlsService } from './dtls.service';
+import { IngestTransportService } from './ingest/ingest-transport.service';
 import { IceService } from './ice.service';
 import { MediaService } from './media.service';
 import { NestSfuAsyncOptions, NestSfuOptions, NestSfuOptionsFactory } from './nest-sfu.options';
@@ -14,6 +15,7 @@ const exportedProviders = [
   MediaService,
   IceService,
   DtlsService,
+  IngestTransportService,
   SrtpService,
   PipeTransportService,
   PipeTransportManager,
@@ -84,6 +86,7 @@ function coreProviders(): Provider[] {
     IceService,
     DtlsService,
     SrtpService,
+    IngestTransportService,
     PipeTransportService,
     { provide: PipeTransportManager, useFactory: () => new PipeTransportManager() },
     {

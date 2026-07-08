@@ -19,6 +19,13 @@
   margin-bottom: 18px;
 }
 
+.detail-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .detail-heading h1,
 .detail-card h2,
 .post-class-state h1 {
@@ -133,8 +140,60 @@
 }
 
 .recording-row {
-  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  grid-template-columns: 1fr;
+}
+
+.recording-main,
+.recording-main > div,
+.recording-actions {
+  display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+.recording-main {
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.recording-main > div {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.recording-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.recording-progress {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(97, 112, 106, 0.1);
+  color: var(--muted, #61706a);
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.recording-progress.progress {
+  background: rgba(255, 209, 80, 0.2);
+  color: #7f5b00;
+}
+
+.recording-progress.watched {
+  background: rgba(69, 139, 115, 0.14);
+  color: #458b73;
+}
+
+.recording-player {
+  width: 100%;
+  max-height: 360px;
+  border-radius: 8px;
+  background: #050706;
 }
 
 .recording-row a,
@@ -219,6 +278,15 @@
   .summary-grid,
   .detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .recording-main {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .recording-actions {
+    justify-content: flex-start;
   }
 
   .whiteboard-review-frame,

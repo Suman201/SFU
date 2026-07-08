@@ -14,6 +14,9 @@ import {
   AdminRecordingSummary,
   ClassSessionRecordingEvent,
   Recording,
+  RecordingEngagementSummary,
+  RecordingPlaybackProgress,
+  RecordingPlaybackProgressUpdateRequest,
   RecordingScope,
   RecordingStatus,
   RecordingTrackManifestEntry
@@ -30,6 +33,8 @@ import {
   ProducerMongoDocument,
   RecordingDocument,
   RecordingMongoDocument,
+  RecordingPlaybackProgressDocument,
+  RecordingPlaybackProgressMongoDocument,
   RoomDocument,
   RoomMongoDocument
 } from '../database/schemas';
@@ -64,6 +69,8 @@ interface AdminRecordingHydration {
   batch?: BatchMongoDocument;
 }
 
+export interface RecordingPlaybackProgressRecord extends RecordingPlaybackProgress {}
+
 @Injectable()
 export class RecordingsService {
   private readonly classSessionRecordingEventListeners = new Set<
@@ -77,6 +84,8 @@ export class RecordingsService {
     @InjectModel(ParticipantDocument.name) private readonly participants: Model<ParticipantMongoDocument>,
     @InjectModel(ProducerDocument.name) private readonly producers: Model<ProducerMongoDocument>,
     @InjectModel(RecordingDocument.name) private readonly recordings: Model<RecordingMongoDocument>,
+    @InjectModel(RecordingPlaybackProgressDocument.name)
+    private readonly playbackProgress: Model<RecordingPlaybackProgressMongoDocument>,
     private readonly config: ConfigService,
     private readonly platformEvents: PlatformEventsService,
     private readonly studentEnrollments: StudentEnrollmentsService,
@@ -315,6 +324,22 @@ export class RecordingsService {
     return docs.map((doc) => this.toRecording(doc));
   }
 
+  async listClassSessionRecordingsForAnalytics(sessionIds: string[], batchIds: string[] = []): Promise<Recording[]> {
+    const normalizedSessionIds = [...new Set(sessionIds.filter(Boolean))];
+    if (!normalizedSessionIds.length) {
+      return [];
+    }
+    const filter: Record<string, unknown> = {
+      sessionId: { $in: normalizedSessionIds }
+    };
+    const normalizedBatchIds = [...new Set(batchIds.filter(Boolean))];
+    if (normalizedBatchIds.length) {
+      filter.batchId = { $in: normalizedBatchIds };
+    }
+    const docs = await this.recordings.find(filter).sort({ startedAt: -1 });
+    return docs.map((doc) => this.toRecording(doc));
+  }
+
   async getClassSessionRecordingSummary(sessionId: string): Promise<{ active?: Recording; latest?: Recording }> {
     const [active, latest] = await Promise.all([
       this.recordings.findOne({ sessionId, status: { $in: ACTIVE_RECORDING_STATUSES } }).sort({ startedAt: -1 }),
@@ -386,6 +411,94 @@ export class RecordingsService {
     };
   }
 
+  async updatePlaybackProgress(
+    recordingId: string,
+    request: RecordingPlaybackProgressUpdateRequest,
+    user: AuthenticatedUser
+  ): Promise<RecordingPlaybackProgress> {
+    if (!user.roles.includes('STUDENT')) {
+      throw new ForbiddenException('Only enrolled students can update recording playback progress.');
+    }
+    const recording = await this.findAdminRecording(recordingId);
+    if (!recording.sessionId || !recording.batchId) {
+      throw new BadRequestException('Playback progress is available only for class-session recordings.');
+    }
+    if (request.sessionId && request.sessionId !== recording.sessionId) {
+      throw new BadRequestException('Recording does not belong to the supplied class session.');
+    }
+    if (request.batchId && request.batchId !== recording.batchId) {
+      throw new BadRequestException('Recording does not belong to the supplied batch.');
+    }
+    if (recording.status !== 'stopped' || !this.isPublishedRecording(recording)) {
+      throw new ConflictException('Recording is not available for student playback tracking.');
+    }
+    if (recording.retentionExpiresAt && recording.retentionExpiresAt.getTime() <= Date.now()) {
+      throw new NotFoundException('Recording has expired.');
+    }
+    const allowed = await this.studentEnrollments.isStudentHistoricallyEnrolledInBatch(user.sub, recording.batchId);
+    if (!allowed) {
+      throw new ForbiddenException('You are not allowed to update playback progress for this recording.');
+    }
+    const now = new Date();
+    const existing = await this.playbackProgress.findOne({ recordingId: recording.recordingId, studentId: user.sub }).exec();
+    const durationSeconds = this.clampPlaybackNumber(request.durationSeconds ?? recording.durationSeconds, 0, 24 * 60 * 60);
+    const positionSeconds = this.clampPlaybackNumber(request.positionSeconds, 0, durationSeconds || 24 * 60 * 60);
+    const watchedSeconds = this.resolveWatchedSeconds(existing, request, positionSeconds, durationSeconds);
+    const completionPercent = this.completionPercent(watchedSeconds, durationSeconds);
+    const completedAt = request.completed || completionPercent >= 90 ? existing?.completedAt ?? now : existing?.completedAt;
+    const update = {
+      recordingId: recording.recordingId,
+      sessionId: recording.sessionId,
+      batchId: recording.batchId,
+      studentId: user.sub,
+      userId: user.sub,
+      firstPlayedAt: existing?.firstPlayedAt ?? now,
+      lastPlayedAt: now,
+      lastPositionSeconds: positionSeconds,
+      watchedSeconds,
+      ...(durationSeconds ? { durationSeconds } : {}),
+      completionPercent,
+      ...(completedAt ? { completedAt } : {}),
+      playCount: (existing?.playCount ?? 0) + (request.event === 'play' ? 1 : 0),
+      pauseCount: (existing?.pauseCount ?? 0) + (request.event === 'pause' ? 1 : 0),
+      seekCount: (existing?.seekCount ?? 0) + (request.event === 'seek' ? 1 : 0)
+    };
+    const saved = await this.playbackProgress.findOneAndUpdate(
+      { recordingId: recording.recordingId, studentId: user.sub },
+      { $set: update },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    if (!saved) {
+      throw new ConflictException('Unable to update recording playback progress.');
+    }
+    return this.toPlaybackProgress(saved);
+  }
+
+  async listPlaybackProgressForStudent(recordingIds: string[], studentId: string): Promise<RecordingPlaybackProgressRecord[]> {
+    const ids = [...new Set(recordingIds.filter(Boolean))];
+    if (!ids.length) {
+      return [];
+    }
+    const docs = await this.playbackProgress.find({ recordingId: { $in: ids }, studentId }).exec();
+    return docs.map((doc) => this.toPlaybackProgress(doc));
+  }
+
+  async listPlaybackProgressForAnalytics(recordingIds: string[]): Promise<RecordingPlaybackProgressRecord[]> {
+    const ids = [...new Set(recordingIds.filter(Boolean))];
+    if (!ids.length) {
+      return [];
+    }
+    const docs = await this.playbackProgress.find({ recordingId: { $in: ids } }).exec();
+    return docs.map((doc) => this.toPlaybackProgress(doc));
+  }
+
+  async getAdminRecordingEngagement(recordingId: string, user: AuthenticatedUser): Promise<RecordingEngagementSummary> {
+    this.assertAdmin(user);
+    const recording = await this.findAdminRecording(recordingId);
+    const hydration = await this.hydrateAdminRecording(recording);
+    return this.engagementForRecordings([recording], hydration.batch);
+  }
+
   async listAdminRecordings(query: AdminRecordingListQuery, user: AuthenticatedUser): Promise<AdminRecordingListResponse> {
     this.assertAdmin(user);
     const page = this.clampPositiveInteger(query.page, 1, 10_000);
@@ -412,7 +525,8 @@ export class RecordingsService {
     this.assertAdmin(user);
     const recording = await this.findAdminRecording(recordingId);
     const hydration = await this.hydrateAdminRecording(recording);
-    return this.toAdminRecordingDetail(recording, hydration);
+    const engagement = await this.engagementForRecordings([recording], hydration.batch);
+    return this.toAdminRecordingDetail(recording, hydration, engagement);
   }
 
   async getAdminRecordingPlayback(recordingId: string, user: AuthenticatedUser): Promise<AdminRecordingPlaybackResponse> {
@@ -482,7 +596,8 @@ export class RecordingsService {
     recording.retentionExpiresAt = expiresAt;
     await recording.save();
     const hydration = await this.hydrateAdminRecording(recording);
-    const detail = this.toAdminRecordingDetail(recording, hydration);
+    const engagement = await this.engagementForRecordings([recording], hydration.batch);
+    const detail = this.toAdminRecordingDetail(recording, hydration, engagement);
     await this.auditLogs?.record({
       actor: user,
       action: 'admin.recordings.retention.update',
@@ -501,7 +616,8 @@ export class RecordingsService {
     recording.retentionExpiresAt = new Date();
     await recording.save();
     const hydration = await this.hydrateAdminRecording(recording);
-    const detail = this.toAdminRecordingDetail(recording, hydration);
+    const engagement = await this.engagementForRecordings([recording], hydration.batch);
+    const detail = this.toAdminRecordingDetail(recording, hydration, engagement);
     await this.auditLogs?.record({
       actor: user,
       action: 'admin.recordings.archive',
@@ -910,7 +1026,11 @@ export class RecordingsService {
     };
   }
 
-  private toAdminRecordingDetail(doc: RecordingMongoDocument, hydration: AdminRecordingHydration = {}): AdminRecordingDetail {
+  private toAdminRecordingDetail(
+    doc: RecordingMongoDocument,
+    hydration: AdminRecordingHydration = {},
+    engagement?: RecordingEngagementSummary
+  ): AdminRecordingDetail {
     return {
       ...this.toAdminRecordingListItem(doc, hydration),
       scope: doc.scope,
@@ -919,7 +1039,8 @@ export class RecordingsService {
       ...(doc.stoppedBy ? { stoppedBy: doc.stoppedBy } : {}),
       ...(doc.consentRequired !== undefined ? { consentRequired: doc.consentRequired } : {}),
       ...(doc.consentVersion ? { consentVersion: doc.consentVersion } : {}),
-      trackCount: doc.tracks?.length ?? 0
+      trackCount: doc.tracks?.length ?? 0,
+      ...(engagement ? { engagement } : {})
     };
   }
 
@@ -932,6 +1053,83 @@ export class RecordingsService {
 
   private canAccessRecordingContent(doc: RecordingMongoDocument): boolean {
     return doc.status === 'stopped' && this.adminRecordingStatus(doc) !== 'expired' && Boolean(doc.path);
+  }
+
+  private isPublishedRecording(doc: RecordingMongoDocument): boolean {
+    return Boolean(doc.publishedAt && !doc.unpublishedAt);
+  }
+
+  private async engagementForRecordings(
+    recordings: RecordingMongoDocument[],
+    batch?: BatchMongoDocument
+  ): Promise<RecordingEngagementSummary> {
+    const ready = recordings.filter((recording) => recording.status === 'stopped');
+    const recordingIds = ready.map((recording) => recording.recordingId);
+    const progress = recordingIds.length ? await this.listPlaybackProgressForAnalytics(recordingIds) : [];
+    const roster = batch ? await this.studentEnrollments.listBatchRoster(batch.id, { includeInactive: true }) : [];
+    const watchedStudents = new Set(progress.filter((row) => row.completionPercent > 0 || row.playCount > 0).map((row) => row.studentId));
+    const averageCompletionPercent = progress.length
+      ? Math.round(progress.reduce((total, row) => total + row.completionPercent, 0) / progress.length)
+      : 0;
+    return {
+      recordingsReady: ready.length,
+      studentsWatched: watchedStudents.size,
+      studentsUnwatched: Math.max(roster.length - watchedStudents.size, 0),
+      averageCompletionPercent,
+      totalWatchedSeconds: progress.reduce((total, row) => total + row.watchedSeconds, 0),
+      playCount: progress.reduce((total, row) => total + row.playCount, 0),
+      pauseCount: progress.reduce((total, row) => total + row.pauseCount, 0),
+      seekCount: progress.reduce((total, row) => total + row.seekCount, 0)
+    };
+  }
+
+  private resolveWatchedSeconds(
+    existing: RecordingPlaybackProgressMongoDocument | null,
+    request: RecordingPlaybackProgressUpdateRequest,
+    positionSeconds: number,
+    durationSeconds: number
+  ): number {
+    const previous = existing?.watchedSeconds ?? 0;
+    const explicit = this.clampPlaybackNumber(request.watchedSeconds, 0, durationSeconds || 24 * 60 * 60);
+    const delta = this.clampPlaybackNumber(request.watchedSecondsDelta, 0, 60 * 60);
+    const candidate = Math.max(previous, explicit, positionSeconds, previous + delta);
+    return durationSeconds ? Math.min(candidate, durationSeconds) : candidate;
+  }
+
+  private completionPercent(watchedSeconds: number, durationSeconds: number): number {
+    if (!durationSeconds) {
+      return watchedSeconds > 0 ? 1 : 0;
+    }
+    return Math.min(100, Math.max(0, Math.round((watchedSeconds / durationSeconds) * 100)));
+  }
+
+  private clampPlaybackNumber(value: unknown, min: number, max: number): number {
+    const numeric = Number(value ?? 0);
+    if (!Number.isFinite(numeric)) {
+      return min;
+    }
+    return Math.min(max, Math.max(min, Math.round(numeric)));
+  }
+
+  private toPlaybackProgress(doc: RecordingPlaybackProgressMongoDocument): RecordingPlaybackProgress {
+    return {
+      recordingId: doc.recordingId,
+      sessionId: doc.sessionId,
+      batchId: doc.batchId,
+      studentId: doc.studentId,
+      ...(doc.firstPlayedAt ? { firstPlayedAt: doc.firstPlayedAt.toISOString() } : {}),
+      ...(doc.lastPlayedAt ? { lastPlayedAt: doc.lastPlayedAt.toISOString() } : {}),
+      lastPositionSeconds: doc.lastPositionSeconds ?? 0,
+      watchedSeconds: doc.watchedSeconds ?? 0,
+      ...(doc.durationSeconds !== undefined ? { durationSeconds: doc.durationSeconds } : {}),
+      completionPercent: doc.completionPercent ?? 0,
+      ...(doc.completedAt ? { completedAt: doc.completedAt.toISOString() } : {}),
+      playCount: doc.playCount ?? 0,
+      pauseCount: doc.pauseCount ?? 0,
+      seekCount: doc.seekCount ?? 0,
+      ...(doc.createdAt ? { createdAt: doc.createdAt.toISOString() } : {}),
+      ...(doc.updatedAt ? { updatedAt: doc.updatedAt.toISOString() } : {})
+    };
   }
 
   private storageProviderLabel(driver: string): string {

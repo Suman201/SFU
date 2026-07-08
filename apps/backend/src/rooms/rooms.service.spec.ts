@@ -4889,6 +4889,104 @@ describe('RoomsService', () => {
     expect(metrics.activeTransports.dec).toHaveBeenCalledTimes(1);
     expect(metrics.mediaWorkerFailedRooms.set).toHaveBeenCalledWith(0);
   });
+
+  it('creates an ingest-backed system participant with restricted room permissions', async () => {
+    const { service, rooms, participants, permissions, platformEvents, nodeRegistry } = createService();
+    rooms.findById.mockResolvedValue(fakeRoomDoc({ id: 'room-1', name: 'Operations Room', closedAt: undefined }));
+    participants.create.mockImplementation(async (payload: Record<string, unknown>) => ({
+      id: 'ingest-participant-1',
+      ...payload
+    }));
+
+    const participant = await service.createIngestParticipant({
+      roomId: 'room-1',
+      displayName: 'House Feed'
+    });
+
+    expect(nodeRegistry.assertLocalRoomOwner).toHaveBeenCalledWith('room-1');
+    const createdParticipantPayload = participants.create.mock.calls[0]?.[0];
+    expect(createdParticipantPayload.roomId).toBe('room-1');
+    expect(createdParticipantPayload.displayName).toBe('House Feed');
+    expect(createdParticipantPayload.socketId).toBe('');
+    expect(createdParticipantPayload.origin).toBe('system');
+    expect(createdParticipantPayload.role).toBe(Role.PARTICIPANT);
+    expect(permissions.create).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      participantId: 'ingest-participant-1',
+      canPublishAudio: true,
+      canPublishVideo: true,
+      canShareScreen: false,
+      canChat: false
+    });
+    const joinedEvent = platformEvents.appendEvent.mock.calls.find(([event]) => event.type === 'room.joined')?.[0];
+    expect(joinedEvent?.type).toBe('room.joined');
+    expect(joinedEvent?.roomId).toBe('room-1');
+    expect(joinedEvent?.actor?.type).toBe('system');
+    expect(participant.origin).toBe('system');
+    expect(participant.permissions).toEqual({
+      canPublishAudio: true,
+      canPublishVideo: true,
+      canShareScreen: false,
+      canChat: false
+    });
+  });
+
+  it('creates an ingest-backed producer through the normal media registration path', async () => {
+    const { service, rooms, participants, media, platformEvents, metrics } = createService();
+    const room = fakeRoomDoc({ id: 'room-1', name: 'Operations Room', closedAt: undefined, mediaProfile: { id: 'webinar' } });
+    const participant = fakeParticipantDoc({
+      id: 'ingest-participant-1',
+      roomId: 'room-1',
+      role: Role.PARTICIPANT,
+      displayName: 'House Feed',
+      admitted: true
+    });
+    const rtpParameters = {
+      codecs: [
+        {
+          mimeType: 'audio/opus',
+          payloadType: 111,
+          clockRate: 48000,
+          channels: 2,
+          rtcpFeedback: ['transport-cc']
+        }
+      ],
+      encodings: [{ ssrc: 424242 }],
+      rtcp: { cname: 'ingest-room-1', reducedSize: true }
+    };
+    rooms.findById.mockResolvedValue(room);
+    participants.findOne.mockResolvedValue(participant);
+
+    const producer = await service.createIngestProducer({
+      roomId: 'room-1',
+      participantId: 'ingest-participant-1',
+      transportId: 'transport-1',
+      kind: 'audio',
+      rtpParameters
+    });
+
+    const boundRtpParameters = media.bindProducer.mock.calls[0]?.[2];
+    expect(media.bindProducer.mock.calls[0]?.[0]).toBe('transport-1');
+    expect(media.bindProducer.mock.calls[0]?.[1]).toBe('ingest-participant-1');
+    expect(boundRtpParameters.codecs).toEqual(rtpParameters.codecs);
+    expect(boundRtpParameters.rtcp).toEqual(rtpParameters.rtcp);
+    expect(boundRtpParameters.encodings[0]?.ssrc).toBe(424242);
+    expect(boundRtpParameters.encodings[0]?.maxBitrate).toBeGreaterThan(0);
+    const registeredProducer = media.registerProducer.mock.calls[0]?.[0];
+    expect(registeredProducer.roomId).toBe('room-1');
+    expect(registeredProducer.participantId).toBe('ingest-participant-1');
+    expect(registeredProducer.transportId).toBe('transport-1');
+    expect(registeredProducer.source).toBe('ingest');
+    expect(registeredProducer.kind).toBe('audio');
+    expect(registeredProducer.status).toBe('live');
+    const createdEvent = platformEvents.appendEvent.mock.calls.find(([event]) => event.type === 'producer.created')?.[0];
+    expect(createdEvent?.type).toBe('producer.created');
+    expect(createdEvent?.roomId).toBe('room-1');
+    expect(createdEvent?.actor?.type).toBe('system');
+    expect(metrics.activeProducers.labels).toHaveBeenCalledWith('audio');
+    expect(producer.source).toBe('ingest');
+    expect(producer.status).toBe('live');
+  });
 });
 
 function createService(): {
@@ -4900,7 +4998,7 @@ function createService(): {
   classSessions: { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; findOneAndUpdate: jest.Mock; updateOne: jest.Mock };
   participants: { create: jest.Mock; findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; countDocuments: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   permissions: { create: jest.Mock; find: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock };
-  producers: { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
+  producers: jest.Mock & { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   consumers: { findById: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   moderation: { create: jest.Mock; exists: jest.Mock; updateMany: jest.Mock };
   chatAttachments: { create: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
@@ -4928,6 +5026,8 @@ function createService(): {
     roomWorkerId: jest.Mock;
     transportQualityState: jest.Mock;
     assertTransportOwner: jest.Mock;
+    bindProducer: jest.Mock;
+    registerProducer: jest.Mock;
     registerConsumer: jest.Mock;
     closeRoom: jest.Mock;
     closeParticipantTransports: jest.Mock;
@@ -5054,18 +5154,28 @@ function createService(): {
     updateMany: jest.fn()
   };
   const permissions = {
-    create: jest.fn(),
+    create: jest.fn(async (payload: Record<string, unknown>) => payload),
     find: jest.fn(async () => []),
     findOne: jest.fn(async () => null),
     updateOne: jest.fn(async () => ({ modifiedCount: 1 }))
   };
-  const producers = {
-    findById: jest.fn(),
-    findOne: jest.fn(),
-    find: jest.fn(async () => []),
-    updateOne: jest.fn(async () => ({ modifiedCount: 1 })),
-    updateMany: jest.fn()
-  };
+  const producers = Object.assign(
+    jest.fn(function ProducersModel(this: Record<string, unknown>, payload: Record<string, unknown>) {
+      Object.assign(this, {
+        id: `producer-${Math.random().toString(16).slice(2, 10)}`,
+        createdAt: new Date('2026-06-22T10:00:00.000Z'),
+        save: jest.fn(async () => this),
+        ...payload
+      });
+    }),
+    {
+      findById: jest.fn(),
+      findOne: jest.fn(),
+      find: jest.fn(async () => []),
+      updateOne: jest.fn(async () => ({ modifiedCount: 1 })),
+      updateMany: jest.fn()
+    }
+  );
   const consumers = {
     findById: jest.fn(),
     find: jest.fn(async () => []),
@@ -5149,6 +5259,8 @@ function createService(): {
     roomWorkerId: jest.fn(() => undefined),
     transportQualityState: jest.fn(() => undefined),
     assertTransportOwner: jest.fn(),
+    bindProducer: jest.fn(async () => undefined),
+    registerProducer: jest.fn(async () => undefined),
     registerConsumer: jest.fn(),
     closeRoom: jest.fn(async () => ({
       participantIds: [],

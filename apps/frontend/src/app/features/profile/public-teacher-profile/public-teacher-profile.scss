@@ -113,6 +113,19 @@
   min-width: 0;
 }
 
+.identity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 8px;
+}
+
+.primary-link.secondary {
+  border-color: var(--line-soft);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
 .eyebrow,
 h1,
 h2,
@@ -383,6 +396,22 @@ h3 {
   gap: 12px;
 }
 
+.content-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 850;
+  text-decoration: none;
+}
+
 .award-list,
 .batch-list {
   display: grid;
@@ -539,6 +568,10 @@ h3 {
     grid-template-columns: 1fr;
     align-items: start;
     margin-top: -44px;
+  }
+
+  .identity-actions {
+    justify-content: start;
   }
 
   .profile-image {

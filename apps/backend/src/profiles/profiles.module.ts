@@ -1,12 +1,25 @@
 import { Module } from '@nestjs/common';
+import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { AuthModule } from '../auth/auth.module';
 import { DatabaseModule } from '../database/database.module';
-import { ProfilesController, PublicTeacherProfilesController, TeacherLiveSettingsController } from './profiles.controller';
+import {
+  AdminTeacherPromotionsController,
+  ProfilesController,
+  PublicTeacherProfilesController,
+  TeacherLiveSettingsController,
+  TeacherPromotionsController
+} from './profiles.controller';
 import { ProfilesService } from './profiles.service';
 
 @Module({
-  imports: [AuthModule, DatabaseModule],
-  controllers: [ProfilesController, PublicTeacherProfilesController, TeacherLiveSettingsController],
+  imports: [AuthModule, DatabaseModule, AuditLogsModule],
+  controllers: [
+    ProfilesController,
+    PublicTeacherProfilesController,
+    TeacherLiveSettingsController,
+    TeacherPromotionsController,
+    AdminTeacherPromotionsController
+  ],
   providers: [ProfilesService],
   exports: [ProfilesService]
 })

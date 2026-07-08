@@ -58,6 +58,229 @@
       }
     </section>
 
+    <section class="profile-panel promotion-panel">
+      <header class="edit-header">
+        <div>
+          <p class="eyebrow">Public visibility</p>
+          <h2>Profile promotion</h2>
+        </div>
+        <span class="status-pill">{{ profile.publicProfileEnabled ? 'Public profile enabled' : 'Public profile off' }}</span>
+      </header>
+
+      @if (!canRequestPromotion(profile)) {
+        <div class="promotion-callout">
+          <strong>Complete your public profile first.</strong>
+          <p>Promotion requests require an active public profile with a headline and bio so marketplace visitors see useful teacher context.</p>
+        </div>
+      }
+
+      <div class="promotion-layout">
+        <div class="form-grid promotion-form">
+          <label>
+            <span>Placement</span>
+            <select [value]="promotionForm().placement" (change)="updatePromotionForm('placement', promotionPlacementValue($event))">
+              <option value="marketplace_featured">Marketplace featured</option>
+              <option value="search_boost">Search boost</option>
+              <option value="profile_badge">Profile badge</option>
+            </select>
+          </label>
+          <label>
+            <span>Payment reference</span>
+            <input [value]="promotionForm().paymentReference" (input)="updatePromotionForm('paymentReference', inputValue($event))" placeholder="Optional invoice or manual ref" />
+          </label>
+          <label>
+            <span>Start</span>
+            <input type="datetime-local" [value]="promotionForm().startsAt" (input)="updatePromotionForm('startsAt', inputValue($event))" />
+          </label>
+          <label>
+            <span>End</span>
+            <input type="datetime-local" [value]="promotionForm().endsAt" (input)="updatePromotionForm('endsAt', inputValue($event))" />
+          </label>
+          <label class="wide">
+            <span>Request note</span>
+            <textarea rows="3" [value]="promotionForm().reason" (input)="updatePromotionForm('reason', inputValue($event))" placeholder="Campaign goal or admin context"></textarea>
+          </label>
+          <footer class="editor-actions wide">
+            <button class="primary-link button-link" type="button" [disabled]="requestingPromotion() || !canRequestPromotion(profile)" (click)="requestPromotion()">
+              {{ requestingPromotion() ? 'Requesting...' : 'Request promotion' }}
+            </button>
+          </footer>
+        </div>
+
+        <div class="promotion-history">
+          <h3>Promotion history</h3>
+          @if (loadingPromotions()) {
+            <p class="muted-line">Loading promotion requests...</p>
+          } @else if (promotions().length) {
+            @for (promotion of promotions(); track promotion.promotionId) {
+              <article>
+                <div>
+                  <strong>{{ promotionPlacementLabel(promotion.placement) }}</strong>
+                  <span class="status-pill">{{ promotionStatusLabel(promotion) }}</span>
+                </div>
+                <p>{{ formatDate(promotion.startsAt) }} to {{ formatDate(promotion.endsAt) }}</p>
+                <small>{{ promotion.billingStatus }}{{ promotion.adminNote ? ' · ' + promotion.adminNote : '' }}</small>
+              </article>
+            }
+          } @else {
+            <div class="empty-state compact">
+              <h3>No promotion requests</h3>
+              <p>Requests you submit here appear for admin review before any public boost is applied.</p>
+            </div>
+          }
+        </div>
+      </div>
+    </section>
+
+    <section class="profile-panel public-content-panel">
+      <header class="edit-header">
+        <div>
+          <p class="eyebrow">Public gallery</p>
+          <h2>Gallery and demo classes</h2>
+        </div>
+        <button class="primary-link button-link" type="button" (click)="resetPublicContentForm()">
+          {{ editingPublicContentId() ? 'Cancel edit' : 'New item' }}
+        </button>
+      </header>
+
+      <div class="public-content-layout">
+        <div class="public-content-form form-grid">
+          <label>
+            <span>Type</span>
+            <select [value]="publicContentForm().itemType" (change)="updatePublicContentForm('itemType', publicContentItemTypeValue($event))">
+              <option value="gallery">Gallery item</option>
+              <option value="demo_class">Demo class</option>
+            </select>
+          </label>
+          <label>
+            <span>Media type</span>
+            <select [value]="publicContentForm().mediaType" (change)="updatePublicContentForm('mediaType', publicContentMediaTypeValue($event))">
+              <option value="image">Image</option>
+              <option value="video">Video</option>
+              <option value="pdf">PDF</option>
+              <option value="document">Document</option>
+              <option value="slides">Slides</option>
+              <option value="link">Link</option>
+            </select>
+          </label>
+          <label>
+            <span>Title</span>
+            <input [value]="publicContentForm().title" (input)="updatePublicContentForm('title', inputValue($event))" />
+          </label>
+          <label>
+            <span>Sort order</span>
+            <input type="number" [value]="publicContentForm().sortOrder" (input)="updatePublicContentForm('sortOrder', numberValue($event, publicContentForm().sortOrder))" />
+          </label>
+          <label class="wide">
+            <span>Public URL</span>
+            <input [value]="publicContentForm().externalUrl" (input)="updatePublicContentForm('externalUrl', inputValue($event))" placeholder="https://example.com/demo-video" />
+            <small>Use a public link, or upload a safe file after saving the draft.</small>
+          </label>
+          <label class="wide">
+            <span>Description</span>
+            <textarea rows="3" [value]="publicContentForm().description" (input)="updatePublicContentForm('description', inputValue($event))"></textarea>
+          </label>
+          <label>
+            <span>Tags</span>
+            <input [value]="publicContentForm().tagsText" (input)="updatePublicContentForm('tagsText', inputValue($event))" placeholder="demo, algebra" />
+          </label>
+          <label>
+            <span>Topics</span>
+            <input [value]="publicContentForm().topicsText" (input)="updatePublicContentForm('topicsText', inputValue($event))" placeholder="Linear equations" />
+          </label>
+          <footer class="editor-actions wide">
+            <button class="primary-link button-link" type="button" [disabled]="savingPublicContent()" (click)="savePublicContent()">
+              {{ savingPublicContent() ? 'Saving...' : editingPublicContentId() ? 'Save item' : 'Create draft' }}
+            </button>
+          </footer>
+        </div>
+
+        <div class="public-content-lists">
+          <section>
+            <h3>Gallery</h3>
+            <div class="content-card-list">
+              @for (item of galleryContent(); track item.contentId) {
+                <article class="content-card">
+                  <div class="content-card-main">
+                    <span class="status-pill">{{ publicContentStatusLabel(item) }}</span>
+                    <strong>{{ item.title }}</strong>
+                    <p>{{ item.description || item.mediaType }}</p>
+                    <div class="pill-list subtle">
+                      @for (tag of item.tags; track tag) {
+                        <span>{{ tag }}</span>
+                      }
+                    </div>
+                  </div>
+                  <footer>
+                    @if (publicContentUrl(item)) {
+                      <a [href]="publicContentUrl(item)" target="_blank" rel="noopener">Open</a>
+                    }
+                    <button type="button" [disabled]="isPublicContentBusy(item)" (click)="editPublicContent(item)">Edit</button>
+                    <button type="button" [disabled]="isPublicContentBusy(item)" (click)="galleryUpload.click()">
+                      {{ uploadingPublicContentId() === item.contentId ? 'Uploading...' : 'Upload' }}
+                    </button>
+                    <input #galleryUpload type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,video/mp4,video/webm,.doc,.docx,.ppt,.pptx" hidden (change)="uploadPublicContentFile($event, item)" />
+                    @if (item.publishStatus === 'published') {
+                      <button type="button" [disabled]="isPublicContentBusy(item)" (click)="unpublishPublicContent(item)">Unpublish</button>
+                    } @else {
+                      <button type="button" [disabled]="isPublicContentBusy(item)" (click)="publishPublicContent(item)">Publish</button>
+                    }
+                    <button type="button" class="danger-action" [disabled]="isPublicContentBusy(item)" (click)="deletePublicContent(item)">Archive</button>
+                  </footer>
+                </article>
+              } @empty {
+                <div class="empty-state compact">
+                  <h3>No gallery items</h3>
+                  <p>Add proof, slides, or images that help students understand your teaching style.</p>
+                </div>
+              }
+            </div>
+          </section>
+
+          <section>
+            <h3>Demo classes</h3>
+            <div class="content-card-list">
+              @for (item of demoContent(); track item.contentId) {
+                <article class="content-card">
+                  <div class="content-card-main">
+                    <span class="status-pill">{{ publicContentStatusLabel(item) }}</span>
+                    <strong>{{ item.title }}</strong>
+                    <p>{{ item.description || item.mediaType }}</p>
+                    <div class="pill-list subtle">
+                      @for (topic of item.topics; track topic) {
+                        <span>{{ topic }}</span>
+                      }
+                    </div>
+                  </div>
+                  <footer>
+                    @if (publicContentUrl(item)) {
+                      <a [href]="publicContentUrl(item)" target="_blank" rel="noopener">Open</a>
+                    }
+                    <button type="button" [disabled]="isPublicContentBusy(item)" (click)="editPublicContent(item)">Edit</button>
+                    <button type="button" [disabled]="isPublicContentBusy(item)" (click)="demoUpload.click()">
+                      {{ uploadingPublicContentId() === item.contentId ? 'Uploading...' : 'Upload' }}
+                    </button>
+                    <input #demoUpload type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,video/mp4,video/webm,.doc,.docx,.ppt,.pptx" hidden (change)="uploadPublicContentFile($event, item)" />
+                    @if (item.publishStatus === 'published') {
+                      <button type="button" [disabled]="isPublicContentBusy(item)" (click)="unpublishPublicContent(item)">Unpublish</button>
+                    } @else {
+                      <button type="button" [disabled]="isPublicContentBusy(item)" (click)="publishPublicContent(item)">Publish</button>
+                    }
+                    <button type="button" class="danger-action" [disabled]="isPublicContentBusy(item)" (click)="deletePublicContent(item)">Archive</button>
+                  </footer>
+                </article>
+              } @empty {
+                <div class="empty-state compact">
+                  <h3>No demo classes</h3>
+                  <p>Add short sample lessons or public demo links for prospective students.</p>
+                </div>
+              }
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
     @if (editing()) {
       <section class="profile-panel edit-panel">
         <header class="edit-header">

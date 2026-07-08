@@ -25,6 +25,7 @@ import { MetricsService } from './metrics/metrics.service';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RedisModule } from './redis/redis.module';
 import { RecordingsModule } from './recordings/recordings.module';
+import { IngestModule } from './ingest/ingest.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { ClusterModule } from './cluster/cluster.module';
 import { PermissionsModule } from './permissions/permissions.module';
@@ -33,6 +34,7 @@ import { RbacModule } from './rbac/rbac.module';
 import { RolesModule } from './roles/roles.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { StudentEnrollmentsModule } from './student-enrollments/student-enrollments.module';
+import { SupportModule } from './support/support.module';
 import { TeacherBatchesModule } from './teacher-batches/teacher-batches.module';
 import { UsersModule } from './users/users.module';
 
@@ -159,6 +161,8 @@ import { UsersModule } from './users/users.module';
     AdminDashboardModule,
     AssignmentsModule,
     StudentEnrollmentsModule,
+    SupportModule,
+    IngestModule,
     TeacherBatchesModule,
     ClassLibraryModule,
     ClassSessionsModule,

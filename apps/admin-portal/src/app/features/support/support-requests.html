@@ -1,0 +1,208 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Student support</p>
+    <h1>Support queue</h1>
+    <p>Triage class access, live class, recording, audio/video, assignment, and other student issues.</p>
+  </div>
+</section>
+
+<section class="support-layout">
+  <div class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div>
+        <h2>Requests</h2>
+        <p>{{ total() }} records found</p>
+      </div>
+      <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+        <select formControlName="status" aria-label="Status">
+          <option value="all">All statuses</option>
+          <option value="open">Open</option>
+          <option value="in_review">In review</option>
+          <option value="waiting_for_student">Waiting for student</option>
+          <option value="resolved">Resolved</option>
+          <option value="closed">Closed</option>
+        </select>
+        <select formControlName="issueType" aria-label="Issue type">
+          <option value="all">All issue types</option>
+          <option value="access">Access</option>
+          <option value="class_issue">Class issue</option>
+          <option value="recording_access">Recording access</option>
+          <option value="recording_problem">Recording problem</option>
+          <option value="audio_video">Audio / video</option>
+          <option value="assignment">Assignment</option>
+          <option value="other">Other</option>
+        </select>
+        <input type="search" formControlName="search" placeholder="Search request, student, subject" aria-label="Search support" />
+        <input type="search" formControlName="batchId" placeholder="Batch ID" aria-label="Batch ID" />
+        <input type="search" formControlName="sessionId" placeholder="Session ID" aria-label="Session ID" />
+        <input type="search" formControlName="studentId" placeholder="Student ID" aria-label="Student ID" />
+        <button type="submit" class="table-action primary">Apply</button>
+        <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+      </form>
+    </div>
+
+    @if (error()) {
+      <p class="table-error" role="alert">{{ error() }}</p>
+    }
+    @if (success()) {
+      <p class="table-success" role="status">{{ success() }}</p>
+    }
+
+    <div class="data-table-wrap" style="--data-table-min-width: 1120px">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Student</th>
+            <th>Subject</th>
+            <th>Context</th>
+            <th>Issue</th>
+            <th>Status</th>
+            <th>Updated</th>
+            <th class="actions-cell">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @if (loading()) {
+            <tr>
+              <td colspan="7" class="empty-state">Loading support requests...</td>
+            </tr>
+          } @else if (!rows().length) {
+            <tr>
+              <td colspan="7" class="empty-state">No support requests match these filters.</td>
+            </tr>
+          } @else {
+            @for (row of rows(); track trackByRequest($index, row)) {
+              <tr [class.selected-row]="selected()?.requestId === row.requestId">
+                <td>
+                  <div class="primary-cell">
+                    <span class="table-avatar">{{ initials(row) || 'ST' }}</span>
+                    <div>
+                      <strong>{{ row.studentName }}</strong>
+                      <small>{{ row.studentEmail || row.studentId }}</small>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <strong>{{ row.subject }}</strong>
+                  <small>{{ row.requestId }}</small>
+                </td>
+                <td>
+                  <strong>{{ contextLabel(row) }}</strong>
+                  <small>{{ row.batchId || row.sessionId || row.recordingId || 'No class context' }}</small>
+                </td>
+                <td>{{ issueLabel(row.issueType) }}</td>
+                <td><span class="data-pill {{ statusClass(row.status) }}">{{ statusLabel(row.status) }}</span></td>
+                <td>{{ row.updatedAt | date: 'medium' }}</td>
+                <td class="actions-cell">
+                  <button type="button" class="table-action primary" (click)="select(row)">Triage</button>
+                </td>
+              </tr>
+            }
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <footer class="table-footer">
+      <span>Page {{ page() }} · {{ total() }} total</span>
+      <div>
+        <button type="button" class="table-action" [disabled]="page() === 1" (click)="previousPage()">Previous</button>
+        <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+      </div>
+    </footer>
+  </div>
+
+  @if (selected(); as ticket) {
+    <aside class="support-detail" aria-label="Support request detail">
+      <header>
+        <div>
+          <p class="eyebrow">Triage</p>
+          <h2>{{ ticket.subject }}</h2>
+          <span>{{ ticket.requestId }}</span>
+        </div>
+        <button type="button" class="table-action" (click)="selected.set(null)">Close</button>
+      </header>
+
+      <dl>
+        <div>
+          <dt>Student</dt>
+          <dd>{{ ticket.studentName }} · {{ ticket.studentEmail || ticket.studentId }}</dd>
+        </div>
+        <div>
+          <dt>Context</dt>
+          <dd>{{ contextLabel(ticket) }}</dd>
+        </div>
+        <div>
+          <dt>Created</dt>
+          <dd>{{ ticket.createdAt | date: 'medium' }}</dd>
+        </div>
+      </dl>
+
+      <section>
+        <h3>Student message</h3>
+        <p>{{ ticket.message }}</p>
+      </section>
+
+      @if (ticket.diagnostics) {
+        <section class="diagnostics">
+          <h3>Diagnostics</h3>
+          <p>{{ ticket.diagnostics.route || 'No route recorded' }}</p>
+          <small>{{ ticket.diagnostics.userAgent || 'No browser details recorded' }}</small>
+        </section>
+      }
+
+      @if (ticket.comments.length) {
+        <section class="comments">
+          <h3>Responses</h3>
+          @for (comment of ticket.comments; track comment.id) {
+            <article>
+              <strong>{{ comment.authorName }}</strong>
+              <p>{{ comment.message }}</p>
+              <small>{{ comment.visibleToStudent ? 'Student visible' : 'Internal' }} · {{ comment.createdAt | date: 'medium' }}</small>
+            </article>
+          }
+        </section>
+      }
+
+      <form [formGroup]="updateForm" (ngSubmit)="updateSelected()">
+        <label>
+          <span>Status</span>
+          <select formControlName="status">
+            <option value="open">Open</option>
+            <option value="in_review">In review</option>
+            <option value="waiting_for_student">Waiting for student</option>
+            <option value="resolved">Resolved</option>
+            <option value="closed">Closed</option>
+          </select>
+        </label>
+        <label>
+          <span>Assigned to</span>
+          <input type="text" formControlName="assignedToName" placeholder="Optional" />
+        </label>
+        <label>
+          <span>Response to student</span>
+          <textarea rows="3" formControlName="response" placeholder="Visible to student"></textarea>
+        </label>
+        <label>
+          <span>Internal note</span>
+          <textarea rows="3" formControlName="internalNote" placeholder="Admin/support only"></textarea>
+        </label>
+        <button type="submit" class="table-action primary" [disabled]="saving()">
+          {{ saving() ? 'Updating...' : 'Update request' }}
+        </button>
+      </form>
+
+      <nav class="support-links">
+        @if (ticket.sessionId) {
+          <a class="table-action" [routerLink]="['/class-sessions', ticket.sessionId]">Open session</a>
+        }
+        @if (ticket.recordingId) {
+          <a class="table-action" [routerLink]="['/recordings', ticket.recordingId]">Open recording</a>
+        }
+        @if (ticket.batchId) {
+          <a class="table-action" [routerLink]="['/batches', ticket.batchId]">Open batch</a>
+        }
+      </nav>
+    </aside>
+  }
+</section>

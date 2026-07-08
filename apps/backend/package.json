@@ -17,6 +17,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.850.0",
     "@native-sfu/contracts": "0.1.0",
+    "@native-sfu/media-ingest": "0.1.0",
     "@native-sfu/nest-sfu": "0.1.0",
     "@native-sfu/sfu-core": "0.1.0",
     "@nestjs/common": "^11.0.0",
@@ -83,6 +84,9 @@
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.ts$": "ts-jest"
+    },
+    "moduleNameMapper": {
+      "^@native-sfu/media-ingest$": "<rootDir>/../../packages/media-ingest/dist/index.js"
     },
     "collectCoverageFrom": [
       "src/**/*.(t|j)s"

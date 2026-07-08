@@ -42,6 +42,14 @@ export const routes: Routes = [
         loadComponent: () => import('./features/class-library/class-library').then((route) => route.AdminClassLibrary)
       },
       {
+        path: 'support',
+        loadComponent: () => import('./features/support/support-requests').then((route) => route.SupportRequests)
+      },
+      {
+        path: 'teacher-promotions',
+        loadComponent: () => import('./features/teacher-promotions/teacher-promotions').then((route) => route.TeacherPromotions)
+      },
+      {
         path: 'attendance',
         loadComponent: () => import('./features/attendance/list/attendance-list').then((route) => route.AttendanceList)
       },

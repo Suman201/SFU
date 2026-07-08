@@ -4,6 +4,8 @@ import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type {
   AdminAttendanceQuery,
+  AdminAttendanceSourceFilter,
+  AdminAttendanceStatusFilter,
   AdminAttendanceSessionStudentRow,
   AdminAttendanceSessionRow,
   AdminAttendanceStudentRow,
@@ -15,7 +17,7 @@ import { finalize, forkJoin } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
 import { AdminLookupService } from '../../../core/services/admin-lookup.service';
 
-type AttendanceStatusFilter = AdminClassSessionStatus | 'all';
+type SessionStatusFilter = AdminClassSessionStatus | 'all';
 type AttendanceTab = 'sessions' | 'students';
 
 @Component({
@@ -51,10 +53,13 @@ export class AttendanceList implements OnInit {
   protected readonly selectedSessionStudents = signal<AdminAttendanceSessionStudentRow[]>([]);
 
   protected readonly filters = this.formBuilder.nonNullable.group({
-    status: ['all' as AttendanceStatusFilter],
+    status: ['all' as SessionStatusFilter],
+    attendanceStatus: ['all' as AdminAttendanceStatusFilter],
+    source: ['all' as AdminAttendanceSourceFilter],
     courseId: [''],
     batchId: [''],
     teacherId: [''],
+    studentId: [''],
     dateFrom: [''],
     dateTo: ['']
   });
@@ -72,9 +77,12 @@ export class AttendanceList implements OnInit {
   protected resetFilters(): void {
     this.filters.reset({
       status: 'all',
+      attendanceStatus: 'all',
+      source: 'all',
       courseId: '',
       batchId: '',
       teacherId: '',
+      studentId: '',
       dateFrom: '',
       dateTo: ''
     });
@@ -111,6 +119,20 @@ export class AttendanceList implements OnInit {
 
   protected averageAttendance(): number {
     return (this.summary()?.averageAttendanceRate ?? 0) / 100;
+  }
+
+  protected sourceCoverageLabel(): string {
+    const summary = this.summary();
+    if (!summary || !summary.totalSessions) {
+      return 'None';
+    }
+    if (summary.snapshottedSessions > 0 && summary.inferredSessions > 0) {
+      return 'Mixed';
+    }
+    if (summary.snapshottedSessions > 0) {
+      return 'Snapshot';
+    }
+    return summary.inferredSessions > 0 ? 'Inferred' : 'None';
   }
 
   protected attendancePercent(value: number): number {
@@ -239,9 +261,12 @@ export class AttendanceList implements OnInit {
     this.activeTab.set(params.get('tab') === 'students' ? 'students' : 'sessions');
     this.filters.reset({
       status: this.toStatus(params.get('status')),
+      attendanceStatus: this.toAttendanceStatus(params.get('attendanceStatus')),
+      source: this.toSource(params.get('source')),
       courseId: params.get('courseId') ?? '',
       batchId: params.get('batchId') ?? '',
       teacherId: params.get('teacherId') ?? '',
+      studentId: params.get('studentId') ?? '',
       dateFrom: params.get('dateFrom') ?? '',
       dateTo: params.get('dateTo') ?? ''
     });
@@ -269,16 +294,27 @@ export class AttendanceList implements OnInit {
     const value = this.filters.getRawValue();
     return {
       ...(value.status !== 'all' ? { status: value.status } : {}),
+      ...(value.attendanceStatus !== 'all' ? { attendanceStatus: value.attendanceStatus } : {}),
+      ...(value.source !== 'all' ? { source: value.source } : {}),
       ...(value.courseId.trim() ? { courseId: value.courseId.trim() } : {}),
       ...(value.batchId.trim() ? { batchId: value.batchId.trim() } : {}),
       ...(value.teacherId.trim() ? { teacherId: value.teacherId.trim() } : {}),
+      ...(value.studentId.trim() ? { studentId: value.studentId.trim() } : {}),
       ...(value.dateFrom ? { dateFrom: value.dateFrom } : {}),
       ...(value.dateTo ? { dateTo: value.dateTo } : {})
     };
   }
 
-  private toStatus(value: string | null): AttendanceStatusFilter {
+  private toStatus(value: string | null): SessionStatusFilter {
     return value === 'scheduled' || value === 'live' || value === 'completed' || value === 'cancelled' ? value : 'all';
+  }
+
+  private toAttendanceStatus(value: string | null): AdminAttendanceStatusFilter {
+    return value === 'present' || value === 'absent' ? value : 'all';
+  }
+
+  private toSource(value: string | null): AdminAttendanceSourceFilter {
+    return value === 'snapshot' || value === 'inferred' ? value : 'all';
   }
 
   private saveBlob(blob: Blob, fileName: string): void {

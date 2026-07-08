@@ -19,6 +19,18 @@
     <strong>{{ summary()?.completedSessions ?? 0 }}</strong>
   </article>
   <article>
+    <span>Coverage</span>
+    <strong>{{ sourceCoverageLabel() }}</strong>
+  </article>
+  <article>
+    <span>Snapshot source</span>
+    <strong>{{ summary()?.snapshottedSessions ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Inferred source</span>
+    <strong>{{ summary()?.inferredSessions ?? 0 }}</strong>
+  </article>
+  <article>
     <span>Enrolled seats</span>
     <strong>{{ summary()?.totalEnrolledStudents ?? 0 }}</strong>
   </article>
@@ -37,6 +49,10 @@
   <article>
     <span>Late joins</span>
     <strong>{{ summary()?.lateJoinCount ?? 0 }}</strong>
+  </article>
+  <article>
+    <span>Early leaves</span>
+    <strong>{{ summary()?.earlyLeaveCount ?? 0 }}</strong>
   </article>
   <article>
     <span>Reconnects</span>
@@ -76,15 +92,26 @@
     </div>
     <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
       <select formControlName="status" aria-label="Session status">
-        <option value="all">All statuses</option>
+        <option value="all">All session statuses</option>
         <option value="scheduled">Scheduled</option>
         <option value="live">Live</option>
         <option value="completed">Completed</option>
         <option value="cancelled">Cancelled</option>
       </select>
+      <select formControlName="attendanceStatus" aria-label="Attendance status">
+        <option value="all">All attendance</option>
+        <option value="present">Present</option>
+        <option value="absent">Absent</option>
+      </select>
+      <select formControlName="source" aria-label="Attendance source">
+        <option value="all">All sources</option>
+        <option value="snapshot">Snapshot</option>
+        <option value="inferred">Inferred</option>
+      </select>
       <input type="search" formControlName="courseId" list="attendance-course-options" placeholder="Course name or ID" aria-label="Course ID" />
       <input type="search" formControlName="batchId" list="attendance-batch-options" placeholder="Batch name or ID" aria-label="Batch ID" />
       <input type="search" formControlName="teacherId" list="attendance-teacher-options" placeholder="Teacher name or ID" aria-label="Teacher ID" />
+      <input type="search" formControlName="studentId" placeholder="Student ID" aria-label="Student ID" />
       <input type="date" formControlName="dateFrom" aria-label="Date from" />
       <input type="date" formControlName="dateTo" aria-label="Date to" />
       <button type="submit" class="table-action primary">Apply</button>
@@ -155,11 +182,15 @@
                   </div>
                 </td>
                 <td>
-                  <strong>{{ row.batchName }}</strong>
-                  <small>{{ row.courseName || row.courseId || 'No course' }}</small>
+                  <a class="inline-link" [routerLink]="['/batches', row.batchId]">{{ row.batchName }}</a>
+                  @if (row.courseId) {
+                    <small><a class="inline-link muted" [routerLink]="['/courses', row.courseId]">{{ row.courseName || row.courseId }}</a></small>
+                  } @else {
+                    <small>No course</small>
+                  }
                 </td>
                 <td>
-                  <strong>{{ row.teacherName || row.teacherId }}</strong>
+                  <a class="inline-link" [routerLink]="['/users', row.teacherId]">{{ row.teacherName || row.teacherId }}</a>
                   <small>{{ row.teacherId }}</small>
                 </td>
                 <td>{{ row.scheduledAt | date: 'medium' }}</td>
@@ -299,8 +330,12 @@
                   </div>
                 </td>
                 <td>
-                  <strong>{{ row.batchName }}</strong>
-                  <small>{{ row.courseName || row.courseId || 'No course' }}</small>
+                  <a class="inline-link" [routerLink]="['/batches', row.batchId]">{{ row.batchName }}</a>
+                  @if (row.courseId) {
+                    <small><a class="inline-link muted" [routerLink]="['/courses', row.courseId]">{{ row.courseName || row.courseId }}</a></small>
+                  } @else {
+                    <small>No course</small>
+                  }
                 </td>
                 <td>
                   <strong>{{ row.sessionsAttended }}/{{ row.sessionsEnrolled }}</strong>

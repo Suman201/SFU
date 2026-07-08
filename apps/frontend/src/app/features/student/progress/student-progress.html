@@ -1,0 +1,179 @@
+<sfu-header />
+<main class="student-progress-shell">
+  <section class="progress-heading">
+    <div>
+      <p class="eyebrow">Learning progress</p>
+      <h1>My progress</h1>
+      <p>Track your own classes, attendance, homework, recordings, and private follow-ups.</p>
+    </div>
+    <div class="heading-actions">
+      <a routerLink="/student/dashboard">Dashboard</a>
+      <a routerLink="/student/classes/completed">Class history</a>
+    </div>
+  </section>
+
+  @if (error()) {
+    <div class="progress-alert" role="alert">{{ error() }}</div>
+  }
+
+  @if (loading()) {
+    <section class="progress-empty">
+      <h2>Loading progress</h2>
+      <p>Pulling your enrolled batch history and learning records from the server.</p>
+    </section>
+  } @else if (!progress()?.batches?.length) {
+    <section class="progress-empty">
+      <h2>No progress records yet</h2>
+      <p>Your progress will appear after you enroll in batches and complete classes or assignments.</p>
+      <a routerLink="/student/explore">Explore batches</a>
+    </section>
+  } @else {
+    <section class="metric-grid" aria-label="Student progress summary">
+      @for (metric of metrics(); track metric.label) {
+        <article class="metric-card" [class.tone-rose]="metric.tone === 'rose'" [class.tone-coral]="metric.tone === 'coral'" [class.tone-amber]="metric.tone === 'amber'">
+          <span>{{ metric.value }}</span>
+          <strong>{{ metric.label }}</strong>
+          <p>{{ metric.hint }}</p>
+        </article>
+      }
+    </section>
+
+    <section class="progress-panel">
+      <header>
+        <div>
+          <p class="eyebrow">Batches</p>
+          <h2>Progress by batch</h2>
+        </div>
+        <button type="button" [disabled]="loading()" (click)="load()">Refresh</button>
+      </header>
+
+      <div class="batch-grid">
+        @for (batch of batches(); track batch.batchId) {
+          <article class="batch-card">
+            <div class="batch-card-head">
+              <div>
+                <h3>{{ batch.batchName }}</h3>
+                <p>{{ batch.courseName || batch.courseId || 'Course' }} · {{ batch.teacherName || 'Teacher' }}</p>
+              </div>
+              <span>{{ attendanceLabel(batch) }}</span>
+            </div>
+
+            <div class="progress-bars" aria-label="Batch progress">
+              <div>
+                <span>Attendance</span>
+                <div class="bar"><i [style.width.%]="batch.attendanceRate"></i></div>
+              </div>
+              <div>
+                <span>Assignments submitted</span>
+                <div class="bar"><i [style.width.%]="batch.assignments.total ? (batch.assignments.submitted / batch.assignments.total) * 100 : 0"></i></div>
+              </div>
+            </div>
+
+            <dl class="batch-stats">
+              <div>
+                <dt>Completed</dt>
+                <dd>{{ batch.completedClasses }}</dd>
+              </div>
+              <div>
+                <dt>Missed</dt>
+                <dd>{{ batch.missedClasses }}</dd>
+              </div>
+              <div>
+                <dt>Due</dt>
+                <dd>{{ batch.assignments.due }}</dd>
+              </div>
+              <div>
+                <dt>Overdue</dt>
+                <dd>{{ batch.assignments.overdue }}</dd>
+              </div>
+              <div>
+                <dt>Recordings</dt>
+                <dd>{{ batch.recordings.watched ?? 0 }}/{{ batch.recordings.ready }}</dd>
+              </div>
+              <div>
+                <dt>Review time</dt>
+                <dd>{{ durationLabel(batch.recordings.totalWatchedSeconds ?? 0) }}</dd>
+              </div>
+              <div>
+                <dt>Questions</dt>
+                <dd>{{ batch.participation.questionsAsked }}</dd>
+              </div>
+            </dl>
+
+            @if (batch.recentAttendance.length) {
+              <div class="attendance-strip">
+                @for (item of batch.recentAttendance; track item.sessionId) {
+                  <a
+                    [routerLink]="['/student/classes/completed', item.sessionId]"
+                    [queryParams]="{ batchId: batch.batchId }"
+                    [class.present]="item.status === 'present'"
+                    [class.absent]="item.status === 'absent'"
+                  >
+                    <strong>{{ item.status }}</strong>
+                    <span>{{ formatDate(item.completedAt || item.scheduledAt) }}</span>
+                    <small>{{ durationLabel(item.totalDurationSeconds) }}</small>
+                  </a>
+                }
+              </div>
+            }
+          </article>
+        }
+      </div>
+    </section>
+
+    <section class="progress-columns">
+      <article class="progress-panel">
+        <header>
+          <div>
+            <p class="eyebrow">Review</p>
+            <h2>Suggested focus</h2>
+          </div>
+        </header>
+        @if (signals().length) {
+          <div class="signal-list">
+            @for (signal of signals(); track signal.label + signal.batchId) {
+              <div class="signal-row" [class.danger]="signalTone(signal) === 'danger'" [class.warning]="signalTone(signal) === 'warning'">
+                <span>{{ signalTypeLabel(signal) }}</span>
+                <div>
+                  <strong>{{ signal.label }}</strong>
+                  <p>{{ signal.explanation || signal.detail }}</p>
+                  <div class="signal-meta">
+                    @if (signal.topic || signal.tag) {
+                      <small>{{ signal.topic || signal.tag }}</small>
+                    }
+                    @if (signalSourceCount(signal)) {
+                      <small>{{ signalSourceCount(signal) }} source{{ signalSourceCount(signal) === 1 ? '' : 's' }}</small>
+                    }
+                  </div>
+                </div>
+              </div>
+            }
+          </div>
+        } @else {
+          <div class="progress-empty compact">
+            <h3>No focus alerts</h3>
+            <p>There are no deterministic review signals from your current records.</p>
+          </div>
+        }
+      </article>
+
+      <article class="progress-panel">
+        <header>
+          <div>
+            <p class="eyebrow">Data notes</p>
+            <h2>Availability</h2>
+          </div>
+        </header>
+        <div class="availability-list">
+          @for (note of availabilityNotes(); track note.key) {
+            <div>
+              <strong>{{ note.key }}</strong>
+              <p>{{ note.reason }}</p>
+            </div>
+          }
+        </div>
+      </article>
+    </section>
+  }
+</main>
+<sfu-footer />

@@ -5,7 +5,10 @@
       <p class="eyebrow">Student explore</p>
       <h1>Find a batch</h1>
     </div>
-    <a class="dashboard-link" routerLink="/student/dashboard">Dashboard · {{ enrolledCount() }}</a>
+    <div class="heading-actions">
+      <a class="dashboard-link" routerLink="/teachers">Browse teachers</a>
+      <a class="dashboard-link" routerLink="/student/dashboard">Dashboard · {{ enrolledCount() }}</a>
+    </div>
   </section>
 
   <section class="batch-grid" aria-label="Available batches">

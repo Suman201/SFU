@@ -28,6 +28,8 @@ import type {
   PostClassArtifactPublishRequest,
   PreviousWhiteboardMemoryListResponse,
   Recording,
+  RecordingPlaybackProgress,
+  RecordingPlaybackProgressUpdateRequest,
   RestorePreviousWhiteboardMemoryRequest,
   RestoreWhiteboardMemoryVersionRequest,
   SaveWhiteboardMemoryRequest,
@@ -35,7 +37,14 @@ import type {
   StudentAssignmentListResponse,
   StudentCompletedClassDetailResponse,
   StudentCompletedClassSessionListResponse,
+  StudentProgressResponse,
   SubmitAssignmentRequest,
+  CreateSupportRequestRequest,
+  SupportRequest,
+  SupportRequestListQuery,
+  SupportRequestListResponse,
+  TeacherAnalyticsQuery,
+  TeacherAnalyticsResponse,
   TeacherAssignmentListResponse,
   UpdateAssignmentRequest,
   UpdatePostClassQuestionStateRequest,
@@ -156,6 +165,34 @@ export class ClassSessionService {
       .pipe(map((response) => this.unwrapResponse(response)));
   }
 
+  createSupportRequest(request: CreateSupportRequestRequest): Observable<SupportRequest> {
+    return this.http
+      .post<SupportRequest | ApiEnvelope<SupportRequest>>(`${API_BASE_URL}/support/requests`, request)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  listMySupportRequests(query: SupportRequestListQuery = {}): Observable<SupportRequestListResponse> {
+    const url = new URL(`${API_BASE_URL}/support/requests`);
+    this.appendQuery(url, query);
+    return this.http
+      .get<SupportRequestListResponse | ApiEnvelope<SupportRequestListResponse>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  getMySupportRequest(requestId: string): Observable<SupportRequest> {
+    return this.http
+      .get<SupportRequest | ApiEnvelope<SupportRequest>>(`${API_BASE_URL}/support/requests/${encodeURIComponent(requestId)}`)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  getTeacherAnalytics(query: TeacherAnalyticsQuery = {}): Observable<TeacherAnalyticsResponse> {
+    const url = new URL(`${API_BASE_URL}/teacher/analytics`);
+    this.appendQuery(url, query);
+    return this.http
+      .get<TeacherAnalyticsResponse | ApiEnvelope<TeacherAnalyticsResponse>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
   getPostClassWorkspace(sessionId: string, options: { batchId?: string } = {}): Observable<ClassSessionPostClassWorkspace> {
     const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/post-class-workspace`);
     if (options.batchId) {
@@ -229,6 +266,12 @@ export class ClassSessionService {
       .pipe(map((response) => this.unwrapResponse(response)));
   }
 
+  getStudentProgress(): Observable<StudentProgressResponse> {
+    return this.http
+      .get<StudentProgressResponse | ApiEnvelope<StudentProgressResponse>>(`${API_BASE_URL}/class-sessions/student/progress`)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
   getCompletedStudentSessionDetail(sessionId: string, batchId?: string): Observable<StudentCompletedClassDetailResponse> {
     const url = new URL(`${API_BASE_URL}/class-sessions/student/completed/${encodeURIComponent(sessionId)}`);
     if (batchId) {
@@ -236,6 +279,15 @@ export class ClassSessionService {
     }
     return this.http
       .get<StudentCompletedClassDetailResponse | ApiEnvelope<StudentCompletedClassDetailResponse>>(url.toString())
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  updateRecordingPlaybackProgress(recordingId: string, request: RecordingPlaybackProgressUpdateRequest): Observable<RecordingPlaybackProgress> {
+    return this.http
+      .post<RecordingPlaybackProgress | ApiEnvelope<RecordingPlaybackProgress>>(
+        `${API_BASE_URL}/recordings/${encodeURIComponent(recordingId)}/playback-progress`,
+        request
+      )
       .pipe(map((response) => this.unwrapResponse(response)));
   }
 

@@ -1,12 +1,21 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import type {
+  CreateTeacherPublicContentRequest,
   LiveClassSettingsPatch,
   ProfileMediaUploadResponse,
   ProfileSettings,
   ProfileUser,
+  PublicTeacherListQuery,
+  PublicTeacherListResponse,
   PublicTeacherProfile,
+  TeacherPromotion,
+  TeacherPromotionListResponse,
+  TeacherPromotionRequest,
+  TeacherPublicContentItem,
+  TeacherPublicContentListResponse,
   TeacherLiveClassSettingsResponse,
+  UpdateTeacherPublicContentRequest,
   UpdateMyProfileRequest,
   UpdateMySettingsRequest
 } from '@native-sfu/contracts';
@@ -73,6 +82,83 @@ export class ProfileService {
       .pipe(map((response) => this.unwrapResponse(response)));
   }
 
+  listPublicTeachers(query: PublicTeacherListQuery = {}): Observable<PublicTeacherListResponse> {
+    const params = this.publicTeacherListParams(query);
+    return this.http
+      .get<PublicTeacherListResponse | ApiEnvelope<PublicTeacherListResponse>>(`${API_BASE_URL}/teachers`, { params })
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  listMyPromotions(): Observable<TeacherPromotionListResponse> {
+    return this.http
+      .get<TeacherPromotionListResponse | ApiEnvelope<TeacherPromotionListResponse>>(`${API_BASE_URL}/teachers/me/promotions`)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  requestMyPromotion(request: TeacherPromotionRequest): Observable<TeacherPromotion> {
+    return this.http
+      .post<TeacherPromotion | ApiEnvelope<TeacherPromotion>>(`${API_BASE_URL}/teachers/me/promotions/request`, request)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  listMyPublicContent(): Observable<TeacherPublicContentListResponse> {
+    return this.http
+      .get<TeacherPublicContentListResponse | ApiEnvelope<TeacherPublicContentListResponse>>(`${API_BASE_URL}/profile/me/public-content`)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  createMyPublicContent(request: CreateTeacherPublicContentRequest): Observable<TeacherPublicContentItem> {
+    return this.http
+      .post<TeacherPublicContentItem | ApiEnvelope<TeacherPublicContentItem>>(`${API_BASE_URL}/profile/me/public-content`, request)
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  updateMyPublicContent(contentId: string, request: UpdateTeacherPublicContentRequest): Observable<TeacherPublicContentItem> {
+    return this.http
+      .patch<TeacherPublicContentItem | ApiEnvelope<TeacherPublicContentItem>>(
+        `${API_BASE_URL}/profile/me/public-content/${encodeURIComponent(contentId)}`,
+        request
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  publishMyPublicContent(contentId: string): Observable<TeacherPublicContentItem> {
+    return this.http
+      .post<TeacherPublicContentItem | ApiEnvelope<TeacherPublicContentItem>>(
+        `${API_BASE_URL}/profile/me/public-content/${encodeURIComponent(contentId)}/publish`,
+        {}
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  unpublishMyPublicContent(contentId: string): Observable<TeacherPublicContentItem> {
+    return this.http
+      .post<TeacherPublicContentItem | ApiEnvelope<TeacherPublicContentItem>>(
+        `${API_BASE_URL}/profile/me/public-content/${encodeURIComponent(contentId)}/unpublish`,
+        {}
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  deleteMyPublicContent(contentId: string): Observable<{ contentId: string; deleted: true }> {
+    return this.http
+      .delete<{ contentId: string; deleted: true } | ApiEnvelope<{ contentId: string; deleted: true }>>(
+        `${API_BASE_URL}/profile/me/public-content/${encodeURIComponent(contentId)}`
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  uploadPublicContentMedia(contentId: string, file: File): Observable<TeacherPublicContentItem> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http
+      .post<TeacherPublicContentItem | ApiEnvelope<TeacherPublicContentItem>>(
+        `${API_BASE_URL}/profile/me/public-content/${encodeURIComponent(contentId)}/file`,
+        formData
+      )
+      .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
   resolveMediaUrl(value: string | undefined): string {
     if (!value) {
       return '';
@@ -102,6 +188,17 @@ export class ProfileService {
     return this.http
       .post<ProfileMediaUploadResponse | ApiEnvelope<ProfileMediaUploadResponse>>(`${API_BASE_URL}/profile/me/${kind}`, formData)
       .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  private publicTeacherListParams(query: PublicTeacherListQuery): Record<string, string> {
+    const params: Record<string, string> = {};
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+      params[key] = String(value);
+    }
+    return params;
   }
 
   private unwrapResponse<T>(response: T | ApiEnvelope<T>): T {

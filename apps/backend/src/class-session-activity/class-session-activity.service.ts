@@ -48,6 +48,14 @@ export interface ClassSessionTimelineListOptions {
   audienceIds?: string[];
 }
 
+export interface ClassSessionAnalyticsEventListOptions {
+  sessionIds: string[];
+  batchIds?: string[];
+  dateFrom?: Date;
+  dateTo?: Date;
+  limit?: number;
+}
+
 @Injectable()
 export class ClassSessionActivityService {
   private readonly logger = new Logger(ClassSessionActivityService.name);
@@ -131,6 +139,33 @@ export class ClassSessionActivityService {
     };
   }
 
+  async listEventsForAnalytics(options: ClassSessionAnalyticsEventListOptions): Promise<ClassSessionTimelineEvent[]> {
+    const sessionIds = [...new Set(options.sessionIds.filter(Boolean))];
+    if (!sessionIds.length) {
+      return [];
+    }
+    const filter: FilterQuery<ClassSessionActivityEventMongoDocument> = {
+      sessionId: { $in: sessionIds }
+    };
+    const batchIds = [...new Set((options.batchIds ?? []).filter(Boolean))];
+    if (batchIds.length) {
+      filter.batchId = { $in: batchIds };
+    }
+    const createdAt: Record<string, Date> = {};
+    if (options.dateFrom) {
+      createdAt.$gte = options.dateFrom;
+    }
+    if (options.dateTo) {
+      createdAt.$lte = options.dateTo;
+    }
+    if (createdAt.$gte || createdAt.$lte) {
+      filter.createdAt = createdAt;
+    }
+    const limit = this.clampAnalyticsLimit(options.limit);
+    const docs = await this.activityEvents.find(filter).sort({ createdAt: -1 }).limit(limit).exec();
+    return docs.map((doc) => this.toTimelineEvent(doc));
+  }
+
   private toTimelineEvent(doc: ClassSessionActivityEventMongoDocument): ClassSessionTimelineEvent {
     const actorRoles = doc.actorRoles ?? [];
     return {
@@ -212,5 +247,12 @@ export class ClassSessionActivityService {
       return 50;
     }
     return Math.min(100, Math.max(1, Math.trunc(value as number)));
+  }
+
+  private clampAnalyticsLimit(value: number | undefined): number {
+    if (!Number.isFinite(value)) {
+      return 5000;
+    }
+    return Math.min(10000, Math.max(1, Math.trunc(value as number)));
   }
 }

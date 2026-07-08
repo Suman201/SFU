@@ -14,7 +14,13 @@ import type {
   RecordingVisibility,
   ScreenShareQualityLimit,
   StudentVideoQualityLimit,
+  TeacherPromotion,
+  TeacherPromotionPlacement,
+  TeacherPublicContentItem,
+  TeacherPublicContentItemType,
+  TeacherPublicContentMediaType,
   UpdateMyProfileRequest,
+  UpdateTeacherPublicContentRequest,
   UpdateMySettingsRequest
 } from '@native-sfu/contracts';
 import { ProfileService } from '../../../core/services/profile.service';
@@ -146,6 +152,25 @@ interface LiveSettingsForm {
   requireExportAuditLog: boolean;
 }
 
+interface PublicContentForm {
+  itemType: TeacherPublicContentItemType;
+  title: string;
+  description: string;
+  mediaType: TeacherPublicContentMediaType;
+  externalUrl: string;
+  tagsText: string;
+  topicsText: string;
+  sortOrder: number;
+}
+
+interface PromotionForm {
+  placement: TeacherPromotionPlacement;
+  startsAt: string;
+  endsAt: string;
+  reason: string;
+  paymentReference: string;
+}
+
 const PROFILE_TABS: ProfileTab[] = [
   { id: 'credentials', label: 'Credentials' },
   { id: 'experience', label: 'Experience' },
@@ -265,6 +290,25 @@ const EMPTY_LIVE_SETTINGS_FORM: LiveSettingsForm = {
   requireExportAuditLog: true
 };
 
+const EMPTY_PUBLIC_CONTENT_FORM: PublicContentForm = {
+  itemType: 'gallery',
+  title: '',
+  description: '',
+  mediaType: 'image',
+  externalUrl: '',
+  tagsText: '',
+  topicsText: '',
+  sortOrder: 0
+};
+
+const EMPTY_PROMOTION_FORM: PromotionForm = {
+  placement: 'marketplace_featured',
+  startsAt: dateTimeInputValue(new Date()),
+  endsAt: dateTimeInputValue(addDays(new Date(), 14)),
+  reason: '',
+  paymentReference: ''
+};
+
 @Component({
   selector: 'sfu-teacher-profile',
   standalone: true,
@@ -287,12 +331,24 @@ export class TeacherProfile implements OnInit {
   protected readonly saving = signal(false);
   protected readonly savingSettings = signal(false);
   protected readonly savingLiveSettings = signal(false);
+  protected readonly savingPublicContent = signal(false);
+  protected readonly loadingPromotions = signal(false);
+  protected readonly requestingPromotion = signal(false);
   protected readonly uploadingField = signal<'avatar' | 'cover' | null>(null);
+  protected readonly uploadingPublicContentId = signal<string | null>(null);
+  protected readonly publicContentBusyId = signal<string | null>(null);
   protected readonly error = signal('');
   protected readonly notice = signal('');
   protected readonly editing = signal(false);
+  protected readonly publicContent = signal<TeacherPublicContentItem[]>([]);
+  protected readonly publicContentForm = signal<PublicContentForm>({ ...EMPTY_PUBLIC_CONTENT_FORM });
+  protected readonly editingPublicContentId = signal<string | null>(null);
+  protected readonly promotions = signal<TeacherPromotion[]>([]);
+  protected readonly promotionForm = signal<PromotionForm>({ ...EMPTY_PROMOTION_FORM });
 
   protected readonly batches = computed(() => this.profile()?.batches ?? []);
+  protected readonly galleryContent = computed(() => this.publicContent().filter((item) => item.itemType === 'gallery'));
+  protected readonly demoContent = computed(() => this.publicContent().filter((item) => item.itemType === 'demo_class'));
   protected readonly totalStudents = computed(() => this.batches().reduce((total, batch) => total + (batch.enrolledCount ?? 0), 0));
   protected readonly metrics = computed<ProfileMetric[]>(() => {
     const profile = this.profile();
@@ -300,13 +356,15 @@ export class TeacherProfile implements OnInit {
       { label: 'Batches', value: `${this.batches().length}` },
       { label: 'Active students', value: `${this.totalStudents()}` },
       { label: 'Skills', value: `${profile?.skills.length ?? 0}` },
-      { label: 'Public profile', value: profile?.publicProfileEnabled ? 'Published' : 'Private' }
+      { label: 'Public assets', value: `${this.publicContent().filter((item) => item.publishStatus === 'published').length}` }
     ];
   });
 
   ngOnInit(): void {
     this.loadProfile();
     this.loadLiveSettings();
+    this.loadPublicContent();
+    this.loadPromotions();
   }
 
   protected loadProfile(): void {
@@ -381,6 +439,135 @@ export class TeacherProfile implements OnInit {
     });
   }
 
+  protected loadPublicContent(): void {
+    this.profiles.listMyPublicContent().subscribe({
+      next: (response) => this.publicContent.set(response.items),
+      error: (error) => this.error.set(this.profiles.errorMessage(error))
+    });
+  }
+
+  protected loadPromotions(): void {
+    this.loadingPromotions.set(true);
+    this.profiles.listMyPromotions().subscribe({
+      next: (response) => this.promotions.set(response.items),
+      error: (error) => this.error.set(this.profiles.errorMessage(error)),
+      complete: () => this.loadingPromotions.set(false)
+    });
+  }
+
+  protected requestPromotion(): void {
+    if (this.requestingPromotion()) {
+      return;
+    }
+    const request = this.promotionRequest();
+    if (!request) {
+      return;
+    }
+    this.requestingPromotion.set(true);
+    this.error.set('');
+    this.notice.set('');
+    this.profiles.requestMyPromotion(request).subscribe({
+      next: (promotion) => {
+        this.promotions.update((items) => [promotion, ...items.filter((item) => item.promotionId !== promotion.promotionId)]);
+        this.promotionForm.set({ ...EMPTY_PROMOTION_FORM, placement: this.promotionForm().placement });
+        this.notice.set('Promotion request submitted for admin review.');
+      },
+      error: (error) => this.error.set(this.profiles.errorMessage(error)),
+      complete: () => this.requestingPromotion.set(false)
+    });
+  }
+
+  protected savePublicContent(): void {
+    if (this.savingPublicContent()) {
+      return;
+    }
+    this.savingPublicContent.set(true);
+    this.error.set('');
+    this.notice.set('');
+    const contentId = this.editingPublicContentId();
+    const request = this.publicContentRequest();
+    const action = contentId
+      ? this.profiles.updateMyPublicContent(contentId, request as UpdateTeacherPublicContentRequest)
+      : this.profiles.createMyPublicContent(request);
+    action.subscribe({
+      next: (item) => {
+        this.upsertPublicContent(item);
+        this.resetPublicContentForm();
+        this.notice.set(contentId ? 'Public content updated.' : 'Public content draft created.');
+      },
+      error: (error) => this.error.set(this.profiles.errorMessage(error)),
+      complete: () => this.savingPublicContent.set(false)
+    });
+  }
+
+  protected editPublicContent(item: TeacherPublicContentItem): void {
+    this.editingPublicContentId.set(item.contentId);
+    this.publicContentForm.set({
+      itemType: item.itemType,
+      title: item.title,
+      description: item.description ?? '',
+      mediaType: item.mediaType,
+      externalUrl: item.externalUrl ?? '',
+      tagsText: item.tags.join(', '),
+      topicsText: item.topics.join(', '),
+      sortOrder: item.sortOrder
+    });
+  }
+
+  protected resetPublicContentForm(): void {
+    this.editingPublicContentId.set(null);
+    this.publicContentForm.set({ ...EMPTY_PUBLIC_CONTENT_FORM });
+  }
+
+  protected publishPublicContent(item: TeacherPublicContentItem): void {
+    this.runPublicContentAction(item.contentId, this.profiles.publishMyPublicContent(item.contentId), 'Public content published.');
+  }
+
+  protected unpublishPublicContent(item: TeacherPublicContentItem): void {
+    this.runPublicContentAction(item.contentId, this.profiles.unpublishMyPublicContent(item.contentId), 'Public content unpublished.');
+  }
+
+  protected deletePublicContent(item: TeacherPublicContentItem): void {
+    this.publicContentBusyId.set(item.contentId);
+    this.error.set('');
+    this.notice.set('');
+    this.profiles.deleteMyPublicContent(item.contentId).subscribe({
+      next: () => {
+        this.publicContent.update((items) => items.filter((candidate) => candidate.contentId !== item.contentId));
+        if (this.editingPublicContentId() === item.contentId) {
+          this.resetPublicContentForm();
+        }
+        this.notice.set('Public content archived.');
+      },
+      error: (error) => this.error.set(this.profiles.errorMessage(error)),
+      complete: () => this.publicContentBusyId.set(null)
+    });
+  }
+
+  protected uploadPublicContentFile(event: Event, item: TeacherPublicContentItem): void {
+    const input = event.target instanceof HTMLInputElement ? event.target : null;
+    const file = input?.files?.[0];
+    if (!file) {
+      return;
+    }
+    this.uploadingPublicContentId.set(item.contentId);
+    this.error.set('');
+    this.notice.set('');
+    this.profiles.uploadPublicContentMedia(item.contentId, file).subscribe({
+      next: (updated) => {
+        this.upsertPublicContent(updated);
+        this.notice.set('Public content media uploaded.');
+      },
+      error: (error) => this.error.set(this.profiles.errorMessage(error)),
+      complete: () => {
+        this.uploadingPublicContentId.set(null);
+        if (input) {
+          input.value = '';
+        }
+      }
+    });
+  }
+
   protected uploadAvatar(event: Event): void {
     this.uploadMedia(event, 'avatar');
   }
@@ -417,6 +604,14 @@ export class TeacherProfile implements OnInit {
 
   protected updateLiveSettingsForm<K extends keyof LiveSettingsForm>(key: K, value: LiveSettingsForm[K]): void {
     this.liveSettingsForm.update((form) => ({ ...form, [key]: value }));
+  }
+
+  protected updatePublicContentForm<K extends keyof PublicContentForm>(key: K, value: PublicContentForm[K]): void {
+    this.publicContentForm.update((form) => ({ ...form, [key]: value }));
+  }
+
+  protected updatePromotionForm<K extends keyof PromotionForm>(key: K, value: PromotionForm[K]): void {
+    this.promotionForm.update((form) => ({ ...form, [key]: value }));
   }
 
   protected inputValue(event: Event): string {
@@ -464,6 +659,24 @@ export class TeacherProfile implements OnInit {
     return value === 'auto' || value === 'medium' || value === 'high' ? value : 'auto';
   }
 
+  protected publicContentItemTypeValue(event: Event): TeacherPublicContentItemType {
+    const value = this.selectValue(event);
+    return value === 'demo_class' ? 'demo_class' : 'gallery';
+  }
+
+  protected publicContentMediaTypeValue(event: Event): TeacherPublicContentMediaType {
+    const value = this.selectValue(event);
+    return value === 'video' || value === 'pdf' || value === 'document' || value === 'slides' || value === 'link' ? value : 'image';
+  }
+
+  protected promotionPlacementValue(event: Event): TeacherPromotionPlacement {
+    const value = this.selectValue(event);
+    if (value === 'search_boost' || value === 'profile_badge') {
+      return value;
+    }
+    return 'marketplace_featured';
+  }
+
   protected profileImage(): string {
     const profile = this.profile();
     if (profile?.avatarUrl) {
@@ -505,6 +718,40 @@ export class TeacherProfile implements OnInit {
     return [item.issuer, item.year].filter(Boolean).join(' - ') || 'Credential';
   }
 
+  protected publicContentUrl(item: TeacherPublicContentItem): string {
+    return this.profiles.resolveMediaUrl(item.externalUrl || item.publicUrl || item.thumbnailUrl);
+  }
+
+  protected publicContentStatusLabel(item: TeacherPublicContentItem): string {
+    if (item.publishStatus === 'published') {
+      return 'Published';
+    }
+    return item.publishStatus === 'unpublished' ? 'Unpublished' : 'Draft';
+  }
+
+  protected promotionPlacementLabel(placement: TeacherPromotionPlacement): string {
+    switch (placement) {
+      case 'marketplace_featured':
+        return 'Marketplace featured';
+      case 'profile_badge':
+        return 'Profile badge';
+      default:
+        return 'Search boost';
+    }
+  }
+
+  protected promotionStatusLabel(promotion: TeacherPromotion): string {
+    return promotion.status.replace(/_/g, ' ');
+  }
+
+  protected canRequestPromotion(profile: ProfileUser): boolean {
+    return Boolean(profile.publicProfileEnabled && profile.headline && profile.bio);
+  }
+
+  protected isPublicContentBusy(item: TeacherPublicContentItem): boolean {
+    return this.publicContentBusyId() === item.contentId || this.uploadingPublicContentId() === item.contentId;
+  }
+
   private loadLiveSettings(): void {
     this.profiles.getTeacherLiveSettings().subscribe({
       next: (response) => {
@@ -537,6 +784,63 @@ export class TeacherProfile implements OnInit {
         }
       }
     });
+  }
+
+  private runPublicContentAction(contentId: string, request: ReturnType<ProfileService['publishMyPublicContent']>, message: string): void {
+    this.publicContentBusyId.set(contentId);
+    this.error.set('');
+    this.notice.set('');
+    request.subscribe({
+      next: (item) => {
+        this.upsertPublicContent(item);
+        this.notice.set(message);
+      },
+      error: (error) => this.error.set(this.profiles.errorMessage(error)),
+      complete: () => this.publicContentBusyId.set(null)
+    });
+  }
+
+  private upsertPublicContent(item: TeacherPublicContentItem): void {
+    this.publicContent.update((items) => {
+      const next = items.filter((candidate) => candidate.contentId !== item.contentId);
+      next.push(item);
+      return next.sort((a, b) => a.sortOrder - b.sortOrder || b.createdAt.localeCompare(a.createdAt));
+    });
+  }
+
+  private publicContentRequest() {
+    const form = this.publicContentForm();
+    return {
+      itemType: form.itemType,
+      title: form.title,
+      description: form.description,
+      mediaType: form.mediaType,
+      externalUrl: form.externalUrl,
+      tags: this.parseList(form.tagsText),
+      topics: this.parseList(form.topicsText),
+      sortOrder: form.sortOrder
+    };
+  }
+
+  private promotionRequest() {
+    const form = this.promotionForm();
+    const startsAt = new Date(form.startsAt);
+    const endsAt = new Date(form.endsAt);
+    if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+      this.error.set('Promotion start and end dates must be valid.');
+      return null;
+    }
+    if (endsAt <= startsAt) {
+      this.error.set('Promotion end date must be after the start date.');
+      return null;
+    }
+    return {
+      placement: form.placement,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      ...(form.reason.trim() ? { reason: form.reason.trim() } : {}),
+      ...(form.paymentReference.trim() ? { paymentReference: form.paymentReference.trim() } : {})
+    };
   }
 
   private updateRequest(): UpdateMyProfileRequest {
@@ -890,4 +1194,15 @@ export class TeacherProfile implements OnInit {
       .slice(0, 2)
       .toUpperCase();
   }
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function dateTimeInputValue(date: Date): string {
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }

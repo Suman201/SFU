@@ -2,9 +2,13 @@ import type { Permissions } from './permissions.js';
 import type { Role } from './roles.js';
 import type { ConsumerLayerState } from './consumers.js';
 
+export const PARTICIPANT_ORIGINS = ['user', 'system'] as const;
+export type ParticipantOrigin = (typeof PARTICIPANT_ORIGINS)[number];
+
 export interface Participant {
   id: string;
   userId?: string;
+  origin?: ParticipantOrigin;
   displayName: string;
   socketId: string;
   connected?: boolean;

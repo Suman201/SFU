@@ -5,9 +5,14 @@ import {
   DELIVERY_SNAPSHOT_SOURCES,
   EVENT_DELIVERY_ADAPTER_KINDS,
   EVENT_DELIVERY_FAILURE_CATEGORIES,
+  INGEST_SOURCE_TYPES,
+  INGEST_STATUSES,
+  INGEST_TRANSPORT_PROTOCOLS,
+  PARTICIPANT_ORIGINS,
   PLATFORM_EVENT_ACTOR_TYPES,
   PLATFORM_EVENT_SCHEMA_VERSION,
   PLATFORM_EVENT_TYPES,
+  PRODUCER_SOURCES,
   WEBHOOK_DELIVERY_STATUSES,
   WEBHOOK_ENDPOINT_HEALTH_STATES,
   Role
@@ -15,9 +20,21 @@ import {
 import type { LiveClassSettings, LiveClassSettingsPatch } from '@native-sfu/contracts';
 import type { ClassSessionTimelineCategory, ClassSessionTimelineEventVisibility } from '@native-sfu/contracts';
 import type { AssignmentAttachment, AssignmentStatus, AssignmentSubmissionStatus, AssignmentSubmissionType } from '@native-sfu/contracts';
+import type { IngestAuthConfig, IngestRestartPolicy, IngestRuntimeState, IngestSourceType, IngestStatus, IngestTransportProtocol, ParticipantOrigin, ProducerSource } from '@native-sfu/contracts';
+import type { SupportIssueType, SupportRequestStatus } from '@native-sfu/contracts';
+import type {
+  TeacherPromotionBillingStatus,
+  TeacherPromotionPlacement,
+  TeacherPromotionStatus,
+  TeacherPublicContentItemType,
+  TeacherPublicContentMediaType,
+  TeacherPublicContentPublishStatus
+} from '@native-sfu/contracts';
 import type { WhiteboardCommand } from '@native-sfu/contracts';
 
 export type UserMongoDocument = HydratedDocument<UserDocument>;
+export type TeacherPublicContentMongoDocument = HydratedDocument<TeacherPublicContentDocument>;
+export type TeacherPromotionMongoDocument = HydratedDocument<TeacherPromotionDocument>;
 export type BatchMongoDocument = HydratedDocument<BatchDocument>;
 export type StudentEnrollmentMongoDocument = HydratedDocument<StudentEnrollmentDocument>;
 export type BatchScheduleMongoDocument = HydratedDocument<BatchScheduleDocument>;
@@ -40,6 +57,7 @@ export type RedisStreamEndpointMongoDocument = HydratedDocument<RedisStreamEndpo
 export type WebhookDeliveryMongoDocument = HydratedDocument<WebhookDeliveryDocument>;
 export type ParticipantMongoDocument = HydratedDocument<ParticipantDocument>;
 export type ProducerMongoDocument = HydratedDocument<ProducerDocument>;
+export type IngestJobMongoDocument = HydratedDocument<IngestJobDocument>;
 export type ConsumerMongoDocument = HydratedDocument<ConsumerDocument>;
 export type PermissionMongoDocument = HydratedDocument<PermissionDocument>;
 export type AccessPermissionMongoDocument = HydratedDocument<AccessPermissionDocument>;
@@ -55,7 +73,9 @@ export type ChatMessageMongoDocument = HydratedDocument<ChatMessageDocument>;
 export type ChatAttachmentFileMongoDocument = HydratedDocument<ChatAttachmentFileDocument>;
 export type ChatReadStateMongoDocument = HydratedDocument<ChatReadStateDocument>;
 export type RecordingMongoDocument = HydratedDocument<RecordingDocument>;
+export type RecordingPlaybackProgressMongoDocument = HydratedDocument<RecordingPlaybackProgressDocument>;
 export type PushSubscriptionMongoDocument = HydratedDocument<PushSubscriptionDocument>;
+export type SupportRequestMongoDocument = HydratedDocument<SupportRequestDocument>;
 
 @Schema({ _id: false })
 export class UserNotificationSettingsDocument {
@@ -208,6 +228,136 @@ export const UserSchema = SchemaFactory.createForClass(UserDocument);
 UserSchema.index({ disabled: 1 });
 UserSchema.index({ status: 1, deletedAt: 1 });
 
+export const TEACHER_PUBLIC_CONTENT_ITEM_TYPES = ['gallery', 'demo_class'] as const satisfies readonly TeacherPublicContentItemType[];
+export const TEACHER_PUBLIC_CONTENT_MEDIA_TYPES = ['image', 'video', 'pdf', 'document', 'slides', 'link'] as const satisfies readonly TeacherPublicContentMediaType[];
+export const TEACHER_PUBLIC_CONTENT_PUBLISH_STATUSES = ['draft', 'published', 'unpublished'] as const satisfies readonly TeacherPublicContentPublishStatus[];
+export const TEACHER_PROMOTION_STATUSES = ['requested', 'scheduled', 'active', 'paused', 'expired', 'cancelled', 'rejected'] as const satisfies readonly TeacherPromotionStatus[];
+export const TEACHER_PROMOTION_PLACEMENTS = ['marketplace_featured', 'search_boost', 'profile_badge'] as const satisfies readonly TeacherPromotionPlacement[];
+export const TEACHER_PROMOTION_BILLING_STATUSES = ['not_required', 'pending', 'paid', 'failed', 'refunded', 'manual'] as const satisfies readonly TeacherPromotionBillingStatus[];
+
+@Schema({ collection: 'teacher_public_contents', timestamps: true })
+export class TeacherPublicContentDocument {
+  @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
+  contentId!: string;
+
+  @Prop({ required: true, index: true })
+  teacherId!: string;
+
+  @Prop({ required: true, enum: TEACHER_PUBLIC_CONTENT_ITEM_TYPES, index: true })
+  itemType!: TeacherPublicContentItemType;
+
+  @Prop({ required: true, trim: true, maxlength: 160 })
+  title!: string;
+
+  @Prop({ trim: true, maxlength: 2000 })
+  description?: string;
+
+  @Prop({ required: true, enum: TEACHER_PUBLIC_CONTENT_MEDIA_TYPES, index: true })
+  mediaType!: TeacherPublicContentMediaType;
+
+  @Prop({ trim: true, maxlength: 2048 })
+  thumbnailUrl?: string;
+
+  @Prop({ trim: true, maxlength: 2048 })
+  publicUrl?: string;
+
+  @Prop({ trim: true, maxlength: 2048 })
+  externalUrl?: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  storageKey?: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  storagePath?: string;
+
+  @Prop({ trim: true, maxlength: 120 })
+  mimeType?: string;
+
+  @Prop()
+  size?: number;
+
+  @Prop({ type: [String], default: [] })
+  tags!: string[];
+
+  @Prop({ type: [String], default: [] })
+  topics!: string[];
+
+  @Prop({ required: true, default: 0, index: true })
+  sortOrder!: number;
+
+  @Prop({ required: true, enum: TEACHER_PUBLIC_CONTENT_PUBLISH_STATUSES, default: 'draft', index: true })
+  publishStatus!: TeacherPublicContentPublishStatus;
+
+  @Prop({ type: Date, index: true })
+  publishedAt?: Date;
+
+  @Prop({ type: Date, index: true })
+  deletedAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const TeacherPublicContentSchema = SchemaFactory.createForClass(TeacherPublicContentDocument);
+TeacherPublicContentSchema.index({ teacherId: 1, itemType: 1, publishStatus: 1, deletedAt: 1, sortOrder: 1 });
+TeacherPublicContentSchema.index({ teacherId: 1, contentId: 1, deletedAt: 1 }, { unique: true });
+
+@Schema({ collection: 'teacher_promotions', timestamps: true })
+export class TeacherPromotionDocument {
+  @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
+  promotionId!: string;
+
+  @Prop({ required: true, index: true })
+  teacherId!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 160 })
+  teacherName!: string;
+
+  @Prop({ required: true, enum: TEACHER_PROMOTION_STATUSES, default: 'requested', index: true })
+  status!: TeacherPromotionStatus;
+
+  @Prop({ required: true, enum: TEACHER_PROMOTION_PLACEMENTS, index: true })
+  placement!: TeacherPromotionPlacement;
+
+  @Prop({ required: true, type: Date, index: true })
+  startsAt!: Date;
+
+  @Prop({ required: true, type: Date, index: true })
+  endsAt!: Date;
+
+  @Prop({ required: true, index: true })
+  requestedByUserId!: string;
+
+  @Prop({ index: true })
+  approvedByUserId?: string;
+
+  @Prop({ index: true })
+  cancelledByUserId?: string;
+
+  @Prop({ required: true, enum: TEACHER_PROMOTION_BILLING_STATUSES, default: 'manual', index: true })
+  billingStatus!: TeacherPromotionBillingStatus;
+
+  @Prop({ trim: true, maxlength: 160 })
+  paymentReference?: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  reason?: string;
+
+  @Prop({ trim: true, maxlength: 1000 })
+  adminNote?: string;
+
+  @Prop({ type: Date, index: true })
+  deletedAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const TeacherPromotionSchema = SchemaFactory.createForClass(TeacherPromotionDocument);
+TeacherPromotionSchema.index({ teacherId: 1, placement: 1, status: 1, startsAt: 1, endsAt: 1 });
+TeacherPromotionSchema.index({ status: 1, placement: 1, startsAt: 1, endsAt: 1 });
+TeacherPromotionSchema.index({ promotionId: 1, deletedAt: 1 }, { unique: true });
+
 @Schema({ _id: false })
 export class PushSubscriptionKeysDocument {
   @Prop({ required: true, trim: true })
@@ -322,6 +472,16 @@ export const CLASS_SESSION_MATERIAL_KINDS = ['pdf', 'image', 'document', 'slides
 export type ClassSessionMaterialKind = (typeof CLASS_SESSION_MATERIAL_KINDS)[number];
 export const CLASS_SESSION_MATERIAL_SOURCES = ['upload', 'link'] as const;
 export type ClassSessionMaterialSource = (typeof CLASS_SESSION_MATERIAL_SOURCES)[number];
+export const SUPPORT_ISSUE_TYPES: SupportIssueType[] = [
+  'access',
+  'class_issue',
+  'recording_access',
+  'recording_problem',
+  'audio_video',
+  'assignment',
+  'other'
+];
+export const SUPPORT_REQUEST_STATUSES: SupportRequestStatus[] = ['open', 'in_review', 'waiting_for_student', 'resolved', 'closed'];
 
 @Schema({ collection: 'student_enrollments', timestamps: true })
 export class StudentEnrollmentDocument {
@@ -2125,6 +2285,9 @@ export class ParticipantDocument {
   @Prop({ index: true })
   nodeId?: string;
 
+  @Prop({ enum: PARTICIPANT_ORIGINS, default: 'user' })
+  origin!: ParticipantOrigin;
+
   @Prop({ required: true, trim: true, maxlength: 120 })
   displayName!: string;
 
@@ -2227,8 +2390,8 @@ export class ProducerDocument {
   @Prop({ required: true, enum: ['audio', 'video', 'screen'] })
   kind!: 'audio' | 'video' | 'screen';
 
-  @Prop({ enum: ['screen', 'whiteboard'] })
-  source?: 'screen' | 'whiteboard';
+  @Prop({ enum: PRODUCER_SOURCES })
+  source?: ProducerSource;
 
   @Prop({ required: true, index: true })
   transportId!: string;
@@ -2262,6 +2425,54 @@ export const ProducerSchema = SchemaFactory.createForClass(ProducerDocument);
 ProducerSchema.index({ roomId: 1, kind: 1, status: 1 });
 ProducerSchema.index({ participantId: 1, status: 1 });
 ProducerSchema.index({ roomId: 1, nodeId: 1, status: 1 });
+
+@Schema({ collection: 'ingest_jobs', timestamps: true })
+export class IngestJobDocument {
+  @Prop({ trim: true, maxlength: 160 })
+  name?: string;
+
+  @Prop({ trim: true, maxlength: 120 })
+  displayName?: string;
+
+  @Prop({ required: true, enum: INGEST_SOURCE_TYPES, index: true })
+  sourceType!: IngestSourceType;
+
+  @Prop({ required: true, trim: true, maxlength: 4096 })
+  sourceUrl!: string;
+
+  @Prop({ required: true, enum: INGEST_TRANSPORT_PROTOCOLS, default: 'trusted-rtp-local' })
+  transportProtocol!: IngestTransportProtocol;
+
+  @Prop({ required: true, enum: INGEST_STATUSES, default: 'idle', index: true })
+  status!: IngestStatus;
+
+  @Prop({ index: true })
+  roomId?: string;
+
+  @Prop({ index: true })
+  participantId?: string;
+
+  @Prop({ index: true })
+  nodeId?: string;
+
+  @Prop({ type: Object })
+  auth?: IngestAuthConfig;
+
+  @Prop({ type: Object })
+  restartPolicy?: IngestRestartPolicy;
+
+  @Prop({ type: Object })
+  runtimeState?: IngestRuntimeState;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const IngestJobSchema = SchemaFactory.createForClass(IngestJobDocument);
+IngestJobSchema.index({ roomId: 1, updatedAt: -1 });
+IngestJobSchema.index({ status: 1, updatedAt: -1 });
+IngestJobSchema.index({ nodeId: 1, updatedAt: -1 });
+IngestJobSchema.index({ participantId: 1, updatedAt: -1 });
 
 @Schema({ collection: 'consumers', timestamps: true })
 export class ConsumerDocument {
@@ -2712,3 +2923,193 @@ RecordingSchema.index({ roomId: 1, participantId: 1, startedAt: -1 });
 RecordingSchema.index({ sessionId: 1, startedAt: -1 });
 RecordingSchema.index({ batchId: 1, sessionId: 1, startedAt: -1 });
 RecordingSchema.index({ sessionId: 1, status: 1 });
+
+@Schema({ collection: 'recording_playback_progress', timestamps: true })
+export class RecordingPlaybackProgressDocument {
+  @Prop({ required: true, index: true })
+  recordingId!: string;
+
+  @Prop({ required: true, index: true })
+  sessionId!: string;
+
+  @Prop({ required: true, index: true })
+  batchId!: string;
+
+  @Prop({ required: true, index: true })
+  studentId!: string;
+
+  @Prop({ index: true })
+  userId?: string;
+
+  @Prop({ type: Date, index: true })
+  firstPlayedAt?: Date;
+
+  @Prop({ type: Date, index: true })
+  lastPlayedAt?: Date;
+
+  @Prop({ default: 0 })
+  lastPositionSeconds!: number;
+
+  @Prop({ default: 0 })
+  watchedSeconds!: number;
+
+  @Prop()
+  durationSeconds?: number;
+
+  @Prop({ default: 0 })
+  completionPercent!: number;
+
+  @Prop({ type: Date, index: true })
+  completedAt?: Date;
+
+  @Prop({ default: 0 })
+  playCount!: number;
+
+  @Prop({ default: 0 })
+  pauseCount!: number;
+
+  @Prop({ default: 0 })
+  seekCount!: number;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const RecordingPlaybackProgressSchema = SchemaFactory.createForClass(RecordingPlaybackProgressDocument);
+RecordingPlaybackProgressSchema.index({ recordingId: 1, studentId: 1 }, { unique: true });
+RecordingPlaybackProgressSchema.index({ sessionId: 1, studentId: 1, updatedAt: -1 });
+RecordingPlaybackProgressSchema.index({ batchId: 1, studentId: 1, updatedAt: -1 });
+RecordingPlaybackProgressSchema.index({ sessionId: 1, recordingId: 1, completionPercent: -1 });
+
+@Schema({ _id: false })
+export class SupportRequestDiagnosticsDocument {
+  @Prop({ trim: true, maxlength: 500 })
+  userAgent?: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  route?: string;
+
+  @Prop({ trim: true, maxlength: 40 })
+  timestamp?: string;
+
+  @Prop({ enum: ['granted', 'denied', 'prompt', 'unknown'] })
+  microphonePermission?: 'granted' | 'denied' | 'prompt' | 'unknown';
+
+  @Prop({ enum: ['granted', 'denied', 'prompt', 'unknown'] })
+  cameraPermission?: 'granted' | 'denied' | 'prompt' | 'unknown';
+
+  @Prop({ trim: true, maxlength: 160 })
+  browser?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  platform?: string;
+}
+
+export const SupportRequestDiagnosticsSchema = SchemaFactory.createForClass(SupportRequestDiagnosticsDocument);
+
+@Schema({ _id: false })
+export class SupportRequestCommentDocument {
+  @Prop({ required: true, default: () => randomUUID() })
+  commentId!: string;
+
+  @Prop({ required: true, index: true })
+  authorId!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 160 })
+  authorName!: string;
+
+  @Prop({ type: [String], default: [] })
+  authorRoles!: string[];
+
+  @Prop({ required: true, trim: true, maxlength: 5000 })
+  message!: string;
+
+  @Prop({ required: true, default: true })
+  visibleToStudent!: boolean;
+
+  @Prop({ required: true, type: Date, default: Date.now })
+  createdAt!: Date;
+}
+
+export const SupportRequestCommentSchema = SchemaFactory.createForClass(SupportRequestCommentDocument);
+
+@Schema({ collection: 'class_session_support_requests', timestamps: true })
+export class SupportRequestDocument {
+  @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
+  requestId!: string;
+
+  @Prop({ required: true, index: true })
+  studentId!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 160 })
+  studentName!: string;
+
+  @Prop({ lowercase: true, trim: true, maxlength: 254, index: true })
+  studentEmail?: string;
+
+  @Prop({ index: true })
+  batchId?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  batchName?: string;
+
+  @Prop({ index: true })
+  teacherId?: string;
+
+  @Prop({ index: true })
+  sessionId?: string;
+
+  @Prop({ trim: true, maxlength: 180 })
+  sessionTitle?: string;
+
+  @Prop({ index: true })
+  roomId?: string;
+
+  @Prop({ index: true })
+  recordingId?: string;
+
+  @Prop({ required: true, enum: SUPPORT_ISSUE_TYPES, index: true })
+  issueType!: SupportIssueType;
+
+  @Prop({ required: true, enum: SUPPORT_REQUEST_STATUSES, default: 'open', index: true })
+  status!: SupportRequestStatus;
+
+  @Prop({ required: true, trim: true, maxlength: 180 })
+  subject!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 5000 })
+  message!: string;
+
+  @Prop({ type: SupportRequestDiagnosticsSchema })
+  diagnostics?: SupportRequestDiagnosticsDocument;
+
+  @Prop({ index: true })
+  assignedToUserId?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  assignedToName?: string;
+
+  @Prop({ type: [SupportRequestCommentSchema], default: [] })
+  comments!: SupportRequestCommentDocument[];
+
+  @Prop({ type: Date, index: true })
+  resolvedAt?: Date;
+
+  @Prop({ type: Date, index: true })
+  closedAt?: Date;
+
+  @Prop({ type: Date, index: true })
+  deletedAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const SupportRequestSchema = SchemaFactory.createForClass(SupportRequestDocument);
+SupportRequestSchema.index({ studentId: 1, createdAt: -1 });
+SupportRequestSchema.index({ status: 1, updatedAt: -1 });
+SupportRequestSchema.index({ issueType: 1, status: 1, updatedAt: -1 });
+SupportRequestSchema.index({ batchId: 1, status: 1, updatedAt: -1 });
+SupportRequestSchema.index({ sessionId: 1, status: 1, updatedAt: -1 });
+SupportRequestSchema.index({ teacherId: 1, status: 1, updatedAt: -1 });
+SupportRequestSchema.index({ recordingId: 1, status: 1, updatedAt: -1 });

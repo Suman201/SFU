@@ -184,6 +184,21 @@ td small {
   white-space: nowrap;
 }
 
+.inline-link {
+  color: var(--text);
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.inline-link:hover {
+  color: var(--product-rose);
+}
+
+.inline-link.muted {
+  color: var(--muted);
+  font-weight: 750;
+}
+
 .actions-cell {
   width: 1%;
   white-space: nowrap;

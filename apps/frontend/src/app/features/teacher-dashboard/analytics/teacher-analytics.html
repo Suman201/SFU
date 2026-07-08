@@ -1,0 +1,251 @@
+<sfu-header />
+<main class="teacher-analytics-shell">
+  <section class="analytics-hero">
+    <div>
+      <p class="eyebrow">Teacher analytics</p>
+      <h1>Batch learning signals</h1>
+      <p>Deterministic attendance, assignment, participation, recording, and material signals for batches you own.</p>
+    </div>
+    <div class="hero-actions">
+      <a class="button" routerLink="/teacher/dashboard">Dashboard</a>
+      <a class="button" routerLink="/class-library">Library</a>
+    </div>
+  </section>
+
+  <section class="data-table-shell analytics-filters">
+    <form class="data-table-toolbar filter-toolbar" (submit)="submit($event)">
+      <div>
+        <h2>Filters</h2>
+        <p>Leave fields empty to summarize all owned batches in the default recent range.</p>
+      </div>
+      <div class="filter-actions">
+        <button class="table-action primary" type="submit" [disabled]="loading()">{{ loading() ? 'Loading...' : 'Apply' }}</button>
+        <button class="table-action" type="button" (click)="clearFilters()">Clear</button>
+      </div>
+    </form>
+    <div class="data-table-filters analytics-filter-grid" aria-label="Teacher analytics filters">
+      <label>
+        <span>Batch</span>
+        <input type="text" placeholder="batchId" [value]="batchId()" (input)="updateText('batchId', $event)" />
+      </label>
+      <label>
+        <span>Course</span>
+        <input type="text" placeholder="courseId" [value]="courseId()" (input)="updateText('courseId', $event)" />
+      </label>
+      <label>
+        <span>Student</span>
+        <input type="text" placeholder="studentId" [value]="studentId()" (input)="updateText('studentId', $event)" />
+      </label>
+      <label>
+        <span>From</span>
+        <input type="date" [value]="dateFrom()" (input)="updateText('dateFrom', $event)" />
+      </label>
+      <label>
+        <span>To</span>
+        <input type="date" [value]="dateTo()" (input)="updateText('dateTo', $event)" />
+      </label>
+    </div>
+  </section>
+
+  @if (error()) {
+    <section class="analytics-state danger" role="alert">{{ error() }}</section>
+  } @else if (loading() && !analytics()) {
+    <section class="analytics-state">
+      <h2>Loading analytics</h2>
+      <p>Reading source records for your owned batches.</p>
+    </section>
+  } @else if (analytics(); as data) {
+    <section class="metric-grid" aria-label="Teacher analytics summary">
+      @for (metric of metrics(); track metric.label) {
+        <article
+          class="metric-card"
+          [class.green]="metric.tone === 'green'"
+          [class.rose]="metric.tone === 'rose'"
+          [class.coral]="metric.tone === 'coral'"
+          [class.amber]="metric.tone === 'amber'"
+        >
+          <span>{{ metric.value }}</span>
+          <p>{{ metric.label }}</p>
+        </article>
+      }
+    </section>
+
+    <section class="analytics-grid">
+      <article class="panel">
+        <header>
+          <div>
+            <p class="eyebrow">Risk indicators</p>
+            <h2>Students needing review</h2>
+          </div>
+          <span class="panel-count">{{ risks().length }} signals</span>
+        </header>
+        @if (risks().length) {
+          <div class="risk-list">
+            @for (risk of risks(); track risk.batchId + ':' + risk.studentId) {
+              <article class="risk-card" [class.high]="riskTone(risk) === 'high'">
+                <div>
+                  <span class="data-pill" [class.danger]="riskTone(risk) === 'high'">{{ risk.riskLevel | titlecase }}</span>
+                  <strong>{{ risk.studentName || risk.studentId }}</strong>
+                  <p>{{ risk.batchName }}</p>
+                </div>
+                <ul>
+                  @for (reason of risk.reasons; track reason) {
+                    <li>{{ reason }}</li>
+                  }
+                </ul>
+                <a class="table-action" [routerLink]="['/teacher/dashboard/batches', risk.batchId]">Open batch</a>
+              </article>
+            }
+          </div>
+        } @else {
+          <div class="empty-state compact">
+            <h3>No risk signals</h3>
+            <p>No conservative risk indicators were detected for the selected range.</p>
+          </div>
+        }
+      </article>
+
+      <article class="panel">
+        <header>
+          <div>
+            <p class="eyebrow">Data coverage</p>
+            <h2>Source availability</h2>
+          </div>
+        </header>
+        <div class="availability-list">
+          @for (note of availabilityNotes(); track note.key) {
+            <article>
+              <span class="data-pill" [class.ok]="note.available">{{ note.key | titlecase }}</span>
+              <p>{{ note.reason }}</p>
+            </article>
+          }
+        </div>
+      </article>
+
+      <article class="panel weak-panel">
+        <header>
+          <div>
+            <p class="eyebrow">Weak areas</p>
+            <h2>Review recommendations</h2>
+          </div>
+          <span class="panel-count">{{ weakSignals().length }} signals</span>
+        </header>
+        @if (weakSignals().length) {
+          <div class="weak-list">
+            @for (signal of weakSignals(); track signal.id) {
+              <article class="weak-card" [class.warning]="signalTone(signal.severity) === 'warning'" [class.danger]="signalTone(signal.severity) === 'danger'">
+                <div>
+                  <span class="data-pill" [class.danger]="signalTone(signal.severity) === 'danger'">{{ signal.severity | titlecase }}</span>
+                  <strong>{{ signal.label }}</strong>
+                  <p>{{ signal.batchName }}</p>
+                </div>
+                <p>{{ signal.explanation }}</p>
+                <footer>
+                  @if (signal.topic || signal.tag) {
+                    <span>{{ signal.topic || signal.tag }}</span>
+                  }
+                  <span>{{ signal.affectedStudentCount }} affected</span>
+                  <span>{{ signal.sourceRecords.length }} source{{ signal.sourceRecords.length === 1 ? '' : 's' }}</span>
+                </footer>
+              </article>
+            }
+          </div>
+        } @else {
+          <div class="empty-state compact">
+            <h3>No weak-area signals</h3>
+            <p>No deterministic review recommendations were detected for the selected range.</p>
+          </div>
+        }
+      </article>
+    </section>
+
+    <section class="data-table-shell">
+      <div class="data-table-toolbar">
+        <div>
+          <h2>Batch rollup</h2>
+          <p>{{ data.summary.batchCount }} batches · generated {{ data.generatedAt | date: 'medium' }}</p>
+        </div>
+      </div>
+      @if (batches().length) {
+        <div class="data-table-wrap">
+          <table class="data-table" style="--data-table-min-width: 1320px">
+            <thead>
+              <tr>
+                <th scope="col">Batch</th>
+                <th scope="col">Classes</th>
+                <th scope="col">Attendance</th>
+                <th scope="col">Participation</th>
+                <th scope="col">Assignments</th>
+                <th scope="col">Recordings</th>
+                <th scope="col">Materials</th>
+                <th scope="col">Risks</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (batch of batches(); track batch.batchId) {
+                <tr>
+                  <td>
+                    <a class="table-primary-cell" [routerLink]="['/teacher/dashboard/batches', batch.batchId]">
+                      <span class="table-avatar" aria-hidden="true">{{ batch.batchName.slice(0, 1) }}</span>
+                      <span class="table-primary-text">
+                        <strong>{{ batch.batchName }}</strong>
+                        <span>{{ batch.courseName || batch.courseId || 'Course not set' }}</span>
+                      </span>
+                    </a>
+                  </td>
+                  <td>{{ batch.completedSessions }}/{{ batch.totalSessions }} completed</td>
+                  <td>
+                    <span class="data-pill auth">{{ attendanceLabel(batch) }}</span>
+                    <span class="cell-note">{{ batch.attendance.missedClasses }} missed · {{ batch.attendance.reconnects }} reconnects</span>
+                  </td>
+                  <td>
+                    <span>{{ batch.participation.handRaises }} hand raises</span>
+                    <span class="cell-note">{{ batch.participation.questionsAsked }} questions · {{ batch.participation.allowedSpeakingTurns }} speak turns</span>
+                  </td>
+                  <td>
+                    <span>{{ batch.assignments.submissions.submitted + batch.assignments.submissions.late }} submitted</span>
+                    <span class="cell-note">{{ batch.assignments.missing }} missing · {{ batch.assignments.overdue }} overdue</span>
+                  </td>
+                  <td>
+                    <span>{{ batch.recordings.ready }} ready</span>
+                    <span class="cell-note">
+                      {{ batch.recordings.watched ?? 0 }} watched · {{ batch.recordings.unwatched ?? 0 }} not watched
+                      @if (batch.recordings.averageCompletionPercent !== undefined) {
+                        · {{ batch.recordings.averageCompletionPercent }}% avg
+                      }
+                    </span>
+                    @if (batch.recordings.failed) {
+                      <span class="cell-note">{{ batch.recordings.failed }} failed</span>
+                    }
+                  </td>
+                  <td>
+                    <span>{{ batch.materials.shared }} shared</span>
+                    <span class="cell-note">{{ batch.materials.downloads }} downloads</span>
+                  </td>
+                  <td>
+                    <span class="data-pill" [class.danger]="batch.riskIndicators.length">{{ batch.riskIndicators.length }}</span>
+                  </td>
+                  <td>
+                    <a class="table-action" [routerLink]="sourceSessionLink(batch)" [queryParams]="sourceSessionQuery(batch)">Open source</a>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else {
+        <div class="empty-state compact">
+          <h3>No analytics found</h3>
+          <p>No owned batches or source records matched the selected filters.</p>
+        </div>
+      }
+    </section>
+  } @else {
+    <section class="analytics-state">
+      <h2>No analytics loaded</h2>
+      <p>Apply filters to load deterministic batch signals.</p>
+    </section>
+  }
+</main>
+<sfu-footer />

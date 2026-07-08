@@ -9,6 +9,7 @@
   },
   "workspaces": [
     "packages/contracts",
+    "packages/media-ingest",
     "packages/sfu-core",
     "packages/nest-sfu",
     "apps/backend",
@@ -40,7 +41,7 @@
     "dev:backend": "npm run start:dev -w @native-sfu/backend",
     "dev:frontend": "npm run start -w @native-sfu/frontend",
     "dev:admin-portal": "npm run start -w @native-sfu/admin-portal",
-    "verify:build": "npm run build --workspace @native-sfu/contracts && npm run build --workspace @native-sfu/sfu-core && npm run build --workspace @native-sfu/nest-sfu && npm run build --workspace @native-sfu/backend && npm run build --workspace @native-sfu/frontend && npm run build --workspace @native-sfu/admin-portal",
+    "verify:build": "npm run build --workspace @native-sfu/contracts && npm run build --workspace @native-sfu/media-ingest && npm run build --workspace @native-sfu/sfu-core && npm run build --workspace @native-sfu/nest-sfu && npm run build --workspace @native-sfu/backend && npm run build --workspace @native-sfu/frontend && npm run build --workspace @native-sfu/admin-portal",
     "verify:dev:backend": "npm run dev:backend",
     "verify:dev:frontend": "npm run dev:frontend",
     "verify:dev:admin": "npm run dev:admin-portal",

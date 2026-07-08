@@ -6,8 +6,10 @@
       <h1>Dashboard</h1>
     </div>
     <div class="heading-actions">
+      <a routerLink="/student/progress">Progress</a>
       <a routerLink="/student/classes/completed">Class history</a>
       <a routerLink="/class-library">Library</a>
+      <a routerLink="/student/support">Get help</a>
       <a routerLink="/student/explore">Explore batches</a>
     </div>
   </section>
@@ -20,6 +22,10 @@
     <article>
       <span>{{ totalWeeks() }}</span>
       <p>Total weeks</p>
+    </article>
+    <article>
+      <a class="summary-link" routerLink="/student/progress">Open</a>
+      <p>Progress dashboard</p>
     </article>
     <article>
       @if (nextBatch(); as batch) {

@@ -42,6 +42,7 @@ export interface Recording {
   consentVersion?: string;
   consentRequired?: boolean;
   tracks?: RecordingTrackManifestEntry[];
+  playbackProgress?: RecordingPlaybackProgress;
   startedAt: string;
   stoppedAt?: string;
 }
@@ -53,4 +54,47 @@ export interface ClassSessionRecordingEvent {
   roomId: string;
   status: RecordingStatus;
   reason?: string;
+}
+
+export type RecordingPlaybackProgressEvent = 'play' | 'heartbeat' | 'pause' | 'seek' | 'ended';
+
+export interface RecordingPlaybackProgressUpdateRequest {
+  sessionId?: string;
+  batchId?: string;
+  event: RecordingPlaybackProgressEvent;
+  positionSeconds?: number;
+  durationSeconds?: number;
+  watchedSeconds?: number;
+  watchedSecondsDelta?: number;
+  completed?: boolean;
+}
+
+export interface RecordingPlaybackProgress {
+  recordingId: string;
+  sessionId: string;
+  batchId: string;
+  studentId: string;
+  firstPlayedAt?: string;
+  lastPlayedAt?: string;
+  lastPositionSeconds: number;
+  watchedSeconds: number;
+  durationSeconds?: number;
+  completionPercent: number;
+  completedAt?: string;
+  playCount: number;
+  pauseCount: number;
+  seekCount: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface RecordingEngagementSummary {
+  recordingsReady: number;
+  studentsWatched: number;
+  studentsUnwatched: number;
+  averageCompletionPercent: number;
+  totalWatchedSeconds: number;
+  playCount: number;
+  pauseCount: number;
+  seekCount: number;
 }

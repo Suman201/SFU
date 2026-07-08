@@ -7,6 +7,7 @@
   <main class="student-session-state">
     <h1>Class unavailable</h1>
     <p>{{ error() }}</p>
+    <a class="button secondary" routerLink="/student/support" [queryParams]="{ issueType: 'access', subject: 'Class access issue' }">Get help</a>
     <a class="button primary" routerLink="/student/dashboard">Back to dashboard</a>
   </main>
 } @else if (!sessionLive()) {
@@ -41,6 +42,21 @@
           </button>
         }
       </div>
+    }
+    @if (session(); as waitingSession) {
+      <a
+        class="button secondary"
+        routerLink="/student/support"
+        [queryParams]="{
+          issueType: waitingSession.status === 'completed' ? 'recording_access' : 'access',
+          batchId: waitingSession.batchId,
+          sessionId: waitingSession.sessionId,
+          roomId: waitingSession.roomId,
+          subject: waitingSession.status === 'completed' ? 'Need help with completed class' : 'Need help joining class'
+        }"
+      >
+        Get help
+      </a>
     }
     <a class="button primary" routerLink="/student/dashboard">Back to dashboard</a>
   </main>
@@ -388,6 +404,24 @@
   >
     Materials
   </button>
+
+  @if (session(); as activeSession) {
+    <a
+      class="student-support-button"
+      routerLink="/student/support"
+      [queryParams]="{
+        issueType: 'audio_video',
+        batchId: activeSession.batchId,
+        sessionId: activeSession.sessionId,
+        roomId: activeSession.roomId,
+        subject: 'Live class issue'
+      }"
+      title="Get help"
+      aria-label="Get help with this class"
+    >
+      Help
+    </a>
+  }
 
   <button
     class="participants-button"
