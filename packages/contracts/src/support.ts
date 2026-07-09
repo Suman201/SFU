@@ -17,6 +17,10 @@ export interface SupportRequestDiagnostics {
   cameraPermission?: 'granted' | 'denied' | 'prompt' | 'unknown';
   browser?: string;
   platform?: string;
+  classSessionStatus?: string;
+  roomStatus?: 'active' | 'closed' | 'unknown';
+  teacherConnectionState?: 'connected' | 'reconnecting' | 'absent' | 'not_started' | 'ended';
+  recordingStatus?: string;
 }
 
 export interface CreateSupportRequestRequest {

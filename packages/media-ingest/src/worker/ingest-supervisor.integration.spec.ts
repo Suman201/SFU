@@ -1,10 +1,8 @@
-import { mkdir, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { rm } from 'node:fs/promises';
 import { createSocket, type Socket } from 'node:dgram';
 import { FfprobeClient } from '../ffmpeg/ffprobe';
+import { createHttpMp4Fixture } from '../testing/http-ingest-fixture';
 import { MediaIngestSupervisor } from './ingest-supervisor';
 
 const ffmpegPath = process.env.FFMPEG_PATH || '/usr/local/bin/ffmpeg';
@@ -14,10 +12,10 @@ const describeIfFfmpeg: typeof describe = existsSync(ffmpegPath) && existsSync(f
 
 describeIfFfmpeg('MediaIngestSupervisor integration', () => {
   it('probes a real fixture and emits local RTP with a real FFmpeg session', async () => {
-    const fixtureDir = join(tmpdir(), `native-sfu-ingest-${Date.now()}`);
-    await mkdir(fixtureDir, { recursive: true });
-    const fixturePath = join(fixtureDir, 'fixture.mp4');
-    await createFixtureMp4(fixturePath);
+    const fixture = await createHttpMp4Fixture({
+      ffmpegPath,
+      durationSeconds: 4
+    });
 
     const videoRtp = await bindSocket();
     const videoRtcp = await bindSocket();
@@ -27,7 +25,7 @@ describeIfFfmpeg('MediaIngestSupervisor integration', () => {
       ingestId: 'real-ffmpeg',
       source: {
         type: 'mp4',
-        url: fixturePath
+        url: fixture.sourceUrl
       },
       outputs: [
         {
@@ -66,7 +64,7 @@ describeIfFfmpeg('MediaIngestSupervisor integration', () => {
       const probe = await new FfprobeClient({ ffprobePath }).probeSource(
         {
           type: 'mp4',
-          url: fixturePath
+          url: fixture.sourceUrl
         },
         8_000
       );
@@ -90,41 +88,71 @@ describeIfFfmpeg('MediaIngestSupervisor integration', () => {
       expect(supervisor.snapshot().state).toBe('stopped');
     } finally {
       await Promise.all([closeSocket(videoRtp), closeSocket(videoRtcp), closeSocket(audioRtp), closeSocket(audioRtcp)]);
-      await rm(fixtureDir, { recursive: true, force: true });
+      await fixture.close();
     }
   }, 30_000);
-});
 
-async function createFixtureMp4(filePath: string): Promise<void> {
-  await spawnForExit(ffmpegPath, [
-    '-hide_banner',
-    '-loglevel',
-    'error',
-    '-y',
-    '-f',
-    'lavfi',
-    '-i',
-    'testsrc=size=640x360:rate=30',
-    '-f',
-    'lavfi',
-    '-i',
-    'sine=frequency=1000:sample_rate=48000',
-    '-t',
-    '2',
-    '-shortest',
-    '-c:v',
-    'libx264',
-    '-preset',
-    'ultrafast',
-    '-pix_fmt',
-    'yuv420p',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '128k',
-    filePath
-  ]);
-}
+  it('restarts after an HTTP source interruption and returns to live media output', async () => {
+    const fixture = await createHttpMp4Fixture({
+      ffmpegPath,
+      durationSeconds: 8,
+      failRequestNumbers: [1, 2, 3],
+      failStatusCode: 503
+    });
+    const videoRtp = await bindSocket();
+    const videoRtcp = await bindSocket();
+    const supervisor = new MediaIngestSupervisor({
+      ingestId: 'http-restart',
+      source: {
+        type: 'mp4',
+        url: fixture.sourceUrl
+      },
+      outputs: [
+        {
+          id: 'video-main',
+          kind: 'video',
+          codec: 'h264',
+          host: '127.0.0.1',
+          rtpPort: socketPort(videoRtp),
+          rtcpPort: socketPort(videoRtcp),
+          payloadType: 102,
+          ssrc: 7001,
+          bitrateKbps: 1200
+        }
+      ],
+      ffmpegPath,
+      ffprobePath,
+      probeTimeoutMs: 8_000,
+      stopTimeoutMs: 3_000,
+      startupTimeoutMs: 12_000,
+      restartPolicy: {
+        mode: 'on_failure',
+        maxAttempts: 3,
+        initialBackoffMs: 100,
+        maxBackoffMs: 250
+      }
+    });
+    const observedErrors: Error[] = [];
+    supervisor.on('error', (error) => observedErrors.push(error));
+
+    try {
+      const restart = waitForRestart(supervisor, 20_000);
+      await supervisor.start();
+      await restart;
+      await supervisor.waitForState('live', 20_000);
+
+      const snapshot = supervisor.snapshot();
+      expect(snapshot.restartCount).toBeGreaterThanOrEqual(1);
+      expect(snapshot.metrics.restarts).toBeGreaterThanOrEqual(1);
+      expect(snapshot.state).toBe('live');
+      expect(observedErrors.length).toBeGreaterThan(0);
+    } finally {
+      await supervisor.stop().catch(() => undefined);
+      await Promise.all([closeSocket(videoRtp), closeSocket(videoRtcp)]);
+      await fixture.close();
+    }
+  }, 45_000);
+});
 
 function bindSocket(): Promise<Socket> {
   return new Promise((resolve, reject) => {
@@ -188,20 +216,21 @@ function isRtcpPacket(packet: Buffer): boolean {
   return packet.length >= 8 && ((packet[0] ?? 0) >> 6) === 2 && packetType >= 192 && packetType <= 223;
 }
 
-function spawnForExit(command: string, args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      stdio: ['ignore', 'ignore', 'pipe']
-    });
-    const stderr: Buffer[] = [];
-    child.stderr?.on('data', (chunk: Buffer) => stderr.push(Buffer.from(chunk)));
-    child.once('error', (error) => reject(error));
-    child.once('exit', (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(Buffer.concat(stderr).toString('utf8') || `ffmpeg exited with code=${code ?? 'null'} signal=${signal ?? 'null'}`));
-    });
+function waitForRestart(supervisor: MediaIngestSupervisor, timeoutMs: number): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('Timed out waiting for the ingest supervisor to restart'));
+    }, timeoutMs);
+    timer.unref?.();
+    const onRestart = (restartCount: number) => {
+      cleanup();
+      resolve(restartCount);
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      supervisor.off('restart', onRestart);
+    };
+    supervisor.on('restart', onRestart);
   });
 }

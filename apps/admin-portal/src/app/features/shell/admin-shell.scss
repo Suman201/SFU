@@ -142,8 +142,28 @@ button {
   .sidebar {
     position: static;
     height: auto;
-    grid-template-columns: 1fr;
+    gap: 12px;
     padding: 14px;
+    overflow: hidden;
+  }
+
+  nav {
+    display: flex;
+    gap: 8px;
+    margin: 0 -14px;
+    padding: 0 14px 4px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  nav a {
+    flex: 0 0 auto;
+    min-height: 38px;
+    white-space: nowrap;
+  }
+
+  nav a span {
+    display: none;
   }
 
   .workspace {
@@ -153,5 +173,26 @@ button {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 520px) {
+  .brand {
+    grid-template-columns: 36px 1fr;
+  }
+
+  .brand span {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .topbar-actions button {
+    flex: 1 1 132px;
   }
 }

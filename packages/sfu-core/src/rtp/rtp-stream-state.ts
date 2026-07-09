@@ -1,5 +1,5 @@
 import { RtpPacket } from './rtp-packet';
-import { addSequenceNumber, sequenceDelta, sequenceDistance } from './rtp-sequence';
+import { addSequenceNumber, normalizeSequenceNumber, sequenceDelta, sequenceDistance, timestampDelta } from './rtp-sequence';
 
 export type RtpPacketDropReason =
   | 'invalid_packet'
@@ -106,6 +106,10 @@ export class RtpSourceStreamState {
     const expected = this.expectedSequenceNumber!;
     const deltaFromExpected = sequenceDelta(packet.sequenceNumber, expected);
     if (deltaFromExpected < 0) {
+      if (this.isRestartFromSequenceReset(packet)) {
+        this.restartCount += 1;
+        return { packets: this.start(packet, true), buffered: false, restarted: true };
+      }
       this.latePackets += 1;
       return { packets: [], buffered: false, restarted: false, dropReason: 'late_packet' };
     }
@@ -220,6 +224,18 @@ export class RtpSourceStreamState {
         expiredAt: this.now()
       }
     };
+  }
+
+  private isRestartFromSequenceReset(packet: RtpPacket): boolean {
+    if (this.highestSequenceNumber === undefined || this.lastTimestamp === undefined) {
+      return false;
+    }
+    const currentSequence = normalizeSequenceNumber(packet.sequenceNumber);
+    const highestSequence = normalizeSequenceNumber(this.highestSequenceNumber);
+    if (highestSequence < this.restartSequenceGap || currentSequence > this.restartSequenceGap) {
+      return false;
+    }
+    return timestampDelta(packet.timestamp, this.lastTimestamp) < 0;
   }
 
   private releaseExpiredGap(): RtpReorderDrainResult {

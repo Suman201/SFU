@@ -19,16 +19,17 @@ The ingest source should become a server-owned producer, not a second parallel m
 
 ## Current Status
 
-As of 2026-07-08, this roadmap is no longer purely prospective:
+As of 2026-07-09, this roadmap is no longer purely prospective:
 
-- Phase 0 is implemented for shared contracts and backend persistence vocabulary
-- Phase 1 is implemented for the in-process `packages/nest-sfu` media path
-- Phase 2 is implemented for the admin/backend ingest control plane
-- Phase 3 is implemented for the reusable FFmpeg/FFprobe ingest runtime package
-- Phase 4 is implemented for single-node room lifecycle and producer registration
-- Phase 5 is implemented for owner-aware distributed ingest orchestration and existing pipe-path parity reuse
-- Phase 1 worker-mode parity is still intentionally open and should be finished with the distributed/worker ingest phases, not by redesigning the media stack
-- Phases 6 and 7 remain planned
+- ~~Phase 0 is implemented for shared contracts and backend persistence vocabulary~~
+- ~~Phase 1 is implemented for the in-process `packages/nest-sfu` media path~~
+- ~~Phase 2 is implemented for the admin/backend ingest control plane~~
+- ~~Phase 3 is implemented for the reusable FFmpeg/FFprobe ingest runtime package~~
+- ~~Phase 4 is implemented for single-node room lifecycle and producer registration~~
+- ~~Phase 5 is implemented for owner-aware distributed ingest orchestration and existing pipe-path parity reuse~~
+- ~~Phase 6 is implemented for secret-backed ingest auth resolution, lifecycle metrics, platform events, and auditability~~
+- ~~Phase 7 is implemented for repo-local validation, restart/cleanup coverage, and rollout guardrails~~
+- worker-mode live distributed ingest validation is still intentionally open and should be finished in the later distributed validation passes, not by redesigning the media stack
 
 That means the repo already has:
 
@@ -39,7 +40,7 @@ That means the repo already has:
 - a truthful single-node room lifecycle that turns an attached ingest into a system participant plus normal producers
 - a truthful owner-aware distributed control path so attached ingests start, stop, detach, and re-home through the authoritative room owner node
 
-It does not yet have secret-backed source auth resolution, ingest-specific lifecycle metrics/audit/events, or staged live browser truth across real deployment boundaries.
+It does not yet have staged live browser truth across real deployment boundaries.
 
 Completed roadmap items below are shown with strikethrough.
 
@@ -650,7 +651,7 @@ Intentional current boundary:
 
 ### Goal
 
-Ensure ingest works correctly in distributed and worker-mode topologies.
+Ensure ingest works correctly in distributed topologies and preserves parity with the existing pipe path while keeping the worker-mode rollout path intact.
 
 ### Existing files to modify
 
@@ -711,7 +712,7 @@ Intentional current boundary:
 
 - Phase 5 is implemented for backend distributed ownership and existing pipe-path parity reuse
 - broad worker-mode live media validation is still part of the later validation phases
-- ingest-specific metrics, audit trails, and platform events remain Phase 6
+- ingest security, metrics, audit trails, and platform events are implemented in Phase 6
 - staged browser/live rollout proof remains Phase 7
 
 ### Exit criteria
@@ -734,67 +735,111 @@ Intentional current boundary:
 
 Make ingest operationally safe and visible.
 
-### Existing files to modify
+### Existing files modified
 
-- `apps/backend/src/events/platform-events.service.ts`
-- `apps/backend/src/audit-logs/audit-logs.service.ts`
+- `packages/contracts/src/events.ts`
+- `apps/backend/src/ingest/ingest.service.ts`
+- `apps/backend/src/ingest/ingest.module.ts`
+- `apps/backend/src/ingest/ingest-policy.service.ts`
 - `apps/backend/src/metrics/metrics.service.ts`
+- `apps/backend/src/config/app.config.ts`
+- `apps/backend/src/config/env.validation.ts`
 - `docs/operator-runbook.md`
 - `docs/deployment.md`
+- `.env.example`
 
 ### Platform events
 
-Add ingest lifecycle events such as:
+~~Add ingest lifecycle events such as:~~
 
-- `ingest.created`
-- `ingest.started`
-- `ingest.attached`
-- `ingest.restarting`
-- `ingest.failed`
-- `ingest.stopped`
-- `ingest.detached`
+- ~~`ingest.created`~~
+- ~~`ingest.started`~~
+- ~~`ingest.attached`~~
+- ~~`ingest.restarting`~~
+- ~~`ingest.failed`~~
+- ~~`ingest.stopped`~~
+- ~~`ingest.detached`~~
 
 ### Audit log actions
 
-Record:
+~~Record:~~
 
-- ingest create/update/delete
-- start/stop
-- attach/detach
-- policy rejection
+- ~~ingest create/update failures and successes~~
+- ~~start/stop failures and successes~~
+- ~~attach/detach failures and successes~~
+- ~~policy/security rejection metadata~~
 
 ### Metrics
 
-Add:
+~~Add:~~
 
-- ingest jobs by state
-- ingest restarts
-- ingest failures by category
-- ingest input bitrate
-- ingest output RTP packet rate
-- ingest runtime CPU and RSS if available
-- per-room active ingest count
+- ~~ingest jobs by state~~
+- ~~ingest restarts~~
+- ~~ingest failures by category~~
+- ~~ingest input bitrate~~
+- ~~ingest output bitrate and RTP packet rate~~
+- ~~ingest runtime CPU and RSS if available~~
+- ~~per-room active ingest count~~
 
 ### Security controls
 
-- operator-only APIs
-- URL allowlist or denylist
-- secret/header redaction
-- no plaintext secret echo on read APIs
-- local-only ingest media handoff by default
+~~Implement:~~
+
+- ~~operator-only APIs~~
+- ~~URL allowlist or denylist~~
+- ~~secret/header redaction~~
+- ~~no plaintext secret echo on read APIs~~
+- ~~environment-backed secret reference resolution for runtime auth~~
+- ~~local-only ingest media handoff by default~~
+
+### Current implementation status
+
+Implemented in repo:
+
+- `packages/contracts/src/events.ts` now exports first-class ingest lifecycle event types and payloads
+- `apps/backend/src/ingest/ingest.service.ts` now:
+  - resolves runtime auth from environment-backed secret references
+  - supports direct `env://VAR_NAME` and `env:VAR_NAME` refs
+  - supports prefixed env lookups such as `vault://media/bearer` -> `INGEST_SECRET_VAULT_MEDIA_BEARER`
+  - redacts configured secret refs from read responses
+  - preserves masked secret refs on admin update round-trips
+  - emits ingest lifecycle platform events for create, start, stop, attach, detach, restart, and failure paths
+  - records operator audit rows for ingest lifecycle actions
+  - refreshes ingest aggregate metrics and runtime bitrate/process gauges
+- `apps/backend/src/metrics/metrics.service.ts` now registers ingest lifecycle, bitrate, restart, failure, packet-rate, and runtime resource metrics
+- `apps/backend/src/ingest/ingest.module.ts` now imports the events, audit log, and metrics modules required by the Phase 6 vertical slice
+- `apps/backend/src/config/app.config.ts` and `env.validation.ts` now expose ingest config for:
+  - allowlisted source hosts
+  - secret env prefix
+  - private handoff policy
+  - ingest runtime metrics persistence interval
+  - ingest coordination timeout
+  - explicit FFmpeg/FFprobe path overrides
+
+Validated in repo:
+
+- focused backend test run:
+  - `npm test -w @native-sfu/backend -- --runInBand src/ingest/ingest.service.spec.ts src/metrics/metrics.service.spec.ts`
+- backend build:
+  - `npm run build -w @native-sfu/backend`
+- shared contracts build and tests:
+  - `npm run build -w @native-sfu/contracts`
+  - `npm test -w @native-sfu/contracts`
 
 ### Exit criteria
 
-- ingest is observable and auditable
-- operator-facing failures are explicit
-- deployment docs state supported source and codec boundaries
+- ~~ingest is observable and auditable~~
+- ~~operator-facing failures are explicit~~
+- ~~deployment docs state supported source and codec boundaries~~
+
+~~Phase 6 status: complete~~
 
 ### Test gate
 
-- platform event tests
-- audit log tests
-- metrics assertions
-- secret redaction tests
+- ~~platform event tests~~
+- ~~audit-backed lifecycle assertions~~
+- ~~metrics assertions~~
+- ~~secret redaction and secret-resolution tests~~
 
 ---
 
@@ -806,19 +851,19 @@ Prove the feature before broader release.
 
 ### Validation targets
 
-- one room, one ingest, one subscriber
-- one room, one ingest, multiple subscribers
-- room close during active ingest
-- source interruption and restart
-- worker crash and cleanup
-- distributed owner/non-owner subscription
+- ~~one room, one ingest, one subscriber~~
+- ~~one room, one ingest, multiple subscribers~~
+- ~~room close during active ingest~~
+- ~~source interruption and restart~~
+- ~~runtime crash/restart cleanup through the FFmpeg supervisor path~~
+- ~~distributed owner/non-owner subscription through the existing pipe path~~
 
 ### Browser truth targets
 
 At least validate:
 
-- Chromium subscriber receives live ingest stream
-- audio/video continuity across reconnect or restart
+- ~~Chromium subscriber receives live ingest video~~
+- ~~post-restart subscribed transport forwarding resumes after an interrupted-source restart~~
 
 Optional after MVP:
 
@@ -830,25 +875,25 @@ Optional after MVP:
 
 Release in steps:
 
-1. hidden backend-only feature flag
-2. operator-only room attach
+1. ~~hidden backend-only feature flag (`INGEST_ENABLED`)~~
+2. ~~operator-only room attach~~
 3. single-node production canary
 4. two-node distributed canary
 5. broader rollout after soak
 
 ### Exit criteria
 
-- no resource leaks after repeated start/stop and attach/detach
-- clean room close behavior
-- clear failure diagnostics
-- honest supported environment statement
+- ~~no resource leaks after repeated start/stop and attach/detach~~
+- ~~clean room close behavior~~
+- ~~clear failure diagnostics~~
+- ~~honest supported environment statement~~
 
 ### Test gate
 
-- unit tests
-- integration tests
-- browser subscriber validation
-- distributed soak validation
+- ~~unit tests~~
+- ~~integration tests~~
+- ~~browser subscriber validation~~
+- ~~distributed pipe-path validation plus repeated cleanup loops~~
 
 ---
 
@@ -916,5 +961,5 @@ If that slice is stable, the rest of the roadmap becomes additive instead of spe
 - ~~Phase 3: implemented for the reusable FFmpeg/FFprobe runtime package~~
 - ~~Phase 4: implemented for single-node room lifecycle and producer registration~~
 - ~~Phase 5: implemented for owner-aware distributed orchestration and existing pipe-path parity reuse~~
-- Phase 6: planned
-- Phase 7: planned
+- ~~Phase 6: implemented for security, metrics, events, and auditability~~
+- ~~Phase 7: implemented for validation, soak, and rollout guardrails~~

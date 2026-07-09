@@ -77,6 +77,11 @@ Treat these values as the minimum deployment-facing config surface that must be 
 | `ICE_STUN_SERVERS` | Optional comma-separated STUN servers used by the SFU itself to gather server-reflexive candidates. Keep them on UDP and point them at real reachable infrastructure. | `GET /api/v1/media/diagnostics/node` -> `ice.stun*` |
 | `ICE_TURN_SERVERS` | Optional comma-separated TURN URIs used by the SFU itself to gather relay candidates. Current RC support is UDP `turn:` only and the backend derives shared-secret credentials from `TURN_SECRET`. | `GET /api/v1/media/diagnostics/node` -> `ice.turn*` |
 | `ICE_ANNOUNCED_ADDRESS` | Optional host-candidate public address rewrite for the SFU media plane. Use it when the node binds privately but must advertise a different public host candidate. | `GET /api/v1/media/diagnostics/node` -> `ice.announcedAddress`, `ice.hostCandidateMode` |
+| `INGEST_ENABLED` | Backend-only rollout gate for media URL ingest. Keep it `false` in production until the node or cluster is intentionally in the ingest canary set. Disabled mode keeps read and drain/cleanup surfaces usable while blocking create/start/attach/update flows. | Admin ingest create/start/attach should return `503` when disabled; stop/detach should remain usable for rollback |
+| `INGEST_ALLOWED_SOURCE_HOSTS` | Optional comma-separated allowlist for server-side ingest source hosts. Leave empty only in trusted local development. | Admin ingest create/update should reject off-list URLs with an explicit policy error |
+| `INGEST_SECRET_ENV_PREFIX` | Prefix for environment-backed ingest auth refs. `vault://media/bearer` resolves to `INGEST_SECRET_VAULT_MEDIA_BEARER` by default. Direct `env://VAR_NAME` refs bypass the prefix. | Start an auth-protected ingest and confirm the runtime resolves secrets without echoing plaintext through the API |
+| `INGEST_ALLOW_PRIVATE_HANDOFF` | Keep `false` by default so trusted RTP ingest binds to loopback/local-safe addresses only. Override only for explicit local-network ingest topologies. | `GET /api/v1/admin/ingests` runtime state plus node-local ingest attach/start smoke |
+| `INGEST_RUNTIME_METRICS_PERSIST_INTERVAL_MS` | How often ingest runtime bitrate/process state is persisted back into the ingest job during live operation. | Watch ingest runtime fields and `sfu_ingest_*` gauges during a running ingest |
 | `OPERATIONS_TOKEN` | Operator credential for `/metrics`, `/api/v1/media/*`, and `/api/v1/events/*` control routes. Production requires a non-empty value. | `npm run test:staging:preflight` checks token enforcement |
 | `WEBHOOK_SECRET_ENCRYPTION_KEY` | Dedicated encryption key for webhook signing secrets at rest. Production should not rely on the JWT fallback for this. | Boot-time config validation plus create/list/replay smoke through `/api/v1/events/*` |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the API. Production values must be explicit `https://` origins, never wildcard or localhost. | Boot-time config validation and browser preflight from the deployed frontend/admin origins |
@@ -86,6 +91,30 @@ Treat these values as the minimum deployment-facing config surface that must be 
 | `METRICS_PATH` | Optional extra scrape alias when an environment needs a non-default metrics path. | Probe the configured alias if you use one; `/metrics` remains the canonical endpoint |
 
 The node diagnostics endpoint is the most honest runtime source for this surface. It shows what the process actually booted with, not just what the manifest intended to set.
+
+### Ingest Auth and Runtime Notes
+
+- Ingest source URLs must not embed credentials. Use secret references instead.
+- Read APIs intentionally redact secret-bearing fields as `[configured]`; the persisted refs stay server-side only.
+- Supported runtime secret patterns are:
+  - direct env ref: `env://INGEST_SOURCE_PASSWORD`
+  - direct env ref: `env:INGEST_SOURCE_PASSWORD`
+  - prefixed ref: `vault://media/bearer` -> `${INGEST_SECRET_ENV_PREFIX}VAULT_MEDIA_BEARER`
+- Current ingest output support remains intentionally narrow:
+  - video: H264
+  - audio: Opus
+  - transport into SFU: trusted local RTP/RTCP
+- The Phase 6 metrics you should expect during live ingest are:
+  - `sfu_ingest_jobs`
+  - `sfu_active_ingests`
+  - `sfu_ingest_restarts_total`
+  - `sfu_ingest_failures_total`
+  - `sfu_ingest_input_bitrate_bps`
+  - `sfu_ingest_output_bitrate_bps`
+  - `sfu_ingest_output_rtp_packet_rate`
+  - `sfu_ingest_runtime_rss_bytes`
+  - `sfu_ingest_runtime_cpu_user_micros`
+  - `sfu_ingest_runtime_cpu_system_micros`
 
 ### Kubernetes UDP Media Plane
 

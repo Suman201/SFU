@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import type { PublicTeacherListItem, PublicTeacherListQuery } from '@native-sfu/contracts';
+import type { CmsPage, PublicTeacherListItem, PublicTeacherListQuery } from '@native-sfu/contracts';
+import { CmsService } from '../../../core/services/cms.service';
 import { ProfileService } from '../../../core/services/profile.service';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
@@ -31,8 +32,10 @@ const EMPTY_FILTERS: MarketplaceFilters = {
 })
 export class TeacherMarketplace implements OnInit {
   private readonly profiles = inject(ProfileService);
+  private readonly cms = inject(CmsService);
 
   protected readonly filters = signal<MarketplaceFilters>({ ...EMPTY_FILTERS });
+  protected readonly cmsIntro = signal<CmsPage | null>(null);
   protected readonly teachers = signal<PublicTeacherListItem[]>([]);
   protected readonly loading = signal(false);
   protected readonly loadingMore = signal(false);
@@ -44,6 +47,10 @@ export class TeacherMarketplace implements OnInit {
   protected readonly hasMore = computed(() => this.page() < this.totalPages());
 
   ngOnInit(): void {
+    this.cms.getPublishedPage('teacher-marketplace').subscribe({
+      next: (page) => this.cmsIntro.set(page),
+      error: () => this.cmsIntro.set(null)
+    });
     this.loadTeachers(1);
   }
 
@@ -114,6 +121,14 @@ export class TeacherMarketplace implements OnInit {
       return primarySkill;
     }
     return 'Published profile';
+  }
+
+  protected marketplaceTitle(): string {
+    return this.cmsIntro()?.title || 'Browse public teachers';
+  }
+
+  protected marketplaceSummary(): string {
+    return this.cmsIntro()?.summary || 'Compare public profiles, demo classes, gallery proof, and open batches before choosing where to enroll.';
   }
 
   private loadTeachers(page: number): void {

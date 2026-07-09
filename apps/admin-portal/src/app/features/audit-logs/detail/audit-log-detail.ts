@@ -37,6 +37,10 @@ export class AuditLogDetail implements OnInit {
     return value ? JSON.stringify(value, null, 2) : '{}';
   }
 
+  protected resourceLink(item: AdminAuditLogDetail): string | null {
+    return auditResourceLink(item.resourceType ?? item.targetType, item.resourceId ?? item.targetId);
+  }
+
   private load(): void {
     const auditLogId = this.route.snapshot.paramMap.get('auditLogId');
     if (!auditLogId) {
@@ -52,5 +56,34 @@ export class AuditLogDetail implements OnInit {
         next: (auditLog) => this.auditLog.set(auditLog),
         error: (error: unknown) => this.error.set(this.api.apiErrorMessage(error))
       });
+  }
+}
+
+function auditResourceLink(type: string | undefined, id: string | undefined): string | null {
+  if (!type || !id) {
+    return null;
+  }
+  switch (type.replace(/[-_]/g, '').toLowerCase()) {
+    case 'classsession':
+    case 'session':
+      return `/class-sessions/${encodeURIComponent(id)}`;
+    case 'recording':
+      return `/recordings/${encodeURIComponent(id)}`;
+    case 'user':
+      return `/users/${encodeURIComponent(id)}`;
+    case 'batch':
+      return `/batches/${encodeURIComponent(id)}`;
+    case 'course':
+      return `/courses/${encodeURIComponent(id)}`;
+    case 'enrollment':
+      return `/enrollments/${encodeURIComponent(id)}`;
+    case 'supportrequest':
+    case 'support':
+      return `/support?search=${encodeURIComponent(id)}`;
+    case 'teacherpromotion':
+    case 'promotion':
+      return `/teacher-promotions?search=${encodeURIComponent(id)}`;
+    default:
+      return null;
   }
 }

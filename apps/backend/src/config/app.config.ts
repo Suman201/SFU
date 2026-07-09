@@ -82,6 +82,17 @@ export const appConfig = () => ({
       announcedAddress: resolveAnnouncedAddress(process.env.ICE_ANNOUNCED_ADDRESS, process.env.ICE_PUBLIC_CANDIDATE_ADDRESS)
     }
   },
+  ingest: {
+    enabled: parseBoolean(process.env.INGEST_ENABLED, (process.env.NODE_ENV ?? 'development') !== 'production'),
+    allowedSourceHosts: splitConfigList(process.env.INGEST_ALLOWED_SOURCE_HOSTS),
+    secretEnvPrefix: process.env.INGEST_SECRET_ENV_PREFIX?.trim() || 'INGEST_SECRET_',
+    allowPrivateHandoff: parseBoolean(process.env.INGEST_ALLOW_PRIVATE_HANDOFF, false),
+    runtimeMetricsPersistIntervalMs: Number(process.env.INGEST_RUNTIME_METRICS_PERSIST_INTERVAL_MS ?? 5000),
+    coordinationTimeoutMs: Number(process.env.INGEST_COORDINATION_TIMEOUT_MS ?? 5000),
+    ffmpegPath: process.env.INGEST_FFMPEG_PATH?.trim() || process.env.FFMPEG_PATH,
+    ffprobePath: process.env.INGEST_FFPROBE_PATH?.trim() || process.env.FFPROBE_PATH,
+    userAgent: process.env.INGEST_USER_AGENT ?? 'NativeSFU-Ingest/0.1'
+  },
   cluster: {
     nodeId: process.env.NODE_ID,
     region: process.env.NODE_REGION,

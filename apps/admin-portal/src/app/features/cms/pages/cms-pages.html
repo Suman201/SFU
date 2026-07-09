@@ -1,0 +1,247 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Public content</p>
+    <h1>CMS pages</h1>
+    <p>Manage published public pages, legal copy, banners, FAQs, and marketplace content without code changes.</p>
+  </div>
+  <button type="button" class="table-action primary" (click)="startNew()">New page</button>
+</section>
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Page library</h2>
+      <p>{{ total() }} CMS pages found</p>
+    </div>
+    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+      <select formControlName="status" aria-label="Status">
+        @for (status of statusOptions; track status) {
+          <option [value]="status">{{ status === 'all' ? 'All statuses' : (status | titlecase) }}</option>
+        }
+      </select>
+      <select formControlName="pageType" aria-label="Page type">
+        @for (type of pageTypes; track type) {
+          <option [value]="type">{{ type === 'all' ? 'All types' : (type.replace('_', ' ') | titlecase) }}</option>
+        }
+      </select>
+      <select formControlName="audience" aria-label="Audience">
+        @for (audience of audiences; track audience) {
+          <option [value]="audience">{{ audience === 'all' ? 'All audiences' : (audience | titlecase) }}</option>
+        }
+      </select>
+      <input type="search" formControlName="locale" placeholder="Locale" aria-label="Locale" />
+      <input type="search" formControlName="search" placeholder="Search title, slug, tags" aria-label="Search CMS pages" />
+      <button type="submit" class="table-action primary">Apply</button>
+      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+    </form>
+  </div>
+
+  @if (error()) {
+    <p class="table-error" role="alert">{{ error() }}</p>
+  }
+
+  <div class="data-table-wrap" style="--data-table-min-width: 960px">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Page</th>
+          <th>Type</th>
+          <th>Audience</th>
+          <th>Status</th>
+          <th>Updated</th>
+          <th class="actions-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr>
+            <td colspan="6" class="empty-state">Loading CMS pages...</td>
+          </tr>
+        } @else if (!rows().length) {
+          <tr>
+            <td colspan="6" class="empty-state">No CMS pages match these filters.</td>
+          </tr>
+        } @else {
+          @for (row of rows(); track trackByPage($index, row)) {
+            <tr [class.selected-row]="selected()?.pageId === row.pageId">
+              <td>
+                <strong>{{ row.title }}</strong>
+                <small>{{ row.slug }} · {{ row.locale || 'en' }} · {{ publicPath(row) }}</small>
+              </td>
+              <td>{{ row.pageType.replace('_', ' ') | titlecase }}</td>
+              <td>{{ row.audience | titlecase }}</td>
+              <td><span class="data-pill {{ statusClass(row.status) }}">{{ row.status }}</span></td>
+              <td>
+                <strong>{{ row.updatedAt | date: 'short' }}</strong>
+                <small>Published {{ row.publishedAt ? (row.publishedAt | date: 'short') : 'not yet' }}</small>
+              </td>
+              <td class="actions-cell">
+                <button type="button" class="table-action" (click)="edit(row)">Edit</button>
+                @if (row.status !== 'published' && row.status !== 'archived') {
+                  <button type="button" class="table-action primary" (click)="publish(row)">Publish</button>
+                }
+                @if (row.status === 'published') {
+                  <button type="button" class="table-action" (click)="unpublish(row)">Unpublish</button>
+                }
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-footer">
+    <span>Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() <= 1" (click)="previousPage()">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+    </div>
+  </div>
+</section>
+
+<section class="cms-editor-shell" aria-label="CMS page editor">
+  <form class="cms-editor" [formGroup]="form" (ngSubmit)="save()">
+    <div class="editor-head">
+      <div>
+        <p class="eyebrow">{{ selected() ? 'Editing' : 'Draft' }}</p>
+        <h2>{{ selected()?.title || 'New CMS page' }}</h2>
+      </div>
+      <div class="editor-actions">
+        @if (selected(); as current) {
+          @if (current.status !== 'published' && current.status !== 'archived') {
+            <button type="button" class="table-action primary" [disabled]="saving()" (click)="publish(current)">Publish</button>
+          }
+          @if (current.status === 'published') {
+            <button type="button" class="table-action" [disabled]="saving()" (click)="unpublish(current)">Unpublish</button>
+          }
+          @if (current.status !== 'archived') {
+            <button type="button" class="table-action danger" [disabled]="saving()" (click)="archive(current)">Archive</button>
+          }
+        }
+        <button type="submit" class="table-action primary" [disabled]="saving()">{{ saving() ? 'Saving...' : 'Save' }}</button>
+      </div>
+    </div>
+
+    @if (editorError()) {
+      <p class="table-error" role="alert">{{ editorError() }}</p>
+    }
+
+    <div class="field-grid">
+      <label>
+        <span>Title</span>
+        <input formControlName="title" type="text" placeholder="Privacy Policy" />
+      </label>
+      <label>
+        <span>Slug</span>
+        <input formControlName="slug" type="text" placeholder="privacy-policy" />
+      </label>
+      <label>
+        <span>Page type</span>
+        <select formControlName="pageType">
+          @for (type of editorPageTypes; track type) {
+            <option [value]="type">{{ type.replace('_', ' ') | titlecase }}</option>
+          }
+        </select>
+      </label>
+      <label>
+        <span>Audience</span>
+        <select formControlName="audience">
+          @for (audience of editorAudiences; track audience) {
+            <option [value]="audience">{{ audience | titlecase }}</option>
+          }
+        </select>
+      </label>
+      <label>
+        <span>Locale</span>
+        <input formControlName="locale" type="text" placeholder="en" />
+      </label>
+      <label>
+        <span>Tags</span>
+        <input formControlName="tagsCsv" type="text" placeholder="legal, marketplace" />
+      </label>
+    </div>
+
+    <label>
+      <span>Summary</span>
+      <textarea formControlName="summary" rows="2" placeholder="Short admin/public summary"></textarea>
+    </label>
+
+    <label>
+      <span>Body markdown</span>
+      <textarea formControlName="bodyMarkdown" rows="8" placeholder="Write plain markdown. HTML is sanitized on save."></textarea>
+    </label>
+
+    <label>
+      <span>Sections JSON</span>
+      <textarea formControlName="sectionsJson" rows="12" spellcheck="false" placeholder='[{"type":"hero","title":"Learn live","body":"..."}]'></textarea>
+    </label>
+
+    <div class="field-grid">
+      <label>
+        <span>Meta title</span>
+        <input formControlName="metaTitle" type="text" />
+      </label>
+      <label>
+        <span>Meta description</span>
+        <input formControlName="metaDescription" type="text" />
+      </label>
+      <label class="wide-field">
+        <span>Canonical URL</span>
+        <input formControlName="canonicalUrl" type="url" />
+      </label>
+    </div>
+  </form>
+
+  <aside class="cms-preview" aria-label="CMS preview">
+    <div class="preview-head">
+      <p class="eyebrow">Safe preview</p>
+      <h2>{{ form.controls.title.value || 'Untitled page' }}</h2>
+      <small>{{ form.controls.slug.value || 'new-page' }} · {{ form.controls.pageType.value }} · {{ form.controls.audience.value }}</small>
+    </div>
+
+    @if (form.controls.summary.value) {
+      <p class="preview-summary">{{ form.controls.summary.value }}</p>
+    }
+
+    @if (form.controls.bodyMarkdown.value) {
+      <pre>{{ form.controls.bodyMarkdown.value }}</pre>
+    }
+
+    <div class="preview-sections">
+      @for (section of parsedSections(); track section.blockId || section.title || $index) {
+        <article>
+          <small>{{ sectionLabel(section) }}</small>
+          @if (section.eyebrow) {
+            <em>{{ section.eyebrow }}</em>
+          }
+          @if (section.title) {
+            <h3>{{ section.title }}</h3>
+          }
+          @if (section.body) {
+            <p>{{ section.body }}</p>
+          }
+          @if (section.links?.length) {
+            <div class="preview-links">
+              @for (link of section.links; track link.url) {
+                <span>{{ link.label }} · {{ link.url }}</span>
+              }
+            </div>
+          }
+          @if (section.items?.length) {
+            <ul>
+              @for (item of section.items; track item.title || item.label || item.url || $index) {
+                <li>
+                  <strong>{{ item.title || item.label || 'Item' }}</strong>
+                  @if (item.body) {
+                    <span>{{ item.body }}</span>
+                  }
+                </li>
+              }
+            </ul>
+          }
+        </article>
+      }
+    </div>
+  </aside>
+</section>

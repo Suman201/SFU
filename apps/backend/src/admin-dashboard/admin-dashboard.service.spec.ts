@@ -13,7 +13,7 @@ describe('AdminDashboardService', () => {
   });
 
   it('returns an operational dashboard summary for admins', async () => {
-    const { service, classSessions, recordings, enrollments, users, batches, attendanceSnapshots } = createHarness();
+    const { service, classSessions, recordings, enrollments, users, batches, attendanceSnapshots, supportRequests, activityEvents } = createHarness();
 
     const summary = await service.getSummary(admin());
 
@@ -40,7 +40,11 @@ describe('AdminDashboardService', () => {
     expect(summary.liveSessionItems[0]?.teacherName).toBe('Ada Teacher');
     const issueLabels = summary.issues.map((issue: { label: string }) => issue.label);
     expect(issueLabels).toEqual([
+      'Teachers reconnecting in live sessions',
       'Failed recordings need review',
+      'Recent live media failures',
+      'Recent class join denials',
+      'Unresolved support requests',
       'Suspended enrollments',
       'Pending enrollments',
       'Disabled user accounts',
@@ -48,12 +52,14 @@ describe('AdminDashboardService', () => {
       'Live sessions active now'
     ]);
 
-    expect(classSessions.countDocuments).toHaveBeenCalledTimes(3);
+    expect(classSessions.countDocuments).toHaveBeenCalledTimes(4);
     expect(recordings.countDocuments).toHaveBeenCalledTimes(2);
     expect(enrollments.countDocuments).toHaveBeenCalledTimes(4);
     expect(users.countDocuments).toHaveBeenCalledTimes(5);
     expect(batches.countDocuments).toHaveBeenCalledTimes(2);
     expect(attendanceSnapshots.aggregate).toHaveBeenCalled();
+    expect(supportRequests.countDocuments).toHaveBeenCalled();
+    expect(activityEvents.countDocuments).toHaveBeenCalledTimes(2);
   });
 
   it('uses explicit UTC day bounds for today counts', async () => {
@@ -96,9 +102,12 @@ describe('AdminDashboardService', () => {
     enrollments: { countDocuments: jest.Mock };
     users: { countDocuments: jest.Mock; find: jest.Mock };
     batches: { countDocuments: jest.Mock; find: jest.Mock; aggregate: jest.Mock };
+    supportRequests: { countDocuments: jest.Mock };
+    activityEvents: { countDocuments: jest.Mock };
   } {
     const classSessions = {
       countDocuments: jest.fn((filter: Record<string, unknown>) => {
+        if (filter.teacherReconnectDeadlineAt) return execResult(1);
         if (filter.status === 'live') return execResult(2);
         if (filter.status === 'completed') return execResult(3);
         return execResult(5);
@@ -113,7 +122,8 @@ describe('AdminDashboardService', () => {
                 batchId: 'batch-1',
                 teacherId: 'teacher-1',
                 startedAt: new Date('2026-06-24T08:00:00.000Z'),
-                roomId: 'room-1'
+                roomId: 'room-1',
+                teacherReconnectDeadlineAt: new Date('2026-06-24T08:35:00.000Z')
               }
             ])
           )
@@ -163,6 +173,12 @@ describe('AdminDashboardService', () => {
       ),
       aggregate: jest.fn(() => execResult([{ _id: 'course-1' }, { _id: 'course-2' }]))
     };
+    const supportRequests = {
+      countDocuments: jest.fn(() => execResult(9))
+    };
+    const activityEvents = {
+      countDocuments: jest.fn((filter: Record<string, unknown>) => execResult(filter.eventType === 'participant.join_denied' ? 4 : 3))
+    };
 
     return {
       service: new AdminDashboardService(
@@ -171,14 +187,18 @@ describe('AdminDashboardService', () => {
         recordings as never,
         enrollments as never,
         users as never,
-        batches as never
+        batches as never,
+        supportRequests as never,
+        activityEvents as never
       ),
       classSessions,
       attendanceSnapshots,
       recordings,
       enrollments,
       users,
-      batches
+      batches,
+      supportRequests,
+      activityEvents
     };
   }
 

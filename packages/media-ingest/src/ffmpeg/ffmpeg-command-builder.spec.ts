@@ -15,6 +15,10 @@ describe('buildFfmpegCommand', () => {
     expect(command.args).toContain('rtp://127.0.0.1:5006?rtcpport=5007&localrtcpport=0&pkt_size=1200');
     expect(command.args).toContain('libx264');
     expect(command.args).toContain('libopus');
+    expect(command.args).toContain('-profile:v');
+    expect(command.args).toContain('baseline');
+    expect(command.args).toContain('-level:v');
+    expect(command.args).toContain('3.1');
   });
 
   it('rejects duplicate output kinds in the Phase 3 profile', () => {

@@ -29,3 +29,8 @@ export function sequenceDistance(from: number, to: number): number {
 export function timestampDistance(from: number, to: number): number {
   return (normalizeTimestamp(to) - normalizeTimestamp(from) + RTP_TIMESTAMP_MODULO) % RTP_TIMESTAMP_MODULO;
 }
+
+export function timestampDelta(current: number, base: number): number {
+  const delta = (normalizeTimestamp(current) - normalizeTimestamp(base) + RTP_TIMESTAMP_MODULO) % RTP_TIMESTAMP_MODULO;
+  return delta > 0x7fff_ffff ? delta - RTP_TIMESTAMP_MODULO : delta;
+}

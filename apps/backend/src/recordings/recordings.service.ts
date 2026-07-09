@@ -41,6 +41,7 @@ import {
 import { PlatformEventsService } from '../events/platform-events.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { ClassSessionActivityService } from '../class-session-activity/class-session-activity.service';
+import { MetricsService } from '../metrics/metrics.service';
 import { StudentEnrollmentsService } from '../student-enrollments/student-enrollments.service';
 
 type ClassSessionRecordingEventName = 'recording:started' | 'recording:updated' | 'recording:stopped' | 'recording:failed';
@@ -90,7 +91,8 @@ export class RecordingsService {
     private readonly platformEvents: PlatformEventsService,
     private readonly studentEnrollments: StudentEnrollmentsService,
     @Optional() private readonly auditLogs?: AuditLogsService,
-    @Optional() private readonly activity?: ClassSessionActivityService
+    @Optional() private readonly activity?: ClassSessionActivityService,
+    @Optional() private readonly metrics?: MetricsService
   ) {}
 
   onClassSessionRecordingEvent(
@@ -1168,6 +1170,7 @@ export class RecordingsService {
       status: doc.status,
       ...(reason ? { reason } : {})
     };
+    this.metrics?.classSessionRecordingEvents.labels(event.replace('recording:', ''), doc.status).inc();
     for (const listener of this.classSessionRecordingEventListeners) {
       listener(event, payload);
     }

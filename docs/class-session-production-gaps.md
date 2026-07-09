@@ -1,6 +1,6 @@
 # Class Session Production Readiness Gaps
 
-Updated: 2026-07-08
+Updated: 2026-07-09
 
 This document tracks the remaining gap between the current class-session implementation and production readiness.
 
@@ -49,6 +49,7 @@ These items were listed as gaps in older versions of this document, but code now
 - Student completed-session history, guarded post-class artifacts, private post-class teacher Q&A, and the teacher post-class workspace.
 - Selective student whiteboard control and whiteboard command events.
 - Admin modules for attendance, recordings, enrollments, users, courses, batches, dashboard, and audit-style operational surfaces.
+- Admin class-session operational health snapshots, support-safe diagnostics, support/recording metrics, and dashboard issue surfacing.
 
 ## Pilot Blockers
 
@@ -928,6 +929,29 @@ Required runbooks:
 - **Done**: ~~chat delivery issue. Done in `docs/operator-runbook.md`.~~
 - **Done**: ~~unauthorized access report. Done in `docs/operator-runbook.md`.~~
 - **Done**: ~~Mongo/Redis degraded. Done in `docs/operator-runbook.md`.~~
+
+### P2: Production Observability And Support Tooling
+
+Status: **Done** for the implemented 2026-07-09 admin health and support tooling scope.
+
+Completed items are fully struck through; if a line contains a Done note, the Done note is part of the completed item.
+
+- **Done**: ~~Admin/operator session health view. Done: admin class-session detail now shows an Operational Health panel backed by `GET /api/v1/admin/class-sessions/:sessionId/health`.~~
+- **Done**: ~~Support-safe health payload. Done: the health endpoint returns safe session, room, teacher connection, participant count, media count, join denial, recording, support, issue, and admin-link summaries without private bodies, storage keys, tokens, or raw media payloads.~~
+- **Done**: ~~Dashboard operational issue surfacing. Done: the admin dashboard now surfaces teacher reconnecting, recent media failures, recent class join denials, failed recordings, and unresolved support requests as issue cards.~~
+- **Done**: ~~Support and recording metrics. Done: `sfu_class_session_support_requests_total` and `sfu_class_session_recording_events_total` are emitted alongside the existing lifecycle, reconnect, join, media, chat, moderation, whiteboard, and material metrics.~~
+- **Done**: ~~Support diagnostics remain privacy-safe. Done: support requests store explicit student support text plus bounded diagnostics only, with route token redaction and no private chat/Q&A bodies or raw attachment URLs.~~
+- **Done**: ~~Operator runbook describes the support-health workflow. Done: `docs/operator-runbook.md` now documents the session health snapshot endpoint and safe-data boundary.~~
+
+Verification:
+
+- Contracts build passed: `npm run build --workspace @native-sfu/contracts`.
+- Backend build passed: `npm run build --workspace @native-sfu/backend`.
+- Frontend build passed: `npm run build --workspace @native-sfu/frontend`.
+- Admin portal build passed: `npm run build --workspace @native-sfu/admin-portal`.
+- Focused backend tests passed: `npm test --workspace @native-sfu/backend -- admin-dashboard.service.spec.ts support.service.spec.ts class-sessions.service.spec.ts rooms.service.spec.ts recordings.service.spec.ts metrics.service.spec.ts`.
+- `git diff --check` passed.
+- Dev runtime signoff remains under the P0 build/runtime blocker until backend, frontend, admin portal, API, and socket smoke checks are run together.
 
 ### P1: Backups, Retention, And Data Lifecycle
 

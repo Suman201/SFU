@@ -20,6 +20,8 @@ import type {
   AdminClassSessionReportQuery,
   AdminClassSessionReportResponse,
   AdminClassSessionReportRow,
+  AdminClassSessionHealthResponse,
+  AdminClassSessionHealthSupportSummary,
   AdminClassSessionReportSummary,
   Assignment,
   AssignmentAttachment,
@@ -114,6 +116,8 @@ import {
   ClassSessionWhiteboardVersionMongoDocument,
   ClassSessionMongoDocument,
   ClassSessionStatus,
+  SupportRequestDocument,
+  SupportRequestMongoDocument,
   UserDocument,
   UserMongoDocument
 } from '../database/schemas';
@@ -317,7 +321,8 @@ export class ClassSessionsService {
     @Optional() @InjectModel(UserDocument.name) private readonly users?: Model<UserMongoDocument>,
     @Optional() private readonly auditLogs?: AuditLogsService,
     @Optional() private readonly activity?: ClassSessionActivityService,
-    @Optional() private readonly metrics?: MetricsService
+    @Optional() private readonly metrics?: MetricsService,
+    @Optional() @InjectModel(SupportRequestDocument.name) private readonly supportRequests?: Model<SupportRequestMongoDocument>
   ) {}
 
   async listAdminClassSessionReports(
@@ -355,6 +360,121 @@ export class ClassSessionsService {
       throw new NotFoundException('Class session not found.');
     }
     return row;
+  }
+
+  async getAdminClassSessionHealth(sessionId: string, user: AuthenticatedUser): Promise<AdminClassSessionHealthResponse> {
+    this.assertAdmin(user);
+    const session = await this.classSessions.findById(sessionId);
+    if (!session) {
+      throw new NotFoundException('Class session not found.');
+    }
+    const [roomHealth, recordings, timeline, support] = await Promise.all([
+      session.roomId
+        ? this.rooms.getClassSessionOperationalRoomHealth(session.roomId, session.teacherId).catch(() => undefined)
+        : Promise.resolve(undefined),
+      this.recordings.listAuthorizedClassSessionRecordings(session.id).catch(() => []),
+      this.activity
+        ? this.activity.listTimeline({
+            sessionId: session.id,
+            batchId: session.batchId,
+            limit: 100,
+            visibility: 'full',
+            category: 'all'
+          })
+        : Promise.resolve(undefined),
+      this.classSessionSupportSummary(session.id)
+    ]);
+    const events = timeline?.items ?? [];
+    const joinDenied = events.filter((event) => event.eventType === 'participant.join_denied');
+    const deniedByReason = joinDenied.reduce<Record<string, number>>((counts, event) => {
+      const reason = typeof event.metadata?.reason === 'string' ? event.metadata.reason : 'unknown';
+      counts[reason] = (counts[reason] ?? 0) + 1;
+      return counts;
+    }, {});
+    const statuses = recordings.reduce<AdminClassSessionHealthResponse['recording']['statuses']>((counts, recording) => {
+      counts[recording.status] = (counts[recording.status] ?? 0) + 1;
+      return counts;
+    }, {});
+    const failedRecordings = recordings.filter((recording) => recording.status === 'failed');
+    const mediaIssueCount = events.filter((event) => event.category === 'media' || event.eventType.startsWith('media.')).length;
+    const supportIssueCount = events.filter((event) => event.category === 'support').length + support.open + support.inReview + support.waitingForStudent;
+    const recordingIssueCount = events.filter((event) => event.eventType === 'recording.failed').length + failedRecordings.length;
+    const lastActivityAt = this.latestIso([
+      ...(roomHealth?.lastActivityAt ? [roomHealth.lastActivityAt] : []),
+      ...events.map((event) => event.createdAt),
+      ...recordings.map((recording) => recording.stoppedAt ?? recording.startedAt)
+    ]);
+    return {
+      generatedAt: new Date().toISOString(),
+      session: {
+        sessionId: session.id,
+        batchId: session.batchId,
+        teacherId: session.teacherId,
+        title: session.title,
+        status: session.status,
+        scheduledAt: this.dateToIso(session.scheduledAt),
+        ...(session.startedAt ? { startedAt: this.dateToIso(session.startedAt) } : {}),
+        ...(session.completedAt ? { completedAt: this.dateToIso(session.completedAt) } : {}),
+        ...(session.roomId ? { roomId: session.roomId } : {}),
+        ...(session.teacherDisconnectedAt ? { teacherDisconnectedAt: this.dateToIso(session.teacherDisconnectedAt) } : {}),
+        ...(session.teacherReconnectDeadlineAt ? { teacherReconnectDeadlineAt: this.dateToIso(session.teacherReconnectDeadlineAt) } : {})
+      },
+      ...(roomHealth?.room ? { room: roomHealth.room } : {}),
+      teacher: {
+        state: this.adminHealthTeacherState(session, Boolean(roomHealth?.teacherConnected)),
+        connected: Boolean(roomHealth?.teacherConnected),
+        reconnecting: Boolean(session.teacherReconnectDeadlineAt),
+        ...(roomHealth?.teacherParticipantId ? { participantId: roomHealth.teacherParticipantId } : {}),
+        ...(session.teacherDisconnectedAt ? { disconnectedAt: this.dateToIso(session.teacherDisconnectedAt) } : {}),
+        ...(session.teacherReconnectDeadlineAt ? { reconnectDeadlineAt: this.dateToIso(session.teacherReconnectDeadlineAt) } : {})
+      },
+      participants: roomHealth?.participants ?? {
+        total: 0,
+        admitted: 0,
+        pending: 0,
+        students: 0,
+        hosts: 0,
+        coHosts: 0,
+        handRaised: 0,
+        inactive: 0
+      },
+      media: roomHealth?.media ?? {
+        audioProducers: 0,
+        videoProducers: 0,
+        screenProducers: 0,
+        whiteboardProducers: 0,
+        pausedProducers: 0,
+        liveConsumers: 0,
+        pausedConsumers: 0
+      },
+      joins: {
+        deniedTotal: joinDenied.length,
+        deniedByReason
+      },
+      recording: {
+        total: recordings.length,
+        active: recordings.filter((recording) => ['starting', 'recording', 'stopping'].includes(recording.status)).length,
+        failed: failedRecordings.length,
+        statuses,
+        ...(failedRecordings[0]?.failureReason ? { latestFailureReason: this.safeOperationalReason(failedRecordings[0].failureReason) } : {})
+      },
+      support,
+      issues: {
+        total: mediaIssueCount + joinDenied.length + supportIssueCount + recordingIssueCount + (roomHealth?.recentIncidents.length ?? 0),
+        media: mediaIssueCount,
+        joinDenied: joinDenied.length,
+        support: supportIssueCount,
+        recording: recordingIssueCount,
+        recent: roomHealth?.recentIncidents ?? []
+      },
+      ...(lastActivityAt ? { lastActivityAt } : {}),
+      links: {
+        timeline: `/class-sessions/${session.id}`,
+        attendance: `/attendance?sessionId=${encodeURIComponent(session.id)}`,
+        recordings: `/recordings?sessionId=${encodeURIComponent(session.id)}`,
+        support: `/support?sessionId=${encodeURIComponent(session.id)}`
+      }
+    };
   }
 
   async getTeacherAnalytics(query: TeacherAnalyticsQuery, user: AuthenticatedUser): Promise<TeacherAnalyticsResponse> {
@@ -4167,6 +4287,52 @@ export class ClassSessionsService {
       moderation: incidents.filter((event) => event.category === 'moderation').length,
       latest: incidents.slice(0, 5)
     };
+  }
+
+  private async classSessionSupportSummary(sessionId: string): Promise<AdminClassSessionHealthSupportSummary> {
+    if (!this.supportRequests) {
+      return { total: 0, open: 0, inReview: 0, waitingForStudent: 0, resolved: 0, closed: 0 };
+    }
+    const base = { sessionId, deletedAt: { $exists: false } };
+    const [open, inReview, waitingForStudent, resolved, closed] = await Promise.all([
+      this.supportRequests.countDocuments({ ...base, status: 'open' }).exec(),
+      this.supportRequests.countDocuments({ ...base, status: 'in_review' }).exec(),
+      this.supportRequests.countDocuments({ ...base, status: 'waiting_for_student' }).exec(),
+      this.supportRequests.countDocuments({ ...base, status: 'resolved' }).exec(),
+      this.supportRequests.countDocuments({ ...base, status: 'closed' }).exec()
+    ]);
+    return {
+      total: open + inReview + waitingForStudent + resolved + closed,
+      open,
+      inReview,
+      waitingForStudent,
+      resolved,
+      closed
+    };
+  }
+
+  private adminHealthTeacherState(
+    session: ClassSessionMongoDocument,
+    teacherConnected: boolean
+  ): AdminClassSessionHealthResponse['teacher']['state'] {
+    if (session.status === 'scheduled') {
+      return 'not_started';
+    }
+    if (session.status === 'completed' || session.status === 'cancelled') {
+      return 'ended';
+    }
+    if (session.teacherReconnectDeadlineAt) {
+      return 'reconnecting';
+    }
+    return teacherConnected ? 'connected' : 'absent';
+  }
+
+  private safeOperationalReason(value: string): string {
+    return value
+      .replace(/https?:\/\/\S+/gi, '[redacted-url]')
+      .replace(/(?:\/|[A-Za-z]:\\)[^\s]+/g, '[redacted-path]')
+      .replace(/([?&](?:token|access_token|refresh_token|authorization|password|secret|key)=)[^&\s]+/gi, '$1[redacted]')
+      .slice(0, 180);
   }
 
   private classSessionReportCsv(report: ClassSessionReport): string {

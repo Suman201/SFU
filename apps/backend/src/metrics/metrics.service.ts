@@ -428,6 +428,16 @@ export class MetricsService implements OnModuleInit {
     help: 'Class-session material actions by action, result, and material kind',
     labelNames: ['action', 'result', 'kind']
   });
+  readonly classSessionSupportRequests = new Counter({
+    name: 'sfu_class_session_support_requests_total',
+    help: 'Class-session support request actions by action, status, and issue type',
+    labelNames: ['action', 'status', 'issueType']
+  });
+  readonly classSessionRecordingEvents = new Counter({
+    name: 'sfu_class_session_recording_events_total',
+    help: 'Class-session recording lifecycle events by event and status',
+    labelNames: ['event', 'status']
+  });
   readonly roomProfileDistribution = new Gauge({
     name: 'sfu_room_profile_distribution',
     help: 'Active rooms by media profile',
@@ -490,6 +500,56 @@ export class MetricsService implements OnModuleInit {
     name: 'sfu_room_alert_events_total',
     help: 'Room operator alert lifecycle events',
     labelNames: ['code', 'status']
+  });
+  readonly ingestJobsByState = new Gauge({
+    name: 'sfu_ingest_jobs',
+    help: 'Current ingest job count by ingest lifecycle state',
+    labelNames: ['state']
+  });
+  readonly activeIngestsByRoom = new Gauge({
+    name: 'sfu_active_ingests',
+    help: 'Current active ingest count by room',
+    labelNames: ['roomId']
+  });
+  readonly ingestRestarts = new Counter({
+    name: 'sfu_ingest_restarts_total',
+    help: 'Ingest runtime restart events by source type',
+    labelNames: ['sourceType']
+  });
+  readonly ingestFailureCategories = new Counter({
+    name: 'sfu_ingest_failures_total',
+    help: 'Ingest failures by failure category and source type',
+    labelNames: ['category', 'sourceType']
+  });
+  readonly ingestInputBitrate = new Gauge({
+    name: 'sfu_ingest_input_bitrate_bps',
+    help: 'Observed ingest input bitrate in bits per second',
+    labelNames: ['ingestId', 'sourceType']
+  });
+  readonly ingestOutputBitrate = new Gauge({
+    name: 'sfu_ingest_output_bitrate_bps',
+    help: 'Observed ingest output bitrate in bits per second',
+    labelNames: ['ingestId', 'sourceType']
+  });
+  readonly ingestOutputRtpPacketRate = new Gauge({
+    name: 'sfu_ingest_output_rtp_packet_rate',
+    help: 'Observed ingest output RTP packet rate in packets per second',
+    labelNames: ['ingestId', 'sourceType']
+  });
+  readonly ingestRuntimeRssBytes = new Gauge({
+    name: 'sfu_ingest_runtime_rss_bytes',
+    help: 'Observed ingest runtime RSS in bytes when the host platform can sample it',
+    labelNames: ['ingestId', 'sourceType']
+  });
+  readonly ingestRuntimeCpuUserMicros = new Gauge({
+    name: 'sfu_ingest_runtime_cpu_user_micros',
+    help: 'Observed ingest runtime user CPU time in microseconds when the host platform can sample it',
+    labelNames: ['ingestId', 'sourceType']
+  });
+  readonly ingestRuntimeCpuSystemMicros = new Gauge({
+    name: 'sfu_ingest_runtime_cpu_system_micros',
+    help: 'Observed ingest runtime system CPU time in microseconds when the host platform can sample it',
+    labelNames: ['ingestId', 'sourceType']
   });
   readonly roomIncidentTimelineEvents = new Counter({
     name: 'sfu_room_incident_timeline_events_total',
@@ -1003,6 +1063,8 @@ export class MetricsService implements OnModuleInit {
       this.classSessionModerationActions,
       this.classSessionWhiteboardControlActions,
       this.classSessionMaterialActions,
+      this.classSessionSupportRequests,
+      this.classSessionRecordingEvents,
       this.roomProfileDistribution,
       this.roomProfileChanges,
       this.roomProtectionDecisions,
@@ -1016,6 +1078,16 @@ export class MetricsService implements OnModuleInit {
       this.roomsUnderRecovery,
       this.roomRecoveryDuration,
       this.roomAlertEvents,
+      this.ingestJobsByState,
+      this.activeIngestsByRoom,
+      this.ingestRestarts,
+      this.ingestFailureCategories,
+      this.ingestInputBitrate,
+      this.ingestOutputBitrate,
+      this.ingestOutputRtpPacketRate,
+      this.ingestRuntimeRssBytes,
+      this.ingestRuntimeCpuUserMicros,
+      this.ingestRuntimeCpuSystemMicros,
       this.roomIncidentTimelineEvents,
       this.platformEventsEmitted,
       this.platformEventQueries,

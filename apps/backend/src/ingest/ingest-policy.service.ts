@@ -166,7 +166,10 @@ export class IngestPolicyService {
   }
 
   private assertAllowedHost(hostname: string): void {
-    const allowlist = this.parseAllowlist(this.config.get<string>('INGEST_ALLOWED_SOURCE_HOSTS'));
+    const allowlist = [
+      ...this.parseAllowlist(this.config.get<string[]>('ingest.allowedSourceHosts')),
+      ...this.parseAllowlist(this.config.get<string>('INGEST_ALLOWED_SOURCE_HOSTS'))
+    ];
     if (!allowlist.length) {
       return;
     }
@@ -177,7 +180,12 @@ export class IngestPolicyService {
     }
   }
 
-  private parseAllowlist(raw: string | undefined): string[] {
+  private parseAllowlist(raw: string[] | string | undefined): string[] {
+    if (Array.isArray(raw)) {
+      return raw
+        .map((entry) => entry.trim().toLowerCase())
+        .filter(Boolean);
+    }
     return String(raw ?? '')
       .split(',')
       .map((entry) => entry.trim().toLowerCase())

@@ -27,7 +27,10 @@ export interface AuditLogInput {
   after?: Record<string, unknown>;
 }
 
-const SENSITIVE_KEY_PATTERN = /(password|passcode|token|secret|authorization|cookie|credential|content|message|body|file|hash|privatekey|api[-_]?key)/i;
+const SENSITIVE_KEY_PATTERN =
+  /(password|passcode|token|secret|authorization|cookie|credential|content|message|body|file|hash|privatekey|api[-_]?key|storage|storagekey|path|url|uri|attachment|payload|raw)/i;
+const SENSITIVE_VALUE_PATTERN =
+  /(bearer\s+[a-z0-9._-]+|mongodb(?:\+srv)?:\/\/\S+|redis:\/\/\S+|(?:\/Volumes\/|\/var\/folders\/|\/private\/|[A-Za-z]:\\)\S+|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/i;
 const MAX_REDACTION_DEPTH = 6;
 
 @Injectable()
@@ -103,6 +106,7 @@ export class AuditLogsService {
   private toFilter(query: AdminAuditLogQuery): FilterQuery<AuditLogMongoDocument> {
     const filter: FilterQuery<AuditLogMongoDocument> = {};
     if (query.actorId) filter.actorId = query.actorId;
+    if (query.actorRole) filter.actorRoles = query.actorRole.toUpperCase();
     if (query.action) filter.action = query.action;
     if (query.resourceType) filter.resourceType = query.resourceType;
     if (query.resourceId) filter.resourceId = query.resourceId;
@@ -144,6 +148,8 @@ export class AuditLogsService {
       ...(resourceType ? { resourceType } : {}),
       ...(resourceId ? { resourceId } : {}),
       ...(doc.resourceLabel ? { resourceLabel: doc.resourceLabel } : {}),
+      ...(doc.targetType ? { targetType: doc.targetType } : {}),
+      ...(doc.targetId ? { targetId: doc.targetId } : {}),
       ...(doc.targetUserId ? { targetUserId: doc.targetUserId } : {}),
       status: doc.status ?? 'success',
       ...(doc.ipAddress ? { ipAddress: doc.ipAddress } : {}),
@@ -190,6 +196,9 @@ export class AuditLogsService {
         output[key] = SENSITIVE_KEY_PATTERN.test(key) ? '[redacted]' : this.redactValue(entry, depth + 1);
       }
       return output;
+    }
+    if (typeof value === 'string' && SENSITIVE_VALUE_PATTERN.test(value)) {
+      return '[redacted]';
     }
     return value;
   }

@@ -28,6 +28,9 @@ import {
   ChatThreadSummary,
   ChatThreadSummaryResponse,
   ChatHistoryResponse,
+  AdminClassSessionHealthMediaCounts,
+  AdminClassSessionHealthParticipantCounts,
+  AdminClassSessionHealthRoom,
   type ClassSessionActivityRequest,
   type ClassSessionMaterialEvent,
   type ClassSessionLifecycleEvent,
@@ -402,6 +405,16 @@ export interface CreateIngestProducerRequest {
   rtpParameters: RtpParameters;
   priority?: number;
   status?: 'live' | 'paused';
+}
+
+export interface ClassSessionOperationalRoomHealth {
+  room: AdminClassSessionHealthRoom;
+  teacherConnected: boolean;
+  teacherParticipantId?: string;
+  participants: AdminClassSessionHealthParticipantCounts;
+  media: AdminClassSessionHealthMediaCounts;
+  recentIncidents: RoomIncidentTimelineEvent[];
+  lastActivityAt?: string;
 }
 
 const ROOM_QUALITY_SIGNAL_STALE_MS = 15_000;
@@ -5839,6 +5852,56 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return this.listRoomIncidentTimeline(roomId, limit);
   }
 
+  async getClassSessionOperationalRoomHealth(roomId: string, teacherId: string): Promise<ClassSessionOperationalRoomHealth> {
+    const [room, incidentTimeline] = await Promise.all([
+      this.getRoom(roomId),
+      this.getRoomIncidentTimelineForOperations(roomId, 20)
+    ]);
+    const teacher = room.participants.find((participant) => participant.userId === teacherId || participant.role === Role.HOST);
+    const participants: AdminClassSessionHealthParticipantCounts = {
+      total: room.participants.length,
+      admitted: room.participants.filter((participant) => participant.admitted).length,
+      pending: room.participants.filter((participant) => !participant.admitted).length,
+      students: room.participants.filter((participant) => participant.role === Role.PARTICIPANT).length,
+      hosts: room.participants.filter((participant) => participant.role === Role.HOST).length,
+      coHosts: room.participants.filter((participant) => participant.role === Role.CO_HOST).length,
+      handRaised: room.participants.filter((participant) => participant.handRaised).length,
+      inactive: room.participants.filter((participant) => participant.inactive).length
+    };
+    const media: AdminClassSessionHealthMediaCounts = {
+      audioProducers: room.producers.filter((producer) => producer.kind === 'audio' && producer.status === 'live').length,
+      videoProducers: room.producers.filter((producer) => producer.kind === 'video' && producer.status === 'live').length,
+      screenProducers: room.producers.filter((producer) => producer.kind === 'screen' && producer.status === 'live').length,
+      whiteboardProducers: room.producers.filter((producer) => producer.kind === 'screen' && producer.source === 'whiteboard' && producer.status === 'live').length,
+      pausedProducers: room.producers.filter((producer) => producer.status === 'paused').length,
+      liveConsumers: room.consumers.filter((consumer) => consumer.status === 'live').length,
+      pausedConsumers: room.consumers.filter((consumer) => consumer.status === 'paused').length
+    };
+    const lastActivityAt = this.latestIso([
+      ...room.participants.map((participant) => participant.lastActiveAt ?? participant.lastSeenAt),
+      ...incidentTimeline.events.map((event) => event.createdAt)
+    ]);
+    return {
+      room: {
+        roomId: room.id,
+        closed: Boolean(room.closedAt),
+        locked: room.settings.locked,
+        mediaStatus: room.mediaState?.status ?? 'active',
+        ...(room.mediaState?.failureReason ? { mediaFailureReason: room.mediaState.failureReason } : {}),
+        incidentStatus: room.incidentState?.status,
+        incidentHealth: room.incidentState?.health,
+        protected: Boolean(room.incidentState?.protected),
+        activeAlerts: room.incidentState?.activeAlerts ?? []
+      },
+      teacherConnected: Boolean(teacher?.connected),
+      ...(teacher?.id ? { teacherParticipantId: teacher.id } : {}),
+      participants,
+      media,
+      recentIncidents: incidentTimeline.events,
+      ...(lastActivityAt ? { lastActivityAt } : {})
+    };
+  }
+
   async getRoomSnapshotHistoryForOperations(roomId: string, limit?: number): Promise<RoomSnapshotHistoryState> {
     return this.listRoomSnapshotHistory(roomId, limit);
   }
@@ -7693,6 +7756,17 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
 
   private dateToIso(value: Date | string): string {
     return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+  }
+
+  private latestIso(values: Array<string | undefined>): string | undefined {
+    const timestamps = values
+      .filter((value): value is string => Boolean(value))
+      .map((value) => Date.parse(value))
+      .filter((value) => Number.isFinite(value));
+    if (!timestamps.length) {
+      return undefined;
+    }
+    return new Date(Math.max(...timestamps)).toISOString();
   }
 
   private async assertParticipant(roomId: string, participantId: string): Promise<ParticipantMongoDocument> {

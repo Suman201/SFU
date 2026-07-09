@@ -1,6 +1,6 @@
 # Repo-Wide Production Readiness Gaps
 
-Updated: 2026-06-25
+Updated: 2026-07-09
 
 This document tracks production gaps across the full Native SFU repo, not only the live class-session surface.
 
@@ -38,7 +38,7 @@ The repo has many production-shaped features in place: manual class-session life
 | --- | --- | --- | --- |
 | Backend API and sockets | `apps/backend` | Needs full green test/build/dev proof, auth edge-case coverage, staging WebRTC proof, and operational hardening evidence. | **Pending Proof** |
 | Teacher/student portal | `apps/frontend` | Needs real runtime screenshots, mobile/tablet QA proof, browser media proof, and demo/static data sweep. | **Pending Proof** |
-| Admin portal | `apps/admin-portal` | Needs admin workflow QA, route-level access proof, dashboard/module smoke proof, and production config proof. | **Pending Proof** |
+| Admin portal | `apps/admin-portal` | Has build-backed route smoke coverage for dashboard/modules and basic non-admin redirect; still needs seeded real-backend workflow QA, production config proof, and export/action signoff. | **Pending Proof** |
 | Shared contracts | `packages/contracts` | Needs contract drift checks across backend/frontend/admin and versioned release discipline. | **Pending Proof** |
 | SFU core packages | `packages/sfu-core`, `packages/nest-sfu` | Needs media interoperability, staging TURN/UDP proof, multi-node pipe proof, and load/soak evidence. | **Blocker** for scale |
 | Infra | `infra` | Needs production secret handling, ingress/TURN validation, backups, retention, observability access control, and multi-node runbooks. | **Blocker** |
@@ -152,13 +152,21 @@ Target paths to keep under review:
 
 Status: **Pending Proof**.
 
+Completed baseline proof:
+
+- **Done**: Admin portal build-backed route smoke exists: `npm run test:browser:admin-portal`.
+- **Done**: Smoke covers `/dashboard`, `/class-sessions`, class-session detail, `/attendance`, `/recordings`, recording detail, `/enrollments`, enrollment detail, `/users`, user detail, `/courses`, course detail, `/batches`, batch detail, `/support`, `/teacher-promotions`, `/audit-logs`, audit-log detail, `/class-library`, and unknown-route redirect behavior.
+- **Done**: Smoke runs desktop, tablet, and mobile viewport checks against the built admin portal with mocked safe admin API responses.
+- **Done**: Smoke validates non-admin sessions are returned to the login surface.
+- **Done**: Smoke fails on broad route error alerts, console/page errors, body-level horizontal overflow, and obvious sensitive text such as bearer tokens, storage keys, local filesystem paths, or Mongo connection strings.
+
 Required proof:
 
 - admin login works against the real backend
-- default dashboard route loads
-- class sessions list/detail loads
-- attendance analytics and drilldown load
-- recordings list/detail loads
+- default dashboard route loads against real backend data
+- class sessions list/detail loads against real backend data
+- attendance analytics and drilldown load against real backend data
+- recordings list/detail loads against real backend data
 - enrollment oversight loads and updates real backend state
 - user management enforces roles
 - course and batch management use backend data
@@ -303,6 +311,52 @@ Related files:
 - `docs/operator-runbook.md`
 - `infra/prometheus/prometheus.yml`
 - `infra/grafana/provisioning/dashboards/native-sfu.json`
+
+## P2: Admin Audit Log Explorer And Compliance Review
+
+Status: **Done** for the implemented explorer and metadata-safety baseline; real-data compliance sampling and retention signoff remain tracked under durability/security proof.
+
+Completed baseline:
+
+- **Done**: Admin audit APIs exist for list/detail at `/api/v1/admin/audit-logs` and `/api/v1/admin/audit-logs/:auditLogId`.
+- **Done**: Audit list supports status, actor id, actor role, action, resource type/id, date range, search, page, and limit filters.
+- **Done**: Audit detail shows safe actor, action, status, resource, target, request, metadata, before, and after data.
+- **Done**: Audit metadata redacts sensitive keys and sensitive string values, including passwords, tokens, secrets, storage keys, raw URLs, local paths, raw payloads, and private message/body fields.
+- **Done**: Admin portal audit list/detail pages use shared admin table/card patterns and link to safe resource routes when the affected resource type is known.
+- **Done**: Non-admin access is rejected by the backend audit service and admin route guard path.
+
+Remaining proof:
+
+- sample real production-like audit rows across user, enrollment, course, batch, recording, support, promotion, class-session, and export actions
+- confirm audit retention policy and backup/restore behavior
+- confirm no feature-specific audit writer stores private chat/Q&A bodies or raw attachment/media internals
+
+## P2: Page-Wise CMS, Public Content, And Contact Inbox Management
+
+Status: **Done** for the first production-safe CMS and Contact Inbox baseline; richer visual block editing, media picker integration, legal version history, and seeded browser QA remain future scope.
+
+Completed baseline:
+
+- **Done**: Admin-only CMS APIs exist for page list, create, update, publish, unpublish, and archive under `/api/v1/admin/cms/pages`.
+- **Done**: Public CMS APIs expose only published `public` or `all` audience pages under `/api/v1/cms/pages`.
+- **Done**: CMS pages store slug, title, page type, status, audience, locale, summary, markdown body, structured sections, SEO metadata, tags, and publish/archive metadata.
+- **Done**: CMS write paths sanitize unsafe tags, event handlers, script/data URL protocols, and unsafe link/image URLs before persistence.
+- **Done**: CMS create/update/publish/unpublish/archive actions write safe audit logs without storing page bodies or raw content payloads.
+- **Done**: Admin portal has a compact `/cms/pages` module using shared admin table patterns, filters, draft editor, safe preview, and status actions.
+- **Done**: Public Home, About, Contact Us, FAQ, Help, Terms, Privacy Policy, Refund Policy, and teacher marketplace intro can render published CMS copy with static fallback when CMS content is missing.
+- **Done**: Public Contact Us form submissions persist through `POST /api/v1/contact/submissions` without requiring login.
+- **Done**: Contact submissions store sanitized name, email, phone, subject, message, category, source page, user agent, hashed IP context, status, priority, assignment, internal notes, and replies.
+- **Done**: Admin portal has a compact `/cms/contact` Contact Inbox using shared admin table patterns, filters, detail triage, reply composer, archive, and spam actions.
+- **Done**: Admin replies use the existing backend email provider path and store delivery status as sent, skipped, or failed without losing the reply.
+- **Done**: Contact create/update/reply/archive/spam actions write audit records without exposing private class-session or support data.
+
+Remaining proof:
+
+- add a richer block editor or curated section presets if admins should not edit JSON directly
+- integrate media/file picker for CMS images once public asset policy is finalized
+- add explicit legal page version history beyond audit metadata if compliance requires immutable legal text snapshots
+- run browser QA against seeded CMS/contact pages across desktop, tablet, and mobile
+- add optional admin notifications for new contact submissions if product wants active alerting
 
 ## P1: Data Durability, Backups, And Retention
 
@@ -454,4 +508,3 @@ Exit criteria:
 - Redis/Mongo behavior proven under expected load
 - no cross-node event leakage
 - multi-node incident runbooks tested
-

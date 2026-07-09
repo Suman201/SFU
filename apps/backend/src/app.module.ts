@@ -13,9 +13,11 @@ import { AuthModule } from './auth/auth.module';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
 import { ClassLibraryModule } from './class-library/class-library.module';
 import { ClassSessionsModule } from './class-sessions/class-sessions.module';
+import { CmsModule } from './cms/cms.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { appConfig } from './config/app.config';
 import { validateConfig } from './config/env.validation';
+import { ContactModule } from './contact/contact.module';
 import { DatabaseModule } from './database/database.module';
 import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
@@ -165,6 +167,8 @@ import { UsersModule } from './users/users.module';
     IngestModule,
     TeacherBatchesModule,
     ClassLibraryModule,
+    CmsModule,
+    ContactModule,
     ClassSessionsModule,
     SessionsModule,
     RecordingsModule,

@@ -3,12 +3,13 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { AuthModule } from '../auth/auth.module';
 import { ClassSessionActivityModule } from '../class-session-activity/class-session-activity.module';
 import { DatabaseModule } from '../database/database.module';
+import { MetricsModule } from '../metrics/metrics.module';
 import { StudentEnrollmentsModule } from '../student-enrollments/student-enrollments.module';
 import { AdminSupportController, SupportController } from './support.controller';
 import { SupportService } from './support.service';
 
 @Module({
-  imports: [AuthModule, DatabaseModule, StudentEnrollmentsModule, AuditLogsModule, ClassSessionActivityModule],
+  imports: [AuthModule, DatabaseModule, StudentEnrollmentsModule, AuditLogsModule, ClassSessionActivityModule, MetricsModule],
   controllers: [SupportController, AdminSupportController],
   providers: [SupportService],
   exports: [SupportService]

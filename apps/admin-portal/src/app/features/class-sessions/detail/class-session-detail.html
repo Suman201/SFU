@@ -35,6 +35,87 @@
     </article>
   </section>
 
+  @if (healthLoading() && !health()) {
+    <section class="detail-state">Loading session health...</section>
+  } @else if (healthError()) {
+    <section class="detail-state error" role="alert">{{ healthError() }}</section>
+  } @else if (health(); as ops) {
+    <section
+      class="health-panel"
+      [class.health-critical]="healthBadgeClass(ops) === 'health-critical'"
+      [class.health-warning]="healthBadgeClass(ops) === 'health-warning'"
+      [class.health-ok]="healthBadgeClass(ops) === 'health-ok'"
+      aria-label="Operational session health"
+    >
+      <div class="health-head">
+        <div>
+          <p class="eyebrow">Session health</p>
+          <h2>{{ ops.teacher.state }}</h2>
+          <p>
+            {{ ops.room?.incidentHealth || 'no-room-health' }} · {{ ops.participants.admitted }} admitted ·
+            {{ ops.issues.total }} safe issue{{ ops.issues.total === 1 ? '' : 's' }}
+          </p>
+        </div>
+        <div class="health-links">
+          <a class="table-action" routerLink="/support" [queryParams]="{ sessionId: item.sessionId }">Support</a>
+          <a class="table-action" routerLink="/recordings" [queryParams]="{ sessionId: item.sessionId }">Recordings</a>
+          <a class="table-action" routerLink="/attendance" [queryParams]="{ sessionId: item.sessionId }">Attendance</a>
+        </div>
+      </div>
+
+      <div class="health-grid">
+        <article>
+          <span>Teacher</span>
+          <strong>{{ ops.teacher.connected ? 'Connected' : ops.teacher.state }}</strong>
+          <small>
+            @if (ops.teacher.reconnectDeadlineAt) {
+              Grace until {{ ops.teacher.reconnectDeadlineAt | date: 'short' }}
+            } @else {
+              No active grace timer
+            }
+          </small>
+        </article>
+        <article>
+          <span>Room</span>
+          <strong>{{ ops.room?.closed ? 'Closed' : (ops.room?.mediaStatus || 'Not created') }}</strong>
+          <small>{{ ops.room?.activeAlerts?.length ?? 0 }} active alert{{ (ops.room?.activeAlerts?.length ?? 0) === 1 ? '' : 's' }}</small>
+        </article>
+        <article>
+          <span>Media</span>
+          <strong>{{ ops.media.audioProducers + ops.media.videoProducers + ops.media.screenProducers }} live producers</strong>
+          <small>{{ ops.media.liveConsumers }} consumers · {{ ops.media.whiteboardProducers }} whiteboard</small>
+        </article>
+        <article>
+          <span>Joins</span>
+          <strong>{{ ops.joins.deniedTotal }} denied</strong>
+          <small>{{ ops.participants.pending }} waiting · {{ ops.participants.inactive }} inactive</small>
+        </article>
+        <article>
+          <span>Recording</span>
+          <strong>{{ ops.recording.active }} active</strong>
+          <small>{{ ops.recording.failed }} failed · {{ ops.recording.total }} total</small>
+        </article>
+        <article>
+          <span>Support</span>
+          <strong>{{ ops.support.open + ops.support.inReview + ops.support.waitingForStudent }} unresolved</strong>
+          <small>{{ ops.support.total }} linked request{{ ops.support.total === 1 ? '' : 's' }}</small>
+        </article>
+      </div>
+
+      @if (ops.issues.recent.length) {
+        <div class="health-incidents">
+          @for (incident of ops.issues.recent.slice(0, 3); track incident.id) {
+            <article>
+              <span class="data-pill">{{ incident.severity }}</span>
+              <strong>{{ incident.summary }}</strong>
+              <small>{{ incident.createdAt | date: 'short' }}</small>
+            </article>
+          }
+        </div>
+      }
+    </section>
+  }
+
   <section class="attendance-card">
     <div>
       <p class="eyebrow">Attendance</p>

@@ -74,7 +74,7 @@ Use the Native SFU palette for new UI surfaces:
 17. ~~Attendance analytics and admin reporting.~~
 18. Classroom policy presets.
 19. Accessibility and localization pass.
-20. Production observability and support tooling.
+20. ~~Production observability and support tooling.~~
 
 ## Completed Or Baseline Items
 
@@ -99,6 +99,7 @@ These ideas should no longer be tracked as new roadmap items unless the goal is 
 - ~~Teacher marketplace and discovery with `/teachers` public listing, safe teacher cards, public-profile links, search/filter API, and student explore entry points.~~
 - ~~Public teacher profile promotion foundation with teacher requests, admin approval/pause/cancel/reject, active promotion boosting, promoted marketplace badges, and audit-safe records.~~
 - ~~Recording playback analytics with enrollment-protected progress writes, watched/unwatched student progress, teacher engagement rollups, and admin recording engagement cards.~~
+- ~~Production observability and support tooling with admin session health snapshots, support-safe diagnostics, support/recording metrics, and dashboard operational issue surfacing.~~
 - ~~Persisted realtime whiteboard with operation persistence, current snapshots, student read-only sync, and completed-session review.~~
 - ~~Chat unread/read state and delivery UI.~~
 - ~~Enrollment-based class-session access control.~~
@@ -1136,27 +1137,51 @@ Live classroom UI has high interaction density. Keyboard, screen reader, contras
 
 ## P2: Production Observability And Support Tooling
 
+Status: **Done on 2026-07-09** for the admin health snapshot, metrics, dashboard issue surfacing, and support-safe diagnostics scope.
+
+Completed roadmap requirements below are fully struck through. The unstruck `Done:` notes describe what shipped.
+
 ### Why
 
-Live classes need quick support answers: who is connected, whether media is flowing, why a student cannot join, and whether socket events are delayed.
+~~Live classes need quick support answers: who is connected, whether media is flowing, why a student cannot join, and whether socket events are delayed.~~
+
+Done: admin users can inspect a support-safe class-session health snapshot, the admin dashboard surfaces live operational issues, and support/recording flows emit bounded metrics without exposing private payloads.
 
 ### Proposed Behavior
 
-- Add class-session support view for admin/operator users.
-- Show session status, room owner, connected participants, media producers, reconnect grace state, lock state, chat health, and recent errors.
-- Add metrics/alerts for failed joins, reconnect grace expiries, chat delivery failures, and attachment validation failures.
+- ~~Add class-session support view for admin/operator users.~~
+  Done: admin class-session detail now includes an Operational Health panel backed by `GET /api/v1/admin/class-sessions/:sessionId/health`.
+- ~~Show session status, room owner, connected participants, media producers, reconnect grace state, lock state, chat health, and recent errors.~~
+  Done: the health payload includes safe session, room, teacher connection, participant count, media count, recent join denial, recording, support, and issue summaries.
+- ~~Add metrics/alerts for failed joins, reconnect grace expiries, chat delivery failures, and attachment validation failures.~~
+  Done: existing class-session lifecycle/chat/media counters remain in place, and this pass added support-request and recording-event counters plus dashboard issues for teacher reconnecting, media failures, join denials, failed recordings, and unresolved support requests.
 
 ### Implementation Notes
 
-- Reuse existing room quality, incident, and snapshot systems.
-- Avoid exposing private chat bodies in support views.
-- Add links from session report to room incident evidence.
+- ~~Reuse existing room quality, incident, and snapshot systems.~~
+  Done: the health endpoint reuses class-session, room, participant, support, recording, and timeline/incident state instead of introducing a parallel event stack.
+- ~~Avoid exposing private chat bodies in support views.~~
+  Done: support diagnostics and health summaries expose IDs, counts, statuses, timestamps, and redacted reasons only; private chat/Q&A bodies, raw media payloads, storage keys, tokens, and secrets stay out of the support view.
+- ~~Add links from session report to room incident evidence.~~
+  Done: the health response includes admin links to the class-session detail, timeline, attendance, recordings, support, and live room where applicable.
 
 ### Acceptance Checks
 
-- Operator can diagnose a live class without database shell access.
-- Alerts include session and batch identifiers.
-- Support view respects admin-only access.
+- ~~Operator can diagnose a live class without database shell access.~~
+  Done: admins can open the class-session detail Operational Health panel for the current safe health snapshot.
+- ~~Alerts include session and batch identifiers.~~
+  Done: dashboard operational issues and session health summaries include session and batch identifiers plus safe related links.
+- ~~Support view respects admin-only access.~~
+  Done: the health endpoint is exposed from the admin class-session controller and uses the existing admin/super-admin guard path.
+
+### Verification
+
+- Contracts build passed: `npm run build --workspace @native-sfu/contracts`.
+- Backend build passed: `npm run build --workspace @native-sfu/backend`.
+- Frontend build passed: `npm run build --workspace @native-sfu/frontend`.
+- Admin portal build passed: `npm run build --workspace @native-sfu/admin-portal`.
+- Focused backend tests passed: `npm test --workspace @native-sfu/backend -- admin-dashboard.service.spec.ts support.service.spec.ts class-sessions.service.spec.ts rooms.service.spec.ts recordings.service.spec.ts metrics.service.spec.ts`.
+- `git diff --check` passed.
 
 ## Verification Checklist
 

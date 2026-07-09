@@ -6,6 +6,8 @@ import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import {
   BatchDocument,
   BatchMongoDocument,
+  ClassSessionActivityEventDocument,
+  ClassSessionActivityEventMongoDocument,
   ClassSessionAttendanceSnapshotDocument,
   ClassSessionAttendanceSnapshotMongoDocument,
   ClassSessionDocument,
@@ -14,6 +16,8 @@ import {
   RecordingMongoDocument,
   StudentEnrollmentDocument,
   StudentEnrollmentMongoDocument,
+  SupportRequestDocument,
+  SupportRequestMongoDocument,
   UserDocument,
   UserMongoDocument
 } from '../database/schemas';
@@ -27,7 +31,9 @@ export class AdminDashboardService {
     @InjectModel(RecordingDocument.name) private readonly recordings: Model<RecordingMongoDocument>,
     @InjectModel(StudentEnrollmentDocument.name) private readonly enrollments: Model<StudentEnrollmentMongoDocument>,
     @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>,
-    @InjectModel(BatchDocument.name) private readonly batches: Model<BatchMongoDocument>
+    @InjectModel(BatchDocument.name) private readonly batches: Model<BatchMongoDocument>,
+    @InjectModel(SupportRequestDocument.name) private readonly supportRequests: Model<SupportRequestMongoDocument>,
+    @InjectModel(ClassSessionActivityEventDocument.name) private readonly activityEvents: Model<ClassSessionActivityEventMongoDocument>
   ) {}
 
   async getSummary(user: AuthenticatedUser): Promise<AdminDashboardSummary> {
@@ -54,7 +60,11 @@ export class AdminDashboardService {
       suspendedEnrollments,
       activeCourses,
       attendanceCounts,
-      liveSessionItems
+      liveSessionItems,
+      teacherReconnectGraceSessions,
+      unresolvedSupportRequests,
+      recentJoinDenials,
+      recentMediaFailures
     ] = await Promise.all([
       this.classSessions.countDocuments({ status: 'live' }).exec(),
       this.classSessions.countDocuments({ scheduledAt: { $gte: todayStart, $lt: todayEnd } }).exec(),
@@ -74,7 +84,22 @@ export class AdminDashboardService {
       this.enrollments.countDocuments({ deletedAt: { $exists: false }, status: 'suspended' }).exec(),
       this.countActiveCourses(),
       this.todayAttendanceCounts(todayStart, todayEnd),
-      this.liveSessionRows()
+      this.liveSessionRows(),
+      this.classSessions.countDocuments({ status: 'live', teacherReconnectDeadlineAt: { $exists: true } }).exec(),
+      this.supportRequests.countDocuments({ deletedAt: { $exists: false }, status: { $in: ['open', 'in_review', 'waiting_for_student'] } }).exec(),
+      this.activityEvents
+        .countDocuments({
+          eventType: 'participant.join_denied',
+          createdAt: { $gte: new Date(generatedAt.getTime() - 30 * 60 * 1000) }
+        })
+        .exec(),
+      this.activityEvents
+        .countDocuments({
+          category: 'media',
+          eventType: { $regex: /failed$/ },
+          createdAt: { $gte: new Date(generatedAt.getTime() - 30 * 60 * 1000) }
+        })
+        .exec()
     ]);
 
     const issues = this.dashboardIssues({
@@ -83,7 +108,11 @@ export class AdminDashboardService {
       pendingEnrollments,
       suspendedEnrollments,
       disabledUsers,
-      cancelledBatches
+      cancelledBatches,
+      teacherReconnectGraceSessions,
+      unresolvedSupportRequests,
+      recentJoinDenials,
+      recentMediaFailures
     });
 
     return {
@@ -132,7 +161,8 @@ export class AdminDashboardService {
         teacherId: session.teacherId,
         ...(teacher?.displayName ? { teacherName: teacher.displayName } : {}),
         ...(session.startedAt ? { startedAt: session.startedAt.toISOString() } : {}),
-        ...(session.roomId ? { roomId: session.roomId } : {})
+        ...(session.roomId ? { roomId: session.roomId } : {}),
+        teacherState: session.teacherReconnectDeadlineAt ? 'reconnecting' : 'connected'
       };
     });
   }
@@ -182,10 +212,46 @@ export class AdminDashboardService {
     suspendedEnrollments: number;
     disabledUsers: number;
     cancelledBatches: number;
+    teacherReconnectGraceSessions: number;
+    unresolvedSupportRequests: number;
+    recentJoinDenials: number;
+    recentMediaFailures: number;
   }): AdminDashboardIssue[] {
     const issues: AdminDashboardIssue[] = [];
+    if (input.teacherReconnectGraceSessions > 0) {
+      issues.push({
+        severity: 'critical',
+        label: 'Teachers reconnecting in live sessions',
+        count: input.teacherReconnectGraceSessions,
+        link: '/class-sessions?status=live'
+      });
+    }
     if (input.failedRecordings > 0) {
       issues.push({ severity: 'critical', label: 'Failed recordings need review', count: input.failedRecordings, link: '/recordings?status=failed' });
+    }
+    if (input.recentMediaFailures > 0) {
+      issues.push({
+        severity: 'warning',
+        label: 'Recent live media failures',
+        count: input.recentMediaFailures,
+        link: '/class-sessions?status=live'
+      });
+    }
+    if (input.recentJoinDenials > 0) {
+      issues.push({
+        severity: 'warning',
+        label: 'Recent class join denials',
+        count: input.recentJoinDenials,
+        link: '/class-sessions?status=live'
+      });
+    }
+    if (input.unresolvedSupportRequests > 0) {
+      issues.push({
+        severity: 'warning',
+        label: 'Unresolved support requests',
+        count: input.unresolvedSupportRequests,
+        link: '/support'
+      });
     }
     if (input.suspendedEnrollments > 0) {
       issues.push({ severity: 'warning', label: 'Suspended enrollments', count: input.suspendedEnrollments, link: '/enrollments?status=suspended' });

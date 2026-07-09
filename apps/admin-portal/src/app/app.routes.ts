@@ -42,6 +42,14 @@ export const routes: Routes = [
         loadComponent: () => import('./features/class-library/class-library').then((route) => route.AdminClassLibrary)
       },
       {
+        path: 'cms/pages',
+        loadComponent: () => import('./features/cms/pages/cms-pages').then((route) => route.CmsPages)
+      },
+      {
+        path: 'cms/contact',
+        loadComponent: () => import('./features/contact-inbox/contact-inbox').then((route) => route.ContactInbox)
+      },
+      {
         path: 'support',
         loadComponent: () => import('./features/support/support-requests').then((route) => route.SupportRequests)
       },

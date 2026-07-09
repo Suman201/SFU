@@ -22,11 +22,14 @@ import {
   ClassSessionMongoDocument,
   RecordingDocument,
   RecordingMongoDocument,
+  RoomDocument,
+  RoomMongoDocument,
   SupportRequestDocument,
   SupportRequestMongoDocument,
   UserDocument,
   UserMongoDocument
 } from '../database/schemas';
+import { MetricsService } from '../metrics/metrics.service';
 import { StudentEnrollmentsService } from '../student-enrollments/student-enrollments.service';
 
 const SUPPORT_ISSUE_TYPES: SupportIssueType[] = [
@@ -64,7 +67,9 @@ export class SupportService {
     @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>,
     private readonly enrollments: StudentEnrollmentsService,
     @Optional() private readonly activity?: ClassSessionActivityService,
-    @Optional() private readonly auditLogs?: AuditLogsService
+    @Optional() private readonly auditLogs?: AuditLogsService,
+    @Optional() private readonly metrics?: MetricsService,
+    @Optional() @InjectModel(RoomDocument.name) private readonly rooms?: Model<RoomMongoDocument>
   ) {}
 
   async createStudentRequest(user: AuthenticatedUser, request: CreateSupportRequestRequest): Promise<SupportRequest> {
@@ -80,7 +85,7 @@ export class SupportService {
       status: 'open',
       subject: this.requiredText(request.subject, 'Subject', 180),
       message: this.requiredText(request.message, 'Message', 5000),
-      diagnostics: this.sanitizeDiagnostics(request.diagnostics),
+      diagnostics: await this.supportDiagnostics(request.diagnostics, context),
       comments: []
     });
     await this.recordCreated(doc, user);
@@ -156,6 +161,9 @@ export class SupportService {
       });
     }
     await doc.save();
+    if (beforeStatus !== doc.status) {
+      this.metrics?.classSessionSupportRequests.labels('status_changed', doc.status, doc.issueType).inc();
+    }
     await this.auditLogs?.record({
       actor: user,
       action: 'admin.support.update',
@@ -355,6 +363,7 @@ export class SupportService {
         }
       });
     }
+    this.metrics?.classSessionSupportRequests.labels('created', doc.status, doc.issueType).inc();
   }
 
   private toSupportRequest(doc: SupportRequestMongoDocument, audience: 'student' | 'admin'): SupportRequest {
@@ -401,6 +410,25 @@ export class SupportService {
     return this.sanitizeDiagnostics(diagnostics) ?? {};
   }
 
+  private async supportDiagnostics(
+    input: SupportRequestDiagnostics | undefined,
+    context: SupportContextResolution
+  ): Promise<SupportRequestDiagnostics | undefined> {
+    const diagnostics = this.sanitizeDiagnostics(input) ?? {};
+    if (context.session?.status) {
+      diagnostics.classSessionStatus = context.session.status;
+      diagnostics.teacherConnectionState = this.teacherConnectionState(context.session);
+    }
+    const roomStatus = await this.safeRoomStatus(context.roomId);
+    if (roomStatus) {
+      diagnostics.roomStatus = roomStatus;
+    }
+    if (context.recording?.status) {
+      diagnostics.recordingStatus = context.recording.status;
+    }
+    return Object.keys(diagnostics).length ? diagnostics : undefined;
+  }
+
   private sanitizeDiagnostics(input?: SupportRequestDiagnostics): SupportRequestDiagnostics | undefined {
     if (!input) return undefined;
     const diagnostics: SupportRequestDiagnostics = {};
@@ -416,7 +444,49 @@ export class SupportService {
     if (platform) diagnostics.platform = platform;
     if (input.microphonePermission && PERMISSION_STATES.has(input.microphonePermission)) diagnostics.microphonePermission = input.microphonePermission;
     if (input.cameraPermission && PERMISSION_STATES.has(input.cameraPermission)) diagnostics.cameraPermission = input.cameraPermission;
+    const classSessionStatus = this.optionalText(input.classSessionStatus, 40);
+    const recordingStatus = this.optionalText(input.recordingStatus, 40);
+    if (classSessionStatus) diagnostics.classSessionStatus = classSessionStatus;
+    if (input.roomStatus && ['active', 'closed', 'unknown'].includes(input.roomStatus)) diagnostics.roomStatus = input.roomStatus;
+    if (
+      input.teacherConnectionState &&
+      ['connected', 'reconnecting', 'absent', 'not_started', 'ended'].includes(input.teacherConnectionState)
+    ) {
+      diagnostics.teacherConnectionState = input.teacherConnectionState;
+    }
+    if (recordingStatus) diagnostics.recordingStatus = recordingStatus;
     return Object.keys(diagnostics).length ? diagnostics : undefined;
+  }
+
+  private async safeRoomStatus(roomId: string | undefined): Promise<SupportRequestDiagnostics['roomStatus'] | undefined> {
+    if (!roomId) {
+      return undefined;
+    }
+    if (!this.rooms) {
+      return 'unknown';
+    }
+    try {
+      const room = await this.rooms.findById(roomId).exec();
+      if (!room) {
+        return 'unknown';
+      }
+      return room.closedAt ? 'closed' : 'active';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  private teacherConnectionState(session: ClassSessionMongoDocument): NonNullable<SupportRequestDiagnostics['teacherConnectionState']> {
+    if (session.status === 'scheduled') {
+      return 'not_started';
+    }
+    if (session.status === 'completed' || session.status === 'cancelled') {
+      return 'ended';
+    }
+    if (session.teacherReconnectDeadlineAt) {
+      return 'reconnecting';
+    }
+    return 'connected';
   }
 
   private issueType(value: unknown): SupportIssueType {

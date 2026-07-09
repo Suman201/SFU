@@ -1,7 +1,13 @@
 import { DatePipe, PercentPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import type { AdminClassSessionReportRow, ClassSessionReport, ClassSessionTimelineCategory, ClassSessionTimelineEvent } from '@native-sfu/contracts';
+import type {
+  AdminClassSessionHealthResponse,
+  AdminClassSessionReportRow,
+  ClassSessionReport,
+  ClassSessionTimelineCategory,
+  ClassSessionTimelineEvent
+} from '@native-sfu/contracts';
 import { finalize } from 'rxjs';
 import { AdminApiService } from '../../../core/services/admin-api.service';
 
@@ -18,6 +24,7 @@ export class ClassSessionDetail implements OnInit {
   private readonly route = inject(ActivatedRoute);
 
   protected readonly session = signal<AdminClassSessionReportRow | null>(null);
+  protected readonly health = signal<AdminClassSessionHealthResponse | null>(null);
   protected readonly report = signal<ClassSessionReport | null>(null);
   protected readonly timeline = signal<ClassSessionTimelineEvent[]>([]);
   protected readonly timelineCategory = signal<ClassSessionTimelineCategory | 'all'>('all');
@@ -26,6 +33,8 @@ export class ClassSessionDetail implements OnInit {
   protected readonly timelineHasMore = signal(false);
   protected readonly timelineNextBefore = signal<string | null>(null);
   protected readonly loading = signal(false);
+  protected readonly healthLoading = signal(false);
+  protected readonly healthError = signal('');
   protected readonly reportLoading = signal(false);
   protected readonly reportError = signal('');
   protected readonly downloading = signal(false);
@@ -46,6 +55,7 @@ export class ClassSessionDetail implements OnInit {
 
   ngOnInit(): void {
     this.load();
+    this.loadHealth();
     this.loadReport();
     this.loadTimeline();
   }
@@ -129,6 +139,16 @@ export class ClassSessionDetail implements OnInit {
     return remaining ? `${hours}h ${remaining}m` : `${hours}h`;
   }
 
+  protected healthBadgeClass(health: AdminClassSessionHealthResponse): string {
+    if (health.teacher.state === 'reconnecting' || health.room?.incidentHealth === 'critical') {
+      return 'health-critical';
+    }
+    if (health.teacher.state === 'absent' || health.room?.incidentHealth === 'degraded' || health.issues.total > 0) {
+      return 'health-warning';
+    }
+    return 'health-ok';
+  }
+
   protected submissionTotal(report: ClassSessionReport): number {
     const submissions = report.assignments.submissions;
     return submissions.submitted + submissions.late + submissions.reviewed + submissions.returned + submissions.completed;
@@ -164,6 +184,22 @@ export class ClassSessionDetail implements OnInit {
       .subscribe({
         next: (report) => this.report.set(report),
         error: (error: unknown) => this.reportError.set(this.api.apiErrorMessage(error))
+      });
+  }
+
+  private loadHealth(): void {
+    const sessionId = this.route.snapshot.paramMap.get('sessionId');
+    if (!sessionId) {
+      return;
+    }
+    this.healthLoading.set(true);
+    this.healthError.set('');
+    this.api
+      .getClassSessionHealth(sessionId)
+      .pipe(finalize(() => this.healthLoading.set(false)))
+      .subscribe({
+        next: (health) => this.health.set(health),
+        error: (error: unknown) => this.healthError.set(this.api.apiErrorMessage(error))
       });
   }
 

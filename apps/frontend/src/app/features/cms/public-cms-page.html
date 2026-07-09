@@ -1,0 +1,131 @@
+<sfu-header />
+
+<main class="cms-page">
+  <section class="cms-hero">
+    <p class="eyebrow">{{ pageType().replace('_', ' ') | titlecase }}</p>
+    <h1>{{ title() }}</h1>
+    <p>{{ summary() }}</p>
+    <div class="cms-meta">
+      @if (loading()) {
+        <span>Loading latest published copy...</span>
+      } @else if (usingFallback()) {
+        <span>Static fallback copy</span>
+      } @else if (updatedAt()) {
+        <span>Published {{ updatedAt() | date: 'mediumDate' }}</span>
+      }
+    </div>
+  </section>
+
+  <section class="cms-body" aria-label="Page content">
+    @if (body()) {
+      <article class="body-copy">
+        @for (paragraph of body().split('\n\n'); track paragraph) {
+          <p>{{ paragraph }}</p>
+        }
+      </article>
+    }
+
+    @if (sections().length) {
+      <div class="cms-sections">
+        @for (section of sections(); track section.blockId || section.title || $index) {
+          <article class="cms-block" [attr.data-type]="section.type">
+            @if (section.eyebrow) {
+              <p class="eyebrow">{{ section.eyebrow }}</p>
+            }
+            @if (section.title) {
+              <h2>{{ section.title }}</h2>
+            }
+            @if (section.body) {
+              <p>{{ section.body }}</p>
+            }
+            @if (section.imageUrl) {
+              <img [src]="section.imageUrl" [alt]="section.title || title()" />
+            }
+            @if (section.links?.length) {
+              <div class="cms-links">
+                @for (link of section.links; track link.url) {
+                  <a [routerLink]="link.url.startsWith('/') ? link.url : null" [href]="link.url.startsWith('/') ? null : link.url">
+                    {{ link.label }}
+                  </a>
+                }
+              </div>
+            }
+            @if (section.items?.length) {
+              <div class="cms-item-grid">
+                @for (item of section.items; track item.title || item.label || item.url || $index) {
+                  <div class="cms-item">
+                    @if (item.imageUrl) {
+                      <img [src]="item.imageUrl" [alt]="item.title || item.label || ''" />
+                    }
+                    <h3>{{ item.title || item.label || 'Item' }}</h3>
+                    @if (item.body) {
+                      <p>{{ item.body }}</p>
+                    }
+                    @if (item.url) {
+                      <a [routerLink]="item.url.startsWith('/') ? item.url : null" [href]="item.url.startsWith('/') ? null : item.url">Open</a>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </article>
+        }
+      </div>
+    }
+
+    @if (isContactPage()) {
+      <section class="contact-form-section" aria-label="Contact form">
+        <div>
+          <p class="eyebrow">Contact form</p>
+          <h2>Send us a message</h2>
+          <p>Share a little context and the team will follow up from the admin contact inbox.</p>
+        </div>
+
+        @if (contactSuccess()) {
+          <p class="form-success" role="status">{{ contactSuccess() }}</p>
+        }
+        @if (contactError()) {
+          <p class="form-error" role="alert">{{ contactError() }}</p>
+        }
+
+        <form [formGroup]="contactForm" (ngSubmit)="submitContact()">
+          <div class="contact-grid">
+            <label>
+              <span>Name</span>
+              <input type="text" formControlName="name" autocomplete="name" />
+            </label>
+            <label>
+              <span>Email</span>
+              <input type="email" formControlName="email" autocomplete="email" />
+            </label>
+            <label>
+              <span>Phone</span>
+              <input type="tel" formControlName="phone" autocomplete="tel" />
+            </label>
+            <label>
+              <span>Category</span>
+              <select formControlName="category">
+                @for (category of contactCategories; track category) {
+                  <option [value]="category">{{ category.replace('_', ' ') | titlecase }}</option>
+                }
+              </select>
+            </label>
+          </div>
+          <label>
+            <span>Subject</span>
+            <input type="text" formControlName="subject" />
+          </label>
+          <label>
+            <span>Message</span>
+            <textarea rows="6" formControlName="message"></textarea>
+          </label>
+          <button type="submit" [disabled]="submittingContact()">
+            {{ submittingContact() ? 'Sending...' : 'Send message' }}
+          </button>
+        </form>
+      </section>
+    }
+  </section>
+</main>
+
+<sfu-footer />

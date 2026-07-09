@@ -35,6 +35,34 @@ npm run docker:up
 npm run test:e2e -w @native-sfu/backend
 ```
 
+## Ingest Validation
+
+Use this focused Phase 7 slice when you need truthful repo-local proof for media URL ingest before any staged rollout claim.
+
+```bash
+npm run test:ingest:integration
+npm run test:browser:ingest
+```
+
+What the integration slice proves:
+
+- real FFmpeg/FFprobe probing and RTP emission from an `http://127.0.0.1/...` MP4 source
+- source interruption followed by supervisor restart and live recovery
+- one ingest fanout to multiple subscribers
+- repeated room cleanup without lingering active-room state
+- distributed owner/non-owner pipe-path forwarding with RTCP flowing back to the ingest source
+
+What the browser slice proves:
+
+- Chromium can subscribe to a real ingest-backed H264 stream through the existing WebRTC transport stack
+- after an interrupted-source restart, the subscribed WebRTC transport resumes forwarding RTP through the existing SFU path
+
+Important limits:
+
+- This is local loopback truth, not public TURN, announced/public IP, or ingress truth.
+- The distributed ingest proof here reuses the in-process pipe path. Worker-mode distributed ingest still belongs to the later distributed validation passes.
+- The browser slice is intentionally Chromium-only for this local ingest proof.
+
 ## Build and Dev Runtime Verification
 
 Use this slice when you need to prove that the repo is not only compile-green, but also starts locally in development mode.
@@ -114,6 +142,17 @@ npm run verify:dev:smoke
 
 That smoke checks backend live/ready health, the protected API route shape, the Socket.IO Engine.IO handshake at `/socket.io`, and unauthenticated frontend/admin route shells. It does not prove real camera, microphone, TURN relay, or authenticated class-session media behavior.
 
+### Admin Portal Runtime Smoke
+
+After building the admin portal, run the build-backed browser smoke:
+
+```bash
+npm run build --workspace @native-sfu/admin-portal
+npm run test:browser:admin-portal
+```
+
+This Playwright smoke serves `apps/admin-portal/dist/admin-portal/browser`, injects an admin session, mocks safe admin API envelopes, and checks the dashboard plus major admin routes at desktop, tablet, and mobile widths. It also verifies that a non-admin token returns to the login surface. This is route/runtime proof, not a replacement for seeded real-backend admin workflow QA.
+
 Expected dev ports:
 
 | Service | Default port | Notes |
@@ -173,6 +212,7 @@ Notes:
 | --- | --- | --- | --- |
 | Local operator incident workflow | Chromium validated | `npm run test:browser:operator` | Proves operator UI/runtime truth locally, not public ingress or staged media truth |
 | Local single-node browser media | Partial local regression evidence | `npm run test:browser` | Good for repo/runtime regressions, not public-network proof |
+| Local media URL ingest | Focused Phase 7 regression path | `npm run test:ingest:phase7` | Proves local FFmpeg/HTTP ingest, fanout, restart, and in-process distributed pipe parity, not staged/public ingress truth |
 | Staged TURN relay gathering | Chromium validated | `npm run test:browser:staging-turn` | Proves relay candidate gathering only, not full publish/subscribe over ingress |
 | Staged full browser publish/subscribe over shared ingress | Chromium harness available | `npm run test:browser -- tests/browser/staging-ingress-browser-proof.spec.ts --project=chromium` | Requires real staging credentials and still needs a real out-of-sandbox browser run for signoff |
 | Two-node distributed soak | Synthetic distributed soak evidence with report output | `npm run docker:start:multi-node && npm run seed:dummy-users:multi-node && npm run test:live-soak:local` | Uses backend/socket flows, not a browser DTLS/SRTP media path |

@@ -14,6 +14,9 @@ describe('AuditLogsService', () => {
       metadata: {
         summary: 'Updated user',
         password: 'secret',
+        storageKey: 'local/private/file.pdf',
+        callbackUrl: 'https://example.test/private-token',
+        note: 'Bearer abc.def.ghi',
         nested: {
           accessToken: 'token',
           safe: 'kept'
@@ -34,6 +37,9 @@ describe('AuditLogsService', () => {
     expect(payload.metadata).toEqual({
       summary: 'Updated user',
       password: '[redacted]',
+      storageKey: '[redacted]',
+      callbackUrl: '[redacted]',
+      note: '[redacted]',
       nested: {
         accessToken: '[redacted]',
         safe: 'kept'
@@ -56,6 +62,7 @@ describe('AuditLogsService', () => {
     const result = await service.listAdminAuditLogs(
       {
         actorId: 'admin-1',
+        actorRole: 'admin',
         action: 'admin.users.update',
         resourceType: 'user',
         resourceId: 'user-1',
@@ -80,6 +87,7 @@ describe('AuditLogsService', () => {
     expect(result.total).toBe(1);
     const filter = auditLogs.find.mock.calls[0]?.[0];
     expect(filter.actorId).toBe('admin-1');
+    expect(filter.actorRoles).toBe('ADMIN');
     expect(filter.action).toBe('admin.users.update');
     expect(filter.resourceType).toBe('user');
     expect(filter.resourceId).toBe('user-1');
@@ -108,6 +116,8 @@ describe('AuditLogsService', () => {
     expect(detail.metadata).toEqual({ summary: 'Updated user' });
     expect(detail.before).toEqual({ roles: ['STUDENT'] });
     expect(detail.after).toEqual({ roles: ['TEACHER'] });
+    expect(detail.targetType).toBe('user');
+    expect(detail.targetId).toBe('user-1');
   });
 
   function createHarness(): {
@@ -130,6 +140,8 @@ describe('AuditLogsService', () => {
       resourceType: 'user',
       resourceId: 'user-1',
       resourceLabel: 'Ada Admin',
+      targetType: 'user',
+      targetId: 'user-1',
       metadata: { summary: 'Updated user' },
       before: { roles: ['STUDENT'] },
       after: { roles: ['TEACHER'] }

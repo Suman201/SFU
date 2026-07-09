@@ -186,6 +186,66 @@ Delivery behavior notes:
   - `WEBHOOK_DELIVERY_RETENTION_DAYS=14`
   - `WEBHOOK_EXHAUSTED_DELIVERY_RETENTION_DAYS=30`
 
+## Media URL Ingest Operations
+
+Use this section when an operator reports that a server-side ingest will not start, is flapping, or is not visible to subscribers.
+
+Primary truth surfaces:
+
+- admin ingest APIs under `/api/v1/admin/ingests`
+- audit actions:
+  - `ingests.create`
+  - `ingests.update`
+  - `ingests.start`
+  - `ingests.stop`
+  - `ingests.attach`
+  - `ingests.detach`
+- platform events:
+  - `ingest.created`
+  - `ingest.started`
+  - `ingest.attached`
+  - `ingest.restarting`
+  - `ingest.failed`
+  - `ingest.stopped`
+  - `ingest.detached`
+
+Useful metrics:
+
+- `sfu_ingest_jobs`
+- `sfu_active_ingests`
+- `sfu_ingest_restarts_total`
+- `sfu_ingest_failures_total`
+- `sfu_ingest_input_bitrate_bps`
+- `sfu_ingest_output_bitrate_bps`
+- `sfu_ingest_output_rtp_packet_rate`
+- `sfu_ingest_runtime_rss_bytes`
+- `sfu_ingest_runtime_cpu_user_micros`
+- `sfu_ingest_runtime_cpu_system_micros`
+
+First-response checks:
+
+1. Confirm the rollout gate is intentionally enabled on the node or canary slice. When `INGEST_ENABLED=false`, create/start/attach/update flows should reject with `503`, while stop/detach remain available for rollback.
+2. Confirm the ingest source host is allowed by policy. Rejections show up as `policy` failures in `sfu_ingest_failures_total`.
+3. Confirm the secret reference can be resolved on the node that owns the room or detached ingest runtime:
+   - `env://INGEST_SOURCE_PASSWORD`
+   - `env:INGEST_SOURCE_PASSWORD`
+   - prefixed refs such as `vault://media/bearer` -> `INGEST_SECRET_VAULT_MEDIA_BEARER`
+4. Confirm read APIs only show `[configured]` for secret-bearing auth fields. Plaintext values in admin responses are a bug.
+5. For attached ingests, confirm the authoritative room owner node is healthy before blaming the source URL.
+6. If an ingest is restarting repeatedly, compare:
+   - `sfu_ingest_restarts_total`
+   - latest `ingest.restarting` / `ingest.failed` events
+   - audit rows for the last operator action
+7. Before escalating to staging-only suspicion, rerun the repo-supported local ingest proofs:
+   - `npm run test:ingest:integration`
+   - `npm run test:browser:ingest`
+
+Operational notes:
+
+- Trusted ingest handoff is loopback/local-only by default. Do not widen it unless the topology explicitly requires that risk.
+- Current supported ingest rebroadcast output remains H264 video plus Opus audio through the trusted local RTP/RTCP transport.
+- Detached ingests can emit lifecycle audit/event state even before they are attached to a room; attached ingests should also show `roomId`, `participantId`, and owner `nodeId` in runtime state once live.
+
 ## Live Class Session Incidents
 
 Use this section for teacher/student classroom incidents. Product behavior remains manual-start/manual-end, except the existing teacher reconnect grace timeout can complete a live session after the configured grace window.
@@ -194,7 +254,33 @@ Core signals:
 
 - Audit actions: `class_sessions.start`, `class_sessions.end`, `class_sessions.join.admitted`, `class_sessions.join.denied`, `class_sessions.room_join.admitted`, `class_sessions.room_join.denied`, `class_sessions.teacher.disconnected`, `class_sessions.teacher.reconnected`, `class_sessions.teacher_reconnect_grace.started`, `class_sessions.teacher_reconnect_grace.cancelled`, `class_sessions.teacher_reconnect_grace.expired`, `class_sessions.media.publish.failure`, `class_sessions.media.consume.failure`, `class_sessions.chat.send.failure`, `class_sessions.chat.read.failure`, `class_sessions.moderation.*`, `class_sessions.whiteboard_control.*`, `class_sessions.material.*`, `class_sessions.recording.*`
 - Platform events: `room.created`, `room.joined`, `room.left`, `room.closed`, `producer.created`, `producer.paused`, `producer.resumed`, `producer.closed`, `consumer.created`, `consumer.paused`, `consumer.resumed`, `consumer.closed`, `recording.started`, `recording.stopped`, `recording.failed`
-- Metrics: `sfu_class_session_lifecycle_transitions_total`, `sfu_class_session_join_attempts_total`, `sfu_class_session_reconnect_grace_events_total`, `sfu_class_session_reconnect_grace_timers_active`, `sfu_class_session_media_failures_total`, `sfu_class_session_chat_failures_total`, `sfu_class_session_moderation_actions_total`, `sfu_class_session_whiteboard_control_actions_total`, `sfu_class_session_material_actions_total`
+- Metrics: `sfu_class_session_lifecycle_transitions_total`, `sfu_class_session_join_attempts_total`, `sfu_class_session_reconnect_grace_events_total`, `sfu_class_session_reconnect_grace_timers_active`, `sfu_class_session_media_failures_total`, `sfu_class_session_chat_failures_total`, `sfu_class_session_moderation_actions_total`, `sfu_class_session_whiteboard_control_actions_total`, `sfu_class_session_material_actions_total`, `sfu_class_session_support_requests_total`, `sfu_class_session_recording_events_total`
+
+### Session Health Snapshot
+
+Admins can open the support-safe session health view from the admin class-session detail page, or query:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://backend.example.com/api/v1/admin/class-sessions/<sessionId>/health
+```
+
+Use it before drilling into raw timelines. It combines:
+
+- lifecycle status, room status, and teacher connected/reconnecting/absent state
+- admitted/pending/student/host participant counts
+- audio/video/screen/whiteboard producer counts and consumer counts
+- join-denied counts by normalized reason
+- recording status counts and sanitized latest failure reason
+- linked support request counts by status
+- recent room incident timeline rows
+- links back to timeline, attendance, recordings, and support filters
+
+Support-safe boundary:
+
+- Safe to share with support: session id, batch id, room id, lifecycle status, participant counts, normalized reasons, recording status, support request status counts, incident summaries, and sanitized failure reason.
+- Do not include: private chat/Q&A bodies, attachment storage keys, local filesystem paths, signed URLs, tokens, cookies, authorization headers, raw RTP/media payloads, raw SDP, passwords, or unredacted browser URLs containing secrets.
+- Support request diagnostics may store browser/device permission state plus safe session status, room status, teacher connection state, and recording status. They must not store chat text, raw media payloads, tokens, or storage paths.
 
 ### Stuck Live Session
 

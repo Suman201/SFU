@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import type { MediaIngestSupervisorSnapshot, MediaProbeResult } from '@native-sfu/media-ingest';
 import type { IngestRuntimeState } from '@native-sfu/contracts';
 import { IngestPolicyService } from './ingest-policy.service';
@@ -7,6 +7,21 @@ import { IngestService } from './ingest.service';
 import { IngestSupervisorService } from './ingest-supervisor.service';
 
 describe('IngestService', () => {
+  it('rejects ingest creation while the rollout feature flag is disabled', async () => {
+    const harness = createHarness({ 'ingest.enabled': false });
+    let thrown: unknown;
+    try {
+      await harness.service.createAdminIngest(adminUser(), {
+        sourceType: 'hls',
+        sourceUrl: 'https://media.example.test/live/index.m3u8'
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ServiceUnavailableException);
+  });
+
   it('creates an ingest job with normalized source and default control-plane state', async () => {
     const harness = createHarness();
     harness.ingests.create.mockImplementation(async (payload: Record<string, unknown>) => ingestDoc(payload));
@@ -35,6 +50,61 @@ describe('IngestService', () => {
     expect(persisted.status).toBe('idle');
     expect(result.sourceType).toBe('hls');
     expect(result.transportProtocol).toBe('trusted-rtp-local');
+    expect(harness.platformEvents.appendEvent.mock.calls[0]?.[0]?.type).toBe('ingest.created');
+  });
+
+  it('redacts configured auth secrets in ingest responses while preserving the stored secret refs', async () => {
+    const harness = createHarness();
+    harness.ingests.create.mockImplementation(async (payload: Record<string, unknown>) => ingestDoc(payload));
+
+    const result = await harness.service.createAdminIngest(adminUser(), {
+      sourceType: 'hls',
+      sourceUrl: 'https://media.example.test/live/index.m3u8',
+      auth: {
+        basicUsername: 'origin-user',
+        basicPasswordSecretRef: 'vault://media/basic-password',
+        bearerTokenSecretRef: 'vault://media/bearer',
+        headers: [{ name: 'X-Origin-Token', valueSecretRef: 'vault://media/header-token' }]
+      }
+    });
+
+    const persisted = harness.ingests.create.mock.calls[0]?.[0] as Record<string, any>;
+    expect(persisted.auth.basicPasswordSecretRef).toBe('vault://media/basic-password');
+    expect(persisted.auth.bearerTokenSecretRef).toBe('vault://media/bearer');
+    expect(result.auth).toEqual({
+      basicUsername: 'origin-user',
+      basicPasswordSecretRef: '[configured]',
+      bearerTokenSecretRef: '[configured]',
+      headers: [{ name: 'X-Origin-Token', valueSecretRef: '[configured]' }]
+    });
+  });
+
+  it('preserves existing secret refs when masked placeholders round-trip through update', async () => {
+    const harness = createHarness();
+    const doc = ingestDoc({
+      auth: {
+        basicUsername: 'origin-user',
+        basicPasswordSecretRef: 'vault://media/basic-password',
+        headers: [{ name: 'X-Origin-Token', valueSecretRef: 'vault://media/header-token' }]
+      }
+    });
+    harness.ingests.findById.mockReturnValue(query(doc));
+
+    const result = await harness.service.updateAdminIngest(adminUser(), doc.id, {
+      displayName: 'Updated ingest',
+      auth: {
+        basicUsername: 'origin-user',
+        basicPasswordSecretRef: '[configured]',
+        headers: [{ name: 'X-Origin-Token', valueSecretRef: '[configured]' }]
+      }
+    });
+
+    expect(doc.auth).toEqual({
+      basicUsername: 'origin-user',
+      basicPasswordSecretRef: 'vault://media/basic-password',
+      headers: [{ name: 'X-Origin-Token', valueSecretRef: 'vault://media/header-token' }]
+    });
+    expect(result.displayName).toBe('Updated ingest');
   });
 
   it('rejects ingest sources outside the configured allowlist', async () => {
@@ -114,7 +184,8 @@ describe('IngestService', () => {
     const transportCreateCall = harness.ingestTransports.createTransport.mock.calls[0] as unknown[];
     expect(transportCreateCall[0]).toEqual({
       roomId: 'room-1',
-      participantId: 'ingest-participant-1'
+      participantId: 'ingest-participant-1',
+      allowPrivateAddresses: false
     });
     expect(harness.roomsService.createIngestProducer).toHaveBeenCalledTimes(2);
     const videoCreate = harness.roomsService.createIngestProducer.mock.calls[0]?.[0];
@@ -135,6 +206,77 @@ describe('IngestService', () => {
     expect(result.runtime?.rtpPort).toBe(5004);
     expect(result.runtime?.rtcpPort).toBe(5005);
     expect(result.runtime?.processId).toBe(4242);
+  });
+
+  it('resolves ingest auth secret refs from environment before probing the source', async () => {
+    const harness = createHarness();
+    const doc = ingestDoc({
+      roomId: 'room-1',
+      status: 'idle',
+      auth: {
+        basicUsername: 'origin-user',
+        basicPasswordSecretRef: 'env://INGEST_SOURCE_PASSWORD',
+        bearerTokenSecretRef: 'vault://media/bearer',
+        headers: [{ name: 'X-Origin-Token', valueSecretRef: 'env:INGEST_HEADER_TOKEN' }]
+      }
+    });
+    const probe = probeResult({ hasAudio: true, hasVideo: true });
+    const supervisor = new FakeSupervisor(doc.id, probe);
+    harness.ingests.findById.mockReturnValue(query(doc));
+    harness.roomsService.createIngestParticipant.mockResolvedValue({ id: 'ingest-participant-1' });
+    harness.ingestTransports.createTransport.mockResolvedValue(trustedTransport());
+    harness.roomsService.createIngestProducer
+      .mockResolvedValueOnce({ id: 'producer-video-1', kind: 'video' })
+      .mockResolvedValueOnce({ id: 'producer-audio-1', kind: 'audio' });
+    const probeSpy = jest.spyOn(harness.service as any, 'probeSource').mockImplementation(async (source: any) => {
+      expect(source.auth).toEqual({
+        basicUsername: 'origin-user',
+        basicPassword: 'basic-secret',
+        bearerToken: 'bearer-secret',
+        headers: [{ name: 'X-Origin-Token', value: 'header-secret' }]
+      });
+      return probe;
+    });
+    jest.spyOn(harness.service as any, 'createSupervisor').mockReturnValue(supervisor);
+    const previousPassword = process.env.INGEST_SOURCE_PASSWORD;
+    const previousHeader = process.env.INGEST_HEADER_TOKEN;
+    const previousBearer = process.env.INGEST_SECRET_VAULT_MEDIA_BEARER;
+    process.env.INGEST_SOURCE_PASSWORD = 'basic-secret';
+    process.env.INGEST_HEADER_TOKEN = 'header-secret';
+    process.env.INGEST_SECRET_VAULT_MEDIA_BEARER = 'bearer-secret';
+
+    try {
+      await harness.service.startAdminIngest(adminUser(), doc.id);
+    } finally {
+      probeSpy.mockRestore();
+      restoreEnv('INGEST_SOURCE_PASSWORD', previousPassword);
+      restoreEnv('INGEST_HEADER_TOKEN', previousHeader);
+      restoreEnv('INGEST_SECRET_VAULT_MEDIA_BEARER', previousBearer);
+    }
+  });
+
+  it('records auth failures when a secret-backed ingest source cannot be resolved', async () => {
+    const harness = createHarness();
+    const doc = ingestDoc({
+      roomId: 'room-1',
+      status: 'idle',
+      auth: {
+        bearerTokenSecretRef: 'vault://media/missing-bearer'
+      }
+    });
+    harness.ingests.findById.mockReturnValue(query(doc));
+
+    let thrown: unknown;
+    try {
+      await harness.service.startAdminIngest(adminUser(), doc.id);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ServiceUnavailableException);
+    expect((harness.metrics.ingestFailureCategories.labels as any).mock.calls[0]).toEqual(['auth', 'hls']);
+    expect((harness.auditLogs.record as any).mock.calls[0]?.[0]?.action).toBe('ingests.start');
+    expect((harness.auditLogs.record as any).mock.calls[0]?.[0]?.status).toBe('failure');
   });
 
   it('routes an attached ingest start request to the current room owner when the owner is remote', async () => {
@@ -348,15 +490,26 @@ describe('IngestService', () => {
     expect(subscribeCall[0]).toBe('sfu:room-owner-events');
     expect(typeof subscribeCall[1]).toBe('function');
   });
+
+  it('keeps coordination listeners active but skips startup resume when the rollout flag is disabled', async () => {
+    const harness = createHarness({ 'ingest.enabled': false });
+
+    await harness.service.onModuleInit();
+
+    expect(harness.redis.consumeDurable).toHaveBeenCalledTimes(1);
+    expect(harness.redis.subscribe).toHaveBeenCalledTimes(1);
+    expect(harness.ingests.find).not.toHaveBeenCalled();
+  });
 });
 
-function createHarness(config: Record<string, string | number> = {}) {
+function createHarness(config: Record<string, string | number | boolean> = {}) {
   const ingests = {
     create: jest.fn(),
     find: jest.fn(),
     findById: jest.fn(),
     countDocuments: jest.fn(),
-    findOne: jest.fn()
+    findOne: jest.fn(),
+    aggregate: jest.fn(async () => [])
   };
   const rooms = {
     findOne: jest.fn()
@@ -373,7 +526,8 @@ function createHarness(config: Record<string, string | number> = {}) {
   };
   const ingestTransports = {
     createTransport: jest.fn(),
-    closeTransport: jest.fn(async () => undefined)
+    closeTransport: jest.fn(async () => undefined),
+    snapshot: jest.fn(() => ({ counters: { forwardedRtpPackets: 0 } }))
   };
   const redis = {
     publishDurable: jest.fn(async () => '1-0'),
@@ -385,6 +539,13 @@ function createHarness(config: Record<string, string | number> = {}) {
     lookupRoomOwner: jest.fn(async () => ownerLookup(true, 'node-a')),
     localNodeId: jest.fn(() => 'node-a')
   };
+  const platformEvents = {
+    appendEvent: jest.fn(async (input: Record<string, unknown>) => ({ id: 'event-1', ...input }))
+  };
+  const auditLogs = {
+    record: jest.fn(async () => undefined)
+  };
+  const metrics = createMetricsMock();
   const configService = {
     get: jest.fn((key: string, fallback?: unknown) => (key in config ? config[key] : fallback))
   };
@@ -399,6 +560,9 @@ function createHarness(config: Record<string, string | number> = {}) {
     ingestTransports as never,
     redis as never,
     nodeRegistry as never,
+    platformEvents as never,
+    auditLogs as never,
+    metrics as never,
     configService as never
   );
 
@@ -410,6 +574,9 @@ function createHarness(config: Record<string, string | number> = {}) {
     ingestTransports,
     redis,
     nodeRegistry,
+    platformEvents,
+    auditLogs,
+    metrics,
     configService,
     emitRoomClosed: async (roomId: string) => {
       roomClosedListener?.(roomId);
@@ -518,6 +685,43 @@ function ownerLookup(local: boolean, ownerNodeId: string) {
       expiresAt: '2026-07-08T12:01:00.000Z'
     }
   };
+}
+
+function createMetricsMock() {
+  return {
+    ingestJobsByState: metricSeries(),
+    activeIngestsByRoom: metricSeries(),
+    ingestRestarts: metricSeries(),
+    ingestFailureCategories: metricSeries(),
+    ingestInputBitrate: metricSeries(),
+    ingestOutputBitrate: metricSeries(),
+    ingestOutputRtpPacketRate: metricSeries(),
+    ingestRuntimeRssBytes: metricSeries(),
+    ingestRuntimeCpuUserMicros: metricSeries(),
+    ingestRuntimeCpuSystemMicros: metricSeries()
+  };
+}
+
+function metricSeries() {
+  const instance = {
+    set: jest.fn(),
+    inc: jest.fn(),
+    remove: jest.fn()
+  };
+  return {
+    labels: jest.fn(() => instance),
+    set: jest.fn(),
+    inc: jest.fn(),
+    remove: jest.fn()
+  };
+}
+
+function restoreEnv(key: string, previous: string | undefined): void {
+  if (previous === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = previous;
 }
 
 function chain<T>(value: T) {

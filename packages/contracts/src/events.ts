@@ -1,3 +1,4 @@
+import type { IngestSourceType, IngestStatus, IngestTransportProtocol } from './ingest.js';
 import type { RecordingScope, RecordingStatus } from './recordings.js';
 import type { Role } from './roles.js';
 import type { RoomIncidentStatus, RoomMediaProfileId, RoomVisibility, RoomRecoveryActionType } from './rooms.js';
@@ -46,6 +47,13 @@ export const PLATFORM_EVENT_TYPES = [
   'recovery.action.executed',
   'operator.action.executed',
   'room.owner.changed',
+  'ingest.created',
+  'ingest.started',
+  'ingest.stopped',
+  'ingest.attached',
+  'ingest.detached',
+  'ingest.restarting',
+  'ingest.failed',
   'recording.started',
   'recording.stopped',
   'recording.failed'
@@ -102,6 +110,18 @@ export interface PlatformConsumerReference {
   priority?: number;
   preferredLayers?: RtpLayerSelection;
   preferredSvcLayers?: SvcLayerSelection;
+}
+
+export interface PlatformIngestReference {
+  ingestId: string;
+  name?: string;
+  displayName?: string;
+  sourceType: IngestSourceType;
+  transportProtocol: IngestTransportProtocol;
+  status: IngestStatus;
+  roomId?: string;
+  participantId?: string;
+  nodeId?: string;
 }
 
 export interface RoomCreatedEventPayload {
@@ -237,6 +257,14 @@ export interface RoomOwnerChangedEventPayload {
   previousOwnerNodeId?: string;
 }
 
+export interface IngestLifecycleEventPayload {
+  ingest: PlatformIngestReference;
+  room?: Pick<PlatformRoomReference, 'roomId' | 'name' | 'mediaProfileId'>;
+  reason?: string;
+  failureCategory?: string;
+  restartCount?: number;
+}
+
 export interface RecordingLifecycleEventPayload {
   room: Pick<PlatformRoomReference, 'roomId' | 'name'>;
   recordingId: string;
@@ -280,6 +308,13 @@ export interface PlatformEventPayloadByType {
   'recovery.action.executed': RecoveryActionExecutedEventPayload;
   'operator.action.executed': OperatorActionExecutedEventPayload;
   'room.owner.changed': RoomOwnerChangedEventPayload;
+  'ingest.created': IngestLifecycleEventPayload;
+  'ingest.started': IngestLifecycleEventPayload;
+  'ingest.stopped': IngestLifecycleEventPayload;
+  'ingest.attached': IngestLifecycleEventPayload;
+  'ingest.detached': IngestLifecycleEventPayload;
+  'ingest.restarting': IngestLifecycleEventPayload;
+  'ingest.failed': IngestLifecycleEventPayload;
   'recording.started': RecordingLifecycleEventPayload;
   'recording.stopped': RecordingLifecycleEventPayload;
   'recording.failed': RecordingLifecycleEventPayload;

@@ -4,6 +4,41 @@ import { RoomComponent } from './features/room/room.component';
 
 export const routes: Routes = [
   { path: '', loadComponent: () => import('./features/landing/landing').then((route) => route.Landing) },
+  {
+    path: 'about',
+    data: { slug: 'about' },
+    loadComponent: () => import('./features/cms/public-cms-page').then((route) => route.PublicCmsPage)
+  },
+  {
+    path: 'contact-us',
+    data: { slug: 'contact-us' },
+    loadComponent: () => import('./features/cms/public-cms-page').then((route) => route.PublicCmsPage)
+  },
+  {
+    path: 'faq',
+    data: { slug: 'faq' },
+    loadComponent: () => import('./features/cms/public-cms-page').then((route) => route.PublicCmsPage)
+  },
+  {
+    path: 'help',
+    data: { slug: 'help' },
+    loadComponent: () => import('./features/cms/public-cms-page').then((route) => route.PublicCmsPage)
+  },
+  {
+    path: 'terms',
+    data: { slug: 'terms' },
+    loadComponent: () => import('./features/cms/public-cms-page').then((route) => route.PublicCmsPage)
+  },
+  {
+    path: 'privacy-policy',
+    data: { slug: 'privacy-policy' },
+    loadComponent: () => import('./features/cms/public-cms-page').then((route) => route.PublicCmsPage)
+  },
+  {
+    path: 'refund-policy',
+    data: { slug: 'refund-policy' },
+    loadComponent: () => import('./features/cms/public-cms-page').then((route) => route.PublicCmsPage)
+  },
   { path: 'login', redirectTo: 'student/login', pathMatch: 'full' },
   {
     path: 'teacher/login',

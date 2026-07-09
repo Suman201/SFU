@@ -13,6 +13,7 @@ import type {
   AdminClassSessionReportQuery,
   AdminClassSessionReportResponse,
   AdminClassSessionReportRow,
+  AdminClassSessionHealthResponse,
   ClassLibrarySearchQuery,
   ClassLibrarySearchResponse,
   ClassSessionReport,
@@ -28,6 +29,15 @@ import type {
   AdminCourseListQuery,
   AdminCourseListResponse,
   AdminCourseUpdateRequest,
+  CmsPage,
+  CmsPageListQuery,
+  CmsPageListResponse,
+  CmsPageWriteRequest,
+  ContactSubmission,
+  ContactSubmissionListQuery,
+  ContactSubmissionListResponse,
+  ReplyToContactSubmissionRequest,
+  UpdateContactSubmissionRequest,
   AdminDashboardSummary,
   AdminEnrollmentDetail,
   AdminEnrollmentListQuery,
@@ -191,6 +201,17 @@ export class AdminApiService {
       );
   }
 
+  getClassSessionHealth(sessionId: string): Observable<AdminClassSessionHealthResponse> {
+    return this.http
+      .get<AdminClassSessionHealthResponse | ApiEnvelope<AdminClassSessionHealthResponse>>(
+        `${API_BASE_URL}/admin/class-sessions/${encodeURIComponent(sessionId)}/health`
+      )
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
   downloadClassSessionReportCsv(sessionId: string): Observable<Blob> {
     return this.http
       .get(`${API_BASE_URL}/admin/class-sessions/${encodeURIComponent(sessionId)}/report/export.csv`, { responseType: 'blob' })
@@ -206,6 +227,106 @@ export class AdminApiService {
         map((response) => this.unwrapResponse(response)),
         catchError((error) => throwError(() => this.toApiError(error)))
       );
+  }
+
+  listCmsPages(query: CmsPageListQuery): Observable<CmsPageListResponse> {
+    return this.http
+      .get<CmsPageListResponse | ApiEnvelope<CmsPageListResponse>>(`${API_BASE_URL}/admin/cms/pages`, {
+        params: this.toParams(query)
+      })
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  getCmsPage(pageId: string): Observable<CmsPage> {
+    return this.http
+      .get<CmsPage | ApiEnvelope<CmsPage>>(`${API_BASE_URL}/admin/cms/pages/${encodeURIComponent(pageId)}`)
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  createCmsPage(request: CmsPageWriteRequest): Observable<CmsPage> {
+    return this.http.post<CmsPage | ApiEnvelope<CmsPage>>(`${API_BASE_URL}/admin/cms/pages`, request).pipe(
+      map((response) => this.unwrapResponse(response)),
+      catchError((error) => throwError(() => this.toApiError(error)))
+    );
+  }
+
+  updateCmsPage(pageId: string, request: CmsPageWriteRequest): Observable<CmsPage> {
+    return this.http
+      .patch<CmsPage | ApiEnvelope<CmsPage>>(`${API_BASE_URL}/admin/cms/pages/${encodeURIComponent(pageId)}`, request)
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  publishCmsPage(pageId: string): Observable<CmsPage> {
+    return this.cmsPageAction(pageId, 'publish');
+  }
+
+  unpublishCmsPage(pageId: string): Observable<CmsPage> {
+    return this.cmsPageAction(pageId, 'unpublish');
+  }
+
+  archiveCmsPage(pageId: string): Observable<CmsPage> {
+    return this.cmsPageAction(pageId, 'archive');
+  }
+
+  listContactSubmissions(query: ContactSubmissionListQuery): Observable<ContactSubmissionListResponse> {
+    return this.http
+      .get<ContactSubmissionListResponse | ApiEnvelope<ContactSubmissionListResponse>>(`${API_BASE_URL}/admin/contact/submissions`, {
+        params: this.toParams(query)
+      })
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  getContactSubmission(submissionId: string): Observable<ContactSubmission> {
+    return this.http
+      .get<ContactSubmission | ApiEnvelope<ContactSubmission>>(`${API_BASE_URL}/admin/contact/submissions/${encodeURIComponent(submissionId)}`)
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  updateContactSubmission(submissionId: string, request: UpdateContactSubmissionRequest): Observable<ContactSubmission> {
+    return this.http
+      .patch<ContactSubmission | ApiEnvelope<ContactSubmission>>(
+        `${API_BASE_URL}/admin/contact/submissions/${encodeURIComponent(submissionId)}`,
+        request
+      )
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  replyToContactSubmission(submissionId: string, request: ReplyToContactSubmissionRequest): Observable<ContactSubmission> {
+    return this.http
+      .post<ContactSubmission | ApiEnvelope<ContactSubmission>>(
+        `${API_BASE_URL}/admin/contact/submissions/${encodeURIComponent(submissionId)}/reply`,
+        request
+      )
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  archiveContactSubmission(submissionId: string): Observable<ContactSubmission> {
+    return this.contactSubmissionAction(submissionId, 'archive');
+  }
+
+  markContactSubmissionSpam(submissionId: string): Observable<ContactSubmission> {
+    return this.contactSubmissionAction(submissionId, 'mark-spam');
   }
 
   listSupportRequests(query: SupportRequestListQuery): Observable<SupportRequestListResponse> {
@@ -590,6 +711,27 @@ export class AdminApiService {
       .post<TeacherPromotion | ApiEnvelope<TeacherPromotion>>(
         `${API_BASE_URL}/admin/teacher-promotions/${encodeURIComponent(promotionId)}/${action}`,
         request
+      )
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  private cmsPageAction(pageId: string, action: 'publish' | 'unpublish' | 'archive'): Observable<CmsPage> {
+    return this.http
+      .post<CmsPage | ApiEnvelope<CmsPage>>(`${API_BASE_URL}/admin/cms/pages/${encodeURIComponent(pageId)}/${action}`, {})
+      .pipe(
+        map((response) => this.unwrapResponse(response)),
+        catchError((error) => throwError(() => this.toApiError(error)))
+      );
+  }
+
+  private contactSubmissionAction(submissionId: string, action: 'archive' | 'mark-spam'): Observable<ContactSubmission> {
+    return this.http
+      .post<ContactSubmission | ApiEnvelope<ContactSubmission>>(
+        `${API_BASE_URL}/admin/contact/submissions/${encodeURIComponent(submissionId)}/${action}`,
+        {}
       )
       .pipe(
         map((response) => this.unwrapResponse(response)),

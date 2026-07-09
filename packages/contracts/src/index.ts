@@ -20,6 +20,8 @@ export * from './teacher-analytics.js';
 export * from './support.js';
 export * from './assignments.js';
 export * from './live-settings.js';
+export * from './cms.js';
+export * from './contact.js';
 export * from './admin.js';
 export * from './profile.js';
 export * from './metrics.js';

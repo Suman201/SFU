@@ -107,6 +107,117 @@
   padding: 18px;
 }
 
+.health-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.health-panel.health-ok {
+  border-color: color-mix(in srgb, var(--product-green) 34%, var(--line));
+}
+
+.health-panel.health-warning {
+  border-color: color-mix(in srgb, var(--product-amber) 46%, var(--line));
+  background: color-mix(in srgb, var(--product-amber) 7%, var(--panel-elevated));
+}
+
+.health-panel.health-critical {
+  border-color: color-mix(in srgb, var(--product-rose) 42%, var(--line));
+  background: color-mix(in srgb, var(--product-rose) 7%, var(--panel-elevated));
+}
+
+.health-head,
+.health-links {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.health-head {
+  justify-content: space-between;
+}
+
+.health-head h2,
+.health-head p {
+  margin: 0;
+}
+
+.health-head h2 {
+  color: var(--text);
+  font-size: 22px;
+  text-transform: capitalize;
+}
+
+.health-head p,
+.health-grid small,
+.health-incidents small {
+  color: var(--muted);
+}
+
+.health-links {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.health-grid article {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.health-grid span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.health-grid strong,
+.health-incidents strong,
+.health-grid small,
+.health-incidents small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-grid strong,
+.health-incidents strong {
+  color: var(--text);
+}
+
+.health-incidents {
+  display: grid;
+  gap: 8px;
+}
+
+.health-incidents article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
 .attendance-card h2 {
   color: var(--text);
   font-size: 26px;
@@ -341,7 +452,8 @@ code {
 @media (max-width: 980px) {
   .detail-grid,
   .report-grid,
-  .report-sections {
+  .report-sections,
+  .health-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -349,8 +461,13 @@ code {
 @media (max-width: 700px) {
   .detail-head,
   .attendance-card,
-  .report-toolbar {
+  .report-toolbar,
+  .health-head {
     flex-direction: column;
+  }
+
+  .health-links {
+    justify-content: flex-start;
   }
 
   .report-actions {
@@ -361,7 +478,9 @@ code {
   .metadata-grid,
   .timeline-row,
   .report-grid,
-  .report-sections {
+  .report-sections,
+  .health-grid,
+  .health-incidents article {
     grid-template-columns: 1fr;
   }
 }
@@ -371,6 +490,7 @@ code {
   .detail-head,
   .detail-grid,
   .attendance-card,
+  .health-panel,
   .report-actions,
   .timeline-shell,
   .data-table-shell {

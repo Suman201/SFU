@@ -144,6 +144,21 @@ describe('MetricsService', () => {
     output = await service.text();
     expect(output).toContain('profile="webinar",health="critical"');
   });
+
+  it('registers ingest metrics for lifecycle, bitrate, and runtime visibility', async () => {
+    const service = new MetricsService();
+    service.onModuleInit();
+
+    const output = await service.text();
+    expect(output).toContain('sfu_ingest_jobs');
+    expect(output).toContain('sfu_active_ingests');
+    expect(output).toContain('sfu_ingest_restarts_total');
+    expect(output).toContain('sfu_ingest_failures_total');
+    expect(output).toContain('sfu_ingest_input_bitrate_bps');
+    expect(output).toContain('sfu_ingest_output_bitrate_bps');
+    expect(output).toContain('sfu_ingest_output_rtp_packet_rate');
+    expect(output).toContain('sfu_ingest_runtime_rss_bytes');
+  });
 });
 
 function summaryFixture(overrides: {

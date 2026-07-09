@@ -1,6 +1,8 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
+import type { CmsPage, CmsPageBlock } from '@native-sfu/contracts';
+import { CmsService } from '../../core/services/cms.service';
 import { Footer } from '../../shared/footer/footer';
 import { Header } from '../../shared/header/header';
 
@@ -12,7 +14,10 @@ import { Header } from '../../shared/header/header';
   styleUrl: './landing.scss',
   changeDetection: ChangeDetectionStrategy.Eager
 })
-export class Landing {
+export class Landing implements OnInit {
+  private readonly cms = inject(CmsService);
+  protected readonly cmsHome = signal<CmsPage | null>(null);
+
   protected readonly heroBannerImage = '/assets/images/hero-banner.png';
   protected readonly heroImage = '/assets/images/hero-teacher.webp';
   protected readonly heroMapImage = '/assets/images/india-map-connection.webp';
@@ -132,4 +137,27 @@ export class Landing {
       image: '/assets/images/testimonial-3.webp'
     }
   ];
+
+  ngOnInit(): void {
+    this.cms.getPublishedPage('home').subscribe({
+      next: (page) => this.cmsHome.set(page),
+      error: () => this.cmsHome.set(null)
+    });
+  }
+
+  protected heroTitle(): string {
+    return this.cmsHome()?.title || "Bridging India's Education Gap";
+  }
+
+  protected heroSubtitle(): string {
+    return this.cmsHome()?.summary || 'Connecting Teachers and Learners Nationwide';
+  }
+
+  protected heroLead(): string {
+    return this.cmsHome()?.bodyMarkdown || 'Teach from anywhere. Learn from anywhere. We provide the platform, you focus on education.';
+  }
+
+  protected homeSections(): CmsPageBlock[] {
+    return this.cmsHome()?.sections ?? [];
+  }
 }

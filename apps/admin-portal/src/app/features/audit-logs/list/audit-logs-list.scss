@@ -33,10 +33,6 @@ td small {
   text-transform: uppercase;
 }
 
-.data-table-filters {
-  grid-template-columns: 120px minmax(220px, 1.5fr) repeat(4, minmax(140px, 1fr)) repeat(2, minmax(190px, 1fr)) auto auto;
-}
-
 .actor-cell {
   display: flex;
   align-items: center;

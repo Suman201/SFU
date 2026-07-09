@@ -11,7 +11,12 @@
       <h1>{{ item.action }}</h1>
       <p>{{ item.summary || item.resourceLabel || item.resourceId || item.id }}</p>
     </div>
-    <span class="data-pill {{ statusClass(item.status) }}">{{ item.status }}</span>
+    <div class="detail-actions">
+      @if (resourceLink(item); as link) {
+        <a class="table-action" [routerLink]="link">Open resource</a>
+      }
+      <span class="data-pill {{ statusClass(item.status) }}">{{ item.status }}</span>
+    </div>
   </section>
 
   <section class="detail-grid">
@@ -28,6 +33,11 @@
       <span>Resource</span>
       <strong>{{ item.resourceType || 'resource' }}</strong>
       <small>{{ item.resourceLabel || item.resourceId || 'No target' }}</small>
+    </article>
+    <article>
+      <span>Target resource</span>
+      <strong>{{ item.targetType || item.resourceType || 'None' }}</strong>
+      <small>{{ item.targetId || item.resourceId || 'No target id' }}</small>
     </article>
     <article>
       <span>Target user</span>

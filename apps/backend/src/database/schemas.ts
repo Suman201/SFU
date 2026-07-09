@@ -20,6 +20,8 @@ import {
 import type { LiveClassSettings, LiveClassSettingsPatch } from '@native-sfu/contracts';
 import type { ClassSessionTimelineCategory, ClassSessionTimelineEventVisibility } from '@native-sfu/contracts';
 import type { AssignmentAttachment, AssignmentStatus, AssignmentSubmissionStatus, AssignmentSubmissionType } from '@native-sfu/contracts';
+import type { CmsAudience, CmsPageBlock, CmsPageStatus, CmsPageType, CmsSeoMetadata } from '@native-sfu/contracts';
+import type { ContactReplyDeliveryStatus, ContactSubmissionCategory, ContactSubmissionPriority, ContactSubmissionStatus } from '@native-sfu/contracts';
 import type { IngestAuthConfig, IngestRestartPolicy, IngestRuntimeState, IngestSourceType, IngestStatus, IngestTransportProtocol, ParticipantOrigin, ProducerSource } from '@native-sfu/contracts';
 import type { SupportIssueType, SupportRequestStatus } from '@native-sfu/contracts';
 import type {
@@ -76,6 +78,8 @@ export type RecordingMongoDocument = HydratedDocument<RecordingDocument>;
 export type RecordingPlaybackProgressMongoDocument = HydratedDocument<RecordingPlaybackProgressDocument>;
 export type PushSubscriptionMongoDocument = HydratedDocument<PushSubscriptionDocument>;
 export type SupportRequestMongoDocument = HydratedDocument<SupportRequestDocument>;
+export type CmsPageMongoDocument = HydratedDocument<CmsPageDocument>;
+export type ContactSubmissionMongoDocument = HydratedDocument<ContactSubmissionDocument>;
 
 @Schema({ _id: false })
 export class UserNotificationSettingsDocument {
@@ -357,6 +361,177 @@ export const TeacherPromotionSchema = SchemaFactory.createForClass(TeacherPromot
 TeacherPromotionSchema.index({ teacherId: 1, placement: 1, status: 1, startsAt: 1, endsAt: 1 });
 TeacherPromotionSchema.index({ status: 1, placement: 1, startsAt: 1, endsAt: 1 });
 TeacherPromotionSchema.index({ promotionId: 1, deletedAt: 1 }, { unique: true });
+
+export const CMS_PAGE_STATUSES = ['draft', 'published', 'archived'] as const satisfies readonly CmsPageStatus[];
+export const CMS_PAGE_TYPES = ['page', 'legal', 'faq', 'landing', 'announcement', 'banner'] as const satisfies readonly CmsPageType[];
+export const CMS_AUDIENCES = ['public', 'student', 'teacher', 'admin', 'all'] as const satisfies readonly CmsAudience[];
+
+@Schema({ collection: 'cms_pages', timestamps: true })
+export class CmsPageDocument {
+  @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
+  pageId!: string;
+
+  @Prop({ required: true, lowercase: true, trim: true, maxlength: 120, index: true })
+  slug!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 180 })
+  title!: string;
+
+  @Prop({ required: true, enum: CMS_PAGE_TYPES, default: 'page', index: true })
+  pageType!: CmsPageType;
+
+  @Prop({ required: true, enum: CMS_PAGE_STATUSES, default: 'draft', index: true })
+  status!: CmsPageStatus;
+
+  @Prop({ required: true, enum: CMS_AUDIENCES, default: 'public', index: true })
+  audience!: CmsAudience;
+
+  @Prop({ trim: true, lowercase: true, maxlength: 24, default: 'en', index: true })
+  locale!: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  summary?: string;
+
+  @Prop({ trim: true, maxlength: 20000 })
+  bodyMarkdown?: string;
+
+  @Prop({ type: [Object], default: [] })
+  sections!: CmsPageBlock[];
+
+  @Prop({ type: Object, default: () => ({}) })
+  seo!: CmsSeoMetadata;
+
+  @Prop({ type: [String], default: [] })
+  tags!: string[];
+
+  @Prop({ type: Date, index: true })
+  publishedAt?: Date;
+
+  @Prop({ index: true })
+  publishedByUserId?: string;
+
+  @Prop({ type: Date, index: true })
+  archivedAt?: Date;
+
+  @Prop({ index: true })
+  createdByUserId?: string;
+
+  @Prop({ index: true })
+  updatedByUserId?: string;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const CmsPageSchema = SchemaFactory.createForClass(CmsPageDocument);
+CmsPageSchema.index({ slug: 1, locale: 1, audience: 1 }, { unique: true });
+CmsPageSchema.index({ status: 1, pageType: 1, audience: 1, locale: 1, updatedAt: -1 });
+CmsPageSchema.index({ status: 1, slug: 1, audience: 1, locale: 1 });
+
+export const CONTACT_SUBMISSION_CATEGORIES = [
+  'general',
+  'sales',
+  'support',
+  'partnership',
+  'teacher_interest',
+  'student_interest',
+  'technical_issue'
+] as const satisfies readonly ContactSubmissionCategory[];
+export const CONTACT_SUBMISSION_STATUSES = ['new', 'open', 'replied', 'waiting_for_user', 'resolved', 'archived', 'spam'] as const satisfies readonly ContactSubmissionStatus[];
+export const CONTACT_SUBMISSION_PRIORITIES = ['low', 'normal', 'high'] as const satisfies readonly ContactSubmissionPriority[];
+export const CONTACT_REPLY_DELIVERY_STATUSES = ['pending', 'sent', 'failed', 'skipped'] as const satisfies readonly ContactReplyDeliveryStatus[];
+
+@Schema({ _id: false })
+export class ContactSubmissionReplyDocument {
+  @Prop({ required: true, default: () => randomUUID() })
+  replyId!: string;
+
+  @Prop({ required: true, index: true })
+  adminUserId!: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  adminName?: string;
+
+  @Prop({ required: true, trim: true, maxlength: 5000 })
+  message!: string;
+
+  @Prop({ required: true, type: Date, default: Date.now })
+  sentAt!: Date;
+
+  @Prop({ required: true, enum: CONTACT_REPLY_DELIVERY_STATUSES, default: 'pending', index: true })
+  deliveryStatus!: ContactReplyDeliveryStatus;
+
+  @Prop({ trim: true, maxlength: 500 })
+  deliveryError?: string;
+}
+
+export const ContactSubmissionReplySchema = SchemaFactory.createForClass(ContactSubmissionReplyDocument);
+
+@Schema({ collection: 'contact_submissions', timestamps: true })
+export class ContactSubmissionDocument {
+  @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
+  submissionId!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 160 })
+  name!: string;
+
+  @Prop({ required: true, lowercase: true, trim: true, maxlength: 254, index: true })
+  email!: string;
+
+  @Prop({ trim: true, maxlength: 40 })
+  phone?: string;
+
+  @Prop({ required: true, trim: true, maxlength: 180 })
+  subject!: string;
+
+  @Prop({ required: true, trim: true, maxlength: 5000 })
+  message!: string;
+
+  @Prop({ required: true, enum: CONTACT_SUBMISSION_CATEGORIES, default: 'general', index: true })
+  category!: ContactSubmissionCategory;
+
+  @Prop({ required: true, enum: CONTACT_SUBMISSION_STATUSES, default: 'new', index: true })
+  status!: ContactSubmissionStatus;
+
+  @Prop({ required: true, enum: CONTACT_SUBMISSION_PRIORITIES, default: 'normal', index: true })
+  priority!: ContactSubmissionPriority;
+
+  @Prop({ index: true })
+  assignedToUserId?: string;
+
+  @Prop({ trim: true, maxlength: 160 })
+  assignedToName?: string;
+
+  @Prop({ lowercase: true, trim: true, maxlength: 120, index: true })
+  sourcePageSlug?: string;
+
+  @Prop({ index: true })
+  userId?: string;
+
+  @Prop({ trim: true, maxlength: 500 })
+  userAgent?: string;
+
+  @Prop({ trim: true, maxlength: 128 })
+  ipHash?: string;
+
+  @Prop({ type: [ContactSubmissionReplySchema], default: [] })
+  replies!: ContactSubmissionReplyDocument[];
+
+  @Prop({ trim: true, maxlength: 5000 })
+  internalNotes?: string;
+
+  @Prop({ type: Date, index: true })
+  archivedAt?: Date;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export const ContactSubmissionSchema = SchemaFactory.createForClass(ContactSubmissionDocument);
+ContactSubmissionSchema.index({ status: 1, priority: 1, updatedAt: -1 });
+ContactSubmissionSchema.index({ category: 1, status: 1, updatedAt: -1 });
+ContactSubmissionSchema.index({ assignedToUserId: 1, status: 1, updatedAt: -1 });
+ContactSubmissionSchema.index({ email: 1, createdAt: -1 });
 
 @Schema({ _id: false })
 export class PushSubscriptionKeysDocument {
@@ -1478,6 +1653,7 @@ AuditLogSchema.index({ resourceType: 1, resourceId: 1, createdAt: -1 });
 AuditLogSchema.index({ action: 1, createdAt: -1 });
 AuditLogSchema.index({ status: 1, createdAt: -1 });
 AuditLogSchema.index({ actorId: 1, action: 1, createdAt: -1 });
+AuditLogSchema.index({ actorRoles: 1, createdAt: -1 });
 
 @Schema({ _id: false })
 export class RoomSettingsDocument {
@@ -3003,6 +3179,18 @@ export class SupportRequestDiagnosticsDocument {
 
   @Prop({ trim: true, maxlength: 160 })
   platform?: string;
+
+  @Prop({ trim: true, maxlength: 40 })
+  classSessionStatus?: string;
+
+  @Prop({ enum: ['active', 'closed', 'unknown'] })
+  roomStatus?: 'active' | 'closed' | 'unknown';
+
+  @Prop({ enum: ['connected', 'reconnecting', 'absent', 'not_started', 'ended'] })
+  teacherConnectionState?: 'connected' | 'reconnecting' | 'absent' | 'not_started' | 'ended';
+
+  @Prop({ trim: true, maxlength: 40 })
+  recordingStatus?: string;
 }
 
 export const SupportRequestDiagnosticsSchema = SchemaFactory.createForClass(SupportRequestDiagnosticsDocument);

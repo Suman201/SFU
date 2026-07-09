@@ -11,6 +11,14 @@
   gap: 16px;
 }
 
+.detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .detail-head h1,
 .detail-head p,
 .data-table-toolbar h2,
@@ -123,5 +131,9 @@ pre {
 @media (max-width: 640px) {
   .detail-head {
     flex-direction: column;
+  }
+
+  .detail-actions {
+    justify-content: flex-start;
   }
 }

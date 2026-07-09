@@ -18,6 +18,14 @@
         <option value="success">Success</option>
         <option value="failure">Failure</option>
       </select>
+      <select formControlName="actorRole" aria-label="Actor role">
+        <option value="all">All roles</option>
+        <option value="ADMIN">Admin</option>
+        <option value="SUPER_ADMIN">Super admin</option>
+        <option value="TEACHER">Teacher</option>
+        <option value="STUDENT">Student</option>
+        <option value="SYSTEM">System</option>
+      </select>
       <input type="search" formControlName="search" placeholder="Search action, actor, resource" aria-label="Search" />
       <input type="search" formControlName="actorId" placeholder="Actor ID" aria-label="Actor ID" />
       <input type="search" formControlName="action" placeholder="Action" aria-label="Action" />
@@ -80,6 +88,9 @@
               <td><span class="data-pill {{ statusClass(row.status) }}">{{ row.status }}</span></td>
               <td>{{ row.summary || row.action }}</td>
               <td class="actions-cell">
+                @if (resourceLink(row); as link) {
+                  <a class="table-action" [routerLink]="link">Open resource</a>
+                }
                 <a class="table-action" [routerLink]="['/audit-logs', row.id]">View</a>
               </td>
             </tr>

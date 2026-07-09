@@ -1,4 +1,6 @@
-import type { RecordingEngagementSummary } from './recordings.js';
+import type { RecordingEngagementSummary, RecordingStatus } from './recordings.js';
+import type { RoomIncidentTimelineEvent } from './metrics.js';
+import type { RoomHealthState, RoomIncidentStatus, RoomOperatorAlert } from './rooms.js';
 
 export type AdminClassSessionStatus = 'scheduled' | 'live' | 'completed' | 'cancelled';
 
@@ -575,6 +577,7 @@ export type AdminAuditLogStatus = 'success' | 'failure';
 
 export interface AdminAuditLogQuery {
   actorId?: string;
+  actorRole?: string;
   action?: string;
   resourceType?: string;
   resourceId?: string;
@@ -597,6 +600,8 @@ export interface AdminAuditLogListItem {
   resourceType?: string;
   resourceId?: string;
   resourceLabel?: string;
+  targetType?: string;
+  targetId?: string;
   targetUserId?: string;
   status: AdminAuditLogStatus;
   ipAddress?: string;
@@ -636,6 +641,9 @@ export interface AdminDashboardLiveSession {
   teacherName?: string;
   startedAt?: string;
   roomId?: string;
+  teacherState?: AdminClassSessionHealthTeacherState;
+  participantCount?: number;
+  activeAlertCount?: number;
 }
 
 export interface AdminDashboardSummary {
@@ -659,4 +667,115 @@ export interface AdminDashboardSummary {
   activeBatches: number;
   issues: AdminDashboardIssue[];
   liveSessionItems: AdminDashboardLiveSession[];
+}
+
+export type AdminClassSessionHealthTeacherState = 'connected' | 'reconnecting' | 'absent' | 'not_started' | 'ended';
+
+export interface AdminClassSessionHealthSession {
+  sessionId: string;
+  batchId: string;
+  teacherId: string;
+  title: string;
+  status: AdminClassSessionStatus;
+  scheduledAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  roomId?: string;
+  teacherDisconnectedAt?: string;
+  teacherReconnectDeadlineAt?: string;
+}
+
+export interface AdminClassSessionHealthRoom {
+  roomId: string;
+  closed: boolean;
+  locked: boolean;
+  mediaStatus: string;
+  mediaFailureReason?: string;
+  incidentStatus?: RoomIncidentStatus;
+  incidentHealth?: RoomHealthState;
+  protected: boolean;
+  activeAlerts: RoomOperatorAlert[];
+}
+
+export interface AdminClassSessionHealthTeacher {
+  state: AdminClassSessionHealthTeacherState;
+  connected: boolean;
+  reconnecting: boolean;
+  participantId?: string;
+  disconnectedAt?: string;
+  reconnectDeadlineAt?: string;
+}
+
+export interface AdminClassSessionHealthParticipantCounts {
+  total: number;
+  admitted: number;
+  pending: number;
+  students: number;
+  hosts: number;
+  coHosts: number;
+  handRaised: number;
+  inactive: number;
+}
+
+export interface AdminClassSessionHealthMediaCounts {
+  audioProducers: number;
+  videoProducers: number;
+  screenProducers: number;
+  whiteboardProducers: number;
+  pausedProducers: number;
+  liveConsumers: number;
+  pausedConsumers: number;
+}
+
+export interface AdminClassSessionHealthJoinSummary {
+  deniedTotal: number;
+  deniedByReason: Record<string, number>;
+}
+
+export interface AdminClassSessionHealthRecordingSummary {
+  total: number;
+  active: number;
+  failed: number;
+  statuses: Partial<Record<RecordingStatus, number>>;
+  latestFailureReason?: string;
+}
+
+export interface AdminClassSessionHealthSupportSummary {
+  total: number;
+  open: number;
+  inReview: number;
+  waitingForStudent: number;
+  resolved: number;
+  closed: number;
+}
+
+export interface AdminClassSessionHealthIssueSummary {
+  total: number;
+  media: number;
+  joinDenied: number;
+  support: number;
+  recording: number;
+  recent: RoomIncidentTimelineEvent[];
+}
+
+export interface AdminClassSessionHealthLinks {
+  timeline: string;
+  attendance: string;
+  recordings: string;
+  support: string;
+}
+
+export interface AdminClassSessionHealthResponse {
+  generatedAt: string;
+  session: AdminClassSessionHealthSession;
+  room?: AdminClassSessionHealthRoom;
+  teacher: AdminClassSessionHealthTeacher;
+  participants: AdminClassSessionHealthParticipantCounts;
+  media: AdminClassSessionHealthMediaCounts;
+  joins: AdminClassSessionHealthJoinSummary;
+  recording: AdminClassSessionHealthRecordingSummary;
+  support: AdminClassSessionHealthSupportSummary;
+  issues: AdminClassSessionHealthIssueSummary;
+  lastActivityAt?: string;
+  links: AdminClassSessionHealthLinks;
 }

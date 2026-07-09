@@ -57,6 +57,7 @@
 .steps-section,
 .india-section,
 .testimonials-section,
+.cms-home-section,
 .cta-section {
   width: 100%;
   max-width: 1320px;
@@ -69,6 +70,38 @@
   align-items: center;
   gap: 20px;
   min-height: 560px;
+}
+
+.cms-home-section {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+.cms-home-section article {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--ed-line);
+  border-radius: 18px;
+  background: var(--ed-card);
+  box-shadow: var(--ed-shadow-sm);
+  padding: clamp(20px, 3vw, 30px);
+}
+
+.cms-home-section h2 {
+  color: var(--ed-ink);
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1.12;
+  letter-spacing: 0;
+}
+
+.cms-home-section p:not(.hero-kicker) {
+  color: var(--ed-muted);
+  line-height: 1.65;
+}
+
+.hero-actions.compact {
+  gap: 10px;
 }
 
 .hero-copy {

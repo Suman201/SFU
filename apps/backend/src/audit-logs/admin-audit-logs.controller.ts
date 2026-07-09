@@ -9,6 +9,7 @@ import { AuditLogsService } from './audit-logs.service';
 
 interface AdminAuditLogQueryParams {
   actorId?: string;
+  actorRole?: string;
   action?: string;
   resourceType?: string;
   resourceId?: string;
@@ -46,6 +47,7 @@ export class AdminAuditLogsController {
     const limit = query.limit ? Number(query.limit) : undefined;
     return {
       ...(query.actorId ? { actorId: query.actorId } : {}),
+      ...(query.actorRole ? { actorRole: query.actorRole } : {}),
       ...(query.action ? { action: query.action } : {}),
       ...(query.resourceType ? { resourceType: query.resourceType } : {}),
       ...(query.resourceId ? { resourceId: query.resourceId } : {}),

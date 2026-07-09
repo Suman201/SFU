@@ -29,6 +29,7 @@ export class AuditLogsList implements OnInit {
 
   protected readonly filters = this.formBuilder.nonNullable.group({
     status: ['all' as AuditStatusFilter],
+    actorRole: ['all'],
     search: [''],
     actorId: [''],
     action: [''],
@@ -49,6 +50,7 @@ export class AuditLogsList implements OnInit {
   protected resetFilters(): void {
     this.filters.reset({
       status: 'all',
+      actorRole: 'all',
       search: '',
       actorId: '',
       action: '',
@@ -80,6 +82,10 @@ export class AuditLogsList implements OnInit {
     return `status-${status}`;
   }
 
+  protected resourceLink(row: AdminAuditLogListItem): string | null {
+    return auditResourceLink(row.resourceType ?? row.targetType, row.resourceId ?? row.targetId);
+  }
+
   protected trackByAuditLog(_index: number, row: AdminAuditLogListItem): string {
     return row.id;
   }
@@ -107,6 +113,7 @@ export class AuditLogsList implements OnInit {
       page,
       limit: this.limit(),
       ...(value.status !== 'all' ? { status: value.status } : {}),
+      ...(value.actorRole !== 'all' ? { actorRole: value.actorRole } : {}),
       ...(value.search.trim() ? { search: value.search.trim() } : {}),
       ...(value.actorId.trim() ? { actorId: value.actorId.trim() } : {}),
       ...(value.action.trim() ? { action: value.action.trim() } : {}),
@@ -115,5 +122,34 @@ export class AuditLogsList implements OnInit {
       ...(value.dateFrom ? { dateFrom: new Date(value.dateFrom).toISOString() } : {}),
       ...(value.dateTo ? { dateTo: new Date(value.dateTo).toISOString() } : {})
     };
+  }
+}
+
+function auditResourceLink(type: string | undefined, id: string | undefined): string | null {
+  if (!type || !id) {
+    return null;
+  }
+  switch (type.replace(/[-_]/g, '').toLowerCase()) {
+    case 'classsession':
+    case 'session':
+      return `/class-sessions/${encodeURIComponent(id)}`;
+    case 'recording':
+      return `/recordings/${encodeURIComponent(id)}`;
+    case 'user':
+      return `/users/${encodeURIComponent(id)}`;
+    case 'batch':
+      return `/batches/${encodeURIComponent(id)}`;
+    case 'course':
+      return `/courses/${encodeURIComponent(id)}`;
+    case 'enrollment':
+      return `/enrollments/${encodeURIComponent(id)}`;
+    case 'supportrequest':
+    case 'support':
+      return `/support?search=${encodeURIComponent(id)}`;
+    case 'teacherpromotion':
+    case 'promotion':
+      return `/teacher-promotions?search=${encodeURIComponent(id)}`;
+    default:
+      return null;
   }
 }

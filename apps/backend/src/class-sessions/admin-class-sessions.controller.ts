@@ -4,6 +4,7 @@ import type {
   AdminClassSessionReportQuery,
   AdminClassSessionReportResponse,
   AdminClassSessionReportRow,
+  AdminClassSessionHealthResponse,
   ClassSessionReport,
   ClassSessionTimelineCategory,
   ClassSessionTimelineResponse
@@ -87,6 +88,13 @@ export class AdminClassSessionsController {
   @ApiOperation({ summary: 'Download a completed class session recap report CSV as an administrator' })
   downloadReport(@Param('sessionId') sessionId: string, @CurrentUser() user: AuthenticatedUser): Promise<string> {
     return this.classSessions.exportClassSessionReportCsv(sessionId, undefined, user);
+  }
+
+  @Get(':sessionId/health')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get support-safe class session operational health' })
+  getHealth(@Param('sessionId') sessionId: string, @CurrentUser() user: AuthenticatedUser): Promise<AdminClassSessionHealthResponse> {
+    return this.classSessions.getAdminClassSessionHealth(sessionId, user);
   }
 
   @Get(':sessionId')

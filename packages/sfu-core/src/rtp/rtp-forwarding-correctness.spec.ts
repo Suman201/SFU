@@ -298,6 +298,30 @@ describe('RtpRouter forwarding correctness', () => {
     expect(writes.map((packet) => packet.sequenceNumber)).toEqual([1000, 5000]);
   });
 
+  it('detects producer sequence resets back near zero and resets consumer rewrite state', async () => {
+    let nextSequenceBase = 1000;
+    const restarts: string[] = [];
+    const router = new RtpRouter({
+      restartSequenceGap: 100,
+      sequenceNumberGenerator: () => nextSequenceBase,
+      timestampGenerator: () => 500000,
+      onStreamRestart: (producerId, ssrc) => restarts.push(`${producerId}:${ssrc}`)
+    });
+    const producer = createProducer('producer-1', 'publisher', 'transport-pub', rtpParameters(1111, 96));
+    const writes: RtpPacket[] = [];
+    router.addProducer(producer);
+    router.addConsumer(createConsumer('consumer-1', producer, 'viewer', 'transport-sub', rtpParameters(2222, 120)), async (packet) => {
+      writes.push(packet);
+    });
+
+    await router.route(rawPacket(1111, 96, 180, 540000));
+    nextSequenceBase = 5000;
+    await router.route(rawPacket(1111, 96, 0, 3000));
+
+    expect(restarts).toEqual(['producer-1:1111']);
+    expect(writes.map((packet) => packet.sequenceNumber)).toEqual([1000, 5000]);
+  });
+
   it('preserves reverse NACK mapping across consumer sequence wrap', async () => {
     let nextSequenceBase = 65534;
     const router = new RtpRouter({

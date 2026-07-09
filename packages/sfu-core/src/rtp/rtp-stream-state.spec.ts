@@ -58,6 +58,18 @@ describe('RtpSourceStreamState', () => {
     expect(state.snapshot().restartCount).toBe(1);
   });
 
+  it('detects stream restarts when a source resets sequence numbers back near zero with a backward timestamp jump', () => {
+    const state = new RtpSourceStreamState({ ssrc: 1111, allowedPayloadTypes: [96], restartSequenceGap: 100 });
+
+    expect(state.accept(packet(1111, 96, 180, 540000)).packets.map((item) => item.sequenceNumber)).toEqual([180]);
+    const restarted = state.accept(packet(1111, 96, 0, 3000));
+
+    expect(restarted.restarted).toBe(true);
+    expect(restarted.dropReason).toBeUndefined();
+    expect(restarted.packets.map((item) => item.sequenceNumber)).toEqual([0]);
+    expect(state.snapshot().restartCount).toBe(1);
+  });
+
   it('treats 16-bit sequence wrap as in-order traffic instead of a restart or late packet', () => {
     const state = new RtpSourceStreamState({ ssrc: 1111, allowedPayloadTypes: [96], restartSequenceGap: 100 });
 
@@ -75,8 +87,8 @@ describe('RtpSourceStreamState', () => {
   });
 });
 
-function packet(ssrc: number, payloadType: number, sequenceNumber: number): RtpPacket {
-  return RtpPacket.parse(rawPacket(ssrc, payloadType, sequenceNumber, sequenceNumber * 3000));
+function packet(ssrc: number, payloadType: number, sequenceNumber: number, timestamp = sequenceNumber * 3000): RtpPacket {
+  return RtpPacket.parse(rawPacket(ssrc, payloadType, sequenceNumber, timestamp));
 }
 
 function rawPacket(ssrc: number, payloadType: number, sequenceNumber: number, timestamp: number): Buffer {
