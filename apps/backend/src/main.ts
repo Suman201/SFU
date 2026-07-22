@@ -11,6 +11,7 @@ import { buildPublicRouteExclusions } from './bootstrap/public-routes';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { operationsTokenMatches } from './common/guards/operations-token.guard';
 import { SuccessResponseInterceptor } from './common/interceptors/success-response.interceptor';
+import { ConfiguredIoAdapter } from './common/websockets/configured-io.adapter';
 import { MetricsController } from './metrics/metrics.controller';
 
 async function bootstrap(): Promise<void> {
@@ -21,6 +22,10 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService);
   const allowedOrigins = config.get<string[]>('cors.allowedOrigins', ['http://localhost:4200']);
   const nodeEnv = config.get<string>('app.nodeEnv', 'development');
+  const trustProxyHops = config.get<number>('app.trustProxyHops', nodeEnv === 'production' ? 1 : 0);
+
+  app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
+  app.useWebSocketAdapter(new ConfiguredIoAdapter(app, config));
 
   app.enableShutdownHooks();
   app.use(helmet());
@@ -76,7 +81,8 @@ async function bootstrap(): Promise<void> {
       res: { status: (code: number) => { send: (body: string) => void }; setHeader: (name: string, value: string) => void; send: (body: string) => void }
     ) => {
       const configuredOperationsToken = config.get<string | undefined>('security.operationsToken')?.trim();
-      const requestOperationsToken = normalizeHeaderValue(req.headers?.['x-operations-token']);
+      const requestOperationsToken = normalizeHeaderValue(req.headers?.['x-operations-token'])
+        ?? normalizeBearerToken(req.headers?.authorization);
       if (configuredOperationsToken && !operationsTokenMatches(requestOperationsToken, configuredOperationsToken)) {
         res.status(401).send('Missing or invalid operations token');
         return;
@@ -132,7 +138,8 @@ function installSwaggerOperationsTokenProtection(
       requestPath === protectedJsonPath ||
       requestPath === protectedYamlPath
     ) {
-      const requestOperationsToken = normalizeHeaderValue(req.headers?.['x-operations-token']);
+      const requestOperationsToken = normalizeHeaderValue(req.headers?.['x-operations-token'])
+        ?? normalizeBearerToken(req.headers?.authorization);
       if (!operationsTokenMatches(requestOperationsToken, operationsToken)) {
         res.status(401).send('Missing or invalid operations token');
         return;
@@ -145,4 +152,9 @@ function installSwaggerOperationsTokenProtection(
 function normalizeRequestPath(path: string): string {
   const base = path.split('?')[0] ?? '/';
   return base.startsWith('/') ? base : `/${base}`;
+}
+
+function normalizeBearerToken(value: string | string[] | undefined): string | undefined {
+  const normalized = normalizeHeaderValue(value);
+  return normalized?.startsWith('Bearer ') ? normalized.slice('Bearer '.length).trim() : undefined;
 }

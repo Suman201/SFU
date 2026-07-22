@@ -1,0 +1,108 @@
+groups:
+  - name: native-sfu-runtime
+    rules:
+      - alert: NativeSfuBackendDown
+        expr: up{job="native-sfu-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Native SFU backend is unavailable
+          description: Prometheus has been unable to scrape the backend for two minutes.
+
+      - alert: NativeSfuMediaWorkersUnavailable
+        expr: sfu_media_workers_ready < sfu_media_workers_configured
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: One or more media workers are not ready
+          description: Ready media worker count is below configured capacity.
+
+      - alert: NativeSfuMediaWorkerCapacityHigh
+        expr: max(sfu_media_worker_capacity_score) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Media worker capacity is above 90 percent
+          description: New-room admission may soon be rejected; add capacity or drain load.
+
+      - alert: NativeSfuFailedRoomsPresent
+        expr: sfu_media_worker_failed_rooms > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Media worker has quarantined failed rooms
+          description: Inspect worker and room incident diagnostics immediately.
+
+      - alert: NativeSfuWorkerRestartLoop
+        expr: sum(increase(sfu_media_worker_restarts_total[10m])) > 3
+        labels:
+          severity: critical
+        annotations:
+          summary: Media workers are restarting repeatedly
+          description: More than three worker restarts occurred in ten minutes.
+
+      - alert: NativeSfuRtpDropRateHigh
+        expr: sum(rate(sfu_dropped_rtp_packets_total[5m])) / clamp_min(sum(rate(sfu_forwarded_rtp_packets_total[5m])) + sum(rate(sfu_dropped_rtp_packets_total[5m])), 1) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: RTP drop ratio is above five percent
+          description: Inspect pacing queues, worker capacity, and packet-loss diagnostics.
+
+      - alert: NativeSfuRateLimitAbuse
+        expr: sum(rate(sfu_rate_limit_rejections_total[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Sustained API or socket rate limiting detected
+          description: Review source traffic and authentication logs for abuse or a client retry loop.
+
+      - alert: NativeSfuCapacityAdmissionRejections
+        expr: sum(increase(sfu_capacity_admission_rejections_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Hard room media capacity was reached
+          description: A room exceeded configured participant, producer, consumer, or screen-share ceilings.
+
+      - alert: NativeSfuControlPlaneFailure
+        expr: sum(rate(sfu_control_plane_publish_failures_total[5m])) + sum(rate(sfu_control_plane_consume_failures_total[5m])) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Redis-backed control-plane delivery is failing
+          description: Cross-node room events or pipe coordination may be degraded.
+
+      - alert: NativeSfuPipeErrors
+        expr: sum(rate(sfu_pipe_errors_total[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Cross-node media pipe errors detected
+          description: Inspect encrypted UDP pipe reachability, peer admission, and node ownership.
+
+      - alert: NativeSfuMetricsRefreshFailed
+        expr: min(sfu_metrics_refresh_status) < 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Runtime metrics refresh is incomplete
+          description: Cluster, pipe, or media-worker snapshots could not be refreshed.
+
+      - alert: NativeSfuEventLoopLagHigh
+        expr: nodejs_eventloop_lag_mean_seconds > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Backend event-loop lag is high
+          description: Sustained event-loop lag can delay signaling and media control operations.

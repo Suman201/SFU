@@ -1,21 +1,24 @@
 import { buildIceTurnServers, resolveAnnouncedAddress, splitConfigList } from './media.config';
+import { envOrSecretFile } from './secret-file';
 
 export const appConfig = () => ({
   app: {
     nodeEnv: process.env.NODE_ENV ?? 'development',
     port: Number(process.env.PORT ?? 3000),
-    publicUrl: process.env.PUBLIC_URL ?? 'http://localhost:3000'
+    publicUrl: process.env.PUBLIC_URL ?? 'http://localhost:3000',
+    trustProxyHops: Number(process.env.TRUST_PROXY_HOPS ?? ((process.env.NODE_ENV ?? 'development') === 'production' ? 1 : 0)),
+    gracefulShutdownTimeoutMs: Number(process.env.GRACEFUL_SHUTDOWN_TIMEOUT_MS ?? 30_000)
   },
   database: {
-    uri: process.env.MONGODB_URI
+    uri: envOrSecretFile('MONGODB_URI')
   },
   redis: {
-    url: process.env.REDIS_URL,
+    url: envOrSecretFile('REDIS_URL'),
     required: process.env.REDIS_REQUIRED !== 'false'
   },
   jwt: {
-    accessSecret: process.env.JWT_ACCESS_SECRET,
-    refreshSecret: process.env.JWT_REFRESH_SECRET,
+    accessSecret: envOrSecretFile('JWT_ACCESS_SECRET'),
+    refreshSecret: envOrSecretFile('JWT_REFRESH_SECRET'),
     accessTtl: process.env.JWT_ACCESS_TTL ?? '15m',
     refreshTtl: process.env.JWT_REFRESH_TTL ?? '7d',
     issuer: process.env.JWT_ISSUER ?? 'native-sfu-auth',
@@ -42,19 +45,28 @@ export const appConfig = () => ({
     superAdminPassword: process.env.SUPER_ADMIN_PASSWORD
   },
   security: {
-    rateLimitTtl: Number(process.env.RATE_LIMIT_TTL ?? 60),
+    rateLimitTtlSeconds: Number(process.env.RATE_LIMIT_TTL ?? 60),
     rateLimitMax: Number(process.env.RATE_LIMIT_MAX ?? 120),
-    operationsToken: process.env.OPERATIONS_TOKEN?.trim() || undefined
+    socketConnectionRateLimitMax: Number(process.env.SOCKET_CONNECTION_RATE_LIMIT_MAX ?? 60),
+    socketEventRateLimitMax: Number(process.env.SOCKET_EVENT_RATE_LIMIT_MAX ?? 300),
+    socketJoinRateLimitMax: Number(process.env.SOCKET_JOIN_RATE_LIMIT_MAX ?? 30),
+    socketMediaRateLimitMax: Number(process.env.SOCKET_MEDIA_RATE_LIMIT_MAX ?? 240),
+    socketRealtimeRateLimitMax: Number(process.env.SOCKET_REALTIME_RATE_LIMIT_MAX ?? 1200),
+    socketMaxPayloadBytes: Number(process.env.SOCKET_MAX_PAYLOAD_BYTES ?? 1_048_576),
+    operationsToken: envOrSecretFile('OPERATIONS_TOKEN')
+  },
+  logging: {
+    level: process.env.LOG_LEVEL ?? ((process.env.NODE_ENV ?? 'development') === 'production' ? 'info' : 'debug')
   },
   turn: {
     realm: process.env.TURN_REALM ?? 'native-sfu.local',
-    secret: process.env.TURN_SECRET,
+    secret: envOrSecretFile('TURN_SECRET'),
     uris: splitConfigList(process.env.TURN_URIS)
   },
   mediaWorker: {
     mode: process.env.MEDIA_WORKER_MODE ?? 'in-process',
     count: Number(process.env.MEDIA_WORKER_COUNT ?? 1),
-    hostCandidatePortRange: parsePortRange(process.env.HOST_CANDIDATE_PORT_RANGE ?? '40000-40100'),
+    hostCandidatePortRange: parsePortRange(process.env.HOST_CANDIDATE_PORT_RANGE ?? '40000-40999'),
     requestTimeoutMs: Number(process.env.MEDIA_WORKER_REQUEST_TIMEOUT_MS ?? 5000),
     startupTimeoutMs: Number(process.env.MEDIA_WORKER_STARTUP_TIMEOUT_MS ?? 10000),
     heartbeatIntervalMs: Number(process.env.MEDIA_WORKER_HEARTBEAT_INTERVAL_MS ?? 2000),
@@ -69,18 +81,31 @@ export const appConfig = () => ({
     softMemoryLimitBytes: process.env.MEDIA_WORKER_SOFT_MEMORY_LIMIT_BYTES ? Number(process.env.MEDIA_WORKER_SOFT_MEMORY_LIMIT_BYTES) : undefined,
     hardMemoryLimitBytes: process.env.MEDIA_WORKER_HARD_MEMORY_LIMIT_BYTES ? Number(process.env.MEDIA_WORKER_HARD_MEMORY_LIMIT_BYTES) : undefined,
     softRtpPacketRate: Number(process.env.MEDIA_WORKER_SOFT_RTP_PACKET_RATE ?? 50000),
-    softRtcpPacketRate: Number(process.env.MEDIA_WORKER_SOFT_RTCP_PACKET_RATE ?? 5000)
+    softRtcpPacketRate: Number(process.env.MEDIA_WORKER_SOFT_RTCP_PACKET_RATE ?? 5000),
+    maxInboundPacketQueuePackets: Number(process.env.MEDIA_MAX_INBOUND_PACKET_QUEUE_PACKETS ?? 2048),
+    maxInboundPacketQueueBytes: Number(process.env.MEDIA_MAX_INBOUND_PACKET_QUEUE_BYTES ?? 8 * 1024 * 1024)
   },
   media: {
     ice: {
       stunServers: splitConfigList(process.env.ICE_STUN_SERVERS),
       turnServers: buildIceTurnServers(splitConfigList(process.env.ICE_TURN_SERVERS), {
-        turnSecret: process.env.TURN_SECRET,
+        turnSecret: envOrSecretFile('TURN_SECRET'),
         turnRealm: process.env.TURN_REALM,
         usernameSubject: process.env.NODE_ID ?? 'media-node'
       }),
       announcedAddress: resolveAnnouncedAddress(process.env.ICE_ANNOUNCED_ADDRESS, process.env.ICE_PUBLIC_CANDIDATE_ADDRESS)
     }
+  },
+  roomLimits: {
+    maxParticipants: Number(process.env.ROOM_MAX_PARTICIPANTS ?? 100),
+    maxProducers: Number(process.env.ROOM_MAX_PRODUCERS ?? 300),
+    maxProducersPerParticipant: Number(process.env.ROOM_MAX_PRODUCERS_PER_PARTICIPANT ?? 3),
+    maxConsumers: Number(process.env.ROOM_MAX_CONSUMERS ?? 20_000),
+    maxConsumersPerParticipant: Number(process.env.ROOM_MAX_CONSUMERS_PER_PARTICIPANT ?? 300),
+    maxScreenProducers: Number(process.env.ROOM_MAX_SCREEN_PRODUCERS ?? 4),
+    maxAudioBitrateBps: Number(process.env.ROOM_MAX_AUDIO_BITRATE_BPS ?? 128_000),
+    maxVideoBitrateBps: Number(process.env.ROOM_MAX_VIDEO_BITRATE_BPS ?? 2_500_000),
+    maxScreenBitrateBps: Number(process.env.ROOM_MAX_SCREEN_BITRATE_BPS ?? 5_000_000)
   },
   ingest: {
     enabled: parseBoolean(process.env.INGEST_ENABLED, (process.env.NODE_ENV ?? 'development') !== 'production'),
@@ -107,7 +132,8 @@ export const appConfig = () => ({
   },
   pipe: {
     enabled: String(process.env.ENABLE_PIPE_TRANSPORT ?? 'false').toLowerCase() === 'true',
-    clusterSecret: process.env.PIPE_CLUSTER_SECRET,
+    clusterSecret: envOrSecretFile('PIPE_CLUSTER_SECRET'),
+    previousClusterSecret: envOrSecretFile('PIPE_CLUSTER_SECRET_PREVIOUS'),
     advertiseIp: process.env.PIPE_ADVERTISE_IP,
     allowedNodeIds: (process.env.PIPE_ALLOWED_NODE_IDS ?? '')
       .split(',')
@@ -124,8 +150,8 @@ export const appConfig = () => ({
     retentionDays: Number(process.env.RECORDING_RETENTION_DAYS ?? 90),
     s3Endpoint: process.env.S3_ENDPOINT,
     s3Bucket: process.env.S3_BUCKET,
-    s3AccessKeyId: process.env.S3_ACCESS_KEY_ID,
-    s3SecretAccessKey: process.env.S3_SECRET_ACCESS_KEY
+    s3AccessKeyId: envOrSecretFile('S3_ACCESS_KEY_ID'),
+    s3SecretAccessKey: envOrSecretFile('S3_SECRET_ACCESS_KEY')
   },
   chatAttachments: {
     storageProvider: 'local',
@@ -149,7 +175,7 @@ export const appConfig = () => ({
       port: Number(process.env.SMTP_PORT ?? 587),
       secure: parseBoolean(process.env.SMTP_SECURE, false),
       user: process.env.SMTP_USER?.trim() || undefined,
-      password: process.env.SMTP_PASSWORD?.trim() || undefined,
+      password: envOrSecretFile('SMTP_PASSWORD'),
       fromEmail: process.env.SMTP_FROM_EMAIL?.trim() || undefined,
       fromName: process.env.SMTP_FROM_NAME?.trim() || undefined,
       replyTo: process.env.SMTP_REPLY_TO?.trim() || undefined
@@ -157,14 +183,14 @@ export const appConfig = () => ({
     push: {
       enabled: parseBoolean(process.env.PUSH_ENABLED, false),
       vapidPublicKey: process.env.PUSH_VAPID_PUBLIC_KEY?.trim() || undefined,
-      vapidPrivateKey: process.env.PUSH_VAPID_PRIVATE_KEY?.trim() || undefined,
+      vapidPrivateKey: envOrSecretFile('PUSH_VAPID_PRIVATE_KEY'),
       vapidSubject: process.env.PUSH_VAPID_SUBJECT?.trim() || undefined
     }
   },
   events: {
     webhooks: {
       enabled: parseBoolean(process.env.WEBHOOK_DELIVERY_ENABLED, true),
-      secretEncryptionKey: process.env.WEBHOOK_SECRET_ENCRYPTION_KEY ?? process.env.JWT_ACCESS_SECRET,
+      secretEncryptionKey: envOrSecretFile('WEBHOOK_SECRET_ENCRYPTION_KEY') ?? envOrSecretFile('JWT_ACCESS_SECRET'),
       defaultTimeoutMs: Number(process.env.WEBHOOK_DEFAULT_TIMEOUT_MS ?? 5000),
       defaultMaxAttempts: Number(process.env.WEBHOOK_DEFAULT_MAX_ATTEMPTS ?? 5),
       defaultInitialBackoffMs: Number(process.env.WEBHOOK_DEFAULT_INITIAL_BACKOFF_MS ?? 2000),
@@ -184,13 +210,13 @@ export const appConfig = () => ({
   // Backward-compatible aliases for existing code that still reads raw keys.
   NODE_ENV: process.env.NODE_ENV ?? 'development',
   PORT: Number(process.env.PORT ?? 3000),
-  MONGODB_URI: process.env.MONGODB_URI,
-  REDIS_URL: process.env.REDIS_URL,
-  JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET,
-  JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET,
+  MONGODB_URI: envOrSecretFile('MONGODB_URI'),
+  REDIS_URL: envOrSecretFile('REDIS_URL'),
+  JWT_ACCESS_SECRET: envOrSecretFile('JWT_ACCESS_SECRET'),
+  JWT_REFRESH_SECRET: envOrSecretFile('JWT_REFRESH_SECRET'),
   JWT_ACCESS_TTL: process.env.JWT_ACCESS_TTL ?? '15m',
   JWT_REFRESH_TTL: process.env.JWT_REFRESH_TTL ?? '7d',
-  TURN_SECRET: process.env.TURN_SECRET
+  TURN_SECRET: envOrSecretFile('TURN_SECRET')
 });
 
 function parsePortRange(value: string): { min: number; max: number } {

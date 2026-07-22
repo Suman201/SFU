@@ -107,7 +107,7 @@ function coreProviders(): Provider[] {
         if (options.mediaWorkerMode === 'worker') {
           return new WorkerMediaService(options, pipe);
         }
-        return new MediaService(ice, dtls, srtp, rtcp, router, pipe);
+        return new MediaService(ice, dtls, srtp, rtcp, router, pipe, options);
       }
     },
     {
@@ -148,6 +148,7 @@ function coreProviders(): Provider[] {
           duplicateWindowSize: options.rtpDuplicateWindowSize,
           enableTwcc: options.enableTwcc,
           enablePacing: options.enablePacing,
+          detachPacedWrites: true,
           enableProbeScheduling: options.enableProbeScheduling,
           enableJoinKeyframeGate: options.enableJoinKeyframeGate,
           enableAdaptiveLayerSelection: options.enableAdaptiveLayerSelection,

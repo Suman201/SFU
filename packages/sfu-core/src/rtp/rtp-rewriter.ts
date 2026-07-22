@@ -152,7 +152,8 @@ class RtpStreamRewriter {
       mapping.targetSsrc,
       [...packet.csrc],
       packet.headerExtension ? { profile: packet.headerExtension.profile, value: Buffer.from(packet.headerExtension.value) } : null,
-      Buffer.from(packet.payload)
+      Buffer.from(packet.payload),
+      Buffer.from(packet.paddingBytes)
     );
   }
 

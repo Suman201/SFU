@@ -56,6 +56,19 @@ describe('NativeSrtpSession', () => {
 
     await expectRejected(receiver.unprotectRtp(protectedPacket), SrtpSsrcValidationError);
   });
+
+  it('protects padded RTP without interpreting the authentication tag as RTP padding', async () => {
+    const { sender, receiver } = pair(ProtectionProfileAes128CmHmacSha1_80);
+    sender.setOutboundSsrcs([8888]);
+    receiver.setInboundSsrcs([8888]);
+    const packet = rtpPacket(8888, 2, 9000);
+    packet[0] = packet[0]! | 0x20;
+    const padded = Buffer.concat([packet, Buffer.from([0, 0, 0, 4])]);
+
+    const protectedPacket = await sender.protectRtp(padded);
+
+    expect(await receiver.unprotectRtp(protectedPacket)).toEqual(padded);
+  });
 });
 
 function pair(profile: number): { sender: NativeSrtpSession; receiver: NativeSrtpSession } {

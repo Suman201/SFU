@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, Logger } from '@nestjs/common';
+import { BadRequestException, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   Ack as WsAck,
   ConnectedSocket,
@@ -51,6 +52,7 @@ import type { Server, Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import { socketAck } from '../common/utils/ack';
 import { RecordingsService } from '../recordings/recordings.service';
+import { MetricsService } from '../metrics/metrics.service';
 import { RoomSignalService, type RoomSignalEnvelope, type RoomSignalTarget } from './room-signal.service';
 import { RoomsService, SocketUser, type SocketDeliveryTarget, type StudentMediaModerationResult } from './rooms.service';
 
@@ -113,21 +115,13 @@ function uniqueNonEmpty(values: readonly (string | undefined)[]): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value?.trim())))];
 }
 
-const socketAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? process.env.FRONTEND_URL ?? 'http://localhost:4200')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-
 @WebSocketGateway({
-  namespace: '/sfu',
-  cors: {
-    origin: socketAllowedOrigins,
-    credentials: true
-  }
+  namespace: '/sfu'
 })
 export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(RoomsGateway.name);
   private readonly connectionAttempts = new Map<string, { count: number; resetAt: number }>();
+  private readonly eventAttempts = new Map<string, { count: number; resetAt: number }>();
 
   @WebSocketServer()
   server!: Server<ClientToServerEvents, ServerToClientEvents>;
@@ -136,7 +130,9 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly rooms: RoomsService,
     private readonly auth: AuthService,
     private readonly signals: RoomSignalService,
-    private readonly recordings: RecordingsService
+    private readonly recordings: RecordingsService,
+    @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly metrics?: MetricsService
   ) {
     this.signals.onSignal((signal) => {
       if (signal.target) {
@@ -228,6 +224,7 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         email: payload.email,
         roles: payload.roles
       };
+      this.installSocketRateLimiter(socket);
     } catch (error) {
       this.logger.warn(`Socket auth failed requestId=${socket.data.requestId}: ${error instanceof Error ? error.message : String(error)}`);
       socket.disconnect(true);
@@ -1185,12 +1182,78 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private isConnectionThrottled(socket: SfuSocket): boolean {
     const address = socket.handshake.address ?? 'unknown';
     const now = Date.now();
-    const current = this.connectionAttempts.get(address);
+    return this.exceedsFixedWindow(
+      this.connectionAttempts,
+      address,
+      this.config?.get<number>('security.socketConnectionRateLimitMax', 60) ?? 60,
+      now
+    );
+  }
+
+  private installSocketRateLimiter(socket: SfuSocket): void {
+    socket.use((events, next) => {
+      const event = typeof events[0] === 'string' ? events[0] : 'unknown';
+      const bucket = socketRateBucket(event);
+      const userId = socket.data.user?.id ?? socket.handshake.address ?? 'unknown';
+      const limit = this.socketEventLimit(bucket);
+      if (!this.exceedsFixedWindow(this.eventAttempts, `${userId}:${bucket}`, limit, Date.now())) {
+        next();
+        return;
+      }
+      this.metrics?.rateLimitRejections.labels('socket', bucket).inc();
+      this.logger.warn(`Socket event throttled userId=${userId} bucket=${bucket} requestId=${socket.data.requestId}`);
+      next(new Error('Socket event rate limit exceeded'));
+      socket.disconnect(true);
+    });
+  }
+
+  private socketEventLimit(bucket: SocketRateBucket): number {
+    if (bucket === 'join') {
+      return this.config?.get<number>('security.socketJoinRateLimitMax', 30) ?? 30;
+    }
+    if (bucket === 'media') {
+      return this.config?.get<number>('security.socketMediaRateLimitMax', 240) ?? 240;
+    }
+    if (bucket === 'realtime') {
+      return this.config?.get<number>('security.socketRealtimeRateLimitMax', 1200) ?? 1200;
+    }
+    return this.config?.get<number>('security.socketEventRateLimitMax', 300) ?? 300;
+  }
+
+  private exceedsFixedWindow(
+    windows: Map<string, { count: number; resetAt: number }>,
+    key: string,
+    limit: number,
+    now: number
+  ): boolean {
+    if (windows.size > 10_000) {
+      for (const [entryKey, window] of windows) {
+        if (window.resetAt <= now) {
+          windows.delete(entryKey);
+        }
+      }
+    }
+    const current = windows.get(key);
     if (!current || current.resetAt <= now) {
-      this.connectionAttempts.set(address, { count: 1, resetAt: now + 60_000 });
+      windows.set(key, { count: 1, resetAt: now + 60_000 });
       return false;
     }
     current.count += 1;
-    return current.count > 60;
+    return current.count > limit;
   }
+}
+
+type SocketRateBucket = 'default' | 'join' | 'media' | 'realtime';
+
+function socketRateBucket(event: string): SocketRateBucket {
+  if (event === 'room:create' || event === 'room:join' || event === 'session:watch') {
+    return 'join';
+  }
+  if (event.startsWith('transport:') || event.startsWith('producer:') || event.startsWith('consumer:') || event.startsWith('screen:')) {
+    return 'media';
+  }
+  if (event === 'whiteboard:cursor' || event === 'class:activity') {
+    return 'realtime';
+  }
+  return 'default';
 }

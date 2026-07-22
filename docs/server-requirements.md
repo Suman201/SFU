@@ -158,8 +158,8 @@ This repo is media-first, so networking is as important as CPU and RAM.
 
 ### Important current reality
 
-- TURN over UDP is the primary realistic expectation in the current repo
-- TURN TCP/TLS should be treated as deployment validation work, not assumed truth
+- browser clients can receive UDP, TCP, and TLS TURN URIs, but every advertised transport still requires deployment proof
+- the custom server-side ICE agent uses UDP TURN only
 - announced IP correctness must be tested from outside the host network
 - ingress must not break UDP media paths
 

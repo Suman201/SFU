@@ -60,6 +60,8 @@ export class MediaWorkerPool extends EventEmitter {
   private readonly failures = new Map<string, MediaWorkerRoomFailureEvent>();
   private readonly drainingWorkers = new Set<string>();
   private readonly drainTimers = new Map<string, NodeJS.Timeout>();
+  private readonly restartTimers = new Map<string, { timer: NodeJS.Timeout; resolve: () => void }>();
+  private readonly restartingWorkers = new Set<string>();
   private started = false;
 
   constructor(private readonly config: MediaWorkerPoolOptions) {
@@ -70,7 +72,7 @@ export class MediaWorkerPool extends EventEmitter {
         config.workerFactory?.(workerId) ??
         new MediaWorkerClient({
           workerId,
-          options: config.options,
+          options: optionsForWorker(config.options, index, Math.max(1, config.workerCount)),
           requestTimeoutMs: config.requestTimeoutMs,
           startupTimeoutMs: config.startupTimeoutMs,
           heartbeatTimeoutMs: config.heartbeatTimeoutMs,
@@ -104,17 +106,27 @@ export class MediaWorkerPool extends EventEmitter {
     if (this.started) {
       return;
     }
-    await Promise.all(this.workers.map((worker) => worker.start()));
     this.started = true;
+    try {
+      await Promise.all(this.workers.map((worker) => worker.start()));
+    } catch (error) {
+      this.started = false;
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
+    this.started = false;
     for (const timer of this.drainTimers.values()) {
       clearTimeout(timer);
     }
     this.drainTimers.clear();
+    for (const pending of this.restartTimers.values()) {
+      clearTimeout(pending.timer);
+      pending.resolve();
+    }
+    this.restartTimers.clear();
     await Promise.all(this.workers.map((worker) => worker.stop('pool shutdown')));
-    this.started = false;
   }
 
   workerForRoom(roomId: string): MediaWorkerClient {
@@ -311,16 +323,44 @@ export class MediaWorkerPool extends EventEmitter {
   }
 
   private async restartWorker(workerId: string): Promise<void> {
-    const worker = this.requireWorker(workerId);
-    await new Promise((resolve) => setTimeout(resolve, this.config.restartBackoffMs));
-    try {
-      worker.markDraining(false);
-      worker.markRestarted();
-      await worker.start();
-      this.emit('restart', { workerId, reason: 'crash' });
-    } catch {
-      // Health remains failed; a later request or process restart can surface the fault.
+    if (this.restartingWorkers.has(workerId)) {
+      return;
     }
+    this.restartingWorkers.add(workerId);
+    const worker = this.requireWorker(workerId);
+    try {
+      let attempt = 0;
+      while (this.started) {
+        const backoffMs = Math.min(30_000, this.config.restartBackoffMs * 2 ** Math.min(attempt, 5));
+        await this.waitForRestart(workerId, backoffMs);
+        if (!this.started) {
+          return;
+        }
+        try {
+          worker.markDraining(false);
+          worker.markRestarted();
+          await worker.start();
+          this.emit('restart', { workerId, reason: attempt === 0 ? 'crash' : 'crash_retry' });
+          return;
+        } catch {
+          attempt += 1;
+        }
+      }
+    } finally {
+      this.restartingWorkers.delete(workerId);
+      this.restartTimers.delete(workerId);
+    }
+  }
+
+  private waitForRestart(workerId: string, delayMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.restartTimers.delete(workerId);
+        resolve();
+      }, delayMs);
+      timer.unref?.();
+      this.restartTimers.set(workerId, { timer, resolve });
+    });
   }
 
   private async completeDrain(workerId: string): Promise<void> {
@@ -443,6 +483,30 @@ export class MediaWorkerPool extends EventEmitter {
       safeRatio(health.rtcpPacketRate ?? 0, this.config.options.mediaWorkerSoftRtcpPacketRate ?? Number.POSITIVE_INFINITY)
     );
   }
+}
+
+function optionsForWorker(options: NestSfuOptions, workerIndex: number, workerCount: number): NestSfuOptions {
+  const range = options.hostCandidatePortRange;
+  if (!range || workerCount <= 1) {
+    return options;
+  }
+
+  const portCount = range.max - range.min + 1;
+  if (portCount < workerCount) {
+    throw new Error(`Host candidate port range must provide at least one port per media worker`);
+  }
+
+  const baseSize = Math.floor(portCount / workerCount);
+  const remainder = portCount % workerCount;
+  const offset = workerIndex * baseSize + Math.min(workerIndex, remainder);
+  const size = baseSize + (workerIndex < remainder ? 1 : 0);
+  return {
+    ...options,
+    hostCandidatePortRange: {
+      min: range.min + offset,
+      max: range.min + offset + size - 1
+    }
+  };
 }
 
 function safeRatio(value: number, max: number): number {

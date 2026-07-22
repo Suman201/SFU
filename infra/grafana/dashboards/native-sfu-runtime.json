@@ -1,0 +1,83 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Active rooms",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [{ "expr": "sfu_active_rooms", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Workers ready / configured",
+      "gridPos": { "h": 4, "w": 6, "x": 4, "y": 0 },
+      "targets": [
+        { "expr": "sfu_media_workers_ready", "legendFormat": "ready", "refId": "A" },
+        { "expr": "sfu_media_workers_configured", "legendFormat": "configured", "refId": "B" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Failed rooms",
+      "gridPos": { "h": 4, "w": 4, "x": 10, "y": 0 },
+      "targets": [{ "expr": "sfu_media_worker_failed_rooms", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Capacity pressure",
+      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 0 },
+      "targets": [{ "expr": "max(sfu_media_worker_capacity_score)", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Active participants",
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 0 },
+      "targets": [{ "expr": "sum(sfu_active_participants)", "refId": "A" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "RTP forwarding and drops",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "sum(rate(sfu_forwarded_rtp_packets_total[5m]))", "legendFormat": "forwarded/s", "refId": "A" },
+        { "expr": "sum(rate(sfu_dropped_rtp_packets_total[5m]))", "legendFormat": "dropped/s", "refId": "B" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker IPC p95",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(sfu_media_worker_ipc_request_duration_ms_bucket[5m])) by (le))", "legendFormat": "p95 ms", "refId": "A" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Admission protection",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "sum(rate(sfu_room_admission_rejections_total[5m])) by (reason)", "legendFormat": "{{reason}}", "refId": "A" },
+        { "expr": "sum(rate(sfu_capacity_admission_rejections_total[5m])) by (resource)", "legendFormat": "capacity: {{resource}}", "refId": "B" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Control-plane and pipe failures",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "sum(rate(sfu_control_plane_publish_failures_total[5m]))", "legendFormat": "publish failures", "refId": "A" },
+        { "expr": "sum(rate(sfu_control_plane_consume_failures_total[5m]))", "legendFormat": "consume failures", "refId": "B" },
+        { "expr": "sum(rate(sfu_pipe_errors_total[5m]))", "legendFormat": "pipe errors", "refId": "C" }
+      ]
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["native-sfu", "operations"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "Native SFU Runtime",
+  "uid": "native-sfu-runtime",
+  "version": 1
+}

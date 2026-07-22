@@ -45,7 +45,6 @@ describe('ICE server candidate gathering', () => {
       stunServers: [`stun:127.0.0.1:${server.port}`],
       transactionTimeoutMs: 500
     });
-
     try {
       const candidates = await agent.gatherCandidates();
       const srflx = candidates.find((candidate) => candidate.type === 'srflx');
@@ -113,6 +112,7 @@ describe('ICE server candidate gathering', () => {
 
   it('uses the relay candidate for ICE checks received through TURN data indications', async () => {
     let clientRemote: RemoteInfo | undefined;
+    let nextRelayPort = 55001;
     const sendIndications: ReturnType<typeof parseStunMessage>[] = [];
     const server = await createStunServer((request, remote, socket) => {
       if (request.type === STUN_ALLOCATE_REQUEST) {
@@ -130,7 +130,7 @@ describe('ICE server candidate gathering', () => {
           socket.send(response, remote.port, remote.address);
           return;
         }
-        const relayed = encodeXorMappedAddress({ family: 'IPv4', address: '203.0.113.11', port: 55001 }, request.transactionId);
+        const relayed = encodeXorMappedAddress({ family: 'IPv4', address: '203.0.113.11', port: nextRelayPort++ }, request.transactionId);
         relayed.type = StunAttributeType.XOR_RELAYED_ADDRESS;
         const response = encodeStunMessage({
           type: STUN_ALLOCATE_SUCCESS_RESPONSE,
@@ -161,11 +161,17 @@ describe('ICE server candidate gathering', () => {
       turnServers: [{ url: `turn:127.0.0.1:${server.port}?transport=udp`, username: 'turn-user', credential: 'turn-pass' }],
       transactionTimeoutMs: 500
     });
-
     try {
       await agent.gatherCandidates();
       expect(agent.snapshot().localCandidates.some((candidate) => candidate.type === 'relay')).toBe(true);
       expect(clientRemote).toBeDefined();
+      const relayCandidate = (agent as unknown as {
+        relayCandidateForDataIndication(socketId: string, remote: RemoteInfo): { type: string } | undefined;
+      }).relayCandidateForDataIndication(
+        agent.snapshot().localCandidates.find((candidate) => candidate.type === 'relay')!.socketId,
+        { address: '127.0.0.1', port: server.port, family: 'IPv4', size: 0 }
+      );
+      expect(relayCandidate?.type).toBe('relay');
 
       const connected = onceState(agent, 'connected');
       const requestTransactionId = createTransactionId();

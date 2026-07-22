@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { formatBatchFee } from '../../../shared/formatting/batch-fee';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
 import { StudentEnrollmentStore, type StudentBatch } from '../student-enrollment.store';
@@ -53,5 +54,9 @@ export class StudentExplore implements OnInit {
       hour: 'numeric',
       minute: '2-digit'
     }).format(new Date(value));
+  }
+
+  protected feeLabel(value: number | null | undefined): string {
+    return formatBatchFee(value);
   }
 }

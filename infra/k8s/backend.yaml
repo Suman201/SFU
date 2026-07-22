@@ -1,10 +1,15 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: backend
   namespace: native-sfu
+  labels:
+    app: backend
 spec:
-  replicas: 1
+  serviceName: backend-headless
+  replicas: 2
+  updateStrategy:
+    type: OnDelete
   selector:
     matchLabels:
       app: backend
@@ -13,9 +18,23 @@ spec:
       labels:
         app: backend
     spec:
+      # WebRTC host candidates and encrypted cross-node pipes bind directly to
+      # the node UDP ranges. Run at most one backend media pod per node.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       # Keep this long enough for an explicit drain request, readiness withdrawal,
       # and any external load balancer deregistration before SIGKILL.
       terminationGracePeriodSeconds: 45
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: backend
+              topologyKey: kubernetes.io/hostname
       containers:
         - name: backend
           image: native-sfu/backend:latest
@@ -30,14 +49,32 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: ICE_ANNOUNCED_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: PIPE_ADVERTISE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
           ports:
             - name: http
               containerPort: 3000
-          # Media UDP exposure must cover the full configured host/pipe ranges.
-          # This example deployment intentionally leaves transport exposure to the
-          # operator so it does not pretend that a single UDP service port is enough.
-          # Planned rollouts should drain the node first and wait for /health/ready
-          # to fail before allowing the pod to terminate.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - node
+                  - -e
+                  - >-
+                    fetch('http://127.0.0.1:3000/api/v1/media/node/drain', {
+                      method: 'POST',
+                      headers: {
+                        'content-type': 'application/json',
+                        'x-operations-token': process.env.OPERATIONS_TOKEN
+                      },
+                      body: JSON.stringify({ reason: 'kubernetes_termination' })
+                    }).catch(() => undefined).finally(() => setTimeout(() => process.exit(0), 5000));
           readinessProbe:
             httpGet:
               path: /health/ready
@@ -56,8 +93,6 @@ spec:
               port: http
             failureThreshold: 30
             periodSeconds: 2
-          # If you add a preStop hook in your environment, make it trigger the
-          # drain workflow and observe readiness withdrawal instead of sleeping.
           resources:
             requests:
               cpu: 250m
@@ -65,13 +100,84 @@ spec:
             limits:
               cpu: "2"
               memory: 1Gi
+          volumeMounts:
+            - name: shared-assets
+              mountPath: /app/recordings
+              subPath: recordings
+            - name: shared-assets
+              mountPath: /app/chat-attachments
+              subPath: chat-attachments
+            - name: shared-assets
+              mountPath: /app/class-materials
+              subPath: class-materials
+            - name: shared-assets
+              mountPath: /app/profile-media
+              subPath: profile-media
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      initContainers:
+        - name: prepare-shared-assets
+          image: busybox:1.37
+          command:
+            - sh
+            - -ec
+            - >-
+              mkdir -p /shared/recordings /shared/chat-attachments /shared/class-materials /shared/profile-media;
+              chmod 2770 /shared/recordings /shared/chat-attachments /shared/class-materials /shared/profile-media
+          volumeMounts:
+            - name: shared-assets
+              mountPath: /shared
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: shared-assets
+          persistentVolumeClaim:
+            claimName: native-sfu-shared-assets
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: backend
   namespace: native-sfu
+  labels:
+    app: backend
+    monitoring: native-sfu
 spec:
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-headless
+  namespace: native-sfu
+  labels:
+    app: backend
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
   selector:
     app: backend
   ports:

@@ -218,7 +218,7 @@ Notes:
 | Two-node distributed soak | Synthetic distributed soak evidence with report output | `npm run docker:start:multi-node && npm run seed:dummy-users:multi-node && npm run test:live-soak:local` | Uses backend/socket flows, not a browser DTLS/SRTP media path |
 | Firefox | Partial | `npm run test:browser:firefox` | Some live multi-layer and impairment slices still skip in Playwright |
 | WebKit | Partial | `npm run test:browser:webkit` | Flow coverage exists, but live adaptive/browser edge coverage is thinner than Chromium |
-| TURN transport support | UDP only | `npm run test:browser:staging-turn` | Do not advertise TURN-over-TCP or TURNS in the current RC |
+| Browser TURN transport support | UDP, TCP, and TLS configured | `npm run test:browser:staging-turn` | Staging must still prove relay gathering for each advertised transport; the server-side ICE agent uses UDP TURN only |
 
 ## Staging Rollout Signoff
 

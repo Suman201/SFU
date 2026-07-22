@@ -9,6 +9,7 @@ import type {
 } from '@native-sfu/contracts';
 import { ProfileService } from '../../../core/services/profile.service';
 import { Footer } from '../../../shared/footer/footer';
+import { formatBatchFee } from '../../../shared/formatting/batch-fee';
 import { Header } from '../../../shared/header/header';
 
 type TeacherProfileTab = 'gallery' | 'demos' | 'credentials' | 'experience' | 'links' | 'batches';
@@ -126,6 +127,10 @@ export class PublicTeacherProfile implements OnInit {
     const enrolled = batch.enrolledCount ?? 0;
     const seatsLeft = Math.max(0, capacity - enrolled);
     return seatsLeft === 1 ? '1 seat left' : `${seatsLeft} seats left`;
+  }
+
+  protected feeLabel(value: number | null | undefined): string {
+    return formatBatchFee(value);
   }
 
   protected credentialLabel(item: ProfileCredential): string {

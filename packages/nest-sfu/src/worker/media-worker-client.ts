@@ -120,7 +120,7 @@ export class MediaWorkerClient extends EventEmitter {
         },
         execArgv,
         serialization: 'advanced',
-        stdio: ['ignore', 'ignore', 'ignore', 'ipc']
+        stdio: ['ignore', 'inherit', 'inherit', 'ipc']
       });
       this.child = child;
       this.stopping = false;

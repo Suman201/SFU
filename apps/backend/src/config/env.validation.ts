@@ -2,12 +2,14 @@ import Joi from 'joi';
 import {
   isLocalOrWildcardHost,
   isSupportedStunUri,
+  isSupportedSfuTurnUri,
   isSupportedTurnUri,
   parseIceServerUrl,
   parseTurnUriHost,
   resolveAnnouncedAddress,
   splitConfigList
 } from './media.config';
+import { hydrateSecretFiles } from './secret-file';
 
 const forbiddenSecretValues = [
   'changeme',
@@ -37,6 +39,8 @@ const schema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   PORT: Joi.number().port().default(3000),
   PUBLIC_URL: Joi.string().uri().default('http://localhost:3000'),
+  TRUST_PROXY_HOPS: Joi.number().integer().min(0).max(10).default(Joi.ref('NODE_ENV', { adjust: (value) => value === 'production' ? 1 : 0 })),
+  GRACEFUL_SHUTDOWN_TIMEOUT_MS: Joi.number().integer().min(1000).max(300_000).default(30_000),
   FRONTEND_URL: Joi.string().default('http://localhost:4200'),
   CORS_ALLOWED_ORIGINS: Joi.string().default(Joi.ref('FRONTEND_URL')),
   MONGODB_URI: Joi.string().uri({ scheme: ['mongodb', 'mongodb+srv'] }).required(),
@@ -107,6 +111,13 @@ const schema = Joi.object({
   S3_SECRET_ACCESS_KEY: Joi.string().allow('').optional(),
   RATE_LIMIT_TTL: Joi.number().integer().min(1).default(60),
   RATE_LIMIT_MAX: Joi.number().integer().min(1).default(120),
+  SOCKET_CONNECTION_RATE_LIMIT_MAX: Joi.number().integer().min(1).max(10_000).default(60),
+  SOCKET_EVENT_RATE_LIMIT_MAX: Joi.number().integer().min(1).max(100_000).default(300),
+  SOCKET_JOIN_RATE_LIMIT_MAX: Joi.number().integer().min(1).max(10_000).default(30),
+  SOCKET_MEDIA_RATE_LIMIT_MAX: Joi.number().integer().min(1).max(100_000).default(240),
+  SOCKET_REALTIME_RATE_LIMIT_MAX: Joi.number().integer().min(1).max(1_000_000).default(1200),
+  SOCKET_MAX_PAYLOAD_BYTES: Joi.number().integer().min(16_384).max(10 * 1024 * 1024).default(1024 * 1024),
+  LOG_LEVEL: Joi.string().valid('fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent').default('info'),
   SWAGGER_ENABLED: Joi.boolean().truthy('true').falsy('false').default(Joi.ref('NODE_ENV', { adjust: (value) => value !== 'production' })),
   SWAGGER_TITLE: Joi.string().default('EduConnect Live Backend API'),
   SWAGGER_VERSION: Joi.string().default('0.1.0'),
@@ -117,11 +128,24 @@ const schema = Joi.object({
   SUPER_ADMIN_PASSWORD: Joi.string().min(12).optional(),
   MEDIA_WORKER_MODE: Joi.string().valid('in-process', 'worker').default('in-process'),
   MEDIA_WORKER_COUNT: Joi.number().integer().min(1).default(1),
-  HOST_CANDIDATE_PORT_RANGE: Joi.string().pattern(/^\d{2,5}-\d{2,5}$/).default('40000-40100'),
+  MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER: Joi.number().integer().min(1).default(500),
+  HOST_CANDIDATE_PORT_RANGE: Joi.string().pattern(/^\d{2,5}-\d{2,5}$/).default('40000-40999'),
+  MEDIA_MAX_INBOUND_PACKET_QUEUE_PACKETS: Joi.number().integer().min(64).default(2048),
+  MEDIA_MAX_INBOUND_PACKET_QUEUE_BYTES: Joi.number().integer().min(65536).default(8388608),
+  ROOM_MAX_PARTICIPANTS: Joi.number().integer().min(2).max(10_000).default(100),
+  ROOM_MAX_PRODUCERS: Joi.number().integer().min(1).max(100_000).default(300),
+  ROOM_MAX_PRODUCERS_PER_PARTICIPANT: Joi.number().integer().min(1).max(32).default(3),
+  ROOM_MAX_CONSUMERS: Joi.number().integer().min(1).max(1_000_000).default(20_000),
+  ROOM_MAX_CONSUMERS_PER_PARTICIPANT: Joi.number().integer().min(1).max(10_000).default(300),
+  ROOM_MAX_SCREEN_PRODUCERS: Joi.number().integer().min(1).max(100).default(4),
+  ROOM_MAX_AUDIO_BITRATE_BPS: Joi.number().integer().min(16_000).max(1_000_000).default(128_000),
+  ROOM_MAX_VIDEO_BITRATE_BPS: Joi.number().integer().min(100_000).max(100_000_000).default(2_500_000),
+  ROOM_MAX_SCREEN_BITRATE_BPS: Joi.number().integer().min(100_000).max(100_000_000).default(5_000_000),
   MEDIA_WORKER_HEARTBEAT_INTERVAL_MS: Joi.number().integer().min(250).default(2000),
   MEDIA_WORKER_HEARTBEAT_TIMEOUT_MS: Joi.number().integer().min(500).default(6000),
   ENABLE_PIPE_TRANSPORT: Joi.boolean().truthy('true').falsy('false').default(false),
   PIPE_CLUSTER_SECRET: secretSchema.allow('').when('ENABLE_PIPE_TRANSPORT', { is: true, then: Joi.required().invalid('') }),
+  PIPE_CLUSTER_SECRET_PREVIOUS: secretSchema.allow('').default(''),
   PIPE_ADVERTISE_IP: Joi.string().allow('').when('ENABLE_PIPE_TRANSPORT', { is: true, then: Joi.required().invalid('') }),
   PIPE_PORT_RANGE: Joi.string().pattern(/^\d{2,5}-\d{2,5}$/).default('41000-41100'),
   NODE_PUBLIC_URL: Joi.string().uri().default(Joi.ref('PUBLIC_URL')),
@@ -130,7 +154,7 @@ const schema = Joi.object({
 }).unknown(true);
 
 export function validateConfig(config: Record<string, unknown>): Record<string, unknown> {
-  const { error, value } = schema.validate(config, { abortEarly: false, convert: true });
+  const { error, value } = schema.validate(hydrateSecretFiles(config), { abortEarly: false, convert: true });
   if (error) {
     throw new Error(`Invalid environment configuration: ${error.details.map((detail) => detail.message).join('; ')}`);
   }
@@ -139,6 +163,17 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
 
   validatePortRange(validated.HOST_CANDIDATE_PORT_RANGE, 'HOST_CANDIDATE_PORT_RANGE', semanticErrors);
   validatePortRange(validated.PIPE_PORT_RANGE, 'PIPE_PORT_RANGE', semanticErrors);
+  const hostRange = portRangeBounds(validated.HOST_CANDIDATE_PORT_RANGE);
+  const pipeRange = portRangeBounds(validated.PIPE_PORT_RANGE);
+  if (hostRange) {
+    const requiredPorts = Number(validated.MEDIA_WORKER_COUNT) * Number(validated.MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER);
+    if (hostRange.max - hostRange.min + 1 < requiredPorts) {
+      semanticErrors.push(`HOST_CANDIDATE_PORT_RANGE must provide at least ${requiredPorts} ports for configured media worker transport capacity`);
+    }
+  }
+  if (hostRange && pipeRange && hostRange.min <= pipeRange.max && pipeRange.min <= hostRange.max) {
+    semanticErrors.push('HOST_CANDIDATE_PORT_RANGE and PIPE_PORT_RANGE must not overlap');
+  }
 
   const nodeHeartbeatIntervalMs = Number(validated.NODE_HEARTBEAT_INTERVAL_MS);
   const nodeTtlMs = Number(validated.NODE_TTL_MS);
@@ -150,6 +185,16 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
   const workerHeartbeatTimeoutMs = Number(validated.MEDIA_WORKER_HEARTBEAT_TIMEOUT_MS);
   if (workerHeartbeatTimeoutMs <= workerHeartbeatIntervalMs) {
     semanticErrors.push('MEDIA_WORKER_HEARTBEAT_TIMEOUT_MS must be greater than MEDIA_WORKER_HEARTBEAT_INTERVAL_MS');
+  }
+
+  if (Number(validated.ROOM_MAX_PRODUCERS_PER_PARTICIPANT) > Number(validated.ROOM_MAX_PRODUCERS)) {
+    semanticErrors.push('ROOM_MAX_PRODUCERS_PER_PARTICIPANT must not exceed ROOM_MAX_PRODUCERS');
+  }
+  if (Number(validated.ROOM_MAX_CONSUMERS_PER_PARTICIPANT) > Number(validated.ROOM_MAX_CONSUMERS)) {
+    semanticErrors.push('ROOM_MAX_CONSUMERS_PER_PARTICIPANT must not exceed ROOM_MAX_CONSUMERS');
+  }
+  if (Number(validated.ROOM_MAX_SCREEN_PRODUCERS) > Number(validated.ROOM_MAX_PRODUCERS)) {
+    semanticErrors.push('ROOM_MAX_SCREEN_PRODUCERS must not exceed ROOM_MAX_PRODUCERS');
   }
 
   const eventRetentionDays = Number(validated.EVENT_LOG_RETENTION_DAYS);
@@ -181,6 +226,12 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
     const turnUris = splitConfigList(validated.TURN_URIS);
     if (turnUris.length === 0) {
       semanticErrors.push('TURN_URIS must include at least one TURN URI in production');
+    } else {
+      validateProductionTurnTransportCoverage(turnUris, semanticErrors);
+    }
+
+    if (!resolveAnnouncedAddress(validated.ICE_ANNOUNCED_ADDRESS, validated.ICE_PUBLIC_CANDIDATE_ADDRESS)) {
+      semanticErrors.push('ICE_ANNOUNCED_ADDRESS is required in production');
     }
 
     if (!String(validated.OPERATIONS_TOKEN ?? '').trim()) {
@@ -222,24 +273,28 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
 }
 
 function validatePortRange(value: unknown, key: string, errors: string[]): void {
-  const parts = String(value ?? '')
-    .split('-')
-    .map((part) => Number(part.trim()));
-  const parsedMin = parts[0];
-  const parsedMax = parts[1];
-
-  if (parsedMin === undefined || parsedMax === undefined || !Number.isInteger(parsedMin) || !Number.isInteger(parsedMax)) {
+  const bounds = portRangeBounds(value);
+  if (!bounds) {
     errors.push(`${key} must use the form min-max`);
     return;
   }
-  const min = parsedMin;
-  const max = parsedMax;
+  const { min, max } = bounds;
   if (min < 1024 || max > 65535) {
     errors.push(`${key} must stay within UDP ports 1024-65535`);
   }
   if (min > max) {
     errors.push(`${key} must have min less than or equal to max`);
   }
+}
+
+function portRangeBounds(value: unknown): { min: number; max: number } | undefined {
+  const parts = String(value ?? '').split('-');
+  if (parts.length !== 2) {
+    return undefined;
+  }
+  const min = Number(parts[0]?.trim());
+  const max = Number(parts[1]?.trim());
+  return Number.isInteger(min) && Number.isInteger(max) ? { min, max } : undefined;
 }
 
 function requireNonEmpty(config: Record<string, unknown>, keys: string[], errors: string[], suffix: string): void {
@@ -252,8 +307,24 @@ function requireNonEmpty(config: Record<string, unknown>, keys: string[], errors
 
 function validatePublicUrl(value: unknown, key: string, errors: string[]): void {
   const url = new URL(String(value));
+  if (url.protocol !== 'https:') {
+    errors.push(`${key} must use https in production`);
+  }
   if (['localhost', '127.0.0.1', '0.0.0.0'].includes(url.hostname)) {
     errors.push(`${key} must not point to localhost or wildcard addresses in production`);
+  }
+}
+
+function validateProductionTurnTransportCoverage(uris: string[], errors: string[]): void {
+  const parsed = uris.map((uri) => parseIceServerUrl(uri)).filter((entry) => Boolean(entry));
+  if (!parsed.some((entry) => entry?.scheme === 'turn' && entry.transport === 'udp')) {
+    errors.push('TURN_URIS must include a UDP TURN endpoint in production');
+  }
+  if (!parsed.some((entry) => entry?.scheme === 'turn' && entry.transport === 'tcp')) {
+    errors.push('TURN_URIS must include a TCP TURN endpoint in production');
+  }
+  if (!parsed.some((entry) => entry?.scheme === 'turn' && entry.secure && entry.transport === 'tcp')) {
+    errors.push('TURN_URIS must include a TLS TURN endpoint in production');
   }
 }
 
@@ -295,7 +366,8 @@ function validateProductionSecretUniqueness(config: Record<string, unknown>, err
     ['TURN_SECRET', config.TURN_SECRET],
     ['OPERATIONS_TOKEN', config.OPERATIONS_TOKEN],
     ['WEBHOOK_SECRET_ENCRYPTION_KEY', config.WEBHOOK_SECRET_ENCRYPTION_KEY],
-    ['PIPE_CLUSTER_SECRET', config.ENABLE_PIPE_TRANSPORT === true ? config.PIPE_CLUSTER_SECRET : undefined]
+    ['PIPE_CLUSTER_SECRET', config.ENABLE_PIPE_TRANSPORT === true ? config.PIPE_CLUSTER_SECRET : undefined],
+    ['PIPE_CLUSTER_SECRET_PREVIOUS', config.ENABLE_PIPE_TRANSPORT === true ? config.PIPE_CLUSTER_SECRET_PREVIOUS : undefined]
   ];
   const secretEntries = rawSecretEntries
     .map(([key, value]): [string, string] => [key, String(value ?? '').trim()])
@@ -316,15 +388,13 @@ function validateTurnUris(value: unknown, errors: string[], options: { rejectLoc
   const uris = splitConfigList(value);
 
   for (const uri of uris) {
-    if (!parseIceServerUrl(uri) || !uri.trim().toLowerCase().startsWith('turn:')) {
-      errors.push(`TURN_URIS entry "${uri}" must use the turn: scheme`);
+    const parsed = parseIceServerUrl(uri);
+    if (!parsed || parsed.scheme !== 'turn') {
+      errors.push(`TURN_URIS entry "${uri}" must use the turn: or turns: scheme`);
       continue;
     }
-    if (!uri.trim().toLowerCase().includes('transport=udp')) {
-      errors.push(`TURN_URIS entry "${uri}" must explicitly request transport=udp`);
-    }
     if (!isSupportedTurnUri(uri)) {
-      errors.push(`TURN_URIS entry "${uri}" uses an unsupported TCP/TLS TURN transport`);
+      errors.push(`TURN_URIS entry "${uri}" must use explicit UDP/TCP TURN or TLS TURN`);
     }
     if (options.rejectLocalHosts) {
       const host = parseTurnUriHost(uri);
@@ -365,7 +435,7 @@ function validateIceTurnServerUris(value: unknown, errors: string[], options: { 
     if (!uri.trim().toLowerCase().includes('transport=udp')) {
       errors.push(`ICE_TURN_SERVERS entry "${uri}" must explicitly request transport=udp`);
     }
-    if (!isSupportedTurnUri(uri)) {
+    if (!isSupportedSfuTurnUri(uri)) {
       errors.push(`ICE_TURN_SERVERS entry "${uri}" uses an unsupported TCP/TLS TURN transport`);
     }
     if (options.rejectLocalHosts && isLocalOrWildcardHost(parsed.host)) {

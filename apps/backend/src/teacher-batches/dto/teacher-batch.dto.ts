@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsEnum, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BATCH_STATUSES, BATCH_WEEKDAYS, BatchStatus, BatchWeekday } from '../../database/schemas';
 
@@ -46,6 +46,13 @@ export class CreateTeacherBatchDto {
   @Max(1000)
   maxCapacity!: number;
 
+  @ApiPropertyOptional({ example: 1200, description: 'Batch fee amount in your default business currency. Use 0 for free batches.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  feeAmount?: number;
+
   @ApiProperty({ type: [BatchScheduleDto] })
   @IsArray()
   @ArrayMinSize(1)
@@ -88,6 +95,13 @@ export class UpdateTeacherBatchDto {
   @Min(1)
   @Max(1000)
   maxCapacity?: number;
+
+  @ApiPropertyOptional({ example: 1200, description: 'Batch fee amount in your default business currency. Use 0 for free batches.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  feeAmount?: number;
 
   @ApiPropertyOptional({ type: [BatchScheduleDto] })
   @IsOptional()

@@ -261,6 +261,7 @@
                     <div class="batch-meta">
                       <span>{{ batch.schedule || 'Schedule to be announced' }}</span>
                       <span>{{ batch.durationMinutes || 60 }} min</span>
+                      <span>{{ feeLabel(batch.feeAmount) }}</span>
                       <span>Starts {{ formatStart(batch.startsAt) }}</span>
                       <span>{{ seatsLabel(batch) }}</span>
                     </div>

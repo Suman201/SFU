@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { ConfirmDialogService } from '../../shared/confirm-dialog/confirm-dialog.service';
+import { formatBatchFee } from '../../shared/formatting/batch-fee';
 import { Footer } from '../../shared/footer/footer';
 import { Header } from '../../shared/header/header';
 import {
@@ -25,6 +26,7 @@ interface BatchFormModel {
   courseId: string;
   year: number;
   maxCapacity: number | null;
+  feeAmount: number | null;
   schedule: Partial<Record<BatchDayOfWeek, string>>;
 }
 
@@ -191,6 +193,10 @@ export class TeacherDashboard {
     return this.nextSession(batch)?.status === 'live' ? 'Open session' : 'Start session';
   }
 
+  protected feeLabel(feeAmount: number | null | undefined): string {
+    return formatBatchFee(feeAmount);
+  }
+
   protected nextBatchStatusLabel(item: NextBatchAction): string {
     if (!item.session) {
       return 'No upcoming session';
@@ -343,6 +349,7 @@ export class TeacherDashboard {
       courseId: '',
       year,
       maxCapacity: 30,
+      feeAmount: 0,
       schedule: {}
     };
   }
@@ -355,6 +362,7 @@ export class TeacherDashboard {
       courseName: value.courseName.trim() || undefined,
       year: Number(value.year),
       maxCapacity: Number(value.maxCapacity),
+      feeAmount: Math.max(0, Number(value.feeAmount ?? 0)),
       schedule: this.scheduleFromModel(value)
     };
   }
@@ -401,6 +409,7 @@ export class TeacherDashboard {
     if (!model.name.trim()) errors.push('Batch name is required.');
     if (!model.year || Number(model.year) < 2000) errors.push('Year is required.');
     if (!model.maxCapacity || Number(model.maxCapacity) <= 0) errors.push('Max capacity must be greater than 0.');
+    if (model.feeAmount === null || Number(model.feeAmount) < 0) errors.push('Fee must be zero or greater.');
     if (!schedule.length) errors.push('Select at least one weekday.');
     if (schedule.some((item) => !item.startTime)) errors.push('Every selected weekday must have a start time.');
     return errors;

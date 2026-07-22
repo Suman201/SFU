@@ -4,6 +4,7 @@ import type { Assignment, AssignmentSubmission } from '@native-sfu/contracts';
 import { ClassSessionService, type ClassroomPayload } from '../../class-session/class-session.service';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
+import { formatBatchFee } from '../../../shared/formatting/batch-fee';
 import { StudentEnrollmentStore, type StudentBatch } from '../student-enrollment.store';
 
 @Component({
@@ -148,6 +149,10 @@ export class StudentDashboard implements OnInit {
 
   protected assignmentBatchLabel(assignment: Assignment): string {
     return assignment.batchName || this.enrolledBatches().find((batch) => batch.id === assignment.batchId)?.title || 'Batch';
+  }
+
+  protected feeLabel(value: number | null | undefined): string {
+    return formatBatchFee(value);
   }
 
   protected dueAssignments(): Array<Assignment & { submission?: AssignmentSubmission }> {

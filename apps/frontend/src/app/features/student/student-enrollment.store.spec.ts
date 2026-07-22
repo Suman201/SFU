@@ -67,6 +67,7 @@ function batch(overrides: Partial<StudentBatch> = {}): StudentBatch {
     totalWeeks: 1,
     enrolledCount: 0,
     capacity: 20,
+    feeAmount: 0,
     startsAt: '2026-06-25T10:00:00.000Z',
     level: 'Intermediate',
     ...overrides

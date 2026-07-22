@@ -322,7 +322,20 @@ export class PipeTransport extends EventEmitter {
     if (mappedSsrc === rtp.ssrc) {
       return packet;
     }
-    return new RtpPacket(rtp.version, rtp.padding, rtp.extension, rtp.marker, rtp.payloadType, rtp.sequenceNumber, rtp.timestamp, mappedSsrc, rtp.csrc, rtp.headerExtension, rtp.payload).serialize();
+    return new RtpPacket(
+      rtp.version,
+      rtp.padding,
+      rtp.extension,
+      rtp.marker,
+      rtp.payloadType,
+      rtp.sequenceNumber,
+      rtp.timestamp,
+      mappedSsrc,
+      rtp.csrc,
+      rtp.headerExtension,
+      rtp.payload,
+      rtp.paddingBytes
+    ).serialize();
   }
 
   private rewriteRtcp(packet: Buffer, mappings: PipeSsrcMapping[] | undefined): Buffer | undefined {

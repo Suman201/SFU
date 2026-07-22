@@ -62,13 +62,16 @@ export function parseIceServerUrl(url: string): ParsedIceServerUrl | undefined {
     .split('&')
     .map((part) => part.split('='))
     .find(([key]) => key?.toLowerCase() === 'transport')?.[1]?.toLowerCase();
+  if (transportValue !== undefined && transportValue !== 'udp' && transportValue !== 'tcp') {
+    return undefined;
+  }
 
   return {
     scheme,
     secure,
     host: normalizedHost,
     port: normalizedPort,
-    transport: transportValue === 'tcp' ? 'tcp' : 'udp',
+    transport: transportValue === 'tcp' ? 'tcp' : transportValue === 'udp' ? 'udp' : secure ? 'tcp' : 'udp',
     explicitTransport: transportValue !== undefined
   };
 }
@@ -86,6 +89,17 @@ export function parseTurnUriHost(uri: string): string | undefined {
 }
 
 export function isSupportedTurnUri(uri: string): boolean {
+  const parsed = parseIceServerUrl(uri);
+  if (parsed?.scheme !== 'turn') {
+    return false;
+  }
+  if (parsed.secure) {
+    return parsed.transport === 'tcp';
+  }
+  return parsed.explicitTransport && (parsed.transport === 'udp' || parsed.transport === 'tcp');
+}
+
+export function isSupportedSfuTurnUri(uri: string): boolean {
   const parsed = parseIceServerUrl(uri);
   return parsed?.scheme === 'turn' && !parsed.secure && parsed.transport === 'udp' && parsed.explicitTransport === true;
 }
@@ -116,7 +130,7 @@ export function buildIceTurnServers(
   const realm = normalizeOptionalString(options.turnRealm);
 
   return urls
-    .filter(isSupportedTurnUri)
+    .filter(isSupportedSfuTurnUri)
     .map((url) => ({
       url,
       username,

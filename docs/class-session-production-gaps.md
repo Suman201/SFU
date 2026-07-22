@@ -955,27 +955,38 @@ Verification:
 
 ### P1: Backups, Retention, And Data Lifecycle
 
-Status: **Blocker** for broad production.
+Status: **Implemented, environment proof pending** for broad production.
 
-Verify:
+Implemented:
 
-- Mongo backup and restore plan
-- recording retention and expiry behavior
-- chat attachment retention
-- attendance snapshot retention
-- audit log retention
-- user/profile/avatar file retention
-- safe deletion or archival behavior for batches, sessions, materials, and recordings
+- **Done**: ~~Mongo and server-stored artifact backup/restore scripts with checksums, optional `age` encryption, retention cleanup, and confirmation-gated restore.~~
+- **Done**: ~~Redis acceptable-loss policy documented: runtime presence, affinity, and coordination keys rebuild after restore.~~
+- **Done**: ~~Recording, attachment, material, profile-media, audit/event, and snapshot retention controls are documented in `docs/production-operations.md`.~~
+- **Done**: ~~Shared multi-node artifact storage is represented by the Kubernetes RWX volume profile.~~
+
+Pending proof:
+
+- run an encrypted backup against production-like data
+- restore into an isolated target and record measured RPO/RTO
+- validate provider-side S3/versioning policy when S3 recording storage is enabled
 
 ## Scale And Multi-Node Gaps
 
-Status: **Blocker** for large-scale or multi-node production.
+Status: **Implementation complete, environment proof pending** for large-scale or multi-node production.
 
 These should block a large-scale rollout, but may not block a small single-node pilot if risks are accepted.
 
 ### P1: Multi-Node Ownership And Pipe Proof
 
-Status: **Blocker** for multi-node production.
+Status: **Environment proof pending** for multi-node production.
+
+Implemented baseline:
+
+- encrypted authenticated UDP pipe transport with rolling cluster-secret overlap
+- Redis-backed node registration, capacity scoring, ownership fencing, and drain state
+- host-network Kubernetes media pods with required one-pod-per-node anti-affinity
+- shared-ingress signaling with pipe mode enabled, node drain preStop, slow HPA scale-down, and PDBs
+- production hard limits, metrics, alerts, and operator diagnostics
 
 Required proof:
 
@@ -1030,7 +1041,7 @@ Required coverage:
 7. **Pending Proof**: Prove PDF/image/slide-image whiteboard import, annotation, export, and attached board notes in a real browser.
 8. **Done**: ~~Clean up or backend-drive remaining demo/static frontend data. Done 2026-06-25 for frontend portal production surfaces; student enrollment/dashboard/explore now backend-drive data or show honest empty/error states.~~
 9. **Blocker**: Run staging media proof for TURN, UDP, ingress, publish/subscribe, reconnect, and drain.
-10. **Partially Done**: Production security configuration hardening is done 2026-06-25; real environment secret provisioning, monitoring destination checks, backups, and restore proof remain broad-production signoff items.
+10. **Implemented / Pending Proof**: Production security, secret-file loading, alerts, backup/restore tooling, TLS/TURN manifests, and multi-node deployment controls are implemented. Real secret provisioning, alert delivery, public networking, and restore proof remain broad-production signoff items.
 11. **Tracked**: Run a small controlled pilot and log every incident before broad rollout.
 
 ## Acceptance Checklist Before Controlled Pilot

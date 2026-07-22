@@ -9,6 +9,8 @@ data:
   PUBLIC_URL: https://sfu.example.com
   FRONTEND_URL: https://sfu.example.com
   CORS_ALLOWED_ORIGINS: https://sfu.example.com
+  TRUST_PROXY_HOPS: "1"
+  GRACEFUL_SHUTDOWN_TIMEOUT_MS: "30000"
   NODE_REGION: default
   NODE_ZONE: default-a
   # Must be the externally reachable control-plane URL for this node, not an internal pod IP.
@@ -19,8 +21,8 @@ data:
   NODE_PREFER_LOCAL: "true"
   NODE_MAX_ROOMS: "1000"
   NODE_MAX_TRANSPORTS: "5000"
-  # Phase 11 pipe transport is foundation-only and must remain disabled unless explicitly tested.
-  ENABLE_PIPE_TRANSPORT: "false"
+  # Required for horizontally scaled signaling behind one shared ingress URL.
+  ENABLE_PIPE_TRANSPORT: "true"
   PIPE_PORT_RANGE: "41000-41100"
   # When pipe transport is enabled, advertise the stable inter-node IP peers actually reach.
   PIPE_ADVERTISE_IP: ""
@@ -28,14 +30,16 @@ data:
   PIPE_COORDINATION_TIMEOUT_MS: "5000"
   PIPE_COORDINATION_MAX_ATTEMPTS: "3"
   PIPE_MAX_SETUP_REQUESTS_PER_MINUTE: "120"
-  TURN_REALM: native-sfu.local
+  TURN_REALM: sfu.example.com
   # Browser clients consume these URIs through GET /api/v1/media/turn-credentials.
   # Production values must point at the public TURN address browsers actually reach.
-  # The current release candidate validates and advertises UDP TURN only.
-  TURN_URIS: turn:sfu.example.com:3478?transport=udp
+  TURN_URIS: turn:turn.sfu.example.com:3478?transport=udp,turn:turn.sfu.example.com:3478?transport=tcp,turns:turn.sfu.example.com:5349?transport=tcp
+  # Overridden from status.hostIP in backend.yaml. Nodes must have a public,
+  # browser-reachable address or a 1:1 UDP NAT mapping for this value.
+  ICE_ANNOUNCED_ADDRESS: 203.0.113.10
   MEDIA_WORKER_MODE: worker
   MEDIA_WORKER_COUNT: "1"
-  HOST_CANDIDATE_PORT_RANGE: "40000-40100"
+  HOST_CANDIDATE_PORT_RANGE: "40000-40999"
   MEDIA_WORKER_REQUEST_TIMEOUT_MS: "5000"
   MEDIA_WORKER_STARTUP_TIMEOUT_MS: "10000"
   MEDIA_WORKER_HEARTBEAT_INTERVAL_MS: "2000"
@@ -51,6 +55,22 @@ data:
   MEDIA_WORKER_HARD_MEMORY_LIMIT_BYTES: ""
   MEDIA_WORKER_SOFT_RTP_PACKET_RATE: "50000"
   MEDIA_WORKER_SOFT_RTCP_PACKET_RATE: "5000"
+  ROOM_MAX_PARTICIPANTS: "100"
+  ROOM_MAX_PRODUCERS: "300"
+  ROOM_MAX_PRODUCERS_PER_PARTICIPANT: "3"
+  ROOM_MAX_CONSUMERS: "20000"
+  ROOM_MAX_CONSUMERS_PER_PARTICIPANT: "300"
+  ROOM_MAX_SCREEN_PRODUCERS: "4"
+  ROOM_MAX_AUDIO_BITRATE_BPS: "128000"
+  ROOM_MAX_VIDEO_BITRATE_BPS: "2500000"
+  ROOM_MAX_SCREEN_BITRATE_BPS: "5000000"
+  SOCKET_CONNECTION_RATE_LIMIT_MAX: "60"
+  SOCKET_EVENT_RATE_LIMIT_MAX: "300"
+  SOCKET_JOIN_RATE_LIMIT_MAX: "30"
+  SOCKET_MEDIA_RATE_LIMIT_MAX: "240"
+  SOCKET_REALTIME_RATE_LIMIT_MAX: "1200"
+  SOCKET_MAX_PAYLOAD_BYTES: "1048576"
+  LOG_LEVEL: info
   RECORDING_STORAGE_DRIVER: local
   RECORDING_LOCAL_PATH: /app/recordings
   SWAGGER_ENABLED: "false"

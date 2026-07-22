@@ -197,7 +197,8 @@ export function cloneRtpPacketWithHeaderExtension(packet: RtpPacket, headerExten
     packet.ssrc,
     [...packet.csrc],
     headerExtension,
-    Buffer.from(packet.payload)
+    Buffer.from(packet.payload),
+    Buffer.from(packet.paddingBytes)
   );
 }
 

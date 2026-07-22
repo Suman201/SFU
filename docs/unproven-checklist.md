@@ -59,7 +59,9 @@ These are useful follow-ups after staging even if staging goes green.
 - [ ] Add a staging-only Kubernetes overlay for real UDP exposure and drain-hook wiring
 - [ ] Broaden the shared-ingress browser proof beyond Chromium and single-flow video coverage
 - [ ] Add explicit frontend handling for owner redirects if multi-node non-pipe routing is meant to be first-class
-- [ ] Package alert rules or dashboard guidance for TURN, drain, worker, and pipe incidents
+- [x] Package alert rules and dashboard guidance for drain, worker, capacity, abuse, control-plane, and pipe incidents. Environment alert delivery remains unproven.
+- [ ] Run a Mongo/artifact backup and isolated restore drill using the production scripts
+- [ ] Verify the configured Alertmanager receiver receives firing and resolved alerts
 - [ ] Decide whether `/metrics` should remain canonical with alias behavior documented, or become fully path-configurable
 - [ ] Reduce backend lint/test warning noise that obscures real failures
 - [ ] Quiet `ts-jest` dist `.js` transform warnings in backend test output

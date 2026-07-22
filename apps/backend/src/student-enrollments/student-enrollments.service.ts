@@ -47,6 +47,7 @@ export interface StudentEnrolledBatch {
   totalWeeks: number;
   enrolledCount: number;
   capacity: number;
+  feeAmount: number;
   startsAt: string;
   level: 'Beginner' | 'Intermediate' | 'Advanced';
   enrollmentStatus?: StudentEnrollmentStatus;
@@ -664,10 +665,16 @@ export class StudentEnrollmentsService {
       totalWeeks: Math.max(1, schedules.length * 12),
       enrolledCount,
       capacity: batch.maxCapacity,
+      feeAmount: this.batchFeeAmount(batch),
       startsAt: nextStart.toISOString(),
       level: 'Intermediate',
       ...(enrollment?.status ? { enrollmentStatus: enrollment.status } : {})
     };
+  }
+
+  private batchFeeAmount(batch: BatchMongoDocument): number {
+    const value = typeof batch.feeAmount === 'number' ? batch.feeAmount : 0;
+    return Number.isFinite(value) && value > 0 ? value : 0;
   }
 
   private serialize(doc: StudentEnrollmentMongoDocument): Record<string, unknown> {

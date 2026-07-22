@@ -86,6 +86,7 @@ export class MediaWorkerRunner {
       }
     });
     const router = new RtpRouter({
+      detachPacedWrites: true,
       onForwardedPacket: () => {
         this.state.rtpPackets += 1;
       },
@@ -158,7 +159,7 @@ export class MediaWorkerRunner {
           }
         })
     });
-    this.media = new MediaService(ice, dtls, srtp, rtcp, router, this.pipe);
+    this.media = new MediaService(ice, dtls, srtp, rtcp, router, this.pipe, this.options);
     this.forwardMediaEvents();
   }
 
@@ -269,7 +270,7 @@ export class MediaWorkerRunner {
         await this.media.setProducerPaused(command.producerId, command.paused);
         return undefined;
       case 'setProducerPriority':
-        this.media.setProducerPriority(command.producerId, command.priority);
+        await this.media.setProducerPriority(command.producerId, command.priority);
         return undefined;
       case 'registerConsumer':
         await this.media.registerConsumer(command.consumer);
@@ -307,7 +308,7 @@ export class MediaWorkerRunner {
       case 'setConsumerPreferredSvcLayers':
         return this.media.setConsumerPreferredSvcLayers(command.consumerId, command.preferredSvcLayers);
       case 'setConsumerPriority':
-        this.media.setConsumerPriority(command.consumerId, command.priority);
+        await this.media.setConsumerPriority(command.consumerId, command.priority);
         return undefined;
       case 'applyConsumerTwccObservation':
         return this.media.applyConsumerTwccObservation(command.consumerId, command.observation);

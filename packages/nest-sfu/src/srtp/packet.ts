@@ -2,7 +2,8 @@ import { RtpPacket } from '@native-sfu/sfu-core';
 import { RtpHeader as WeriftRtpHeader } from 'werift-dtls/lib/rtp/src';
 
 export interface ParsedRtp {
-  packet: RtpPacket;
+  sequenceNumber: number;
+  ssrc: number;
   packetIndex: bigint;
 }
 
@@ -13,11 +14,16 @@ export interface SrtpSsrcState {
 }
 
 export function parseRtpForSrtp(buffer: Buffer, state: SrtpSsrcState): ParsedRtp {
-  const packet = RtpPacket.parse(buffer);
-  const rolloverCounter = estimateRolloverCounter(packet.sequenceNumber, state);
+  if (buffer.length < 12 || buffer[0]! >> 6 !== 2) {
+    throw new Error('Invalid RTP header');
+  }
+  const sequenceNumber = buffer.readUInt16BE(2);
+  const ssrc = buffer.readUInt32BE(8);
+  const rolloverCounter = estimateRolloverCounter(sequenceNumber, state);
   return {
-    packet,
-    packetIndex: (BigInt(rolloverCounter) << 16n) | BigInt(packet.sequenceNumber)
+    sequenceNumber,
+    ssrc,
+    packetIndex: (BigInt(rolloverCounter) << 16n) | BigInt(sequenceNumber)
   };
 }
 

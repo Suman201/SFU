@@ -1,5 +1,7 @@
 # Operator Runbook
 
+Production deployment, secret rotation, alerts, capacity controls, graceful rollout, and backup/restore procedures are maintained in [production-operations.md](production-operations.md). Use this runbook for incident diagnosis and that guide for platform-level change procedures.
+
 ## Planned Node Maintenance
 
 1. Send `POST /api/v1/media/node/drain` with `X-Operations-Token`.
@@ -509,3 +511,6 @@ Operator notes:
 - room audit/event history is intentionally REST-backed rather than a new Socket.IO stream; use the room incident signals for live operator UX and the audit log for durable history and replay source-of-truth.
 - A failed room should usually be snapshotted before cleanup evidence ages out.
 - If a room is remotely owned and warning strings mention owner-quality visibility or remote-owner risk, investigate owner-node continuity before reopening traffic.
+# Operator Runbook
+
+Production deployment, secret rotation, alerts, capacity controls, graceful rollout, and backup/restore procedures are maintained in [production-operations.md](production-operations.md). Use this runbook for incident diagnosis and that guide for platform-level change procedures.

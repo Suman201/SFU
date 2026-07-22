@@ -80,6 +80,7 @@ export class TeacherBatchesService {
             startDate: dates.startDate,
             endDate: dates.endDate,
             maxCapacity: dto.maxCapacity,
+            feeAmount: this.normalizeFeeAmount(dto.feeAmount),
             status: 'ACTIVE'
           }
         ],
@@ -135,6 +136,9 @@ export class TeacherBatchesService {
         throw new BadRequestException('Max capacity cannot be less than enrolled student count.');
       }
       update.maxCapacity = dto.maxCapacity;
+    }
+    if (dto.feeAmount !== undefined) {
+      update.feeAmount = this.normalizeFeeAmount(dto.feeAmount, existing.feeAmount ?? 0);
     }
 
     return this.withTransaction(async (session) => {
@@ -279,6 +283,7 @@ export class TeacherBatchesService {
             startDate: dates.startDate,
             endDate: dates.endDate,
             maxCapacity: request.maxCapacity,
+            feeAmount: this.normalizeFeeAmount(request.feeAmount),
             status: 'ACTIVE'
           }
         ],
@@ -300,7 +305,7 @@ export class TeacherBatchesService {
       resourceId: detail.id,
       resourceLabel: detail.name,
       metadata: { summary: `Created batch ${detail.name}`, courseId: detail.courseId, teacherId: detail.teacherId },
-      after: { name: detail.name, courseId: detail.courseId, teacherId: detail.teacherId, status: detail.status }
+      after: { name: detail.name, courseId: detail.courseId, teacherId: detail.teacherId, feeAmount: detail.feeAmount, status: detail.status }
     });
     return detail;
   }
@@ -342,6 +347,7 @@ export class TeacherBatchesService {
       update.endDate = dates.endDate;
     }
     if (request.maxCapacity !== undefined) update.maxCapacity = request.maxCapacity;
+    if (request.feeAmount !== undefined) update.feeAmount = this.normalizeFeeAmount(request.feeAmount, existing.feeAmount ?? 0);
     if (request.status !== undefined) update.status = request.status;
     const detail = await this.withTransaction(async (session) => {
       if (Object.keys(update).length) {
@@ -373,6 +379,7 @@ export class TeacherBatchesService {
         teacherId: existing.teacherId,
         year: existing.year,
         maxCapacity: existing.maxCapacity,
+        feeAmount: this.normalizeFeeAmount(existing.feeAmount, 0),
         status: existing.status
       },
       after: {
@@ -382,6 +389,7 @@ export class TeacherBatchesService {
         teacherId: detail.teacherId,
         year: detail.year,
         maxCapacity: detail.maxCapacity,
+        feeAmount: detail.feeAmount,
         status: detail.status
       }
     });
@@ -527,6 +535,7 @@ export class TeacherBatchesService {
       startDate: this.dateOnly(batch.startDate),
       endDate: this.dateOnly(batch.endDate),
       maxCapacity: batch.maxCapacity,
+      feeAmount: this.normalizeFeeAmount(batch.feeAmount, 0),
       enrolledCount,
       status: batch.status,
       schedule: schedules.map((schedule) => ({
@@ -809,6 +818,16 @@ export class TeacherBatchesService {
     });
   }
 
+  private normalizeFeeAmount(value: number | undefined, fallback = 0): number {
+    if (value === undefined || value === null) {
+      return fallback;
+    }
+    if (!Number.isFinite(value) || value < 0) {
+      throw new BadRequestException('Fee amount must be zero or greater.');
+    }
+    return Math.round(value * 100) / 100;
+  }
+
   private async scheduleMap(batchIds: string[]): Promise<Map<string, BatchScheduleMongoDocument[]>> {
     if (!batchIds.length) return new Map();
     const schedules = await this.schedules.find({ batchId: { $in: batchIds } }).sort({ dayOfWeek: 1 });
@@ -843,6 +862,7 @@ export class TeacherBatchesService {
       startDate: this.dateOnly(batch.startDate),
       endDate: this.dateOnly(batch.endDate),
       maxCapacity: batch.maxCapacity,
+      feeAmount: this.normalizeFeeAmount(batch.feeAmount, 0),
       enrolledCount: roster.length,
       status: batch.status,
       schedule: schedules.map((schedule) => ({

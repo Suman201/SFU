@@ -137,8 +137,8 @@ export function buildUnifiedPlanAnswer(options: UnifiedPlanAnswerOptions): strin
   if (targetIndex < 0) {
     throw new Error('SDP offer does not include a compatible media section');
   }
-  const candidate = options.transport.iceCandidates.find((item) => item.ip === '127.0.0.1') ?? options.transport.iceCandidates[0];
-  if (!candidate) {
+  const candidates = answerCandidates(options.transport.iceCandidates);
+  if (candidates.length === 0) {
     throw new Error('Transport does not include ICE candidates');
   }
   const mediaAnswers: string[][] = [];
@@ -184,7 +184,7 @@ export function buildUnifiedPlanAnswer(options: UnifiedPlanAnswerOptions): strin
       'a=rtcp-rsize',
       ...codecLines,
       ...simulcastAnswerLines(section, options.direction, options.rtpParameters),
-      candidateLine(candidate),
+      ...candidates.map(candidateLine),
       'a=end-of-candidates'
     ];
     if (options.direction === 'sendonly' && options.rtpParameters) {
@@ -215,6 +215,21 @@ export function buildUnifiedPlanAnswer(options: UnifiedPlanAnswerOptions): strin
     ...mediaAnswers.flat()
   ];
   return `${lines.join('\r\n')}\r\n`;
+}
+
+function answerCandidates(candidates: IceCandidate[]): IceCandidate[] {
+  const unique = new Map<string, IceCandidate>();
+  for (const candidate of candidates) {
+    const key = `${candidate.protocol}:${candidate.ip}:${candidate.port}:${candidate.type}`;
+    if (!unique.has(key)) {
+      unique.set(key, candidate);
+    }
+  }
+  return [...unique.values()].sort((left, right) => Number(isLoopbackAddress(left.ip)) - Number(isLoopbackAddress(right.ip)));
+}
+
+function isLoopbackAddress(address: string): boolean {
+  return address === '::1' || address.startsWith('127.');
 }
 
 function answerPayloadTypes(section: string[], rtpParameters: RtpParameters | undefined): number[] {

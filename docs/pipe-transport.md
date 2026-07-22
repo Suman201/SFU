@@ -30,7 +30,7 @@ Implemented:
 - Signed Redis coordination envelopes with correlation IDs, idempotency keys, acknowledgements, retries, timeout propagation, and persisted duplicate suppression.
 - Owner fencing against the current Redis room owner, including claim-timestamp validation.
 - Internal pipe transport simulation for RTP, RTCP, SSRC rewriting, replay/drop protection, backpressure, counters, and idempotent cleanup.
-- UDP pipe transport for controlled node-to-node RTP/RTCP validation with framed datagrams, peer auth, advertised endpoints, and socket cleanup.
+- UDP pipe transport for controlled node-to-node RTP/RTCP validation with AES-256-GCM authenticated encryption, nonce replay rejection, frame freshness checks, strict peer endpoints, bounded queues, advertised endpoints, and socket cleanup.
 - MediaService pipe ingress/egress hooks for controlled owner-to-remote RTP and remote-to-owner RTCP validation.
 - Owner-orchestrated remote feed setup so a non-owner subscriber node can request a producer feed, establish a pipe, and register a remote proxy producer while keeping WebRTC transport local to the subscriber node.
 - Remote publisher setup so a non-owner publisher node can publish locally while the owner node receives a proxy producer through coordinated pipe bindings.

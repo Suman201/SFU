@@ -41,6 +41,7 @@ export class NodeRegistryService implements OnModuleInit, OnModuleDestroy, Befor
   private readonly preferLocalNode: boolean;
   private readonly maxRooms: number;
   private readonly maxTransports: number;
+  private readonly gracefulShutdownTimeoutMs: number;
   private readonly registeredAt = new Date().toISOString();
   private readonly ownedRooms = new Set<string>();
   private runtimeDraining = false;
@@ -62,6 +63,7 @@ export class NodeRegistryService implements OnModuleInit, OnModuleDestroy, Befor
     this.preferLocalNode = config.get<boolean>('cluster.preferLocalNode', true);
     this.maxRooms = config.get<number>('cluster.maxRooms', 1000);
     this.maxTransports = config.get<number>('cluster.maxTransports', 5000);
+    this.gracefulShutdownTimeoutMs = config.get<number>('app.gracefulShutdownTimeoutMs', 30_000);
   }
 
   async onModuleInit(): Promise<void> {
@@ -78,14 +80,28 @@ export class NodeRegistryService implements OnModuleInit, OnModuleDestroy, Befor
       clearInterval(this.heartbeat);
       this.heartbeat = undefined;
     }
-    await this.beginDraining('module_destroy').catch((error) => {
-      this.logger.warn(`Failed to publish final draining heartbeat: ${error instanceof Error ? error.message : String(error)}`);
-    });
   }
 
   async beforeApplicationShutdown(signal?: string): Promise<void> {
     this.runtimeDraining = true;
     this.runtimeDrainReason = signal ? `shutdown:${signal}` : 'shutdown';
+    await this.beginDraining(this.runtimeDrainReason).catch((error) => {
+      this.logger.warn(`Failed to publish shutdown drain state: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    const deadline = Date.now() + this.gracefulShutdownTimeoutMs;
+    let nextHeartbeatAt = Date.now() + this.heartbeatIntervalMs;
+    while (this.ownedRooms.size > 0 && Date.now() < deadline) {
+      if (Date.now() >= nextHeartbeatAt) {
+        await this.heartbeatNow().catch((error) => {
+          this.logger.warn(`Failed to renew draining node ownership: ${error instanceof Error ? error.message : String(error)}`);
+        });
+        nextHeartbeatAt = Date.now() + this.heartbeatIntervalMs;
+      }
+      await delay(250);
+    }
+    if (this.ownedRooms.size > 0) {
+      this.logger.warn(`Graceful shutdown drain timed out with ${this.ownedRooms.size} owned room(s) still active`);
+    }
   }
 
   localNodeId(): string {
@@ -408,4 +424,8 @@ function nodeScore(node: ClusterNodeInfo, options: SelectNodeOptions): number {
   const regionPenalty = options.region && node.region !== options.region ? 1000 : 0;
   const zonePenalty = options.zone && node.zone !== options.zone ? 100 : 0;
   return regionPenalty + zonePenalty + node.capacity.capacityScore;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

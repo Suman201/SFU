@@ -28,6 +28,7 @@ export interface ProfileBatchAssociation {
   durationMinutes?: number;
   enrolledCount?: number;
   capacity?: number;
+  feeAmount?: number;
   startsAt?: string;
   status?: string;
 }

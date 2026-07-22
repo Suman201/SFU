@@ -220,6 +220,15 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
   async unregisterProducer(producerId: string): Promise<void> {
     const worker = this.pool.workerForProducer(producerId);
     await worker.request({ type: 'unregisterProducer', producerId });
+    for (const [consumerId, consumer] of [...this.consumers]) {
+      if (consumer.producerId !== producerId) {
+        continue;
+      }
+      this.consumers.delete(consumerId);
+      this.consumerLayerStates.delete(consumerId);
+      this.consumerQualityStates.delete(consumerId);
+      this.pool.releaseConsumer(consumerId);
+    }
     this.producers.delete(producerId);
     this.producerLayerStates.delete(producerId);
     this.producerDynacastStates.delete(producerId);
@@ -231,13 +240,13 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
     await this.pool.workerForProducer(producerId).request({ type: 'setProducerPaused', producerId, paused });
   }
 
-  setProducerPriority(producerId: string, priority: number): void {
+  async setProducerPriority(producerId: string, priority: number): Promise<void> {
     const producer = this.producers.get(producerId);
     if (!producer) {
       throw new NotFoundException('Producer not found');
     }
+    await this.pool.workerForProducer(producerId).request({ type: 'setProducerPriority', producerId, priority });
     producer.priority = priority;
-    void this.pool.workerForProducer(producerId).request({ type: 'setProducerPriority', producerId, priority });
   }
 
   async registerConsumer(consumer: Consumer): Promise<void> {
@@ -427,13 +436,13 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
     return state;
   }
 
-  setConsumerPriority(consumerId: string, priority: number): void {
+  async setConsumerPriority(consumerId: string, priority: number): Promise<void> {
     const consumer = this.consumers.get(consumerId);
     if (!consumer) {
       throw new NotFoundException('Consumer not found');
     }
+    await this.pool.workerForConsumer(consumerId).request({ type: 'setConsumerPriority', consumerId, priority });
     consumer.priority = priority;
-    void this.pool.workerForConsumer(consumerId).request({ type: 'setConsumerPriority', consumerId, priority });
   }
 
   async applyConsumerTwccObservation(
@@ -982,9 +991,13 @@ function emptyMediaCounters(): MediaPacketBridgeCounters {
     routedRtpPackets: 0,
     routedRtcpPackets: 0,
     inboundRtpPaddingOnlyPackets: 0,
+    inboundMediaBeforeSrtpPackets: 0,
     inboundRtpSsrcCounts: {},
     inboundRtpPayloadTypeCounts: {},
     queueDepth: 0,
-    maxQueueDepth: 0
+    queueBytes: 0,
+    maxQueueDepth: 0,
+    maxQueueBytes: 0,
+    droppedQueuePackets: 0
   };
 }

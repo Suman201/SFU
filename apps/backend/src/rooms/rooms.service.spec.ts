@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,6 +27,18 @@ describe('RoomsService', () => {
 
     expect(thrown).toBeInstanceOf(ForbiddenException);
     expect(nodeRegistry.assertLocalCanOwnNewRoom).not.toHaveBeenCalled();
+  });
+
+  it('rejects room capacity above the configured production ceiling', async () => {
+    const { service, rooms } = createService();
+
+    const error = await captureError(() => service.createRoom(
+      { id: 'teacher-1', email: 'teacher@example.com', roles: [Role.HOST] },
+      'socket-1',
+      { name: 'Oversized Room', maxParticipants: 101 }
+    ));
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(rooms.create).not.toHaveBeenCalled();
   });
 
   it('preallocates the host participant id before persisting a room', async () => {
@@ -4987,6 +4999,30 @@ describe('RoomsService', () => {
     expect(producer.source).toBe('ingest');
     expect(producer.status).toBe('live');
   });
+
+  it('rejects producer creation when the room producer ceiling is reached', async () => {
+    const { service, rooms, participants, producers, media, metrics } = createService();
+    (service as unknown as { roomLimits: { maxProducers: number } }).roomLimits.maxProducers = 1;
+    rooms.findById.mockResolvedValue(fakeRoomDoc({ id: 'room-1', closedAt: undefined }));
+    participants.findOne.mockResolvedValue(fakeParticipantDoc({ id: 'participant-1', roomId: 'room-1' }));
+    producers.countDocuments.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+    const error = await captureError(() => service.createIngestProducer({
+      roomId: 'room-1',
+      participantId: 'participant-1',
+      transportId: 'transport-1',
+      kind: 'audio',
+      rtpParameters: {
+        codecs: [{ mimeType: 'audio/opus', payloadType: 111, clockRate: 48_000, channels: 2, rtcpFeedback: [] }],
+        encodings: [{ ssrc: 1234 }],
+        rtcp: { cname: 'capacity-test', reducedSize: true }
+      }
+    }));
+    expect(error).toBeInstanceOf(ServiceUnavailableException);
+
+    expect(media.bindProducer).not.toHaveBeenCalled();
+    expect(metrics.capacityAdmissionRejections.labels).toHaveBeenCalledWith('producers_room');
+  });
 });
 
 function createService(): {
@@ -4998,8 +5034,8 @@ function createService(): {
   classSessions: { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; findOneAndUpdate: jest.Mock; updateOne: jest.Mock };
   participants: { create: jest.Mock; findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; countDocuments: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   permissions: { create: jest.Mock; find: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock };
-  producers: jest.Mock & { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
-  consumers: { findById: jest.Mock; find: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
+  producers: jest.Mock & { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; countDocuments: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
+  consumers: { findById: jest.Mock; find: jest.Mock; countDocuments: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   moderation: { create: jest.Mock; exists: jest.Mock; updateMany: jest.Mock };
   chatAttachments: { create: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   chat: { create: jest.Mock; find: jest.Mock; countDocuments: jest.Mock };
@@ -5072,6 +5108,7 @@ function createService(): {
     activeProducers: { labels: jest.Mock };
     activeConsumers: { inc: jest.Mock; dec: jest.Mock };
     roomAdmissionRejections: { labels: jest.Mock };
+    capacityAdmissionRejections: { labels: jest.Mock };
     classSessionLifecycleTransitions: { labels: jest.Mock };
     classSessionJoinAttempts: { labels: jest.Mock };
     classSessionReconnectGraceEvents: { labels: jest.Mock };
@@ -5172,6 +5209,7 @@ function createService(): {
       findById: jest.fn(),
       findOne: jest.fn(),
       find: jest.fn(async () => []),
+      countDocuments: jest.fn(async () => 0),
       updateOne: jest.fn(async () => ({ modifiedCount: 1 })),
       updateMany: jest.fn()
     }
@@ -5179,6 +5217,7 @@ function createService(): {
   const consumers = {
     findById: jest.fn(),
     find: jest.fn(async () => []),
+    countDocuments: jest.fn(async () => 0),
     updateOne: jest.fn(async () => ({ modifiedCount: 0 })),
     updateMany: jest.fn()
   };
@@ -5354,6 +5393,9 @@ function createService(): {
     roomAdmissionRejections: {
       labels: jest.fn(() => roomAdmissionRejectionMetric)
     },
+    capacityAdmissionRejections: {
+      labels: jest.fn(() => roomAdmissionRejectionMetric)
+    },
     classSessionLifecycleTransitions: {
       labels: jest.fn(() => classSessionMetric)
     },
@@ -5494,6 +5536,15 @@ function createService(): {
     recordings,
     config
   };
+}
+
+async function captureError(operation: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await operation();
+    return undefined;
+  } catch (error) {
+    return error;
+  }
 }
 
 function ownerLookup(local: boolean) {

@@ -13,6 +13,7 @@ import { RoomsService } from '../rooms/rooms.service';
 import {
   isLocalOrWildcardHost,
   isSupportedStunUri,
+  isSupportedSfuTurnUri,
   isSupportedTurnUri,
   parseIceServerUrl,
   parseTurnUriHost,
@@ -480,15 +481,18 @@ function buildTurnDiagnostics(config: ConfigService): TurnRuntimeDiagnostics {
     uriCount: uris.length,
     supportedUriCount,
     localhostUriCount,
-    udpOnly: uris.length === supportedUriCount
+    udpOnly: uris.every((uri) => {
+      const parsed = parseIceServerUrl(uri);
+      return parsed?.secure === false && parsed.transport === 'udp';
+    })
   };
 }
 
 function buildServerIceDiagnostics(config: ConfigService): ServerIceRuntimeDiagnostics {
-  const announcedAddress = config.get<string | undefined>('mediaWorker.ice.announcedAddress')?.trim() || undefined;
-  const stunServers = config.get<string[]>('mediaWorker.ice.stunServers', []).map((value) => value.trim()).filter(Boolean);
+  const announcedAddress = config.get<string | undefined>('media.ice.announcedAddress')?.trim() || undefined;
+  const stunServers = config.get<string[]>('media.ice.stunServers', []).map((value) => value.trim()).filter(Boolean);
   const turnServers = config
-    .get<Array<{ url: string }>>('mediaWorker.ice.turnServers', [])
+    .get<Array<{ url: string }>>('media.ice.turnServers', [])
     .map((entry) => entry?.url?.trim())
     .filter((value): value is string => Boolean(value));
 
@@ -500,7 +504,7 @@ function buildServerIceDiagnostics(config: ConfigService): ServerIceRuntimeDiagn
     supportedStunServerCount: stunServers.filter(isSupportedStunUri).length,
     stunServerHosts: stunServers.map((value) => parseIceServerUrl(value)?.host).filter((value): value is string => Boolean(value)),
     turnServerCount: turnServers.length,
-    supportedTurnServerCount: turnServers.filter(isSupportedTurnUri).length,
+    supportedTurnServerCount: turnServers.filter(isSupportedSfuTurnUri).length,
     turnServerHosts: turnServers.map((value) => parseTurnUriHost(value)).filter((value): value is string => Boolean(value)),
     usesSharedSecretTurnCredentials: turnServers.length > 0
   };

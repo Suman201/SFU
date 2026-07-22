@@ -976,6 +976,7 @@
                     <div class="batch-meta">
                       <span>{{ batch.status || 'ACTIVE' }}</span>
                       <span>{{ batch.schedule || 'Schedule to be announced' }}</span>
+                      <span>{{ feeLabel(batch.feeAmount) }}</span>
                       <span>{{ batchFillLabel(batch) }}</span>
                       <span>{{ formatDate(batch.startsAt) }}</span>
                     </div>

@@ -263,6 +263,7 @@
                 <th class="table-checkbox-cell" scope="col"><input class="table-checkbox" type="checkbox" aria-label="Select all batches" /></th>
                 <th scope="col">Batch</th>
                 <th scope="col">Course</th>
+                <th scope="col">Fee</th>
                 <th scope="col">Total student</th>
                 <th scope="col">Schedule</th>
                 <th scope="col">Next class</th>
@@ -286,6 +287,7 @@
                     </a>
                   </td>
                   <td>{{ batch.courseName }}</td>
+                  <td>{{ feeLabel(batch.feeAmount) }}</td>
                   <td>{{ batch.enrolledCount }}/{{ batch.maxCapacity }}</td>
                   <td>{{ scheduleLabel(batch) }}</td>
                   <td>
@@ -380,6 +382,10 @@
         <label>
           Max Capacity
           <input type="number" min="1" [ngModel]="batchModel().maxCapacity" (ngModelChange)="updateModel('maxCapacity', +$event)" name="maxCapacity" />
+        </label>
+        <label>
+          Fee
+          <input type="number" min="0" step="0.01" [ngModel]="batchModel().feeAmount" (ngModelChange)="updateModel('feeAmount', +$event)" name="feeAmount" />
         </label>
 
         <div class="year-range">

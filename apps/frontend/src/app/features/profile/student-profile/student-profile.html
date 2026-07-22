@@ -223,6 +223,7 @@
               <div>
                 <span>{{ batch.teacherName || 'Teacher' }}</span>
                 <span>{{ batch.schedule || 'Schedule to be announced' }}</span>
+                <span>{{ feeLabel(batch.feeAmount) }}</span>
                 <span>{{ formatStart(batch.startsAt) }}</span>
               </div>
             </article>

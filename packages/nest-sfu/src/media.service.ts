@@ -37,6 +37,7 @@ import { DtlsService } from './dtls.service';
 import type { TrustedIngestTransportRegistration } from './ingest/ingest-transport.types';
 import { IceService } from './ice.service';
 import { MediaPacketBridge, type MediaPacketBridgeCounters } from './media/media-packet-bridge';
+import type { NestSfuOptions } from './nest-sfu.options';
 import type { PipeTransportAdapter } from './pipe-transport.adapter';
 import { SrtpService } from './srtp.service';
 import type { MediaWorkerPoolSnapshot, MediaWorkerRoomFailureEvent } from './worker/ipc';
@@ -103,7 +104,8 @@ export class MediaService {
     private readonly srtp: SrtpService,
     private readonly rtcp: RtcpProcessor,
     private readonly router: RtpRouter,
-    private readonly pipe?: PipeTransportAdapter
+    private readonly pipe?: PipeTransportAdapter,
+    private readonly options: Pick<NestSfuOptions, 'maxInboundPacketQueuePackets' | 'maxInboundPacketQueueBytes'> = {}
   ) {
     this.router.onConsumerLayerEvent((event) => {
       const consumer = this.consumers.get(event.consumerId);
@@ -226,7 +228,9 @@ export class MediaService {
       getSrtpSession: () => this.srtp.getSession(id),
       onRtp: (packet) => this.router.route(packet, { sourceTransportId: id, sourceParticipantId: participantId }),
       onRtcp: (packet) => this.handleRtcp(id, participantId, packet).then((result) => result.forwarded),
-      onError: () => undefined
+      onError: () => undefined,
+      maxQueuePackets: this.options.maxInboundPacketQueuePackets,
+      maxQueueBytes: this.options.maxInboundPacketQueueBytes
     });
     bridge.on('error', () => undefined);
     dtlsTransport.on('connect', (keyingMaterial) => {
@@ -366,6 +370,16 @@ export class MediaService {
   }
 
   async unregisterProducer(producerId: string): Promise<void> {
+    for (const [consumerId, consumer] of [...this.consumers]) {
+      if (consumer.producerId !== producerId) {
+        continue;
+      }
+      this.releasePipeConsumer(consumerId);
+      this.consumers.delete(consumerId);
+      this.consumerLayerStates.delete(consumerId);
+      this.consumerQualityStates.delete(consumerId);
+      this.router.removeConsumer(consumerId);
+    }
     this.releasePipeProducer(producerId);
     this.producers.delete(producerId);
     this.producerDynacastStates.delete(producerId);
@@ -377,7 +391,7 @@ export class MediaService {
     this.router.setProducerPaused(producerId, paused);
   }
 
-  setProducerPriority(producerId: string, priority: number): void {
+  async setProducerPriority(producerId: string, priority: number): Promise<void> {
     const producer = this.producers.get(producerId);
     if (!producer) {
       throw new NotFoundException('Producer not found');
@@ -551,7 +565,7 @@ export class MediaService {
     return snapshot;
   }
 
-  setConsumerPriority(consumerId: string, priority: number): void {
+  async setConsumerPriority(consumerId: string, priority: number): Promise<void> {
     const consumer = this.consumers.get(consumerId);
     if (!consumer) {
       throw new NotFoundException('Consumer not found');

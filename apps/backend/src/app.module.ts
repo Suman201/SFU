@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { getStorageToken, seconds, ThrottlerModule } from '@nestjs/throttler';
 import { NestSfuModule, type TurnServerOptions } from '@native-sfu/nest-sfu';
 import { LoggerModule } from 'nestjs-pino';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
@@ -15,6 +16,8 @@ import { ClassLibraryModule } from './class-library/class-library.module';
 import { ClassSessionsModule } from './class-sessions/class-sessions.module';
 import { CmsModule } from './cms/cms.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import { ProductionThrottlerGuard } from './common/guards/production-throttler.guard';
+import { RedisThrottlerStorage } from './common/throttling/redis-throttler.storage';
 import { appConfig } from './config/app.config';
 import { validateConfig } from './config/env.validation';
 import { ContactModule } from './contact/contact.module';
@@ -59,11 +62,34 @@ import { UsersModule } from './users/users.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         pinoHttp: {
-          level: config.get<string>('app.nodeEnv') === 'production' ? 'info' : 'debug',
+          level: config.get<string>('logging.level', config.get<string>('app.nodeEnv') === 'production' ? 'info' : 'debug'),
           transport: config.get<string>('app.nodeEnv') === 'production' ? undefined : { target: 'pino-pretty', options: { singleLine: true } },
           genReqId: (request: IncomingMessage) => request.headers['x-request-id']?.toString() ?? randomUUID(),
           customProps: (request: IncomingMessage) => ({ requestId: String((request as { id?: string | number }).id ?? '') }),
-          redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]']
+          redact: {
+            censor: '[REDACTED]',
+            paths: [
+              'req.headers.authorization',
+              'req.headers.cookie',
+              'req.headers["x-operations-token"]',
+              'req.headers["x-api-key"]',
+              'req.headers["x-forwarded-for"]',
+              'req.headers["x-real-ip"]',
+              'req.remoteAddress',
+              'req.remotePort',
+              'req.query.token',
+              'req.query.accessToken',
+              'req.body.password',
+              'req.body.currentPassword',
+              'req.body.newPassword',
+              'req.body.refreshToken',
+              'req.body.accessToken',
+              'req.body.token',
+              'req.body.secret',
+              'req.body.credential',
+              'res.headers["set-cookie"]'
+            ]
+          }
         }
       })
     }),
@@ -71,7 +97,7 @@ import { UsersModule } from './users/users.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => [
         {
-          ttl: config.get<number>('security.rateLimitTtl', 60),
+          ttl: seconds(config.get<number>('security.rateLimitTtlSeconds', 60)),
           limit: config.get<number>('security.rateLimitMax', 120)
         }
       ]
@@ -94,9 +120,9 @@ import { UsersModule } from './users/users.module';
       useFactory: (config: ConfigService, metrics: MetricsService) => ({
         turnSecret: config.getOrThrow<string>('turn.secret'),
         turnUris: config.get<string[]>('turn.uris') ?? [],
-        stunServers: config.get<string[]>('mediaWorker.ice.stunServers') ?? [],
-        turnServers: config.get<TurnServerOptions[]>('mediaWorker.ice.turnServers') ?? [],
-        announcedAddress: config.get<string | undefined>('mediaWorker.ice.announcedAddress'),
+        stunServers: config.get<string[]>('media.ice.stunServers') ?? [],
+        turnServers: config.get<TurnServerOptions[]>('media.ice.turnServers') ?? [],
+        announcedAddress: config.get<string | undefined>('media.ice.announcedAddress'),
         mediaWorkerMode: config.get<'in-process' | 'worker'>('mediaWorker.mode', 'in-process'),
         mediaWorkerCount: config.get<number>('mediaWorker.count', 1),
         mediaWorkerRequestTimeoutMs: config.get<number>('mediaWorker.requestTimeoutMs', 5000),
@@ -114,7 +140,9 @@ import { UsersModule } from './users/users.module';
         mediaWorkerHardMemoryLimitBytes: config.get<number | undefined>('mediaWorker.hardMemoryLimitBytes'),
         mediaWorkerSoftRtpPacketRate: config.get<number>('mediaWorker.softRtpPacketRate', 50000),
         mediaWorkerSoftRtcpPacketRate: config.get<number>('mediaWorker.softRtcpPacketRate', 5000),
-        hostCandidatePortRange: config.get<{ min: number; max: number }>('mediaWorker.hostCandidatePortRange', { min: 40000, max: 40100 }),
+        maxInboundPacketQueuePackets: config.get<number>('mediaWorker.maxInboundPacketQueuePackets', 2048),
+        maxInboundPacketQueueBytes: config.get<number>('mediaWorker.maxInboundPacketQueueBytes', 8 * 1024 * 1024),
+        hostCandidatePortRange: config.get<{ min: number; max: number }>('mediaWorker.hostCandidatePortRange', { min: 40000, max: 40999 }),
         turnCredentialTtlSeconds: 3600,
         enablePipeTransport: config.get<boolean>('pipe.enabled', false),
         pipePortRange: config.get<{ min: number; max: number }>('pipe.portRange'),
@@ -177,6 +205,16 @@ import { UsersModule } from './users/users.module';
     RoomsModule,
     MediaApiModule,
     HealthModule
+  ],
+  providers: [
+    {
+      provide: getStorageToken(),
+      useClass: RedisThrottlerStorage
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ProductionThrottlerGuard
+    }
   ]
 })
 export class AppModule implements NestModule {

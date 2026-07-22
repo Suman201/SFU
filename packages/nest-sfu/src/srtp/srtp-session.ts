@@ -1,5 +1,4 @@
 import { createCipheriv, createDecipheriv, createHmac, timingSafeEqual } from 'crypto';
-import { RtpPacket } from '@native-sfu/sfu-core';
 import { ProtectionProfileAeadAes128Gcm, ProtectionProfileAes128CmHmacSha1_80 } from 'werift-dtls/lib/rtp/src/srtp/const';
 import type { DtlsSrtpKeyingMaterial } from '../dtls/dtls.types';
 import { parseRtcpSsrcs, parseRtpForSrtp, parseSrtcpIndex, rtpPayloadOffset, type SrtpSsrcState } from './packet';
@@ -71,28 +70,30 @@ export class NativeSrtpSession implements SrtpSession {
   }
 
   async protectRtp(packet: Buffer): Promise<Buffer> {
-    const parsed = RtpPacket.parse(packet);
-    this.validateOutboundSsrc(parsed.ssrc);
-    const state = this.outboundRtpState(parsed.ssrc);
+    const parsedHeader = parseRtpHeader(packet);
+    this.validateOutboundSsrc(parsedHeader.ssrc);
+    const state = this.outboundRtpState(parsedHeader.ssrc);
     const packetIndex = parseRtpForSrtp(packet, state).packetIndex;
     const rolloverCounter = Number(packetIndex >> 16n);
     const offset = rtpPayloadOffset(packet);
     const header = packet.subarray(0, offset);
     const payload = packet.subarray(offset);
-    const encrypted = this.keyingMaterial.profile === ProtectionProfileAeadAes128Gcm ? this.encryptRtpGcm(header, payload, parsed.ssrc, parsed.sequenceNumber, rolloverCounter) : this.encryptRtpCtr(header, payload, parsed.ssrc, parsed.sequenceNumber, rolloverCounter);
-    acceptOutboundRtpSequence(parsed.sequenceNumber, state);
+    const encrypted = this.keyingMaterial.profile === ProtectionProfileAeadAes128Gcm
+      ? this.encryptRtpGcm(header, payload, parsedHeader.ssrc, parsedHeader.sequenceNumber, rolloverCounter)
+      : this.encryptRtpCtr(header, payload, parsedHeader.ssrc, parsedHeader.sequenceNumber, rolloverCounter);
+    acceptOutboundRtpSequence(parsedHeader.sequenceNumber, state);
     return encrypted;
   }
 
   async unprotectRtp(packet: Buffer): Promise<Buffer> {
-    const parsed = RtpPacket.parse(packet);
-    this.validateInboundSsrc(parsed.ssrc);
-    const state = this.inboundRtpState(parsed.ssrc);
+    const header = parseRtpHeader(packet);
+    this.validateInboundSsrc(header.ssrc);
+    const state = this.inboundRtpState(header.ssrc);
     const rtp = parseRtpForSrtp(packet, state.sequence);
     state.replay.check(rtp.packetIndex);
-    const decrypted = this.keyingMaterial.profile === ProtectionProfileAeadAes128Gcm ? this.decryptRtpGcm(packet, parsed.ssrc, parsed.sequenceNumber, Number(rtp.packetIndex >> 16n)) : this.decryptRtpCtr(packet, parsed.ssrc, parsed.sequenceNumber, Number(rtp.packetIndex >> 16n));
+    const decrypted = this.keyingMaterial.profile === ProtectionProfileAeadAes128Gcm ? this.decryptRtpGcm(packet, header.ssrc, header.sequenceNumber, Number(rtp.packetIndex >> 16n)) : this.decryptRtpCtr(packet, header.ssrc, header.sequenceNumber, Number(rtp.packetIndex >> 16n));
     state.replay.accept(rtp.packetIndex);
-    acceptInboundRtpSequence(parsed.sequenceNumber, state.sequence);
+    acceptInboundRtpSequence(header.sequenceNumber, state.sequence);
     return decrypted;
   }
 
@@ -389,4 +390,14 @@ function replaceSet(target: Set<number>, values: Iterable<number>): void {
   for (const value of values) {
     target.add(value >>> 0);
   }
+}
+
+function parseRtpHeader(packet: Buffer): { sequenceNumber: number; ssrc: number } {
+  if (packet.length < 12 || packet[0]! >> 6 !== 2) {
+    throw new Error('Invalid RTP header');
+  }
+  return {
+    sequenceNumber: packet.readUInt16BE(2),
+    ssrc: packet.readUInt32BE(8)
+  };
 }

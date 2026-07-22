@@ -1,0 +1,25 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: native-sfu-web
+  namespace: native-sfu
+spec:
+  secretName: native-sfu-web-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - sfu.example.com
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: native-sfu-turn
+  namespace: native-sfu
+spec:
+  secretName: native-sfu-turn-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - turn.sfu.example.com

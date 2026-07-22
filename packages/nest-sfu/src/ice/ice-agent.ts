@@ -28,6 +28,8 @@ import {
   STUN_ALLOCATE_REQUEST,
   STUN_ALLOCATE_SUCCESS_RESPONSE,
   STUN_ALLOCATE_ERROR_RESPONSE,
+  STUN_REFRESH_REQUEST,
+  STUN_REFRESH_SUCCESS_RESPONSE,
   STUN_CREATE_PERMISSION_REQUEST,
   STUN_CREATE_PERMISSION_SUCCESS_RESPONSE,
   STUN_DATA_INDICATION,
@@ -184,6 +186,12 @@ export class IceAgent extends EventEmitter {
       transaction.reject(new Error('ICE agent closed'));
     }
     this.serverTransactions.clear();
+    for (const relay of new Set(this.localCandidates.map((candidate) => candidate.relay).filter((value): value is TurnRelayAllocation => Boolean(value)))) {
+      if (relay.refreshTimer) {
+        clearTimeout(relay.refreshTimer);
+        relay.refreshTimer = undefined;
+      }
+    }
     this.localParameters.usernameFragment = randomBytes(12).toString('base64url');
     this.localParameters.password = randomBytes(24).toString('base64url');
     this.stopCheckTimer();
@@ -367,6 +375,7 @@ export class IceAgent extends EventEmitter {
           if (!allocation) {
             continue;
           }
+          this.scheduleTurnAllocationRefresh(context, allocation.relay);
           this.addLocalCandidate({
             transportId: this.transportId,
             socketId: context.candidate.socketId,
@@ -415,12 +424,15 @@ export class IceAgent extends EventEmitter {
       return {
         address,
         relay: {
-          server: { host: server.host, port: server.port },
+          server: { host: server.host, port: server.port, resolvedAddress: unauthenticated.remote.address },
           username: serverOptions.username,
           credential: serverOptions.credential,
           realm,
           nonce,
-          permissions: new Set<string>()
+          lifetimeSeconds: readUInt32AttributeSafe(unauthenticated.message, StunAttributeType.LIFETIME) ?? 600,
+          expiresAt: Date.now() + (readUInt32AttributeSafe(unauthenticated.message, StunAttributeType.LIFETIME) ?? 600) * 1000,
+          permissions: new Set<string>(),
+          permissionExpiresAt: new Map<string, number>()
         }
       };
     }
@@ -452,13 +464,15 @@ export class IceAgent extends EventEmitter {
     return {
       address,
       relay: {
-        server: { host: server.host, port: server.port },
+        server: { host: server.host, port: server.port, resolvedAddress: authenticated.remote.address },
         username: serverOptions.username,
         credential: serverOptions.credential,
         realm,
         nonce,
-        lifetimeSeconds: lifetime,
-        permissions: new Set<string>()
+        lifetimeSeconds: lifetime ?? 600,
+        expiresAt: Date.now() + (lifetime ?? 600) * 1000,
+        permissions: new Set<string>(),
+        permissionExpiresAt: new Map<string, number>()
       }
     };
   }
@@ -573,6 +587,9 @@ export class IceAgent extends EventEmitter {
 
   private async handleSocketMessage(socketId: string, message: Buffer, remote: RemoteInfo, relayIngress?: RelayIngressContext): Promise<void> {
     if (!isStunMessage(message)) {
+      if (!this.matchesSelectedPair(socketId, remote, relayIngress?.localCandidate)) {
+        return;
+      }
       this.emit('data', { socketId, message, remote });
       return;
     }
@@ -611,11 +628,32 @@ export class IceAgent extends EventEmitter {
       size: data.length
     };
     const relayCandidate = this.relayCandidateForDataIndication(socketId, turnRemote);
+    if (!relayCandidate) {
+      return;
+    }
     if (isStunMessage(data)) {
-      await this.handleSocketMessage(socketId, data, remote, relayCandidate ? { localCandidate: relayCandidate } : undefined);
+      await this.handleSocketMessage(socketId, data, remote, { localCandidate: relayCandidate });
+      return;
+    }
+    if (!this.matchesSelectedPair(socketId, remote, relayCandidate)) {
       return;
     }
     this.emit('data', { socketId, message: data, remote });
+  }
+
+  private matchesSelectedPair(socketId: string, remote: Pick<RemoteInfo, 'address' | 'port'>, localCandidate?: LocalIceCandidate): boolean {
+    const pair = this.selectedPair;
+    if (!pair?.nominated) {
+      return false;
+    }
+    const inboundLocal = localCandidate ?? this.sockets.get(socketId)?.candidate;
+    return Boolean(
+      inboundLocal
+      && socketId === pair.local.socketId
+      && inboundLocal.socketId === pair.local.socketId
+      && remote.address === pair.remote.ip
+      && remote.port === pair.remote.port
+    );
   }
 
   private async handleBindingRequest(socketId: string, raw: Buffer, request: ReturnType<typeof parseStunMessage>, remote: RemoteInfo, relayIngress?: RelayIngressContext): Promise<void> {
@@ -737,15 +775,42 @@ export class IceAgent extends EventEmitter {
   private relayCandidateForDataIndication(socketId: string, turnRemote: RemoteInfo): LocalIceCandidate | undefined {
     const relays = this.localCandidates.filter((candidate) => candidate.relay);
     const sameSocketRelays = relays.filter((candidate) => candidate.socketId === socketId);
-    const sameServer = (candidate: LocalIceCandidate): boolean => candidate.relay?.server.port === turnRemote.port && candidate.relay.server.host === turnRemote.address;
-    return sameSocketRelays.find(sameServer) ?? sameSocketRelays[0] ?? relays.find(sameServer) ?? relays[0];
+    const sameServer = (candidate: LocalIceCandidate): boolean => {
+      const server = candidate.relay?.server;
+      return Boolean(
+        server
+        && server.port === turnRemote.port
+        && (
+          normalizeIpAddress(server.resolvedAddress) === normalizeIpAddress(turnRemote.address)
+          || normalizeIpAddress(server.host) === normalizeIpAddress(turnRemote.address)
+        )
+      );
+    };
+    return sameSocketRelays.find(sameServer);
   }
 
   private async ensureTurnPermission(context: IceSocketContext, relay: TurnRelayAllocation, remote: RemoteIceCandidate): Promise<void> {
-    const permissionKey = `${remote.ip}:${remote.port}`;
-    if (relay.permissions.has(permissionKey)) {
+    const permissionKey = remote.ip;
+    if ((relay.permissionExpiresAt.get(permissionKey) ?? 0) > Date.now() + 30_000) {
       return;
     }
+    let result = await this.sendTurnPermissionRequest(context, relay, remote);
+    if (result.message.type !== STUN_CREATE_PERMISSION_SUCCESS_RESPONSE && this.updateTurnChallenge(relay, result.message)) {
+      result = await this.sendTurnPermissionRequest(context, relay, remote);
+    }
+    if (result.message.type === STUN_CREATE_PERMISSION_SUCCESS_RESPONSE) {
+      relay.permissions.add(permissionKey);
+      relay.permissionExpiresAt.set(permissionKey, Date.now() + 5 * 60 * 1000);
+      return;
+    }
+    throw new Error(`TURN permission request failed with response type ${result.message.type}`);
+  }
+
+  private async sendTurnPermissionRequest(
+    context: IceSocketContext,
+    relay: TurnRelayAllocation,
+    remote: RemoteIceCandidate
+  ): Promise<StunServerResponse> {
     const transactionId = createTransactionId();
     const attributes = [
       encodeStringAttribute(StunAttributeType.USERNAME, relay.username),
@@ -766,10 +831,77 @@ export class IceAgent extends EventEmitter {
       this.serverTransactions.set(transactionIdHex, { timeout, resolve, reject });
     });
     await sendUdp(context.socket, packet, relay.server.port, relay.server.host);
-    const result = await response;
-    if (result.message.type === STUN_CREATE_PERMISSION_SUCCESS_RESPONSE) {
-      relay.permissions.add(permissionKey);
+    return response;
+  }
+
+  private scheduleTurnAllocationRefresh(context: IceSocketContext, relay: TurnRelayAllocation, delayMs?: number): void {
+    if (relay.refreshTimer) {
+      clearTimeout(relay.refreshTimer);
     }
+    const refreshAfterMs = delayMs ?? Math.max(5_000, Math.floor((relay.lifetimeSeconds ?? 600) * 800));
+    relay.refreshTimer = setTimeout(() => {
+      relay.refreshTimer = undefined;
+      void this.refreshTurnAllocation(context, relay).catch((error) => {
+        this.emit('warning', error);
+        if (!this.closed) {
+          this.scheduleTurnAllocationRefresh(context, relay, 5_000);
+        }
+      });
+    }, refreshAfterMs);
+    relay.refreshTimer.unref?.();
+  }
+
+  private async refreshTurnAllocation(context: IceSocketContext, relay: TurnRelayAllocation): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    let response = await this.sendTurnRefreshRequest(context, relay);
+    if (response.message.type !== STUN_REFRESH_SUCCESS_RESPONSE && this.updateTurnChallenge(relay, response.message)) {
+      response = await this.sendTurnRefreshRequest(context, relay);
+    }
+    if (response.message.type !== STUN_REFRESH_SUCCESS_RESPONSE) {
+      throw new Error(`TURN allocation refresh failed with response type ${response.message.type}`);
+    }
+    const lifetime = readUInt32AttributeSafe(response.message, StunAttributeType.LIFETIME) ?? relay.lifetimeSeconds ?? 600;
+    relay.lifetimeSeconds = lifetime;
+    relay.expiresAt = Date.now() + lifetime * 1000;
+    relay.server.resolvedAddress = response.remote.address;
+    const nonce = getAttribute(response.message, StunAttributeType.NONCE)?.toString('utf8');
+    if (nonce) {
+      relay.nonce = nonce;
+    }
+    this.scheduleTurnAllocationRefresh(context, relay);
+  }
+
+  private sendTurnRefreshRequest(context: IceSocketContext, relay: TurnRelayAllocation): Promise<StunServerResponse> {
+    const authenticatedAttributes = relay.realm && relay.nonce
+      ? [
+          encodeStringAttribute(StunAttributeType.USERNAME, relay.username),
+          encodeStringAttribute(StunAttributeType.REALM, relay.realm),
+          encodeStringAttribute(StunAttributeType.NONCE, relay.nonce)
+        ]
+      : [];
+    const key = relay.realm ? turnLongTermKey(relay.username, relay.realm, relay.credential) : undefined;
+    return this.sendServerRequest(
+      context,
+      { scheme: 'turn', host: relay.server.host, port: relay.server.port, transport: 'udp' },
+      STUN_REFRESH_REQUEST,
+      [...authenticatedAttributes, encodeUInt32Attribute(StunAttributeType.LIFETIME, relay.lifetimeSeconds ?? 600)],
+      key
+    );
+  }
+
+  private updateTurnChallenge(relay: TurnRelayAllocation, message: ReturnType<typeof parseStunMessage>): boolean {
+    const nonce = getAttribute(message, StunAttributeType.NONCE)?.toString('utf8');
+    const realm = getAttribute(message, StunAttributeType.REALM)?.toString('utf8');
+    if (!nonce || (nonce === relay.nonce && (!realm || realm === relay.realm))) {
+      return false;
+    }
+    relay.nonce = nonce;
+    if (realm) {
+      relay.realm = realm;
+    }
+    return true;
   }
 
   private ensurePeerReflexiveCandidate(remote: RemoteInfo, priority?: number): RemoteIceCandidate {
@@ -926,6 +1058,10 @@ function remoteCandidateKey(candidate: Pick<RemoteIceCandidate, 'ip' | 'port' | 
 function readUInt32AttributeSafe(message: ReturnType<typeof parseStunMessage>, type: StunAttributeType): number | undefined {
   const attribute = getAttribute(message, type);
   return attribute && attribute.length >= 4 ? attribute.readUInt32BE(0) : undefined;
+}
+
+function normalizeIpAddress(address: string | undefined): string | undefined {
+  return address?.startsWith('::ffff:') ? address.slice(7) : address;
 }
 
 function sendUdp(socket: Socket, packet: Buffer, port: number, address: string): Promise<void> {

@@ -193,6 +193,7 @@ describe('StudentEnrollmentsService', () => {
     expect(results.length).toBe(1);
     expect(results[0]?.id).toBe('batch-1');
     expect(results[0]?.teacherName).toBe('Teacher One');
+    expect(results[0]?.feeAmount).toBe(1200);
     expect(enrollments.find.mock.calls[0]?.[0]).toEqual({
       studentId: 'student-1',
       deletedAt: { $exists: false },
@@ -380,6 +381,7 @@ function batchDoc(overrides: Record<string, unknown> = {}): Record<string, unkno
     teacherId: 'teacher-1',
     startDate: new Date('2026-01-01T00:00:00.000Z'),
     maxCapacity: 30,
+    feeAmount: 1200,
     status: 'ACTIVE',
     ...overrides
   };

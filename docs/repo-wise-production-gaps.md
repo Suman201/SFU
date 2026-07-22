@@ -360,18 +360,22 @@ Remaining proof:
 
 ## P1: Data Durability, Backups, And Retention
 
-Status: **Blocker** for paid-user production.
+Status: **Implemented baseline; restore proof remains a blocker** for paid-user production.
 
-Required proof:
+Implemented:
+
+- **Done**: ~~MongoDB plus local recording/attachment/material/profile-media backup script.~~
+- **Done**: ~~Checksum validation, optional `age` encryption, and bounded backup retention.~~
+- **Done**: ~~Confirmation-gated restore with non-destructive Mongo behavior by default.~~
+- **Done**: ~~Redis acceptable-loss policy and clean-rebuild sequence documented.~~
+- **Done**: ~~Kubernetes ReadWriteMany artifact storage profile and Compose durable volumes.~~
+- **Done**: ~~Restore procedure, rollout order, and starting RPO/RTO policy documented in `docs/production-operations.md`.~~
+
+Required environment proof:
 
 - Mongo backup and restore tested
-- Redis persistence or acceptable-loss policy documented
-- recordings storage backup/retention policy exists
-- chat attachment and material storage retention policy exists
-- attendance snapshot retention policy exists
-- audit log retention policy exists
-- deleted user, deleted enrollment, and deleted material behavior is defined
-- restore drill is documented with target RPO/RTO
+- provider-side S3 backup/versioning is enabled when S3 is selected
+- product/legal retention and deletion windows are approved
 
 Repo areas:
 

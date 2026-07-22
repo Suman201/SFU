@@ -1,4 +1,4 @@
-import { buildIceTurnServers, isSupportedStunUri, isSupportedTurnUri, parseIceServerUrl, resolveAnnouncedAddress } from './media.config';
+import { buildIceTurnServers, isSupportedSfuTurnUri, isSupportedStunUri, isSupportedTurnUri, parseIceServerUrl, resolveAnnouncedAddress } from './media.config';
 
 describe('media.config helpers', () => {
   it('parses ICE server URLs with explicit transport details', () => {
@@ -24,11 +24,19 @@ describe('media.config helpers', () => {
     expect(isSupportedStunUri('stun:stun.example.com:3478')).toBe(true);
     expect(isSupportedStunUri('stuns:stun.example.com:5349')).toBe(false);
     expect(isSupportedTurnUri('turn:turn.example.com:3478?transport=udp')).toBe(true);
-    expect(isSupportedTurnUri('turns:turn.example.com:5349?transport=tcp')).toBe(false);
+    expect(isSupportedTurnUri('turn:turn.example.com:3478?transport=tcp')).toBe(true);
+    expect(isSupportedTurnUri('turns:turn.example.com:5349?transport=tcp')).toBe(true);
+    expect(isSupportedTurnUri('turn:turn.example.com:3478?transport=quic')).toBe(false);
+    expect(isSupportedSfuTurnUri('turn:turn.example.com:3478?transport=udp')).toBe(true);
+    expect(isSupportedSfuTurnUri('turns:turn.example.com:5349?transport=tcp')).toBe(false);
   });
 
   it('builds shared-secret TURN server credentials for the media plane', () => {
-    const servers = buildIceTurnServers(['turn:turn.example.com:3478?transport=udp'], {
+    const servers = buildIceTurnServers([
+      'turn:turn.example.com:3478?transport=udp',
+      'turn:turn.example.com:3478?transport=tcp',
+      'turns:turn.example.com:5349?transport=tcp'
+    ], {
       turnSecret: 'turn-secret-valid-length-32chars',
       turnRealm: 'native-sfu.local',
       usernameSubject: 'node-a',

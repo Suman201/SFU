@@ -16,6 +16,7 @@ export interface StudentBatch {
   totalWeeks: number;
   enrolledCount: number;
   capacity: number;
+  feeAmount: number;
   startsAt: string;
   level: 'Beginner' | 'Intermediate' | 'Advanced';
   enrollmentStatus?: StudentEnrollmentStatus;
@@ -189,6 +190,7 @@ export class StudentEnrollmentStore {
       totalWeeks: batch.totalWeeks ?? 1,
       enrolledCount: batch.enrolledCount ?? 0,
       capacity: batch.capacity ?? 0,
+      feeAmount: typeof batch.feeAmount === 'number' && Number.isFinite(batch.feeAmount) && batch.feeAmount > 0 ? batch.feeAmount : 0,
       startsAt: batch.startsAt ?? new Date().toISOString()
     };
   }

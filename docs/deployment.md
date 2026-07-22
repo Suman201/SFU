@@ -44,22 +44,31 @@ This proof does not replace staging validation for public TURN, public ICE candi
 
 ```bash
 kubectl apply -f infra/k8s/namespace.yaml
-# first create a private Secret manifest or external secret from infra/k8s/secret.example.yaml
-# after replacing every placeholder value, then apply that private manifest here
+# Install cert-manager and External Secrets Operator (or create a private Secret
+# using secret.example.yaml) before applying the dependent workloads.
+kubectl apply -f infra/k8s/external-secret.example.yaml
 kubectl apply -f infra/k8s/configmap.yaml
+kubectl apply -f infra/k8s/certificates.yaml
+kubectl apply -f infra/k8s/storage.yaml
 kubectl apply -f infra/k8s/backend.yaml
+kubectl apply -f infra/k8s/coturn.yaml
 kubectl apply -f infra/k8s/frontend.yaml
 kubectl apply -f infra/k8s/hpa.yaml
+kubectl apply -f infra/k8s/pod-disruption-budgets.yaml
 kubectl apply -f infra/k8s/ingress.yaml
+# Optional when Prometheus Operator CRDs are installed:
+kubectl apply -f infra/k8s/monitoring.yaml
 ```
 
-The Kubernetes manifests are a control-plane baseline, not a complete media-plane deployment. Before declaring production readiness:
+The manifests use a stable `OnDelete` StatefulSet for host-network backend media, host-network Coturn replicas, required pod anti-affinity, encrypted cross-node pipe transport, cert-manager TLS, an RWX artifact volume, graceful node drain, and scale-up-only HPA behavior. Replace all example domains, public IPs, storage classes, issuer names, and secret-store references before applying them.
+
+Before declaring production readiness:
 
 - Replace `secret.example.yaml` with real secrets and move credentialed `MONGODB_URI` / `REDIS_URL` out of ConfigMaps.
-- Expose the full configured UDP ranges for `HOST_CANDIDATE_PORT_RANGE` and `PIPE_PORT_RANGE`. A single UDP service port is not enough for a real SFU workload.
-- Configure sticky Socket.IO routing or an equivalent owner-aware ingress strategy.
-- Deploy Coturn externally or fully wire Coturn with public IP, TLS, `TURN_SECRET`, `TURN_REALM`, and the advertised TURN URIs.
-- Keep `ENABLE_PIPE_TRANSPORT=false` until the environment has been explicitly validated for distributed media.
+- Permit the full configured UDP ranges for `HOST_CANDIDATE_PORT_RANGE`, `PIPE_PORT_RANGE`, and Coturn relay ports in node firewalls/security groups.
+- Confirm host-network nodes have browser-reachable public IPs or explicit 1:1 UDP NAT mappings before relying on `status.hostIP` as `ICE_ANNOUNCED_ADDRESS`.
+- Point `turn.sfu.example.com` at the Coturn host and verify UDP, TCP, and TLS TURN allocations.
+- Keep cross-node signaling behind the shared ingress only while `ENABLE_PIPE_TRANSPORT=true`; otherwise provide truly node-specific `NODE_PUBLIC_URL` values for owner redirects.
 - Verify `PUBLIC_URL`, `NODE_PUBLIC_URL`, `PIPE_ADVERTISE_IP`, `ICE_STUN_SERVERS`, `ICE_TURN_SERVERS`, `ICE_ANNOUNCED_ADDRESS`, and TURN public/announced addresses match the addresses remote browsers and peer nodes really use.
 - Verify the frontend resolves the real backend origin in staging. Non-local frontend builds now default to same-origin `/api/v1` and `/sfu`; if the frontend is served from a different host than the backend ingress, override `/env.js` with `apiBaseUrl` and `socketUrl`.
 - Set `CORS_ALLOWED_ORIGINS` to explicit `https://` browser origins. Production validation rejects wildcards, localhost origins, and origin values with paths or query strings.
@@ -73,7 +82,7 @@ Treat these values as the minimum deployment-facing config surface that must be 
 | --- | --- | --- |
 | `PUBLIC_URL` | The shared control-plane URL operators and clients are meant to reach. In production it must not be localhost or a wildcard address. | `GET /api/v1/media/diagnostics/node` -> `addressing.publicUrl` |
 | `NODE_PUBLIC_URL` | The externally reachable URL for this specific node. In single-host staging it may match `PUBLIC_URL`; in multi-node staging it should identify the real node entrypoint. | `GET /api/v1/media/diagnostics/node` -> `addressing.nodePublicUrl` |
-| `TURN_URIS` | Comma-separated public TURN URIs returned by `GET /api/v1/media/turn-credentials`. Current RC support is UDP TURN only. | `GET /api/v1/media/diagnostics/node` -> `turn.*`; staged browser proof via `npm run test:browser:staging-turn` |
+| `TURN_URIS` | Comma-separated browser TURN URIs returned by `GET /api/v1/media/turn-credentials`. Production requires UDP, TCP, and TLS TURN coverage. | `GET /api/v1/media/diagnostics/node` -> `turn.*`; staged browser proof via `npm run test:browser:staging-turn` |
 | `ICE_STUN_SERVERS` | Optional comma-separated STUN servers used by the SFU itself to gather server-reflexive candidates. Keep them on UDP and point them at real reachable infrastructure. | `GET /api/v1/media/diagnostics/node` -> `ice.stun*` |
 | `ICE_TURN_SERVERS` | Optional comma-separated TURN URIs used by the SFU itself to gather relay candidates. Current RC support is UDP `turn:` only and the backend derives shared-secret credentials from `TURN_SECRET`. | `GET /api/v1/media/diagnostics/node` -> `ice.turn*` |
 | `ICE_ANNOUNCED_ADDRESS` | Optional host-candidate public address rewrite for the SFU media plane. Use it when the node binds privately but must advertise a different public host candidate. | `GET /api/v1/media/diagnostics/node` -> `ice.announcedAddress`, `ice.hostCandidateMode` |
@@ -118,7 +127,7 @@ The node diagnostics endpoint is the most honest runtime source for this surface
 
 ### Kubernetes UDP Media Plane
 
-The provided manifests intentionally stop at HTTP readiness and control-plane wiring. For real media traffic you must choose one of these operator-owned exposure models:
+The checked-in Kubernetes profile chooses `hostNetwork: true` for backend media and Coturn. If that does not fit the target platform, replace it with one of these explicitly validated exposure models:
 
 1. `hostNetwork: true`
    - Simplest path for fixed-node clusters.
@@ -134,18 +143,19 @@ The provided manifests intentionally stop at HTTP readiness and control-plane wi
 Minimum production expectation:
 
 - Expose every UDP port in `HOST_CANDIDATE_PORT_RANGE`.
+- Size `HOST_CANDIDATE_PORT_RANGE` to at least `MEDIA_WORKER_COUNT * MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER`; worker mode partitions the range so workers never bind the same candidate ports.
 - If `ENABLE_PIPE_TRANSPORT=true`, expose every UDP port in `PIPE_PORT_RANGE` between nodes.
 - Keep the HTTP service separate from media-plane exposure so readiness and ingress policy do not hide UDP failures.
 - Align `PUBLIC_URL`, `NODE_PUBLIC_URL`, Coturn public IP, and any external DNS names with the addresses browsers and peer nodes actually reach.
 - Treat pod IPs, localhost, and private RFC1918 addresses as invalid TURN/browser-facing candidates unless clients are inside that same network boundary.
 
-The current release candidate validates UDP media transport. TURN-over-TCP/TLS is documented as unsupported and must not be advertised in production config. Publish only UDP TURN URIs to clients until TCP/TLS support is explicitly released.
+Browser clients may receive explicit UDP/TCP TURN and TLS TURN (`turns:`) URIs. The custom server-side ICE agent remains datagram-based and accepts only explicit UDP TURN entries from `ICE_TURN_SERVERS`. Validate every browser-advertised relay transport in staging before rollout.
 
 ### Ingress and Session Ownership
 
 HTTP ingress is part of the control plane only. For stable signaling and media ownership:
 
-- Keep Socket.IO upgrades sticky to the same backend for the lifetime of the session, or route requests through an owner-aware layer that can consistently reach the node holding the room transports.
+- The provided ingress keeps Socket.IO affinity, while encrypted pipe mode allows participants connected to another healthy node to reach owner-hosted media. Do not disable both mechanisms behind a shared URL.
 - Do not assume ordinary round-robin HTTP ingress is enough for multi-node admission, reconnect, or host-control workflows.
 - Keep media UDP exposure outside the HTTP ingress path; L7 ingress readiness does not prove the media plane is reachable.
 - When running more than one backend replica, validate reconnect, host handoff, and node-drain behavior through the real ingress path before calling the deployment GA-ready.
@@ -179,7 +189,9 @@ Do not use a blind sleep as the primary shutdown mechanism. If you add a `preSto
 - `/metrics` stays outside the API prefix for Prometheus scraping.
 - If `METRICS_PATH` is set to a non-default value, the server also exposes that alias outside the API prefix. Keep `/metrics` as the canonical path in docs, dashboards, and operator habits unless the environment has a strong reason to prefer the alias.
 - Development can leave `OPERATIONS_TOKEN` empty; production requires it.
-- Send `X-Operations-Token` for `/metrics`, any configured metrics alias, Swagger if temporarily enabled in production, and `/api/v1/media/*` / `/api/v1/events/*` operator endpoints.
+- Send `X-Operations-Token` or `Authorization: Bearer <operations-token>` for `/metrics`, any configured metrics alias, Swagger if temporarily enabled in production, and `/api/v1/media/*` / `/api/v1/events/*` operator endpoints.
+
+The complete production configuration, alert, rollout, rotation, backup, and restore procedures live in [production-operations.md](production-operations.md).
 - Treat `/api/v1/media/*` diagnostics and drain routes as operator-only even though some health routes stay public for orchestrators.
 - `GET /api/v1/media/diagnostics/node` is the main runtime truth source for staged rollout checks. Use it to confirm `trafficReady`, derived rollout alerts, TURN URI hygiene, public URL shape, and pipe advertise IP shape before blaming browsers or ingress.
 - `GET /api/v1/events/diagnostics/summary` is the runtime truth source for eventing backlog fairness, per-adapter skew, dispatch concurrency, lease expiry, backlog aging, hottest-lane concentration, and frozen snapshot mix.

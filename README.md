@@ -6,17 +6,17 @@ The media-plane code is intentionally written behind native interfaces and conta
 
 ## Current Release-Candidate Scope
 
-The repository now includes the end-to-end transport, forwarding, adaptive media, distributed pipe, observability, and shutdown foundations needed for a production release candidate on a controlled single-node or two-node deployment.
+The repository includes transport, forwarding, adaptive media, encrypted distributed pipes, admission limits, abuse controls, observability, graceful drain, TLS/TURN deployment templates, shared artifact storage, and backup/restore tooling for a production release candidate.
 
-The remaining work is operational, not architectural: production TURN deployment, explicit UDP exposure strategy, environment-specific capacity validation, and final release gating in the target runtime.
+Repository implementation does not replace environment proof. Public UDP/TURN reachability, real secrets, capacity targets, alert delivery, backup restore drills, and staged multi-node behavior still require signoff in the target infrastructure. See [Production Operations](docs/production-operations.md) and [Unproven Checklist](docs/unproven-checklist.md).
 
 If the goal is to make this platform more useful than a raw mediasoup deployment, the recommended strategy is to compete on operator experience, policy, diagnostics, and workflow depth rather than only on low-level SFU mechanics. See [docs/beyond-mediasoup-roadmap.md](/Volumes/Extarnal/RND/SFU/docs/beyond-mediasoup-roadmap.md).
 
-Production operators should publish only UDP TURN URIs in the current release candidate and must ensure `PUBLIC_URL`, `NODE_PUBLIC_URL`, `PIPE_ADVERTISE_IP`, `ICE_STUN_SERVERS`, `ICE_TURN_SERVERS`, `ICE_ANNOUNCED_ADDRESS`, and TURN public addresses resolve to the real paths used by browsers and peer nodes.
+Production operators may publish explicit UDP/TCP TURN and TLS TURN URIs to browsers, and must validate each advertised transport from the target networks. The custom server-side ICE agent remains UDP-only. `PUBLIC_URL`, `NODE_PUBLIC_URL`, `PIPE_ADVERTISE_IP`, `ICE_STUN_SERVERS`, `ICE_TURN_SERVERS`, `ICE_ANNOUNCED_ADDRESS`, and TURN public addresses must resolve to the real paths used by browsers and peer nodes.
 
 Outside local development, the frontend now defaults to same-origin `/api/v1` and `/sfu` so staged ingress can exercise real backend and TURN behavior. Split-host deployments can override those runtime endpoints through `/env.js`.
 
-The server now also validates and exposes the deployment-facing config surface more explicitly: production requires a non-empty `OPERATIONS_TOKEN`, `TURN_URIS` must be explicit UDP `turn:` URIs, `PUBLIC_URL` and `NODE_PUBLIC_URL` must not point at localhost, `ICE_STUN_SERVERS` and `ICE_TURN_SERVERS` must stay on supported UDP transports, `ICE_ANNOUNCED_ADDRESS` must not collapse back to localhost, and `PIPE_ADVERTISE_IP` must be a real inter-node address whenever pipe transport is enabled. Operators can confirm the effective runtime values and rollout alerts through `GET /api/v1/media/diagnostics/node`.
+The server validates and exposes the deployment-facing config surface explicitly: production requires a non-empty `OPERATIONS_TOKEN`; browser `TURN_URIS` may use explicit UDP/TCP TURN or TLS TURN; server-side `ICE_TURN_SERVERS` remains explicit UDP only; media and pipe UDP ranges must not overlap; and the host-candidate range must cover configured worker transport capacity. `PUBLIC_URL`, `NODE_PUBLIC_URL`, `ICE_ANNOUNCED_ADDRESS`, and `PIPE_ADVERTISE_IP` must not collapse to localhost in production. Operators can confirm effective runtime values through `GET /api/v1/media/diagnostics/node`.
 
 ## Structure
 

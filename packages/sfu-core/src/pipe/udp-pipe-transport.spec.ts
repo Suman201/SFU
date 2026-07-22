@@ -1,13 +1,17 @@
 import { once } from 'node:events';
+import { createSocket, type Socket } from 'node:dgram';
+import type { AddressInfo } from 'node:net';
 import { createPli, parsePli } from '../rtcp/rtcp-packet';
 import { RtpPacket } from '../rtp/rtp-packet';
 import { UdpPipeTransport, type UdpPipeDropEvent, type UdpPipePacketEvent, type UdpPipeControlEvent } from './udp-pipe-transport';
 
 describe('UdpPipeTransport', () => {
   const transports: UdpPipeTransport[] = [];
+  const sockets: Socket[] = [];
 
   afterEach(async () => {
     await Promise.all(transports.splice(0).map((transport) => transport.close()));
+    await Promise.all(sockets.splice(0).map((socket) => closeSocket(socket)));
   });
 
   it('listens on loopback UDP and forwards framed RTP with advertised endpoint metadata', async () => {
@@ -159,6 +163,63 @@ describe('UdpPipeTransport', () => {
     expect(remote.snapshot().dropReasons.unauthorized).toBe(0);
   });
 
+  it('encrypts token-authenticated media and rejects replayed datagrams', async () => {
+    const sender = track(
+      new UdpPipeTransport({
+        id: 'pipe-sender',
+        roomId: 'room-udp',
+        localNodeId: 'node-a',
+        remoteNodeId: 'node-b',
+        listenIp: '127.0.0.1',
+        peerToken: 'shared-secret-token',
+        authMode: 'token'
+      })
+    );
+    const receiver = track(
+      new UdpPipeTransport({
+        id: 'pipe-receiver',
+        roomId: 'room-udp',
+        localNodeId: 'node-b',
+        remoteNodeId: 'node-a',
+        listenIp: '127.0.0.1',
+        peerToken: 'shared-secret-token',
+        authMode: 'token'
+      })
+    );
+    const receiverEndpoint = await receiver.listen();
+    await sender.listen();
+    const relay = createSocket('udp4');
+    sockets.push(relay);
+    const relayEndpoint = await bindSocket(relay);
+    sender.connect({ address: '127.0.0.1', port: relayEndpoint.port, nodeId: 'node-b' });
+    receiver.connect({ address: '127.0.0.1', port: relayEndpoint.port, nodeId: 'node-a' });
+    const received = waitForEvent<UdpPipePacketEvent>(receiver, 'rtp');
+    const replayDrop = waitForEvent<UdpPipeDropEvent>(receiver, 'drop');
+    const forwarded = new Promise<void>((resolve, reject) => {
+      relay.once('message', (message) => {
+        try {
+          expect(message.includes(Buffer.from('shared-secret-token'))).toBe(false);
+          expect(message.includes(Buffer.from('pipe-media'))).toBe(false);
+          relay.send(message, receiverEndpoint.port, '127.0.0.1', (error) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            relay.send(message, receiverEndpoint.port, '127.0.0.1', (replayError) => replayError ? reject(replayError) : resolve());
+          });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+
+    expect(await sender.sendRtp('producer-1', rtpPacket(1111, 45, 9000))).toBe(true);
+    await forwarded;
+    expect((await received).sequenceNumber).toBe(45);
+    expect((await replayDrop).reason).toBe('replay');
+    expect(receiver.snapshot().dropReasons.replay).toBe(1);
+  });
+
   it('reports backpressure before sending frames beyond queue limits', async () => {
     const owner = track(
       new UdpPipeTransport({
@@ -211,6 +272,22 @@ async function waitForEvent<T>(transport: UdpPipeTransport, event: string, timeo
   });
   const eventPromise = once(transport, event).then(([value]) => value as T);
   return Promise.race([eventPromise, timer]);
+}
+
+async function bindSocket(socket: Socket): Promise<AddressInfo> {
+  await new Promise<void>((resolve, reject) => {
+    socket.once('error', reject);
+    socket.once('listening', resolve);
+    socket.bind(0, '127.0.0.1');
+  });
+  return socket.address() as AddressInfo;
+}
+
+async function closeSocket(socket: Socket): Promise<void> {
+  if (!socket.address) {
+    return;
+  }
+  await new Promise<void>((resolve) => socket.close(() => resolve()));
 }
 
 function rtpPacket(ssrc: number, sequenceNumber: number, timestamp: number): Buffer {

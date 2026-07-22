@@ -4,6 +4,7 @@ import type { ProfileSettings, ProfileThemePreference, ProfileUser, UpdateMyProf
 import { ProfileService } from '../../../core/services/profile.service';
 import { ThemeService } from '../../../core/services/theme.service';
 import { Footer } from '../../../shared/footer/footer';
+import { formatBatchFee } from '../../../shared/formatting/batch-fee';
 import { Header } from '../../../shared/header/header';
 
 interface StudentProfileForm {
@@ -205,6 +206,10 @@ export class StudentProfile implements OnInit {
       month: 'short',
       day: 'numeric'
     }).format(new Date(value));
+  }
+
+  protected feeLabel(value: number | null | undefined): string {
+    return formatBatchFee(value);
   }
 
   private updateRequest(): UpdateMyProfileRequest {

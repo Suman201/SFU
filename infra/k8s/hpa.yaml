@@ -6,10 +6,24 @@ metadata:
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
-    kind: Deployment
+    kind: StatefulSet
     name: backend
-  minReplicas: 1
-  maxReplicas: 1
+  # Every replica requires a distinct node because the media UDP ranges are
+  # host-bound. Keep cluster node capacity ahead of this HPA ceiling.
+  minReplicas: 2
+  maxReplicas: 10
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      # Active WebRTC transports cannot migrate between processes. Operators
+      # must drain a specific node and confirm zero owned rooms before reducing
+      # replicas; automatic HPA scale-down would terminate live sessions.
+      selectPolicy: Disabled
   metrics:
     - type: Resource
       resource:

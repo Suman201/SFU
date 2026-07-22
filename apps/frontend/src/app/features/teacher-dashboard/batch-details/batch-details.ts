@@ -26,6 +26,7 @@ import type {
 } from '@native-sfu/contracts';
 import { ClassSessionService } from '../../class-session/class-session.service';
 import { Footer } from '../../../shared/footer/footer';
+import { formatBatchFee } from '../../../shared/formatting/batch-fee';
 import { Header } from '../../../shared/header/header';
 import {
   TeacherDashboardStore,
@@ -676,6 +677,10 @@ export class BatchDetails {
       day: 'numeric',
       year: 'numeric'
     }).format(new Date(value));
+  }
+
+  protected feeLabel(value: number | null | undefined): string {
+    return formatBatchFee(value);
   }
 
   protected setCalendarView(view: BatchCalendarView): void {

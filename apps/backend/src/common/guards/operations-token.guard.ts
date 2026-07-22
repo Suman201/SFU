@@ -13,13 +13,19 @@ export class OperationsTokenGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<{ headers: Record<string, string | string[] | undefined> }>();
-    const providedToken = normalizeHeaderValue(request.headers['x-operations-token']);
+    const providedToken = normalizeHeaderValue(request.headers['x-operations-token'])
+      ?? bearerToken(request.headers.authorization);
     if (operationsTokenMatches(providedToken, configuredToken)) {
       return true;
     }
 
     throw new UnauthorizedException('Missing or invalid operations token');
   }
+}
+
+function bearerToken(value: string | string[] | undefined): string | undefined {
+  const normalized = normalizeHeaderValue(value);
+  return normalized?.startsWith('Bearer ') ? normalized.slice('Bearer '.length).trim() : undefined;
 }
 
 function normalizeHeaderValue(value: string | string[] | undefined): string | undefined {

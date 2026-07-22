@@ -109,7 +109,7 @@
                 <strong>{{ batch.title }}</strong>
                 <small>
                   <a [routerLink]="['/teachers', batch.teacherId]">{{ batch.teacherName }}</a>
-                  · {{ batch.subject }}
+                  · {{ batch.subject }} · {{ feeLabel(batch.feeAmount) }}
                 </small>
               </div>
             </div>

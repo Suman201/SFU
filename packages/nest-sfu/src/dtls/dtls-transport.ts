@@ -20,6 +20,9 @@ const DTLS_VERSIONS = new Set([0xfeff, 0xfefd]);
 const HANDSHAKE_CONTENT_TYPE = 22;
 const CERTIFICATE_HANDSHAKE_TYPE = 11;
 const SRTP_PROFILES = [ProtectionProfileAes128CmHmacSha1_80, ProtectionProfileAeadAes128Gcm];
+const MAX_CERTIFICATE_HANDSHAKE_BYTES = 1024 * 1024;
+const MAX_CERTIFICATE_FRAGMENT_SETS = 8;
+const MAX_CERTIFICATE_FRAGMENTS = 128;
 
 export class DtlsTransport extends EventEmitter {
   private state: DtlsTransportState = 'new';
@@ -222,6 +225,9 @@ class DtlsCertificateAssembler {
         break;
       }
       if (type === CERTIFICATE_HANDSHAKE_TYPE) {
+        if (length <= 0 || length > MAX_CERTIFICATE_HANDSHAKE_BYTES || fragmentOffset + fragmentLength > length) {
+          throw new Error('DTLS certificate handshake exceeds safe fragmentation bounds');
+        }
         const body =
           fragmentOffset === 0 && fragmentLength === length
             ? record.subarray(bodyStart, bodyEnd)
@@ -236,8 +242,16 @@ class DtlsCertificateAssembler {
   }
 
   private addFragment(sequence: number, length: number, offset: number, data: Buffer): Buffer | undefined {
-    const existing = this.fragments.get(sequence) ?? new CertificateFragmentSet(length);
-    this.fragments.set(sequence, existing);
+    let existing = this.fragments.get(sequence);
+    if (!existing) {
+      if (this.fragments.size >= MAX_CERTIFICATE_FRAGMENT_SETS) {
+        throw new Error('Too many incomplete DTLS certificate handshakes');
+      }
+      existing = new CertificateFragmentSet(length);
+      this.fragments.set(sequence, existing);
+    } else if (existing.expectedLength !== length) {
+      throw new Error('DTLS certificate fragment length changed within a handshake');
+    }
     const body = existing.add(offset, data);
     if (body) {
       this.fragments.delete(sequence);
@@ -247,19 +261,44 @@ class DtlsCertificateAssembler {
 }
 
 class CertificateFragmentSet {
-  private readonly chunks: Array<{ offset: number; data: Buffer }> = [];
+  private readonly body: Buffer;
+  private readonly covered: Uint8Array;
+  private coveredBytes = 0;
+  private fragmentCount = 0;
 
-  constructor(private readonly length: number) {}
+  constructor(readonly expectedLength: number) {
+    this.body = Buffer.alloc(expectedLength);
+    this.covered = new Uint8Array(expectedLength);
+  }
 
   add(offset: number, data: Buffer): Buffer | undefined {
-    this.chunks.push({ offset, data });
-    const body = Buffer.alloc(this.length);
-    let filled = 0;
-    for (const chunk of this.chunks.sort((left, right) => left.offset - right.offset)) {
-      chunk.data.copy(body, chunk.offset);
-      filled += chunk.data.length;
+    if (data.length === 0 || offset < 0 || offset + data.length > this.expectedLength) {
+      throw new Error('Invalid DTLS certificate fragment bounds');
     }
-    return filled >= this.length ? body : undefined;
+    let addsCoverage = false;
+    for (let index = 0; index < data.length; index += 1) {
+      const target = offset + index;
+      if (this.covered[target] === 1 && this.body[target] !== data[index]) {
+        throw new Error('Conflicting DTLS certificate fragment overlap');
+      }
+      addsCoverage ||= this.covered[target] === 0;
+    }
+    if (!addsCoverage) {
+      return this.coveredBytes === this.expectedLength ? Buffer.from(this.body) : undefined;
+    }
+    if (this.fragmentCount >= MAX_CERTIFICATE_FRAGMENTS) {
+      throw new Error('Too many DTLS certificate fragments');
+    }
+    this.fragmentCount += 1;
+    for (let index = 0; index < data.length; index += 1) {
+      const target = offset + index;
+      if (this.covered[target] === 0) {
+        this.covered[target] = 1;
+        this.coveredBytes += 1;
+      }
+      this.body[target] = data[index]!;
+    }
+    return this.coveredBytes === this.expectedLength ? Buffer.from(this.body) : undefined;
   }
 }
 

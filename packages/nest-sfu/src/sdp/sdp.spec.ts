@@ -100,6 +100,19 @@ describe('SDP helpers', () => {
     expect(answer).not.toContain('a=rtpmap:96 VP8/90000');
     expect(answer).not.toContain('a=rtpmap:97 rtx/90000');
   });
+
+  it('advertises every unique transport candidate with loopback ordered last', () => {
+    const offer = safariVideoOffer();
+    const rtp = parseSdpRtpParameters('video', offer);
+    const answer = buildUnifiedPlanAnswer({ transport: transportFixture(), offer, direction: 'sendonly', rtpParameters: rtp });
+    const publicCandidate = 'a=candidate:2 1 UDP 2130706430 203.0.113.10 40001 typ host';
+    const loopbackCandidate = 'a=candidate:1 1 UDP 2130706431 127.0.0.1 40000 typ host';
+
+    expect(answer).toContain(publicCandidate);
+    expect(answer).toContain(loopbackCandidate);
+    expect(answer.indexOf(publicCandidate)).toBeLessThan(answer.indexOf(loopbackCandidate));
+    expect(answer.match(/203\.0\.113\.10 40001 typ host/g)?.length).toBe(1);
+  });
 });
 
 function transportFixture(): TransportOptions {
@@ -116,6 +129,24 @@ function transportFixture(): TransportOptions {
         priority: 2130706431,
         ip: '127.0.0.1',
         port: 40000,
+        type: 'host'
+      },
+      {
+        foundation: '2',
+        component: 1,
+        protocol: 'udp',
+        priority: 2130706430,
+        ip: '203.0.113.10',
+        port: 40001,
+        type: 'host'
+      },
+      {
+        foundation: 'duplicate',
+        component: 1,
+        protocol: 'udp',
+        priority: 2130706429,
+        ip: '203.0.113.10',
+        port: 40001,
         type: 'host'
       }
     ],

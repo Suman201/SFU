@@ -194,6 +194,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PipeCoordinatorService.name);
   private readonly enabled: boolean;
   private readonly clusterSecret?: string;
+  private readonly previousClusterSecret?: string;
   private readonly coordinationTimeoutMs: number;
   private readonly coordinationMaxAttempts: number;
   private readonly maxSetupRequestsPerMinute: number;
@@ -230,6 +231,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
   ) {
     this.enabled = config.get<boolean>('pipe.enabled', false);
     this.clusterSecret = config.get<string>('pipe.clusterSecret');
+    this.previousClusterSecret = config.get<string>('pipe.previousClusterSecret');
     this.coordinationTimeoutMs = config.get<number>('pipe.coordinationTimeoutMs', 5000);
     this.coordinationMaxAttempts = Math.max(1, config.get<number>('pipe.coordinationMaxAttempts', 3));
     this.maxSetupRequestsPerMinute = config.get<number>('pipe.maxSetupRequestsPerMinute', 120);
@@ -1882,12 +1884,27 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
     this.assertClusterSecret();
-    const expected = this.signature({ ...envelope, auth: undefined }, envelope.auth.nonce, envelope.auth.issuedAt);
-    return timingSafeStringEqual(expected, envelope.auth.signature);
+    const unsigned = { ...envelope, auth: undefined };
+    const current = this.signature(unsigned, envelope.auth.nonce, envelope.auth.issuedAt);
+    if (timingSafeStringEqual(current, envelope.auth.signature)) {
+      return true;
+    }
+    return Boolean(
+      this.previousClusterSecret
+      && timingSafeStringEqual(
+        this.signature(unsigned, envelope.auth.nonce, envelope.auth.issuedAt, this.previousClusterSecret),
+        envelope.auth.signature
+      )
+    );
   }
 
-  private signature(envelope: Omit<PipeCoordinationEnvelope, 'auth'> | PipeCoordinationEnvelope, nonce: string, issuedAt: string): string {
-    return createHmac('sha256', this.clusterSecret!)
+  private signature(
+    envelope: Omit<PipeCoordinationEnvelope, 'auth'> | PipeCoordinationEnvelope,
+    nonce: string,
+    issuedAt: string,
+    secret = this.clusterSecret!
+  ): string {
+    return createHmac('sha256', secret)
       .update(
         JSON.stringify({
           version: PIPE_PROTOCOL_VERSION,

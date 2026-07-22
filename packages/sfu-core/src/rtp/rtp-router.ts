@@ -152,6 +152,7 @@ export interface RtpRouterOptions {
   duplicateWindowSize?: number;
   enableTwcc?: boolean;
   enablePacing?: boolean;
+  detachPacedWrites?: boolean;
   enableProbeScheduling?: boolean;
   enableJoinKeyframeGate?: boolean;
   enableAdaptiveLayerSelection?: boolean;
@@ -452,6 +453,9 @@ export class RtpRouter {
     if (!route) {
       return;
     }
+    for (const consumerId of [...(this.consumersByProducer.get(producerId) ?? [])]) {
+      this.removeConsumer(consumerId);
+    }
     for (const ssrc of route.ssrcs) {
       this.producerBySsrc.delete(ssrc);
       this.mediaSsrcBySsrc.delete(ssrc);
@@ -461,6 +465,11 @@ export class RtpRouter {
     this.publishDynacastChange(route, route.dynacast.setAvailableLayers([], 'producer_closed'));
     this.producers.delete(producerId);
     this.consumersByProducer.delete(producerId);
+    const participantProducerIds = this.participantProducers.get(route.producer.participantId);
+    participantProducerIds?.delete(producerId);
+    if (participantProducerIds?.size === 0) {
+      this.participantProducers.delete(route.producer.participantId);
+    }
   }
 
   setProducerPaused(producerId: string, paused: boolean): void {
@@ -795,6 +804,7 @@ export class RtpRouter {
       return 0;
     }
     let forwarded = 0;
+    const immediateSends: Promise<void>[] = [];
     for (const released of packets) {
       const releasedSize = fallbackSize || released.serialize().length;
       recordMetric(producerRoute.metrics.primaryRtp, releasedSize);
@@ -833,15 +843,24 @@ export class RtpRouter {
           this.options.onDroppedPacket?.('invalid_ssrc');
           continue;
         }
-        try {
-          await this.sendRtpToConsumer(consumerRoute, rewritten, { kind: 'primary', layer: packetLayer, svcLayer: svcDetection ? toRtpLayerSelection(producerRoute.svc.svcSelectionForPacket(svcDetection)) : undefined });
-        } catch {
+        const delivery = this.sendRtpToConsumer(consumerRoute, rewritten, {
+          kind: 'primary',
+          layer: packetLayer,
+          svcLayer: svcDetection ? toRtpLayerSelection(producerRoute.svc.svcSelectionForPacket(svcDetection)) : undefined
+        });
+        if (!delivery.admitted) {
           restoreConsumerDeliveryState(consumerRoute, deliveryState);
           continue;
+        }
+        if (delivery.completion) {
+          immediateSends.push(delivery.completion);
         }
         this.options.onForwardedPacket?.(producerRoute.producer.kind);
         forwarded += 1;
       }
+    }
+    if (immediateSends.length > 0) {
+      await Promise.all(immediateSends);
     }
     return forwarded;
   }
@@ -2040,6 +2059,7 @@ export class RtpRouter {
     const consumers = this.targetConsumersForFeedback(producerId, context);
     const missing: number[] = [];
     let retransmitted = 0;
+    const immediateSends: Promise<void>[] = [];
     for (const consumerRoute of consumers) {
       consumerRoute.metrics.retransmission.requestedPackets += lostPacketIds.length;
     }
@@ -2066,10 +2086,20 @@ export class RtpRouter {
           consumerRoute.metrics.retransmission.missingPackets += 1;
           continue;
         }
-        await this.sendRtpToConsumer(consumerRoute, repair.packet, { kind: 'retransmission', rtx: repair.rtx });
+        const delivery = this.sendRtpToConsumer(consumerRoute, repair.packet, { kind: 'retransmission', rtx: repair.rtx });
+        if (!delivery.admitted) {
+          consumerRoute.metrics.retransmission.missingPackets += 1;
+          continue;
+        }
+        if (delivery.completion) {
+          immediateSends.push(delivery.completion);
+        }
         this.options.onRetransmittedPacket?.(producerRoute.producer.kind);
         retransmitted += 1;
       }
+    }
+    if (immediateSends.length > 0) {
+      await Promise.all(immediateSends);
     }
     if (missing.length === 0) {
       return retransmitted;
@@ -2413,11 +2443,11 @@ export class RtpRouter {
     this.options.onForwardedRtcpPacket?.('twcc', 'producer');
   }
 
-  private async sendRtpToConsumer(
+  private sendRtpToConsumer(
     consumerRoute: ConsumerRoute,
     packet: RtpPacket,
     mode: { kind: 'primary' | 'retransmission'; rtx?: boolean; layer?: RtpLayerSelection; svcLayer?: RtpLayerSelection }
-  ): Promise<void> {
+  ): { admitted: boolean; completion?: Promise<void> } {
     const size = packet.serialize().length;
     const send = async () => {
       const sentAt = this.now();
@@ -2444,15 +2474,21 @@ export class RtpRouter {
       this.maybeEmitQualityForConsumer(consumerRoute);
     };
     if (this.options.enablePacing === false) {
-      await send();
-      return;
+      return { admitted: true, completion: send() };
     }
-    try {
-      await consumerRoute.pacer.enqueue(size, () => this.transportPacer(consumerRoute.consumer.transportId).enqueue(size, send));
-    } catch (error) {
-      this.options.onDroppedPacket?.('no_consumers');
-      throw error;
+    if (this.options.detachPacedWrites !== true) {
+      return {
+        admitted: true,
+        completion: consumerRoute.pacer.enqueue(size, () => this.transportPacer(consumerRoute.consumer.transportId).enqueue(size, send))
+      };
     }
+    return {
+      admitted: consumerRoute.pacer.enqueueDetached(
+        size,
+        () => this.transportPacer(consumerRoute.consumer.transportId).enqueue(size, send),
+        () => this.options.onDroppedPacket?.('no_consumers')
+      )
+    };
   }
 
   private recordConsumerSendMetrics(

@@ -28,10 +28,14 @@ export interface MediaPacketBridgeCounters {
   routedRtpPackets: number;
   routedRtcpPackets: number;
   inboundRtpPaddingOnlyPackets: number;
+  inboundMediaBeforeSrtpPackets: number;
   inboundRtpSsrcCounts: Record<string, number>;
   inboundRtpPayloadTypeCounts: Record<string, number>;
   queueDepth: number;
+  queueBytes: number;
   maxQueueDepth: number;
+  maxQueueBytes: number;
+  droppedQueuePackets: number;
 }
 
 export interface MediaPacketBridgeOptions {
@@ -42,10 +46,13 @@ export interface MediaPacketBridgeOptions {
   onRtp: (packet: Buffer) => Promise<number>;
   onRtcp: (packet: Buffer) => Promise<number>;
   onError?: (error: Error, kind: IceDatagramKind) => void;
+  maxQueuePackets?: number;
+  maxQueueBytes?: number;
 }
 
 export class MediaPacketBridge extends EventEmitter {
   private readonly queue: Buffer[] = [];
+  private queueBytes = 0;
   private processing = false;
   private closed = false;
   private readonly counters: MediaPacketBridgeCounters = {
@@ -67,20 +74,25 @@ export class MediaPacketBridge extends EventEmitter {
     routedRtpPackets: 0,
     routedRtcpPackets: 0,
     inboundRtpPaddingOnlyPackets: 0,
+    inboundMediaBeforeSrtpPackets: 0,
     inboundRtpSsrcCounts: {},
     inboundRtpPayloadTypeCounts: {},
     queueDepth: 0,
-    maxQueueDepth: 0
+    queueBytes: 0,
+    maxQueueDepth: 0,
+    maxQueueBytes: 0,
+    droppedQueuePackets: 0
   };
   private readonly iceDataHandler = (event: IceDataEvent) => this.enqueue(event.message);
 
   constructor(private readonly options: MediaPacketBridgeOptions) {
     super();
+    this.counters.maxQueueBytes = options.maxQueueBytes ?? 8 * 1024 * 1024;
     this.options.ice.on('data', this.iceDataHandler);
   }
 
   snapshot(): MediaPacketBridgeCounters {
-    return { ...this.counters, queueDepth: this.queue.length };
+    return { ...this.counters, queueDepth: this.queue.length, queueBytes: this.queueBytes };
   }
 
   async sendRtp(packet: RtpPacket | Buffer, consumer: Consumer): Promise<void> {
@@ -108,7 +120,9 @@ export class MediaPacketBridge extends EventEmitter {
     this.closed = true;
     this.options.ice.off('data', this.iceDataHandler);
     this.queue.length = 0;
+    this.queueBytes = 0;
     this.counters.queueDepth = 0;
+    this.counters.queueBytes = 0;
   }
 
   private enqueue(packet: Buffer): void {
@@ -116,8 +130,18 @@ export class MediaPacketBridge extends EventEmitter {
       return;
     }
     this.counters.inboundPackets += 1;
-    this.queue.push(Buffer.from(packet));
+    const maxQueuePackets = this.options.maxQueuePackets ?? 2048;
+    const maxQueueBytes = this.options.maxQueueBytes ?? 8 * 1024 * 1024;
+    this.counters.maxQueueBytes = maxQueueBytes;
+    if (this.queue.length >= maxQueuePackets || this.queueBytes + packet.length > maxQueueBytes) {
+      this.counters.droppedQueuePackets += 1;
+      return;
+    }
+    const queued = Buffer.from(packet);
+    this.queue.push(queued);
+    this.queueBytes += queued.length;
     this.counters.queueDepth = this.queue.length;
+    this.counters.queueBytes = this.queueBytes;
     this.counters.maxQueueDepth = Math.max(this.counters.maxQueueDepth, this.queue.length);
     if (!this.processing) {
       void this.drain();
@@ -129,7 +153,9 @@ export class MediaPacketBridge extends EventEmitter {
     try {
       while (!this.closed && this.queue.length > 0) {
         const packet = this.queue.shift()!;
+        this.queueBytes -= packet.length;
         this.counters.queueDepth = this.queue.length;
+        this.counters.queueBytes = this.queueBytes;
         await this.handleDatagram(packet);
       }
     } finally {
@@ -163,12 +189,20 @@ export class MediaPacketBridge extends EventEmitter {
         return;
       }
       if (kind === 'rtp') {
+        if (!session) {
+          this.counters.inboundMediaBeforeSrtpPackets += 1;
+          return;
+        }
         const parsed = RtpPacket.parse(packet);
         this.recordInboundRtpPacket(parsed);
         this.counters.routedRtpPackets += await this.options.onRtp(packet);
         return;
       }
       if (kind === 'rtcp') {
+        if (!session) {
+          this.counters.inboundMediaBeforeSrtpPackets += 1;
+          return;
+        }
         this.counters.routedRtcpPackets += await this.options.onRtcp(packet);
       }
     } catch (error) {

@@ -77,6 +77,30 @@ describe('IceAgent nomination helpers', () => {
       agent.close();
     }
   });
+
+  it('accepts media only from the nominated selected tuple', () => {
+    const agent = new IceAgent({
+      transportId: 'transport',
+      roomId: 'room',
+      participantId: 'participant',
+      role: 'controlled'
+    });
+
+    try {
+      const pair = fakePair('selected-pair');
+      pair.nominated = true;
+      (agent as unknown as { selectedPair?: IceCandidatePair }).selectedPair = pair;
+      const matches = agent as unknown as {
+        matchesSelectedPair(socketId: string, remote: { address: string; port: number }, localCandidate: IceCandidatePair['local']): boolean;
+      };
+
+      expect(matches.matchesSelectedPair(pair.local.socketId, { address: pair.remote.ip, port: pair.remote.port }, pair.local)).toBe(true);
+      expect(matches.matchesSelectedPair(pair.local.socketId, { address: pair.remote.ip, port: pair.remote.port + 1 }, pair.local)).toBe(false);
+      expect(matches.matchesSelectedPair('other-socket', { address: pair.remote.ip, port: pair.remote.port }, pair.local)).toBe(false);
+    } finally {
+      agent.close();
+    }
+  });
 });
 
 function fakePair(id: string): IceCandidatePair {

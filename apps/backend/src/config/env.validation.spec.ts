@@ -16,7 +16,8 @@ const productionConfig = {
   NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
   FRONTEND_URL: 'https://app.example.com',
   CORS_ALLOWED_ORIGINS: 'https://app.example.com',
-  TURN_URIS: 'turn:sfu.example.com:3478?transport=udp',
+  TURN_URIS: 'turn:sfu.example.com:3478?transport=udp,turn:sfu.example.com:3478?transport=tcp,turns:sfu.example.com:5349?transport=tcp',
+  ICE_ANNOUNCED_ADDRESS: '203.0.113.10',
   OPERATIONS_TOKEN: 'operations-token-valid-length-32',
   WEBHOOK_SECRET_ENCRYPTION_KEY: 'webhook-secret-encryption-key-32+'
 };
@@ -30,18 +31,41 @@ describe('validateConfig', () => {
     const validated = validateConfig(baseConfig) as Record<string, unknown>;
     expect(validated.NODE_ENV).toBe('test');
     expect(validated.PORT).toBe(3000);
-    expect(validated.HOST_CANDIDATE_PORT_RANGE).toBe('40000-40100');
+    expect(validated.HOST_CANDIDATE_PORT_RANGE).toBe('40000-40999');
     expect(validated.ICE_STUN_SERVERS).toBe('');
     expect(validated.ICE_TURN_SERVERS).toBe('');
+    expect(validated.ROOM_MAX_PARTICIPANTS).toBe(100);
+    expect(validated.SOCKET_MAX_PAYLOAD_BYTES).toBe(1024 * 1024);
   });
 
   it('accepts an explicit host candidate port range for multi-node local validation', () => {
-    const validated = validateConfig({ ...baseConfig, HOST_CANDIDATE_PORT_RANGE: '40100-40149' }) as Record<string, unknown>;
+    const validated = validateConfig({
+      ...baseConfig,
+      HOST_CANDIDATE_PORT_RANGE: '40100-40149',
+      MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER: '50'
+    }) as Record<string, unknown>;
     expect(validated.HOST_CANDIDATE_PORT_RANGE).toBe('40100-40149');
   });
 
   it('rejects semantic port ranges with a descending range', () => {
     expect(() => validateConfig({ ...baseConfig, HOST_CANDIDATE_PORT_RANGE: '40149-40100' })).toThrow(/HOST_CANDIDATE_PORT_RANGE/);
+  });
+
+  it('rejects media port ranges below configured worker capacity', () => {
+    expect(() => validateConfig({
+      ...baseConfig,
+      MEDIA_WORKER_COUNT: '2',
+      MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER: '500',
+      HOST_CANDIDATE_PORT_RANGE: '40000-40499'
+    })).toThrow(/must provide at least 1000 ports/);
+  });
+
+  it('rejects overlapping host-candidate and pipe port ranges', () => {
+    expect(() => validateConfig({
+      ...baseConfig,
+      HOST_CANDIDATE_PORT_RANGE: '40000-40999',
+      PIPE_PORT_RANGE: '40999-41100'
+    })).toThrow(/must not overlap/);
   });
 
   it('requires PIPE_ADVERTISE_IP when pipe transport is enabled outside test mode', () => {
@@ -97,6 +121,21 @@ describe('validateConfig', () => {
 
   it('accepts hardened production values', () => {
     expect(() => validateConfig(productionConfig)).not.toThrow();
+  });
+
+  it('requires UDP, TCP, and TLS TURN coverage in production', () => {
+    expect(() => validateConfig({
+      ...productionConfig,
+      TURN_URIS: 'turn:sfu.example.com:3478?transport=udp'
+    })).toThrow(/TCP TURN endpoint/);
+  });
+
+  it('requires a public announced media address in production', () => {
+    expect(() => validateConfig({
+      ...productionConfig,
+      ICE_ANNOUNCED_ADDRESS: '',
+      ICE_PUBLIC_CANDIDATE_ADDRESS: ''
+    })).toThrow(/ICE_ANNOUNCED_ADDRESS is required/);
   });
 
   it('requires a dedicated webhook secret encryption key in production when delivery is enabled', () => {
@@ -249,22 +288,22 @@ describe('validateConfig', () => {
     ).toThrow(/PIPE_ADVERTISE_IP must not use localhost or wildcard hosts in production/);
   });
 
-  it('rejects unsupported TCP TURN URIs', () => {
+  it('accepts browser TURN over UDP, TCP, and TLS', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        TURN_URIS: 'turn:sfu.example.com:3478?transport=tcp'
+        TURN_URIS: 'turn:sfu.example.com:3478?transport=udp,turn:sfu.example.com:3478?transport=tcp,turns:sfu.example.com:5349?transport=tcp'
       })
-    ).toThrow(/unsupported TCP\/TLS TURN transport/);
+    ).not.toThrow();
   });
 
-  it('rejects TURN URIs without an explicit UDP transport', () => {
+  it('rejects non-TLS TURN URIs without an explicit transport', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
         TURN_URIS: 'turn:sfu.example.com:3478'
       })
-    ).toThrow(/transport=udp/);
+    ).toThrow(/explicit UDP\/TCP TURN/);
   });
 
   it('accepts explicit server-side ICE STUN, TURN, and announced candidate config', () => {

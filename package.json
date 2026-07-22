@@ -54,7 +54,9 @@
     "docker:down": "docker compose -f infra/docker-compose.dev.yml down --remove-orphans",
     "docker:up:multi-node": "docker compose -f infra/docker-compose.multi-node.yml up --build",
     "docker:start:multi-node": "docker compose -f infra/docker-compose.multi-node.yml up --build -d",
-    "docker:down:multi-node": "docker compose -f infra/docker-compose.multi-node.yml down --remove-orphans"
+    "docker:down:multi-node": "docker compose -f infra/docker-compose.multi-node.yml down --remove-orphans",
+    "backup:production": "bash scripts/backup-production.sh",
+    "restore:production": "bash scripts/restore-production.sh"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0"

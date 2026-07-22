@@ -1703,9 +1703,15 @@ export class ProfilesService {
       schedule: this.scheduleLabel(scheduleMap.get(batch.id) ?? []),
       enrolledCount: countMap.get(batch.id) ?? 0,
       capacity: batch.maxCapacity,
+      feeAmount: this.batchFeeAmount(batch),
       startsAt: batch.startDate.toISOString(),
       status: batch.status
     }));
+  }
+
+  private batchFeeAmount(batch: BatchMongoDocument): number {
+    const value = typeof batch.feeAmount === 'number' ? batch.feeAmount : 0;
+    return Number.isFinite(value) && value > 0 ? value : 0;
   }
 
   private async scheduleMap(batchIds: readonly string[]): Promise<Map<string, BatchScheduleMongoDocument[]>> {

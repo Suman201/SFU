@@ -138,6 +138,7 @@ describe('ProfilesService', () => {
     expect(profile.skills).toEqual(['WebRTC']);
     expect(profile.credentials[0]?.title).toBe('Certified SFU Mentor');
     expect(profile.batches[0]?.title).toBe('WebRTC Foundations');
+    expect(profile.batches[0]?.feeAmount).toBe(1200);
     expect((profile as unknown as { email?: string }).email).toBeUndefined();
   });
 
@@ -632,6 +633,7 @@ describe('ProfilesService', () => {
       courseName: 'Native SFU',
       status: 'ACTIVE',
       maxCapacity: 20,
+      feeAmount: 1200,
       startDate: new Date('2026-06-24T00:00:00.000Z'),
       ...values
     };

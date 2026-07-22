@@ -102,6 +102,63 @@ describe('MediaPacketBridge', () => {
     expect(bridge.snapshot().outboundRtpPackets).toBe(1);
     bridge.close();
   });
+
+  it('drops RTP received before SRTP establishment', async () => {
+    const ice = fakeIce();
+    const onRtp = jest.fn(async () => 1);
+    const bridge = new MediaPacketBridge({
+      transportId: 'transport-1',
+      participantId: 'publisher',
+      ice: ice as any,
+      getSrtpSession: () => undefined,
+      onRtp,
+      onRtcp: async () => 0
+    });
+
+    ice.emit('data', { message: rtpPacket(1111, 1) });
+    await bridge.waitForIdle();
+
+    expect(onRtp).not.toHaveBeenCalled();
+    expect(bridge.snapshot().inboundMediaBeforeSrtpPackets).toBe(1);
+    bridge.close();
+  });
+
+  it('bounds the inbound media queue by packet and byte limits', async () => {
+    const { browser, sfu } = pair();
+    browser.setOutboundSsrcs([1111]);
+    sfu.setInboundSsrcs([1111]);
+    const ice = fakeIce();
+    let releaseFirst!: () => void;
+    const firstPacketBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const bridge = new MediaPacketBridge({
+      transportId: 'transport-1',
+      participantId: 'publisher',
+      ice: ice as any,
+      getSrtpSession: () => sfu,
+      onRtp: async () => {
+        await firstPacketBlocked;
+        return 1;
+      },
+      onRtcp: async () => 0,
+      maxQueuePackets: 1,
+      maxQueueBytes: 4096
+    });
+    bridge.on('error', () => undefined);
+    const packets = await Promise.all([1, 2, 3].map((sequence) => browser.protectRtp(rtpPacket(1111, sequence))));
+
+    for (const packet of packets) {
+      ice.emit('data', { message: packet });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    releaseFirst();
+    await bridge.waitForIdle();
+
+    expect(bridge.snapshot().droppedQueuePackets).toBeGreaterThanOrEqual(1);
+    expect(bridge.snapshot().maxQueueDepth).toBeLessThanOrEqual(1);
+    bridge.close();
+  });
 });
 
 function pair(): { browser: NativeSrtpSession; sfu: NativeSrtpSession } {

@@ -15,7 +15,8 @@ export class RtpPacket {
     readonly ssrc: number,
     readonly csrc: number[],
     readonly headerExtension: RtpHeaderExtension | null,
-    readonly payload: Buffer
+    readonly payload: Buffer,
+    readonly paddingBytes: Buffer = Buffer.alloc(0)
   ) {}
 
   static parse(buffer: Buffer): RtpPacket {
@@ -63,18 +64,36 @@ export class RtpPacket {
       };
       offset += extensionLength;
     }
-    const payloadEnd = padding ? buffer.length - buffer[buffer.length - 1]! : buffer.length;
+    const paddingLength = padding ? buffer[buffer.length - 1]! : 0;
+    if (padding && paddingLength === 0) {
+      throw new Error('RTP padding length must be greater than zero');
+    }
+    const payloadEnd = buffer.length - paddingLength;
     if (payloadEnd < offset) {
       throw new Error('RTP padding exceeds payload bounds');
     }
-    return new RtpPacket(version, padding, extension, marker, payloadType, sequenceNumber, timestamp, ssrc, csrc, headerExtension, buffer.subarray(offset, payloadEnd));
+    return new RtpPacket(
+      version,
+      padding,
+      extension,
+      marker,
+      payloadType,
+      sequenceNumber,
+      timestamp,
+      ssrc,
+      csrc,
+      headerExtension,
+      buffer.subarray(offset, payloadEnd),
+      padding ? buffer.subarray(payloadEnd) : Buffer.alloc(0)
+    );
   }
 
   serialize(): Buffer {
     const paddedHeaderExtensionValue = this.headerExtension ? padToWordBoundary(this.headerExtension.value) : null;
     const extensionLength = this.headerExtension && paddedHeaderExtensionValue ? 4 + paddedHeaderExtensionValue.length : 0;
     const csrcLength = this.csrc.length * 4;
-    const buffer = Buffer.alloc(12 + csrcLength + extensionLength + this.payload.length);
+    const paddingBytes = this.padding ? normalizePadding(this.paddingBytes) : Buffer.alloc(0);
+    const buffer = Buffer.alloc(12 + csrcLength + extensionLength + this.payload.length + paddingBytes.length);
     buffer[0] = (this.version << 6) | (this.padding ? 0x20 : 0) | (this.headerExtension ? 0x10 : 0) | this.csrc.length;
     buffer[1] = (this.marker ? 0x80 : 0) | this.payloadType;
     buffer.writeUInt16BE(this.sequenceNumber, 2);
@@ -93,8 +112,19 @@ export class RtpPacket {
       offset += paddedHeaderExtensionValue.length;
     }
     this.payload.copy(buffer, offset);
+    paddingBytes.copy(buffer, offset + this.payload.length);
     return buffer;
   }
+}
+
+function normalizePadding(value: Buffer): Buffer {
+  if (value.length === 0) {
+    return Buffer.from([1]);
+  }
+  if (value.length > 255 || value[value.length - 1] !== value.length) {
+    throw new Error('Invalid RTP padding bytes');
+  }
+  return value;
 }
 
 function padToWordBoundary(value: Buffer): Buffer {

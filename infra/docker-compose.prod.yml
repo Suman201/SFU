@@ -1,11 +1,23 @@
+x-service-logging: &service-logging
+  driver: local
+  options:
+    max-size: ${CONTAINER_LOG_MAX_SIZE:-20m}
+    max-file: ${CONTAINER_LOG_MAX_FILES:-10}
+
 services:
   mongo:
     image: mongo:7
     restart: always
+    logging: *service-logging
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-native_sfu}
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo_root_password
+    secrets:
+      - mongo_root_password
     volumes:
       - mongo-data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD-SHELL", "mongosh --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$(cat /run/secrets/mongo_root_password)\" --authenticationDatabase admin --eval \"db.adminCommand('ping')\" >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -13,11 +25,16 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
-    command: ["redis-server", "--appendonly", "yes"]
+    logging: *service-logging
+    command: ["/bin/sh", "-ec", "exec redis-server --appendonly yes --appendfsync everysec --save 60 1000 --maxmemory \"$$REDIS_MAXMEMORY\" --maxmemory-policy noeviction --requirepass \"$$(cat /run/secrets/redis_password)\""]
+    environment:
+      REDIS_MAXMEMORY: ${REDIS_MAXMEMORY:-2gb}
+    secrets:
+      - redis_password
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$(cat /run/secrets/redis_password)\" ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -27,26 +44,186 @@ services:
       context: ..
       dockerfile: apps/backend/Dockerfile
     restart: always
+    logging: *service-logging
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
     env_file:
-      - ../.env.production
+      - path: ../.env.production
+        required: false
+    environment:
+      MONGODB_URI_FILE: /run/secrets/mongodb_uri
+      REDIS_URL_FILE: /run/secrets/redis_url
+      JWT_ACCESS_SECRET_FILE: /run/secrets/jwt_access_secret
+      JWT_REFRESH_SECRET_FILE: /run/secrets/jwt_refresh_secret
+      OPERATIONS_TOKEN_FILE: /run/secrets/operations_token
+      TURN_SECRET_FILE: /run/secrets/turn_secret
+      WEBHOOK_SECRET_ENCRYPTION_KEY_FILE: /run/secrets/webhook_encryption_key
+      PIPE_CLUSTER_SECRET_FILE: /run/secrets/pipe_cluster_secret
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      NODE_ID: ${NODE_ID:-compose-backend-1}
+    secrets:
+      - mongodb_uri
+      - redis_url
+      - jwt_access_secret
+      - jwt_refresh_secret
+      - operations_token
+      - turn_secret
+      - webhook_encryption_key
+      - pipe_cluster_secret
     ports:
       - "3000:3000"
-      - "40000-40100:40000-40100/udp"
+      - "40000-40999:40000-40999/udp"
+      - "41000-41100:41000-41100/udp"
     depends_on:
       mongo:
         condition: service_healthy
       redis:
         condition: service_healthy
+      coturn:
+        condition: service_healthy
     volumes:
       - recordings:/app/recordings
+      - chat-attachments:/app/chat-attachments
+      - class-materials:/app/class-materials
+      - profile-media:/app/profile-media
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 30s
+    stop_grace_period: 45s
+
+  coturn:
+    image: coturn/coturn:4
+    restart: always
+    logging: *service-logging
+    network_mode: host
+    environment:
+      TURN_REALM: ${TURN_REALM:?TURN_REALM is required}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:?TURN_EXTERNAL_IP is required}
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        exec turnserver -c /etc/coturn/turnserver.conf
+        --realm="$$TURN_REALM"
+        --external-ip="$$TURN_EXTERNAL_IP"
+        --static-auth-secret="$$(cat /run/secrets/turn_secret)"
+        --cert=/run/secrets/turn_tls_certificate
+        --pkey=/run/secrets/turn_tls_private_key
+    secrets:
+      - turn_secret
+      - turn_tls_certificate
+      - turn_tls_private_key
+    volumes:
+      - ./docker/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          username="$$(($$(date +%s) + 120))";
+          password="$$(printf '%s' "$$username" | openssl dgst -binary -sha1 -hmac "$$(cat /run/secrets/turn_secret)" | openssl base64)";
+          turnutils_uclient -y -u "$$username" -w "$$password" -p 3478 127.0.0.1 >/dev/null 2>&1
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    restart: always
+    logging: *service-logging
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}
+    ports:
+      - "127.0.0.1:9090:9090"
+    secrets:
+      - operations_token
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+      alertmanager:
+        condition: service_started
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    restart: always
+    logging: *service-logging
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    secrets:
+      - alertmanager_webhook_url
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: always
+    logging: *service-logging
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    secrets:
+      - grafana_admin_password
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+secrets:
+  mongo_root_password:
+    file: ${MONGO_ROOT_PASSWORD_FILE:?MONGO_ROOT_PASSWORD_FILE is required}
+  redis_password:
+    file: ${REDIS_PASSWORD_FILE:?REDIS_PASSWORD_FILE is required}
+  mongodb_uri:
+    file: ${MONGODB_URI_SECRET_FILE:?MONGODB_URI_SECRET_FILE is required}
+  redis_url:
+    file: ${REDIS_URL_SECRET_FILE:?REDIS_URL_SECRET_FILE is required}
+  jwt_access_secret:
+    file: ${JWT_ACCESS_SECRET_FILE:?JWT_ACCESS_SECRET_FILE is required}
+  jwt_refresh_secret:
+    file: ${JWT_REFRESH_SECRET_FILE:?JWT_REFRESH_SECRET_FILE is required}
+  operations_token:
+    file: ${OPERATIONS_TOKEN_FILE:?OPERATIONS_TOKEN_FILE is required}
+  turn_secret:
+    file: ${TURN_SECRET_FILE:?TURN_SECRET_FILE is required}
+  turn_tls_certificate:
+    file: ${TURN_TLS_CERTIFICATE_FILE:?TURN_TLS_CERTIFICATE_FILE is required}
+  turn_tls_private_key:
+    file: ${TURN_TLS_PRIVATE_KEY_FILE:?TURN_TLS_PRIVATE_KEY_FILE is required}
+  webhook_encryption_key:
+    file: ${WEBHOOK_SECRET_ENCRYPTION_KEY_FILE:?WEBHOOK_SECRET_ENCRYPTION_KEY_FILE is required}
+  pipe_cluster_secret:
+    file: ${PIPE_CLUSTER_SECRET_FILE:?PIPE_CLUSTER_SECRET_FILE is required}
+  grafana_admin_password:
+    file: ${GRAFANA_ADMIN_PASSWORD_FILE:?GRAFANA_ADMIN_PASSWORD_FILE is required}
+  alertmanager_webhook_url:
+    file: ${ALERTMANAGER_WEBHOOK_URL_FILE:?ALERTMANAGER_WEBHOOK_URL_FILE is required}
 
 volumes:
   mongo-data:
   redis-data:
   recordings:
+  chat-attachments:
+  class-materials:
+  profile-media:
+  prometheus-data:
+  grafana-data:
+  alertmanager-data:

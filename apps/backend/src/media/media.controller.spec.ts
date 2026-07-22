@@ -46,9 +46,9 @@ describe('MediaController', () => {
         'app.publicUrl': 'https://sfu.example.com',
         'cluster.publicUrl': 'https://node-a.sfu.example.com',
         'pipe.advertiseIp': '127.0.0.1',
-        'mediaWorker.ice.announcedAddress': '127.0.0.1',
-        'mediaWorker.ice.stunServers': ['stun:127.0.0.1:3478', 'stuns:stun.example.com:5349'],
-        'mediaWorker.ice.turnServers': [
+        'media.ice.announcedAddress': '127.0.0.1',
+        'media.ice.stunServers': ['stun:127.0.0.1:3478', 'stuns:stun.example.com:5349'],
+        'media.ice.turnServers': [
           { url: 'turn:127.0.0.1:3478?transport=udp' },
           { url: 'turns:turn.example.com:5349?transport=tcp' }
         ],
@@ -163,9 +163,9 @@ describe('MediaController', () => {
         'app.publicUrl': 'http://localhost:3000',
         'cluster.publicUrl': 'http://localhost:3000',
         'pipe.advertiseIp': '127.0.0.1',
-        'mediaWorker.ice.announcedAddress': undefined,
-        'mediaWorker.ice.stunServers': [],
-        'mediaWorker.ice.turnServers': [],
+        'media.ice.announcedAddress': undefined,
+        'media.ice.stunServers': [],
+        'media.ice.turnServers': [],
         'turn.realm': 'native-sfu.local',
         'turn.secret': 'turn-secret-valid-length-32',
         'turn.uris': ['turn:sfu.example.com:3478?transport=udp']
@@ -230,9 +230,9 @@ describe('MediaController', () => {
         'app.publicUrl': 'http://localhost:3000',
         'cluster.publicUrl': 'http://localhost:3000',
         'pipe.advertiseIp': '127.0.0.1',
-        'mediaWorker.ice.announcedAddress': undefined,
-        'mediaWorker.ice.stunServers': [],
-        'mediaWorker.ice.turnServers': [],
+        'media.ice.announcedAddress': undefined,
+        'media.ice.stunServers': [],
+        'media.ice.turnServers': [],
         'turn.realm': 'native-sfu.local',
         'turn.secret': 'turn-secret-valid-length-32',
         'turn.uris': ['turn:sfu.example.com:3478?transport=udp']

@@ -615,6 +615,9 @@ export class BatchDocument {
   @Prop({ required: true, min: 1 })
   maxCapacity!: number;
 
+  @Prop({ type: Number, min: 0, default: 0 })
+  feeAmount!: number;
+
   @Prop({ required: true, enum: BATCH_STATUSES, default: 'ACTIVE', index: true })
   status!: BatchStatus;
 

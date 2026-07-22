@@ -384,6 +384,16 @@ export class MetricsService implements OnModuleInit {
     help: 'Room admission or media allocation rejections',
     labelNames: ['reason']
   });
+  readonly rateLimitRejections = new Counter({
+    name: 'sfu_rate_limit_rejections_total',
+    help: 'HTTP and Socket.IO requests rejected by rate limit enforcement',
+    labelNames: ['channel', 'bucket']
+  });
+  readonly capacityAdmissionRejections = new Counter({
+    name: 'sfu_capacity_admission_rejections_total',
+    help: 'Room media allocations rejected by hard capacity ceiling',
+    labelNames: ['resource']
+  });
   readonly classSessionLifecycleTransitions = new Counter({
     name: 'sfu_class_session_lifecycle_transitions_total',
     help: 'Class-session lifecycle transitions by event and status',
@@ -1054,6 +1064,8 @@ export class MetricsService implements OnModuleInit {
       this.mediaWorkerDroppedRtpReasons,
       this.mediaWorkerHeartbeatAgeMs,
       this.roomAdmissionRejections,
+      this.rateLimitRejections,
+      this.capacityAdmissionRejections,
       this.classSessionLifecycleTransitions,
       this.classSessionJoinAttempts,
       this.classSessionReconnectGraceEvents,

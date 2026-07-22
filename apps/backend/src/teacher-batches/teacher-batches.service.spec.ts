@@ -52,6 +52,7 @@ describe('TeacherBatchesService', () => {
           startDate: new Date(Date.UTC(2026, 0, 1)),
           endDate: new Date(Date.UTC(2026, 11, 31)),
           maxCapacity: 30,
+          feeAmount: 1200,
           status: 'ACTIVE',
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
           updatedAt: new Date('2026-01-01T00:00:00.000Z')
@@ -80,6 +81,7 @@ describe('TeacherBatchesService', () => {
     expect(results[0]?.name).toBe('Laravel Morning Batch 2026');
     expect(results[0]?.enrolledCount).toBe(1);
     expect(results[0]?.maxCapacity).toBe(30);
+    expect(results[0]?.feeAmount).toBe(1200);
     expect(results[0]?.students).toEqual([
       {
         id: 'student-1',
@@ -109,6 +111,7 @@ describe('TeacherBatchesService', () => {
     expect(result.items[0]?.id).toBe('batch-1');
     expect(result.items[0]?.teacherName).toBe('Teacher One');
     expect(result.items[0]?.enrolledCount).toBe(1);
+    expect(result.items[0]?.feeAmount).toBe(1200);
     expect(batches.find.mock.calls[0]?.[0]).toEqual({ deletedAt: { $exists: false }, status: 'ACTIVE' });
     expect(batches.find.mock.results[0]?.value.sort).toHaveBeenCalledWith({ startDate: 1, updatedAt: -1 });
   });
@@ -264,13 +267,26 @@ function harnessWith(options: { batchExists?: boolean; batches?: unknown[]; sche
     countActiveByBatch: jest.fn(async () => options.roster?.length ?? 0),
     activeCountByBatchIds: jest.fn(async (batchIds: string[]) => new Map(batchIds.map((id) => [id, options.roster?.length ?? 0])))
   };
+  const profiles = {
+    resolveBatchLiveSettings: jest.fn(),
+    normalizeLiveSettingsPatch: jest.fn()
+  };
   return {
-    service: new TeacherBatchesService(batches as never, schedules as never, classSessions as never, users as never, connection as never, studentEnrollments as never),
+    service: new TeacherBatchesService(
+      batches as never,
+      schedules as never,
+      classSessions as never,
+      users as never,
+      connection as never,
+      studentEnrollments as never,
+      profiles as never
+    ),
     batches,
     schedules,
     classSessions,
     users,
-    studentEnrollments
+    studentEnrollments,
+    profiles
   };
 }
 
@@ -318,6 +334,7 @@ function batchDoc(overrides: Record<string, unknown> = {}): Record<string, unkno
     startDate: new Date(Date.UTC(2026, 0, 1)),
     endDate: new Date(Date.UTC(2026, 11, 31)),
     maxCapacity: 30,
+    feeAmount: 1200,
     status: 'ACTIVE',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-02T00:00:00.000Z'),

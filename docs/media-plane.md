@@ -53,7 +53,7 @@ These pieces are now split into reusable modules:
 - ICE restart rotates local credentials and clears remote checklist state.
 - Consent freshness periodically probes the selected pair and disconnects after configured failures.
 
-The transport module supports UDP ICE with host candidates and can gather server-reflexive or TURN relay candidates when `stunServers` / `turnServers` are explicitly configured. The backend release-candidate deployment baseline wires browser TURN credential generation and UDP host candidates by default. TCP/TLS TURN and advanced candidate pooling are deferred to later hardening work.
+The transport module supports UDP ICE with host candidates and can gather server-reflexive or UDP TURN relay candidates when `stunServers` / `turnServers` are explicitly configured. Browser credentials may advertise UDP, TCP, and TLS TURN relay URIs; those browser transports are handled by the browser WebRTC stack. The custom server-side ICE agent remains UDP-only. SDP answers include every gathered transport candidate, with loopback candidates ordered last.
 
 ## DTLS/SRTP Boundary
 

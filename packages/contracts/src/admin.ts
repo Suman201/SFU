@@ -262,6 +262,7 @@ export interface AdminBatchListItem {
   startDate: string;
   endDate: string;
   maxCapacity: number;
+  feeAmount?: number;
   enrolledCount: number;
   status: AdminBatchStatus;
   schedule: AdminBatchScheduleItem[];
@@ -324,6 +325,7 @@ export interface AdminBatchCreateRequest {
   courseName?: string;
   year: number;
   maxCapacity: number;
+  feeAmount?: number;
   schedule: AdminBatchScheduleItem[];
 }
 
@@ -334,6 +336,7 @@ export interface AdminBatchUpdateRequest {
   teacherId?: string;
   year?: number;
   maxCapacity?: number;
+  feeAmount?: number;
   schedule?: AdminBatchScheduleItem[];
   status?: AdminBatchStatus;
 }

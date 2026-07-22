@@ -73,11 +73,15 @@ export interface TurnRelayAllocation {
   server: {
     host: string;
     port: number;
+    resolvedAddress?: string;
   };
   username: string;
   credential: string;
   realm: string;
   nonce: string;
   lifetimeSeconds?: number;
+  expiresAt?: number;
   permissions: Set<string>;
+  permissionExpiresAt: Map<string, number>;
+  refreshTimer?: NodeJS.Timeout;
 }

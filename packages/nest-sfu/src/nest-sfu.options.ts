@@ -123,6 +123,8 @@ export interface NestSfuOptions {
   enableDynacast?: boolean;
   defaultPacingBitrateBps?: number;
   maxPacingQueueBytes?: number;
+  maxInboundPacketQueuePackets?: number;
+  maxInboundPacketQueueBytes?: number;
   twccFeedbackIntervalMs?: number;
   probeClusterIntervalMs?: number;
   probeBurstPackets?: number;

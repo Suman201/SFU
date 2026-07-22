@@ -90,14 +90,14 @@ describe('NodeRegistryService', () => {
     await service.assertLocalRoomOwner('room-1');
   });
 
-  it('publishes a single draining heartbeat during shutdown and stays quiet after Redis is already closed', async () => {
+  it('publishes a single draining heartbeat before Redis closes during shutdown', async () => {
     const redis = new FakeRedisService();
     const service = createRegistry('node-a', redis);
     await service.heartbeatNow();
 
     await service.onModuleDestroy();
-    redis.close();
     await service.beforeApplicationShutdown('SIGTERM');
+    redis.close();
     const storedNode = await redis.getJson<{ draining: boolean; health: string }>('sfu:node:node-a');
 
     expect(storedNode?.draining).toBe(true);

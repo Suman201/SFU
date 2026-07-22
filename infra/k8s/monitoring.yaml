@@ -1,0 +1,98 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: native-sfu-backend
+  namespace: native-sfu
+  labels:
+    app.kubernetes.io/part-of: native-sfu
+spec:
+  selector:
+    matchLabels:
+      monitoring: native-sfu
+  namespaceSelector:
+    matchNames:
+      - native-sfu
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      authorization:
+        type: Bearer
+        credentials:
+          name: native-sfu-secrets
+          key: OPERATIONS_TOKEN
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: native-sfu-runtime
+  namespace: native-sfu
+  labels:
+    app.kubernetes.io/part-of: native-sfu
+spec:
+  groups:
+    - name: native-sfu-runtime
+      rules:
+        - alert: NativeSfuBackendTargetDown
+          expr: up{namespace="native-sfu",service="backend"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Native SFU backend target is unavailable
+        - alert: NativeSfuMediaWorkersUnavailable
+          expr: sfu_media_workers_ready < sfu_media_workers_configured
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: One or more Native SFU media workers are not ready
+        - alert: NativeSfuMediaWorkerCapacityHigh
+          expr: max(sfu_media_worker_capacity_score) > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Native SFU media worker capacity is above 90 percent
+        - alert: NativeSfuFailedRoomsPresent
+          expr: sfu_media_worker_failed_rooms > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: A Native SFU worker has quarantined failed rooms
+        - alert: NativeSfuRtpDropRateHigh
+          expr: sum(rate(sfu_dropped_rtp_packets_total[5m])) / clamp_min(sum(rate(sfu_forwarded_rtp_packets_total[5m])) + sum(rate(sfu_dropped_rtp_packets_total[5m])), 1) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Native SFU RTP drop ratio is above five percent
+        - alert: NativeSfuRateLimitAbuse
+          expr: sum(rate(sfu_rate_limit_rejections_total[5m])) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Sustained Native SFU rate limiting detected
+        - alert: NativeSfuCapacityAdmissionRejections
+          expr: sum(increase(sfu_capacity_admission_rejections_total[10m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: A Native SFU room reached a hard media ceiling
+        - alert: NativeSfuControlPlaneFailure
+          expr: sum(rate(sfu_control_plane_publish_failures_total[5m])) + sum(rate(sfu_control_plane_consume_failures_total[5m])) > 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Native SFU Redis control-plane delivery is failing
+        - alert: NativeSfuPipeErrors
+          expr: sum(rate(sfu_pipe_errors_total[5m])) > 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: Native SFU cross-node pipe errors detected

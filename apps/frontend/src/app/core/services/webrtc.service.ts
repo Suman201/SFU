@@ -601,7 +601,7 @@ export class WebRtcService {
       if (urls.length === 0) {
         this.turnStatus.set({ state: 'degraded', reason: 'no_supported_uris', supportedUriCount: 0 });
         this.cachedIceServers = { expiresAt: now + 5_000, servers: [] };
-        console.warn('[WebRtcService] TURN credentials returned no supported UDP relay URIs.');
+        console.warn('[WebRtcService] TURN credentials returned no supported UDP, TCP, or TLS relay URIs.');
         return [];
       }
       const servers: RTCIceServer[] = [
@@ -801,7 +801,15 @@ function capitalize(value: string): string {
 
 function isSupportedTurnUri(uri: string): boolean {
   const normalized = uri.trim().toLowerCase();
-  return normalized.startsWith('turn:') && normalized.includes('transport=udp');
+  const transport = normalized
+    .split('?')[1]
+    ?.split('&')
+    .map((entry) => entry.split('='))
+    .find(([key]) => key === 'transport')?.[1];
+  if (normalized.startsWith('turns:')) {
+    return transport === undefined || transport === 'tcp';
+  }
+  return normalized.startsWith('turn:') && (transport === 'udp' || transport === 'tcp');
 }
 
 function addSenderForTrack(peer: RTCPeerConnection, track: MediaStreamTrack, stream: MediaStream, kind: ProducerKind, options: PublishOptions): PublishedSender | undefined {
@@ -1009,8 +1017,8 @@ function buildUnifiedPlanAnswer(options: {
   if (targetIndex < 0) {
     throw new Error('SDP offer does not include a compatible media section');
   }
-  const candidate = options.transport.iceCandidates.find((item) => item.ip === '127.0.0.1') ?? options.transport.iceCandidates[0];
-  if (!candidate) {
+  const candidates = answerCandidates(options.transport.iceCandidates);
+  if (!candidates.length) {
     throw new Error('Transport does not include ICE candidates');
   }
   const mediaAnswers: string[][] = [];
@@ -1058,7 +1066,7 @@ function buildUnifiedPlanAnswer(options: {
       'a=rtcp-rsize',
       ...codecLines,
       ...simulcastAnswerLines(section, options.direction),
-      candidateLine(candidate),
+      ...candidates.map(candidateLine),
       'a=end-of-candidates'
     ];
 
@@ -1090,6 +1098,21 @@ function buildUnifiedPlanAnswer(options: {
     'a=msid-semantic: WMS *',
     ...mediaAnswers.flat()
   ].join('\r\n') + '\r\n';
+}
+
+function answerCandidates(candidates: TransportOptions['iceCandidates']): TransportOptions['iceCandidates'] {
+  const unique = new Map<string, TransportOptions['iceCandidates'][number]>();
+  for (const candidate of candidates) {
+    const key = `${candidate.protocol}:${candidate.ip}:${candidate.port}:${candidate.type}`;
+    if (!unique.has(key)) {
+      unique.set(key, candidate);
+    }
+  }
+  return [...unique.values()].sort((left, right) => Number(isLoopbackAddress(left.ip)) - Number(isLoopbackAddress(right.ip)));
+}
+
+function isLoopbackAddress(address: string): boolean {
+  return address === '::1' || address.startsWith('127.');
 }
 
 function mediaSections(sdp: string): string[][] {

@@ -22,6 +22,7 @@ export interface CreateTeacherBatchInput {
   courseName?: string;
   year: number;
   maxCapacity: number;
+  feeAmount: number;
   schedule: TeacherBatchSchedule[];
 }
 
@@ -60,6 +61,7 @@ export interface TeacherBatch {
   endDate: string;
   maxCapacity: number;
   capacity: number;
+  feeAmount: number;
   enrolledCount: number;
   status: TeacherBatchStatus;
   schedule: TeacherBatchSchedule[];
@@ -106,6 +108,7 @@ interface BackendTeacherBatch {
   startDate: string;
   endDate: string;
   maxCapacity: number;
+  feeAmount?: number;
   enrolledCount: number;
   status: TeacherBatchStatus;
   schedule: TeacherBatchSchedule[];
@@ -449,6 +452,7 @@ export class TeacherDashboardStore {
       endDate: batch.endDate,
       maxCapacity: capacity,
       capacity,
+      feeAmount: typeof batch.feeAmount === 'number' && Number.isFinite(batch.feeAmount) && batch.feeAmount > 0 ? batch.feeAmount : 0,
       enrolledCount,
       status: batch.status,
       schedule,

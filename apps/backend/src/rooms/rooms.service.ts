@@ -576,6 +576,17 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   private readonly distributedProducerTombstones = new Map<string, number>();
   private readonly appliedRoomProfileSignatures = new Map<string, string>();
   private readonly classSessionTeacherReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly roomLimits: {
+    maxParticipants: number;
+    maxProducers: number;
+    maxProducersPerParticipant: number;
+    maxConsumers: number;
+    maxConsumersPerParticipant: number;
+    maxScreenProducers: number;
+    maxAudioBitrateBps: number;
+    maxVideoBitrateBps: number;
+    maxScreenBitrateBps: number;
+  };
   private classSessionTeacherReconnectSweepTimer?: ReturnType<typeof setInterval>;
 
   constructor(
@@ -612,6 +623,17 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     @InjectModel(ClassSessionWhiteboardStateDocument.name)
     private readonly whiteboardStates?: Model<ClassSessionWhiteboardStateMongoDocument>
   ) {
+    this.roomLimits = {
+      maxParticipants: config.get<number>('roomLimits.maxParticipants', 100),
+      maxProducers: config.get<number>('roomLimits.maxProducers', 300),
+      maxProducersPerParticipant: config.get<number>('roomLimits.maxProducersPerParticipant', 3),
+      maxConsumers: config.get<number>('roomLimits.maxConsumers', 20_000),
+      maxConsumersPerParticipant: config.get<number>('roomLimits.maxConsumersPerParticipant', 300),
+      maxScreenProducers: config.get<number>('roomLimits.maxScreenProducers', 4),
+      maxAudioBitrateBps: config.get<number>('roomLimits.maxAudioBitrateBps', 128_000),
+      maxVideoBitrateBps: config.get<number>('roomLimits.maxVideoBitrateBps', 2_500_000),
+      maxScreenBitrateBps: config.get<number>('roomLimits.maxScreenBitrateBps', 5_000_000)
+    };
     this.media.onConsumerLayerEvent((event) => {
       void this.handleConsumerLayerEvent(event);
     });
@@ -750,6 +772,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (!user.roles.includes(Role.HOST)) {
       throw new ForbiddenException('Host role required');
     }
+    const maxParticipants = this.resolveRoomParticipantLimit(request.maxParticipants);
     await this.nodeRegistry.assertLocalCanOwnNewRoom();
     const hostParticipantId = new Types.ObjectId().toHexString();
     const roomDoc = await this.rooms.create({
@@ -760,7 +783,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         waitingRoomEnabled: request.waitingRoomEnabled ?? false,
         joinApprovalRequired: request.joinApprovalRequired ?? false,
         visibility: request.visibility ?? 'public',
-        maxParticipants: request.maxParticipants ?? 100,
+        maxParticipants,
         recordingEnabled: false,
         chatEnabled: true
       },
@@ -841,7 +864,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         waitingRoomEnabled: liveSettings.access.waitingRoomEnabled,
         joinApprovalRequired: false,
         visibility: 'private',
-        maxParticipants: 100,
+        maxParticipants: this.roomLimits.maxParticipants,
         recordingEnabled: liveSettings.recording.recordingEnabled,
         chatEnabled: liveSettings.chat.privateTeacherStudentChatEnabled || liveSettings.chat.teacherBroadcastEnabled
       },
@@ -920,7 +943,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       this.metrics.roomAdmissionRejections.labels('room_locked').inc();
       throw new ForbiddenException('Room is locked');
     }
-    if (activeCount >= room.settings.maxParticipants) {
+    if (activeCount >= Math.min(room.settings.maxParticipants, this.roomLimits.maxParticipants)) {
       this.metrics.roomAdmissionRejections.labels('room_full').inc();
       throw new ForbiddenException('Room is full');
     }
@@ -1431,7 +1454,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (!room) {
       throw new NotFoundException('Room not found');
     }
-    if (activeCount >= room.settings.maxParticipants) {
+    if (activeCount >= Math.min(room.settings.maxParticipants, this.roomLimits.maxParticipants)) {
       this.metrics.roomAdmissionRejections.labels('room_full').inc();
       throw new ForbiddenException('Room is full');
     }
@@ -1543,6 +1566,10 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (!room || room.closedAt) {
       throw new NotFoundException('Room not found');
     }
+    const activeCount = await this.participants.countDocuments({ roomId: request.roomId, admitted: true, leftAt: { $exists: false } });
+    if (activeCount >= Math.min(room.settings.maxParticipants, this.roomLimits.maxParticipants)) {
+      this.rejectCapacity('participants', 'Room participant capacity reached');
+    }
     const participant = await this.createParticipant(
       request.roomId,
       undefined,
@@ -1579,7 +1606,11 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       updatedAt: room.mediaProfile?.updatedAt?.toISOString(),
       updatedByParticipantId: room.mediaProfile?.updatedByParticipantId
     });
-    const rtpParameters = applyProfileBitratePolicy(profile, request.kind, request.rtpParameters);
+    const rtpParameters = this.applyHardBitrateLimit(
+      request.kind,
+      applyProfileBitratePolicy(profile, request.kind, request.rtpParameters)
+    );
+    await this.assertProducerCapacity(request.roomId, request.participantId, request.kind);
     await this.media.bindProducer(request.transportId, request.participantId, rtpParameters);
     const priority = normalizeConsumerPriority(request.priority ?? defaultProducerPriority(profile, request.kind));
     const producerDoc = new this.producers({
@@ -1661,7 +1692,10 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const permission = await this.getPermissions(request.roomId, participantId);
     const policyContext = await this.getRoomPolicyContext(request.roomId);
     const profile = policyContext.room.mediaProfile;
-    const rtpParameters = applyProfileBitratePolicy(profile, request.kind, request.rtpParameters);
+    const rtpParameters = this.applyHardBitrateLimit(
+      request.kind,
+      applyProfileBitratePolicy(profile, request.kind, request.rtpParameters)
+    );
     const publishDecision = request.kind === 'screen'
       ? policyContext.summary.protections.screenShare
       : policyContext.summary.protections.publish;
@@ -1751,6 +1785,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, `policy_${publishDecision.code}`, participant);
       throw new RoomPolicyViolationError(publishDecision.message, publishDecision);
     }
+    await this.assertProducerCapacity(request.roomId, participantId, request.kind, request.kind === 'screen');
     const status = publishDecision.action === 'soft-throttle' ? 'paused' : 'live';
     const closedProducerIds = request.kind === 'screen' ? await this.closeExistingParticipantScreenProducers(request.roomId, participantId) : [];
     try {
@@ -2129,7 +2164,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     await this.assertCanControlProducer(producer, participantId);
     producer.priority = normalizeConsumerPriority(priority);
     await producer.save();
-    this.media.setProducerPriority(producerId, producer.priority);
+    await this.media.setProducerPriority(producerId, producer.priority);
     if (ownerLookup.local && this.pipeCoordinator.isEnabled() && !producerHostedLocally) {
       await this.pipeCoordinator.syncOriginProducerState({ roomId: producer.roomId, producerId, priority: producer.priority });
     } else if (!ownerLookup.local && this.pipeCoordinator.isEnabled() && producerHostedLocally) {
@@ -2195,6 +2230,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
           await this.releaseRemoteConsumerFeedSafely(consumer.id, 'consumer_closed', 'close_producer_consumer');
         }
       }
+      this.metrics.activeConsumers.dec(dependentConsumers.length);
     }
     if (producer.kind === 'screen') {
       const remainingScreens = await this.producers.countDocuments({
@@ -2235,6 +2271,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('Producer not found');
     }
     const participant = await this.assertParticipant(request.roomId, participantId);
+    await this.assertConsumerCapacity(request.roomId, participantId);
     await this.media.assertTransportOwner(request.transportId, participantId);
     const room = await this.getRoom(request.roomId);
     const preferredLayers = normalizeLayerSelection(
@@ -2303,6 +2340,69 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return this.toConsumer(consumerDoc);
   }
 
+  private resolveRoomParticipantLimit(requested: number | undefined): number {
+    const resolved = requested ?? this.roomLimits.maxParticipants;
+    if (!Number.isInteger(resolved) || resolved < 2 || resolved > this.roomLimits.maxParticipants) {
+      throw new BadRequestException(`maxParticipants must be between 2 and ${this.roomLimits.maxParticipants}`);
+    }
+    return resolved;
+  }
+
+  private async assertProducerCapacity(
+    roomId: string,
+    participantId: string,
+    kind: ProducerKind,
+    replacesParticipantScreen = false
+  ): Promise<void> {
+    const activeFilter = { status: { $ne: 'closed' } };
+    const [roomCount, participantCount, screenCount, replaceableScreens] = await Promise.all([
+      this.producers.countDocuments({ roomId, ...activeFilter }),
+      this.producers.countDocuments({ roomId, participantId, ...activeFilter }),
+      kind === 'screen' ? this.producers.countDocuments({ roomId, kind: 'screen', ...activeFilter }) : Promise.resolve(0),
+      kind === 'screen' && replacesParticipantScreen
+        ? this.producers.countDocuments({ roomId, participantId, kind: 'screen', ...activeFilter })
+        : Promise.resolve(0)
+    ]);
+    if (roomCount - replaceableScreens >= this.roomLimits.maxProducers) {
+      this.rejectCapacity('producers_room', 'Room producer capacity reached');
+    }
+    if (participantCount - replaceableScreens >= this.roomLimits.maxProducersPerParticipant) {
+      this.rejectCapacity('producers_participant', 'Participant producer capacity reached');
+    }
+    if (kind === 'screen' && screenCount - replaceableScreens >= this.roomLimits.maxScreenProducers) {
+      this.rejectCapacity('screen_producers', 'Room screen-share capacity reached');
+    }
+  }
+
+  private async assertConsumerCapacity(roomId: string, participantId: string): Promise<void> {
+    const activeFilter = { status: { $ne: 'closed' } };
+    const [roomCount, participantCount] = await Promise.all([
+      this.consumers.countDocuments({ roomId, ...activeFilter }),
+      this.consumers.countDocuments({ roomId, participantId, ...activeFilter })
+    ]);
+    if (roomCount >= this.roomLimits.maxConsumers) {
+      this.rejectCapacity('consumers_room', 'Room consumer capacity reached');
+    }
+    if (participantCount >= this.roomLimits.maxConsumersPerParticipant) {
+      this.rejectCapacity('consumers_participant', 'Participant consumer capacity reached');
+    }
+  }
+
+  private applyHardBitrateLimit(kind: ProducerKind, parameters: RtpParameters): RtpParameters {
+    const ceiling = kind === 'audio'
+      ? this.roomLimits.maxAudioBitrateBps
+      : kind === 'screen'
+        ? this.roomLimits.maxScreenBitrateBps
+        : this.roomLimits.maxVideoBitrateBps;
+    return capEncodingBitrates(parameters, ceiling);
+  }
+
+  private rejectCapacity(resource: string, message: string): never {
+    this.metrics.capacityAdmissionRejections.labels(resource).inc();
+    this.metrics.roomAdmissionRejections.labels(`capacity_${resource}`).inc();
+    throw new ServiceUnavailableException(message);
+  }
+
   async setConsumerPriority(consumerId: string, participantId: string, priority: number): Promise<Consumer> {
     const consumer = await this.consumers.findById(consumerId);
     if (!consumer || consumer.participantId !== participantId) {
@@ -2314,7 +2414,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
     consumer.priority = normalizeConsumerPriority(priority);
     await consumer.save();
-    this.media.setConsumerPriority(consumerId, consumer.priority);
+    await this.media.setConsumerPriority(consumerId, consumer.priority);
     await this.syncDistributedConsumerDemandByProducer(consumer.roomId, consumer.producerId, { ownerLookup, consumerId });
     this.metrics.consumerPriorityUpdates.inc();
     return this.toConsumer(consumer);
@@ -6614,7 +6714,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       if (normalizeConsumerPriority(producerDoc.priority) !== nextPriority) {
         producerDoc.priority = nextPriority;
         await producerDoc.save();
-        this.media.setProducerPriority(producerDoc.id, nextPriority);
+        await this.media.setProducerPriority(producerDoc.id, nextPriority);
       }
       touchedProducerIds.add(producerDoc.id);
     }
@@ -6638,7 +6738,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         consumerDoc.preferredLayer = selectionToPreferredLayerName(nextLayers);
       }
       await consumerDoc.save();
-      this.media.setConsumerPriority(consumerDoc.id, nextPriority);
+      await this.media.setConsumerPriority(consumerDoc.id, nextPriority);
       if (nextLayers) {
         await this.media.setConsumerPreferredLayers(consumerDoc.id, nextLayers);
       }
@@ -9420,6 +9520,23 @@ function normalizeConsumerPriority(priority: number | undefined): number {
     return 1;
   }
   return Math.max(0.1, Math.min(10, priority));
+}
+
+function capEncodingBitrates(parameters: RtpParameters, ceilingBps: number): RtpParameters {
+  if (parameters.encodings.length === 0 || !Number.isFinite(ceilingBps) || ceilingBps <= 0) {
+    return parameters;
+  }
+  const fallbackPerEncoding = Math.max(1, Math.floor(ceilingBps / parameters.encodings.length));
+  const requested = parameters.encodings.map((encoding) => Math.max(1, encoding.maxBitrate ?? fallbackPerEncoding));
+  const requestedTotal = requested.reduce((total, bitrate) => total + bitrate, 0);
+  const scale = Math.min(1, ceilingBps / requestedTotal);
+  return {
+    ...parameters,
+    encodings: parameters.encodings.map((encoding, index) => ({
+      ...encoding,
+      maxBitrate: Math.max(1, Math.floor((requested[index] ?? fallbackPerEncoding) * scale))
+    }))
+  };
 }
 
 function maxDefined(left: number | undefined, right: number | undefined): number | undefined {

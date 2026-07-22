@@ -1,7 +1,7 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createSocket, type RemoteInfo, type Socket } from 'node:dgram';
 import { EventEmitter } from 'node:events';
-import type { AddressInfo } from 'node:net';
+import { isIP, type AddressInfo } from 'node:net';
 import { parseRtcpCompound } from '../rtcp/rtcp-packet';
 import { RtpPacket } from '../rtp/rtp-packet';
 
@@ -13,6 +13,9 @@ export type UdpPipeDropReason =
   | 'missing_peer'
   | 'invalid_frame'
   | 'unauthorized'
+  | 'replay'
+  | 'stale_frame'
+  | 'unexpected_peer'
   | 'wrong_room'
   | 'wrong_node'
   | 'invalid_packet'
@@ -51,6 +54,8 @@ export interface UdpPipeTransportOptions {
   maxHeaderBytes?: number;
   maxQueuePackets?: number;
   maxQueueBytes?: number;
+  maxFrameAgeMs?: number;
+  maxReplayEntries?: number;
   now?: () => number;
 }
 
@@ -139,7 +144,6 @@ interface UdpPipeFrameHeader extends UdpPipeSendMetadata {
   sourceNodeId: string;
   targetNodeId: string;
   sentAt: number;
-  token?: string;
   controlType?: string;
 }
 
@@ -147,11 +151,16 @@ interface DecodedUdpPipeFrame {
   kind: UdpPipePacketKind;
   header: UdpPipeFrameHeader;
   payload: Buffer;
+  authenticated: boolean;
+  nonce?: string;
 }
 
 const UDP_PIPE_MAGIC = 'SFUP';
 const UDP_PIPE_VERSION = 1;
 const UDP_PIPE_FRAME_HEADER_BYTES = 16;
+const UDP_PIPE_FLAG_ENCRYPTED = 1;
+const UDP_PIPE_NONCE_BYTES = 12;
+const UDP_PIPE_AUTH_TAG_BYTES = 16;
 const UDP_PIPE_KIND: Record<UdpPipePacketKind, number> = {
   rtp: 1,
   rtcp: 2,
@@ -160,6 +169,10 @@ const UDP_PIPE_KIND: Record<UdpPipePacketKind, number> = {
 const UDP_PIPE_KIND_BY_ID = new Map(Object.entries(UDP_PIPE_KIND).map(([kind, id]) => [id, kind as UdpPipePacketKind]));
 const DEFAULT_MAX_DATAGRAM_BYTES = 65_507;
 const DEFAULT_MAX_HEADER_BYTES = 2048;
+const DEFAULT_MAX_FRAME_AGE_MS = 120_000;
+const DEFAULT_MAX_REPLAY_ENTRIES = 4096;
+
+class UdpPipeAuthenticationError extends Error {}
 
 export class UdpPipeTransport extends EventEmitter {
   readonly id: string;
@@ -169,7 +182,11 @@ export class UdpPipeTransport extends EventEmitter {
   private readonly maxHeaderBytes: number;
   private readonly maxQueuePackets: number;
   private readonly maxQueueBytes: number;
+  private readonly maxFrameAgeMs: number;
+  private readonly maxReplayEntries: number;
   private readonly authMode: UdpPipeAuthMode;
+  private readonly encryptionKey?: Buffer;
+  private readonly receivedNonces = new Map<string, number>();
   private readonly stats: Omit<
     UdpPipeTransportSnapshot,
     'id' | 'roomId' | 'localNodeId' | 'remoteNodeId' | 'active' | 'listening' | 'localEndpoint' | 'remoteEndpoint' | 'createdAt' | 'closedAt'
@@ -193,6 +210,9 @@ export class UdpPipeTransport extends EventEmitter {
       missing_peer: 0,
       invalid_frame: 0,
       unauthorized: 0,
+      replay: 0,
+      stale_frame: 0,
+      unexpected_peer: 0,
       wrong_room: 0,
       wrong_node: 0,
       invalid_packet: 0,
@@ -220,7 +240,13 @@ export class UdpPipeTransport extends EventEmitter {
     this.maxHeaderBytes = options.maxHeaderBytes ?? DEFAULT_MAX_HEADER_BYTES;
     this.maxQueuePackets = options.maxQueuePackets ?? 1024;
     this.maxQueueBytes = options.maxQueueBytes ?? 4 * 1024 * 1024;
-    this.authMode = options.authMode ?? (options.peerToken ? 'token-or-transport-id' : 'transport-id');
+    this.maxFrameAgeMs = Math.max(1, options.maxFrameAgeMs ?? DEFAULT_MAX_FRAME_AGE_MS);
+    this.maxReplayEntries = Math.max(1, options.maxReplayEntries ?? DEFAULT_MAX_REPLAY_ENTRIES);
+    this.authMode = options.authMode ?? (options.peerToken ? 'token' : 'transport-id');
+    this.encryptionKey = options.peerToken ? deriveEncryptionKey(options.peerToken) : undefined;
+    if (this.authMode === 'token' && !this.encryptionKey) {
+      throw new Error('UDP pipe token authentication requires a peer token');
+    }
     this.remoteEndpointValue = options.remote;
   }
 
@@ -417,9 +443,12 @@ export class UdpPipeTransport extends EventEmitter {
 
     let frame: DecodedUdpPipeFrame;
     try {
-      frame = decodeUdpPipeFrame(message, this.maxHeaderBytes);
-    } catch {
-      this.drop('invalid_frame', { remoteAddress: remote.address, remotePort: remote.port });
+      frame = decodeUdpPipeFrame(message, this.maxHeaderBytes, this.encryptionKey);
+    } catch (error) {
+      this.drop(error instanceof UdpPipeAuthenticationError ? 'unauthorized' : 'invalid_frame', {
+        remoteAddress: remote.address,
+        remotePort: remote.port
+      });
       return;
     }
 
@@ -431,8 +460,20 @@ export class UdpPipeTransport extends EventEmitter {
       remotePort: remote.port
     };
 
-    if (!this.isAuthorized(frame.header)) {
+    if (!this.isExpectedPeer(remote)) {
+      this.drop('unexpected_peer', metadata);
+      return;
+    }
+    if (!this.isAuthorized(frame)) {
       this.drop('unauthorized', metadata);
+      return;
+    }
+    if (Math.abs(this.now() - frame.header.sentAt) > this.maxFrameAgeMs) {
+      this.drop('stale_frame', metadata);
+      return;
+    }
+    if (frame.nonce && !this.acceptNonce(frame.nonce)) {
+      this.drop('replay', metadata);
       return;
     }
     if (frame.header.roomId !== this.options.roomId) {
@@ -520,41 +561,79 @@ export class UdpPipeTransport extends EventEmitter {
       sentAt: this.now(),
       producerId: metadata.producerId,
       consumerId: metadata.consumerId,
-      token: this.options.peerToken,
       controlType: metadata.controlType
     };
     const headerBytes = Buffer.from(JSON.stringify(stripUndefined(header)));
     if (headerBytes.length > this.maxHeaderBytes) {
       throw new Error('UDP pipe header is too large');
     }
-    const totalLength = UDP_PIPE_FRAME_HEADER_BYTES + headerBytes.length + payload.length;
+    const encrypted = Boolean(this.encryptionKey);
+    const totalLength =
+      UDP_PIPE_FRAME_HEADER_BYTES +
+      headerBytes.length +
+      payload.length +
+      (encrypted ? UDP_PIPE_NONCE_BYTES + UDP_PIPE_AUTH_TAG_BYTES : 0);
     if (totalLength > this.maxDatagramBytes) {
       throw new Error('UDP pipe datagram is too large');
     }
 
-    const frame = Buffer.alloc(totalLength);
-    frame.write(UDP_PIPE_MAGIC, 0, 'ascii');
-    frame[4] = UDP_PIPE_VERSION;
-    frame[5] = UDP_PIPE_KIND[kind];
-    frame.writeUInt16BE(0, 6);
-    frame.writeUInt16BE(headerBytes.length, 8);
-    frame.writeUInt16BE(0, 10);
-    frame.writeUInt32BE(payload.length, 12);
-    headerBytes.copy(frame, UDP_PIPE_FRAME_HEADER_BYTES);
-    payload.copy(frame, UDP_PIPE_FRAME_HEADER_BYTES + headerBytes.length);
-    return frame;
+    const prefix = Buffer.alloc(UDP_PIPE_FRAME_HEADER_BYTES);
+    prefix.write(UDP_PIPE_MAGIC, 0, 'ascii');
+    prefix[4] = UDP_PIPE_VERSION;
+    prefix[5] = UDP_PIPE_KIND[kind];
+    prefix.writeUInt16BE(encrypted ? UDP_PIPE_FLAG_ENCRYPTED : 0, 6);
+    prefix.writeUInt16BE(headerBytes.length, 8);
+    prefix.writeUInt16BE(0, 10);
+    prefix.writeUInt32BE(payload.length, 12);
+    if (!encrypted || !this.encryptionKey) {
+      return Buffer.concat([prefix, headerBytes, payload]);
+    }
+
+    const nonce = randomBytes(UDP_PIPE_NONCE_BYTES);
+    const cipher = createCipheriv('aes-256-gcm', this.encryptionKey, nonce);
+    cipher.setAAD(prefix);
+    const ciphertext = Buffer.concat([cipher.update(Buffer.concat([headerBytes, payload])), cipher.final()]);
+    return Buffer.concat([prefix, nonce, ciphertext, cipher.getAuthTag()]);
   }
 
-  private isAuthorized(header: UdpPipeFrameHeader): boolean {
-    const transportIdMatches = header.transportId === this.id;
-    const tokenMatches = Boolean(this.options.peerToken && header.token && safeEqual(header.token, this.options.peerToken));
+  private isAuthorized(frame: DecodedUdpPipeFrame): boolean {
+    const transportIdMatches = frame.header.transportId === this.id;
     if (this.authMode === 'token') {
-      return tokenMatches;
+      return frame.authenticated;
     }
     if (this.authMode === 'transport-id') {
       return transportIdMatches;
     }
-    return transportIdMatches || tokenMatches;
+    return transportIdMatches || frame.authenticated;
+  }
+
+  private isExpectedPeer(remote: RemoteInfo): boolean {
+    const expected = this.remoteEndpointValue;
+    if (!expected || remote.port !== expected.port) {
+      return false;
+    }
+    return isIP(expected.address) === 0 || normalizeIp(remote.address) === normalizeIp(expected.address);
+  }
+
+  private acceptNonce(nonce: string): boolean {
+    const now = this.now();
+    for (const [value, receivedAt] of this.receivedNonces) {
+      if (now - receivedAt > this.maxFrameAgeMs) {
+        this.receivedNonces.delete(value);
+      }
+    }
+    if (this.receivedNonces.has(nonce)) {
+      return false;
+    }
+    while (this.receivedNonces.size >= this.maxReplayEntries) {
+      const oldest = this.receivedNonces.keys().next().value as string | undefined;
+      if (!oldest) {
+        break;
+      }
+      this.receivedNonces.delete(oldest);
+    }
+    this.receivedNonces.set(nonce, now);
+    return true;
   }
 
   private packetEvent(frame: DecodedUdpPipeFrame, remote: RemoteInfo, packet?: RtpPacket): UdpPipePacketEvent {
@@ -650,7 +729,7 @@ export class UdpPipeTransport extends EventEmitter {
   }
 }
 
-function decodeUdpPipeFrame(buffer: Buffer, maxHeaderBytes: number): DecodedUdpPipeFrame {
+function decodeUdpPipeFrame(buffer: Buffer, maxHeaderBytes: number, encryptionKey?: Buffer): DecodedUdpPipeFrame {
   if (buffer.length < UDP_PIPE_FRAME_HEADER_BYTES || buffer.subarray(0, 4).toString('ascii') !== UDP_PIPE_MAGIC) {
     throw new Error('Invalid UDP pipe magic');
   }
@@ -666,6 +745,36 @@ function decodeUdpPipeFrame(buffer: Buffer, maxHeaderBytes: number): DecodedUdpP
     throw new Error('Invalid UDP pipe header length');
   }
   const payloadLength = buffer.readUInt32BE(12);
+  const encrypted = (buffer.readUInt16BE(6) & UDP_PIPE_FLAG_ENCRYPTED) !== 0;
+  if (encrypted) {
+    if (!encryptionKey) {
+      throw new UdpPipeAuthenticationError('Encrypted UDP pipe frame has no matching key');
+    }
+    const expectedLength = UDP_PIPE_FRAME_HEADER_BYTES + UDP_PIPE_NONCE_BYTES + headerLength + payloadLength + UDP_PIPE_AUTH_TAG_BYTES;
+    if (expectedLength !== buffer.length) {
+      throw new Error('Invalid encrypted UDP pipe payload length');
+    }
+    const nonceOffset = UDP_PIPE_FRAME_HEADER_BYTES;
+    const ciphertextOffset = nonceOffset + UDP_PIPE_NONCE_BYTES;
+    const tagOffset = buffer.length - UDP_PIPE_AUTH_TAG_BYTES;
+    const nonce = buffer.subarray(nonceOffset, ciphertextOffset);
+    try {
+      const decipher = createDecipheriv('aes-256-gcm', encryptionKey, nonce);
+      decipher.setAAD(buffer.subarray(0, UDP_PIPE_FRAME_HEADER_BYTES));
+      decipher.setAuthTag(buffer.subarray(tagOffset));
+      const plaintext = Buffer.concat([decipher.update(buffer.subarray(ciphertextOffset, tagOffset)), decipher.final()]);
+      return {
+        kind,
+        header: parseFrameHeader(plaintext.subarray(0, headerLength)),
+        payload: plaintext.subarray(headerLength),
+        authenticated: true,
+        nonce: nonce.toString('base64url')
+      };
+    } catch {
+      throw new UdpPipeAuthenticationError('UDP pipe frame authentication failed');
+    }
+  }
+
   const payloadOffset = UDP_PIPE_FRAME_HEADER_BYTES + headerLength;
   if (payloadOffset + payloadLength !== buffer.length) {
     throw new Error('Invalid UDP pipe payload length');
@@ -675,7 +784,8 @@ function decodeUdpPipeFrame(buffer: Buffer, maxHeaderBytes: number): DecodedUdpP
   return {
     kind,
     header,
-    payload: buffer.subarray(payloadOffset)
+    payload: buffer.subarray(payloadOffset),
+    authenticated: false
   };
 }
 
@@ -690,19 +800,18 @@ function parseFrameHeader(buffer: Buffer): UdpPipeFrameHeader {
   if (value.consumerId !== undefined && !isString(value.consumerId)) {
     throw new Error('Invalid UDP pipe consumer id');
   }
-  if (value.token !== undefined && !isString(value.token)) {
-    throw new Error('Invalid UDP pipe token');
-  }
   if (value.controlType !== undefined && !isString(value.controlType)) {
     throw new Error('Invalid UDP pipe control type');
   }
   return value as UdpPipeFrameHeader;
 }
 
-function safeEqual(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+function deriveEncryptionKey(token: string): Buffer {
+  return createHash('sha256').update(token, 'utf8').digest();
+}
+
+function normalizeIp(address: string): string {
+  return address.startsWith('::ffff:') ? address.slice(7) : address;
 }
 
 function isString(value: unknown): value is string {

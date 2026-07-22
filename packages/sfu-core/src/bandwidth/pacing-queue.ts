@@ -66,6 +66,29 @@ export class PacketPacingQueue {
     });
   }
 
+  enqueueDetached(size: number, send: () => Promise<void>, onError?: (error: Error) => void): boolean {
+    const normalizedSize = Math.max(0, size);
+    const maxQueueBytes = this.options.maxQueueBytes ?? 2_000_000;
+    if (this.queuedBytes + normalizedSize > maxQueueBytes) {
+      this.droppedPackets += 1;
+      this.emitDepth();
+      return false;
+    }
+    this.queue.push({
+      size: normalizedSize,
+      queuedAt: this.now(),
+      send,
+      resolve: () => undefined,
+      reject: (error) => onError?.(error)
+    });
+    this.queuedBytes += normalizedSize;
+    this.emitDepth();
+    if (!this.draining) {
+      void this.drain();
+    }
+    return true;
+  }
+
   updateTargetBitrate(targetBitrateBps: number): void {
     this.targetBitrateBps = Math.max(1, Math.floor(targetBitrateBps));
     this.emitDepth();
