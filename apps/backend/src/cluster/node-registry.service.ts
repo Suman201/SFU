@@ -1,4 +1,4 @@
-import { BeforeApplicationShutdown, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
+import { BeforeApplicationShutdown, Injectable, Logger, OnModuleDestroy, OnApplicationBootstrap, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MediaService } from '@native-sfu/nest-sfu';
 import type { ClusterNodeCapacity, ClusterNodeInfo, RoomOwnerInfo, RoomOwnerLookupResponse, RoomOwnerRedirect } from '@native-sfu/contracts';
@@ -30,7 +30,7 @@ interface SelectNodeOptions {
 }
 
 @Injectable()
-export class NodeRegistryService implements OnModuleInit, OnModuleDestroy, BeforeApplicationShutdown {
+export class NodeRegistryService implements OnApplicationBootstrap, OnModuleDestroy, BeforeApplicationShutdown {
   private readonly logger = new Logger(NodeRegistryService.name);
   private readonly nodeId: string;
   private readonly publicUrl: string;
@@ -66,7 +66,7 @@ export class NodeRegistryService implements OnModuleInit, OnModuleDestroy, Befor
     this.gracefulShutdownTimeoutMs = config.get<number>('app.gracefulShutdownTimeoutMs', 30_000);
   }
 
-  async onModuleInit(): Promise<void> {
+  async onApplicationBootstrap(): Promise<void> {
     await this.heartbeatNow();
     this.heartbeat = setInterval(() => {
       void this.heartbeatNow().catch((error) => {

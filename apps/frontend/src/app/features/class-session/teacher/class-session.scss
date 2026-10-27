@@ -148,6 +148,9 @@
 .preflight-preview {
   position: relative;
   display: grid;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   aspect-ratio: 16 / 9;
   min-height: clamp(240px, 42dvh, 360px);
   overflow: hidden;
@@ -163,9 +166,12 @@
 }
 
 .preflight-preview video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  min-height: clamp(240px, 42dvh, 360px);
+  min-width: 0;
+  min-height: 0;
   object-fit: cover;
 }
 
@@ -235,6 +241,10 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px;
   gap: 8px;
   align-items: end;
+}
+
+.preflight-device-grid > .button:first-child {
+  grid-column: 1 / -1;
 }
 
 .preflight-refresh {
@@ -551,8 +561,14 @@ sfu-whiteboard,
   gap: 16px;
   min-height: 0;
   padding: 18px;
-  overflow: hidden;
+  overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+// Sidebar cards keep their natural height inside the scrollable pane. Shrinking
+// their hosts lets following cards cover visible material and moderation controls.
+.participants-pane > :not(.participant-list) {
+  flex-shrink: 0;
 }
 
 .participants-pane:has(.hand-raise-queue) {
@@ -2062,10 +2078,11 @@ h2 {
 
 .participant-list {
   display: grid;
-  flex: 1 1 auto;
+  flex: 1 0 180px;
   align-content: start;
   gap: 12px;
-  min-height: 0;
+  // Keep moderation reachable when board controls fill the sidebar split.
+  min-height: 180px;
   overflow-y: auto;
   padding: 1px 2px 4px 1px;
   scrollbar-width: thin;
@@ -2800,7 +2817,9 @@ h2 {
 
 @media (max-width: 640px) and (orientation: portrait) {
   .class-session-shell {
-    grid-template-rows: minmax(300px, 46dvh) auto;
+    // Let the board's toolbar and usable canvas determine the first row height.
+    // A shorter fixed row lets the following sidebar overlap the canvas.
+    grid-template-rows: auto auto;
     height: auto;
     min-height: 100vh;
     min-height: 100svh;
@@ -2812,7 +2831,7 @@ h2 {
 
   sfu-whiteboard {
     min-height: 300px;
-    max-height: min(48dvh, 420px);
+    max-height: none;
   }
 
   .session-sidebar {
@@ -3209,3 +3228,10 @@ h2 {
     transform: none;
   }
 }
+
+:host { display: flex; flex-direction: column; min-height: 100dvh; }
+.lesson-recovery-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 9px 16px; margin: 0; color: var(--text-primary, #17362b); background: var(--surface, #fff8e6); border-bottom: 1px solid #ffd150; font-size: 13px; }
+.lesson-recovery-notice button { padding: 6px 10px; border: 1px solid #458b73; border-radius: 7px; color: inherit; background: transparent; cursor: pointer; }
+
+/* The board stays mounted while a device source is presented, preserving pages and undo. */
+.teacher-board-workspace{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}.teacher-board-content{position:relative;display:flex;flex:1;min-width:0;min-height:0}.teacher-board-content>sfu-whiteboard{flex:1;min-width:0;min-height:0;height:100%;width:100%}.device-whiteboard-presentation{position:absolute;inset:0;display:grid;place-items:center;background:#10231c;color:#ecf5ef;overflow:hidden}.device-whiteboard-presentation video{width:100%;height:100%;object-fit:contain}.device-presentation-label{position:absolute;left:16px;top:14px;padding:6px 9px;border-radius:6px;background:#10231cdd;font-size:12px}.device-whiteboard-presentation>button{position:absolute;right:16px;bottom:14px}.participant-device-sharing{display:flex;flex-wrap:wrap;gap:6px;padding:8px 2px 0;font-size:11px}.participant-device-sharing span{width:100%;color:#458b73;font-weight:700}.participant-device-sharing button{font:inherit;padding:5px 7px;cursor:pointer;border:1px solid var(--line-soft);border-radius:6px;background:var(--panel);color:var(--text)}

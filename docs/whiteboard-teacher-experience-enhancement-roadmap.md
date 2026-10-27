@@ -6,95 +6,36 @@ This document captures how much the live class-session whiteboard can still impr
 
 The current whiteboard foundation is already strong: teachers can draw, annotate, use math tools, import lesson assets, share the board as video, grant controlled student participation, export notes, and persist board memory. The remaining opportunity is mostly about making the board feel faster, more teacher-native, and more polished for real classroom delivery.
 
-## Current Readiness
+## Implementation Status — 2026-10-27
 
-Estimated current whiteboard readiness for teacher-led live classes: **85-90%**.
+This roadmap distinguishes implemented tools from remaining product work. Earlier readiness percentages were estimates, not release validation.
 
-Estimated remaining teacher-experience upside: **30-40%**.
+The shared whiteboard already includes pen styles, opacity, smoothing, stylus pressure, auto-close previews, editable matrices/tables, subject templates, page tags, previous-board restore, and raster/hybrid PDF export. Native PowerPoint conversion remains unavailable; teachers should export decks to PDF or slide images before importing.
 
-The remaining gap is not basic whiteboard capability. It is mainly:
-
-- premium writing feel
-- faster lesson preparation
-- richer academic objects
-- better class flow controls
-- stronger export/import polish
-- smarter after-class learning artifacts
+Reliability work covers guarded snapshot saves, synchronized page/history changes, fresh student board state, and laser visibility in canvas sharing. Regression coverage should include two connected boards, delayed saves, imported page backgrounds, read-only controls, and captured laser frames. Real classroom validation across target browsers, networks, and touch/stylus devices is still required.
 
 ## Highest-Impact Enhancements
 
 ### 1. Premium Pen System
 
-Priority: P0
+Status: implemented; continue device and handwriting-quality validation.
 
-Current gap:
+- Dedicated, keyboard-accessible pen settings control.
+- Solid, dashed, dotted, marker, pencil, and calligraphy styles.
+- Width, opacity, smoothing, supported stylus pressure, and auto-close controls.
+- Auto-close sensitivity and visual close preview.
 
-- Pen has basic stroke size/color controls, but no dedicated premium pen dropdown.
-- No stroke style selector.
-- No visible auto-close control.
-- No opacity, smoothing, pressure, or highlighter workflow.
-
-Recommended features:
-
-- Pen-specific dropdown.
-- Stroke styles:
-  - solid
-  - dashed
-  - dotted
-  - marker/highlighter
-  - pencil
-  - calligraphy
-- Opacity control.
-- Smoothing control.
-- Pressure sensitivity where supported.
-- Auto-close toggle for nearly closed pen loops.
-- Auto-close sensitivity:
-  - tight
-  - normal
-  - loose
-- Visual snap/close preview while drawing.
-
-Teacher value:
-
-- Better handwriting quality.
-- Better board clarity.
-- Faster diagram and shape creation.
-- More confidence during live explanation.
+Remaining work: validate handwriting feel and palm/touch behavior on the tablets used by teachers.
 
 ### 2. Editable Matrix and Table Editor
 
-Priority: P0
+Status: implemented; continue classroom workflow validation.
 
-Current gap:
+- Canvas-native editable matrix/table objects with row, column, and cell controls.
+- Matrix/vector presets and table styling.
+- Move, resize, duplicate, delete, history, export, and session-memory support.
 
-- Matrix snippets and table templates exist.
-- A real editable matrix/table object is still future work.
-
-Recommended features:
-
-- Canvas-native matrix object.
-- Canvas-native table object.
-- Editable rows/columns/cells.
-- Presets:
-  - 2x2 matrix
-  - 3x3 matrix
-  - row vector
-  - column vector
-  - augmented matrix
-  - determinant-style matrix
-- Table options:
-  - header row
-  - borders
-  - fill
-  - alignment
-- Move, resize, duplicate, delete, undo/redo.
-- Export and session-memory persistence.
-
-Teacher value:
-
-- Much better algebra, linear algebra, statistics, and tabular teaching.
-- Less need to manually draw tables.
-- Cleaner academic presentation.
+Remaining work: validate larger academic examples, keyboard cell navigation, and export fidelity.
 
 ### 3. Lesson Preparation and Reuse
 
@@ -109,8 +50,8 @@ Recommended features:
 - Prepare board pages before class.
 - Save board as reusable lesson template.
 - Duplicate a lesson board across batches.
-- Restore pages from previous lessons.
-- Tag pages by topic.
+- Expand existing previous-board restore into selective page reuse.
+- Extend existing page tags into reusable lesson organization.
 - Pin today's agenda.
 - Create lesson sections:
   - warm-up
@@ -157,20 +98,13 @@ Priority: P1
 Current gap:
 
 - Native PPT/PPTX import is not implemented.
-- Exported PDFs are raster snapshots, not selectable/vector PDFs.
+- Raster and hybrid PDF modes exist; complex math/font fidelity still needs validation.
 
-Recommended features:
+Remaining work:
 
 - Native PPT/PPTX import through a safe conversion-backed flow.
-- Ordered slide pages.
-- Import progress and clear errors.
-- Hybrid vector PDF export:
-  - text labels as PDF text where feasible
-  - shapes/lines/graphs as vector paths where feasible
-  - raster fallback for images/imported assets
-- Export mode:
-  - fast raster PDF
-  - high-quality/vector PDF
+- Preserve slide ordering, progress feedback, and clear errors in any future converter.
+- Verify text selection, shapes, graphs, and raster backgrounds across existing hybrid PDF exports.
 
 Teacher value:
 
@@ -305,3 +239,27 @@ Success means:
 - Students can participate without disrupting the class.
 - Class notes become reusable learning material.
 - The board remains compatible with existing whiteboard-as-video sharing, session memory, materials, recording, and controlled student access.
+
+
+## Real Classroom Acceptance
+
+The browser acceptance suite runs separate teacher/student Chromium contexts against the actual local NestJS API, Socket.IO gateway, MongoDB, Redis and in-process SFU. Camera/microphone inputs are synthetic; classroom requests and media forwarding are real. Component/unit regressions are separate from this acceptance coverage.
+
+Coverage includes drawing and editing tool families, permission modes and student attempts, rendered student ink, teacher/student reconnect, checkpoints and previous-class restore, a 30-page/1,500-stroke board, imports/exports, presentation, static whiteboard video with a fresh receiver, and desktop/phone viewport checks. This does not replace hardware touch/stylus testing, a teacher usability study, cross-browser validation, staging network tests or a classroom load/soak test.
+
+Run from the repository root after installing dependencies and building the backend and workspace packages. Use an isolated local database: the fixture rejects any database name other than `whiteboard_acceptance` on localhost. Ports 3340, 4440 and the fixture UDP range must be free. The suite creates temporary material storage and removes it after each stack stops.
+
+```sh
+docker run --rm -d --name whiteboard-test-mongo -p 127.0.0.1:27028:27017 --tmpfs /data/db mongo:7 --bind_ip_all
+docker run --rm -d --name whiteboard-test-redis -p 127.0.0.1:16389:6379 redis:7-alpine --save '' --appendonly no
+
+MONGODB_URI=mongodb://127.0.0.1:27028/whiteboard_acceptance \
+REDIS_URL=redis://127.0.0.1:16389 \
+JWT_ACCESS_SECRET=local-whiteboard-access-secret-only-0001 \
+JWT_REFRESH_SECRET=local-whiteboard-refresh-secret-only-0001 \
+npm run test:browser -- tests/browser/whiteboard-classroom-acceptance.spec.ts tests/browser/whiteboard-media-acceptance.spec.ts --project=chromium --workers=1
+
+docker stop whiteboard-test-mongo whiteboard-test-redis
+```
+
+The secret values above are disposable local-test examples. Keep the two browser specifications sequential because they use the same local ports. Each run records board state, visible canvas evidence, media frame delivery, screenshots and failures under the configured Playwright output directory.

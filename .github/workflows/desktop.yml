@@ -1,0 +1,44 @@
+name: Classroom desktop builds
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "scripts/desktop.cjs"
+      - "apps/frontend/**"
+      - "packages/contracts/**"
+      - "package*.json"
+      - ".github/workflows/desktop.yml"
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            package: package:mac
+          - os: windows-latest
+            package: package:win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.3"
+          cache: npm
+      - run: npm ci
+      - run: npm test -w @native-sfu/desktop
+      - run: npm run ${{ matrix.package }} -w @native-sfu/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          SFU_DESKTOP_SERVER_URL: ${{ vars.SFU_DESKTOP_SERVER_URL || 'http://127.0.0.1:3000' }}
+          SFU_DESKTOP_WEBSITE_URL: ${{ vars.SFU_DESKTOP_WEBSITE_URL || 'http://localhost:4200' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: classroom-${{ matrix.os }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+          if-no-files-found: error

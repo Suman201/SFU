@@ -8,9 +8,9 @@
   <main class="class-session-state">
     <h1>Classroom unavailable</h1>
     <p>{{ error() }}</p>
-    <a class="button primary" routerLink="/teacher/dashboard">Back to dashboard</a>
+    <a class="button primary" [routerLink]="desktopSession ? '/desktop/upcoming' : '/teacher/dashboard'">{{ desktopSession ? 'Back to classes' : 'Back to dashboard' }}</a>
   </main>
-} @else if (!sessionLive()) {
+} @else if (!sessionLive() && !privatePreparation()) {
   <main class="class-session-state">
     <h1>{{ session()?.status === 'scheduled' ? 'Ready to start' : 'Session is not live' }}</h1>
     <p>
@@ -52,13 +52,23 @@
         }
       </div>
     }
-    <a class="button primary" [routerLink]="['/teacher/dashboard/batches', session()?.batchId]">Back to batch</a>
+    <a class="button primary" [routerLink]="desktopSession ? ['/desktop/upcoming'] : ['/teacher/dashboard/batches', session()?.batchId]">{{ desktopSession ? 'Back to classes' : 'Back to batch' }}</a>
   </main>
 } @else {
+@if (privatePreparation() && !sessionLive()) {
+  <div class="lesson-recovery-notice" role="status"><span>Private preparation · Students cannot see this board until you start the class.</span><button class="button primary" type="button" (click)="openPreflight()">Start class</button></div>
+}
+@if (localDraft()) {
+  <div class="lesson-recovery-notice" role="status"><span>A local draft from this class was recovered. Restoring it replaces the currently displayed board.</span><button type="button" (click)="restoreLocalDraft()">Restore local draft</button><button type="button" (click)="discardLocalDraft()">Keep saved board</button></div>
+}
+@if (lessonRecorder.notice()) { <p class="lesson-recovery-notice" role="status">{{ lessonRecorder.notice() }}</p> }
 <main class="class-session-shell">
-  <sfu-whiteboard
+  <section class="teacher-board-workspace" aria-label="Whiteboard workspace">
+    <sfu-whiteboard-source [source]="whiteboardSource()" [disabled]="!roomJoined()" [busy]="mediaBusy()" [sharing]="screenSharing()" [presenter]="devicePresenterName()" [notice]="mediaError()" (sourceChange)="selectWhiteboardSource($event)" (share)="shareScreen()" (stop)="useClassroomWhiteboard()" />
+    <div class="teacher-board-content">
+    <sfu-whiteboard [style.visibility]="presentedDeviceProducer() ? 'hidden' : 'visible'" [attr.inert]="presentedDeviceProducer() ? '' : null"
     [cursors]="studentCursors()"
-    [readOnly]="!sessionLive() || ending()"
+    [readOnly]="presentedDeviceProducer() !== null || (!sessionLive() && !privatePreparation()) || ending() || whiteboardMemoryBusy() || whiteboardMemorySaveState() === 'loading'"
     [allowPresentationMode]="true"
     [allowSubjectTemplates]="true"
     [showEndSession]="false"
@@ -66,6 +76,16 @@
     (cursorMoved)="handleTeacherWhiteboardCursor($event)"
     (stateChanged)="handleTeacherWhiteboardStateChanged()"
   />
+      @if (presentedDeviceProducer()) {
+        <section class="device-whiteboard-presentation" aria-label="Shared device whiteboard">
+          @if (presentedDeviceStream(); as stream) { <video autoplay [muted]="true" playsinline [sfuMediaStream]="stream" aria-label="Device whiteboard presentation"></video> }
+          @else { <p role="status">Connecting to {{ devicePresenterName() }}’s device whiteboard…</p> }
+          <span class="device-presentation-label">{{ devicePresenterName() }} · Viewing only</span>
+          <button type="button" class="button secondary" [disabled]="mediaBusy()" (click)="useClassroomWhiteboard()">Return to classroom whiteboard</button>
+        </section>
+      }
+    </div>
+  </section>
 
   <aside
     #rightSidebar
@@ -85,6 +105,7 @@
           <h2>{{ session()?.title ?? 'Participants' }}</h2>
         </div>
         <div class="participants-header-actions">
+          <sfu-device-setup-dialog [previewStream]="webrtc.localStream()" [error]="preflightOpen() ? preflightError() : mediaError()" (microphoneSelected)="preflightOpen() ? switchPreflightMicrophone($event) : switchMicrophone($event)" (cameraSelected)="preflightOpen() ? switchPreflightCamera($event) : switchCamera($event)" />
           <span class="count">{{ participants().length }}</span>
           <button
             class="media-drawer-trigger"
@@ -315,6 +336,15 @@
         @if (whiteboardMemoryNotice()) {
           <p class="whiteboard-memory-note">{{ whiteboardMemoryNotice() }}</p>
         }
+        @if (whiteboardSaveConflict()) {
+          <div class="whiteboard-memory-note" role="alert">
+            <p>Your local board is preserved. Reloading downloads a backup, then opens the latest saved board.</p>
+            <div class="whiteboard-memory-actions">
+              <button type="button" (click)="downloadLocalWhiteboardBackup()">Download local backup</button>
+              <button type="button" [disabled]="whiteboardMemoryBusy()" (click)="reloadSavedWhiteboard()">Back up and reload</button>
+            </div>
+          </div>
+        }
         @if (whiteboardVersions().length) {
           <div class="whiteboard-memory-list" aria-label="Saved whiteboard checkpoints">
             @for (version of whiteboardVersions(); track version.versionId) {
@@ -387,7 +417,7 @@
             <span>Mode</span>
             <select [value]="selectedWhiteboardPermissionLevel()" (change)="setWhiteboardPermissionLevel($event)">
               @for (option of whiteboardPermissionOptions; track option.value) {
-                <option [value]="option.value">{{ option.label }} - {{ option.description }}</option>
+                <option [value]="option.value" [selected]="option.value === selectedWhiteboardPermissionLevel()">{{ option.label }} - {{ option.description }}</option>
               }
             </select>
           </label>
@@ -512,7 +542,7 @@
                       <span class="participant-media-state local-hidden">Hidden locally</span>
                     }
                     @case ('unavailable') {
-                      <span class="participant-media-state unavailable">Reconnecting</span>
+                      <span class="participant-media-state unavailable">{{ participantMediaLabel(participant.id) }}</span>
                     }
                     @default {
                       <span class="participant-media-state unavailable">Unavailable</span>
@@ -613,6 +643,11 @@
                   <span class="control-icon board-control-icon" aria-hidden="true"></span>
                 </button>
               </div>
+              <div class="participant-device-sharing">
+                @if (deviceSharingRequested(participant.id)) { <span role="status">Requests device sharing</span> }
+                <button type="button" [disabled]="!roomJoined() || isParticipantActionPending(participant.id, 'screen')" (click)="setDeviceSharingPermission(participant.id, !hasDeviceSharingPermission(participant.id))">{{ hasDeviceSharingPermission(participant.id) ? 'Revoke device sharing' : 'Allow device sharing' }}</button>
+                @if (deviceSharingRequested(participant.id) && !hasDeviceSharingPermission(participant.id)) { <button type="button" [disabled]="isParticipantActionPending(participant.id, 'screen')" (click)="setDeviceSharingPermission(participant.id, false)">Decline device sharing</button> }
+              </div>
             } @else {
               <div class="participant-staff-badge" [attr.aria-label]="participantRoleLabel(participant)">
                 {{ participantRoleLabel(participant) }}
@@ -668,6 +703,8 @@
   <section class="media-menu-layer" aria-label="Teacher tool menu">
     <button class="media-menu-backdrop" type="button" aria-label="Close media controls menu" (click)="closeMediaMenu()"></button>
     <div id="teacher-media-actions" class="media-quick-menu" role="menu" aria-label="Teacher media actions" (click)="$event.stopPropagation()">
+      <sfu-classroom-connection-tools />
+      <button type="button" role="menuitem" class="media-menu-item" (click)="closeMediaMenu(); leaveClassroom()">Leave class</button>
       <span class="media-menu-group-label">Media</span>
       <button type="button" role="menuitem" class="media-menu-item device-settings" (click)="openMediaDrawer('devices')">
         <span class="media-menu-icon device-icon" aria-hidden="true"></span>
@@ -803,13 +840,14 @@
           <p class="eyebrow">Teacher preflight</p>
           <h1 id="teacher-preflight-title">{{ preflightTitle() }}</h1>
         </div>
+        <sfu-device-setup-dialog [previewStream]="webrtc.localStream()" [error]="preflightOpen() ? preflightError() : mediaError()" (microphoneSelected)="preflightOpen() ? switchPreflightMicrophone($event) : switchMicrophone($event)" (cameraSelected)="preflightOpen() ? switchPreflightCamera($event) : switchCamera($event)" />
         <span class="preflight-mode">{{ preflightMode() === 'start' ? 'Manual start' : 'Live session' }}</span>
       </header>
 
       <div class="preflight-grid">
         <div class="preflight-preview" [class.camera-ready]="cameraPreviewReady()">
           @if (preflightPreviewStream(); as stream) {
-            <video autoplay muted playsinline [sfuMediaStream]="stream"></video>
+            <video autoplay [muted]="true" playsinline [sfuMediaStream]="stream"></video>
           } @else {
             <div class="preflight-preview-placeholder">
               <span class="avatar large">{{ initials(chatDisplayName()) }}</span>
@@ -825,6 +863,7 @@
 
         <div class="preflight-panel">
           <div class="preflight-device-grid" aria-label="Preflight camera and microphone devices">
+              <button class="button secondary" type="button" [disabled]="preflightPreparing() || preflightActionPending()" (click)="audioOnlyPreparation() ? enablePreflightCamera() : useMicrophoneOnly()">{{ audioOnlyPreparation() ? 'Enable camera preview' : 'Use microphone only' }}</button>
             <label class="device-field" [class.switching]="switchingAudioDevice()">
               <span>Microphone</span>
               <select
@@ -924,6 +963,7 @@
       </div>
 
       <footer class="preflight-actions">
+        @if (preflightMode() === 'start') { <button class="button secondary" type="button" [disabled]="preflightActionPending()" (click)="preparePrivately()">Prepare privately</button> }
         <button class="button ghost" type="button" [disabled]="preflightActionPending()" (click)="cancelPreflight()">Back</button>
         <button class="button primary" type="button" [disabled]="!preflightCanConfirm()" (click)="confirmPreflight()">
           {{ preflightPrimaryLabel() }}

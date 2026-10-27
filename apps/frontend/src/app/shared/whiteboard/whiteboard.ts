@@ -13,6 +13,7 @@ import {
 } from '@angular/core';
 import type { WhiteboardMemoryPage, WhiteboardMemorySnapshot } from '@native-sfu/contracts';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs' with { loader: 'file' };
 
 export type WhiteboardTool =
   | 'select'
@@ -344,6 +345,7 @@ export interface WhiteboardUpsertCommand {
   type: 'upsert';
   element: WhiteboardElement;
   pageId?: string;
+  elementIndex?: number;
 }
 
 export interface WhiteboardDeleteCommand {
@@ -357,7 +359,15 @@ export interface WhiteboardClearCommand {
   pageId?: string;
 }
 
-export type WhiteboardCommand = WhiteboardUpsertCommand | WhiteboardDeleteCommand | WhiteboardClearCommand;
+export type WhiteboardPageMetadata = Omit<WhiteboardMemoryPage, 'elements'>;
+
+export type WhiteboardCommand =
+  | WhiteboardUpsertCommand
+  | WhiteboardDeleteCommand
+  | WhiteboardClearCommand
+  | { type: 'page-upsert'; page: WhiteboardPageMetadata }
+  | { type: 'page-delete'; pageId: string }
+  | { type: 'page-select'; pageId: string };
 
 export interface WhiteboardElementRef {
   elementId: string;
@@ -687,6 +697,11 @@ type PdfExportMode = 'hybrid' | 'raster';
 
 const GRID_SIZE = 24;
 const ALIGNMENT_TOLERANCE = 6;
+// Leave room for the Socket.IO event envelope below its 1 MB default payload limit.
+const MAX_IMPORTED_COMMAND_BYTES = 900_000;
+const MAX_IMPORTED_SNAPSHOT_BYTES = 1_500_000;
+const MAX_BOARD_PAGES = 80;
+const MAX_BOARD_ELEMENTS = 2500;
 const MAX_IMAGE_ASSET_BYTES = 12 * 1024 * 1024;
 const MAX_PDF_ASSET_BYTES = 25 * 1024 * 1024;
 const MAX_PRESENTATION_ASSET_BYTES = 50 * 1024 * 1024;
@@ -702,7 +717,7 @@ const PRESENTATION_ASSET_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'application/vnd.ms-powerpoint'
 ]);
-const PDFJS_WORKER_SRC = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+
 const DEFAULT_TEMPLATE_ID: WhiteboardTemplateId = 'grid';
 const DEFAULT_PAGE_VIEW: WhiteboardPageView = { zoom: 1, panX: 0, panY: 0 };
 const PEN_STYLE_OPTIONS: PenStyleOption[] = [
@@ -1806,12 +1821,14 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   private resizeObserver?: ResizeObserver;
   private resizeFrame = 0;
   private imageCache = new Map<string, HTMLImageElement>();
+  private pageSizeCache = new WeakMap<WhiteboardPage, Map<number, number>>();
   private clipboardElements: WhiteboardElement[] = [];
   private clipboardPasteCount = 0;
   private historyPast: WhiteboardPage[][] = [];
   private historyFuture: WhiteboardPage[][] = [];
   private laserTimeout?: number;
   private captureStreamActive = false;
+  private captureRefreshTimer?: number;
   private activeCaptureStream: MediaStream | null = null;
   private pdfWorkerConfigured = false;
   private pdfJsModule: PdfJsModule | null = null;
@@ -1856,9 +1873,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!canvas || typeof captureStream !== 'function') {
       return null;
     }
+    this.stopMediaCapture();
     try {
       this.captureStreamActive = true;
-      this.render();
       const stream = captureStream.call(canvas, fps);
       if (!stream.getVideoTracks().length) {
         stream.getTracks().forEach((track) => track.stop());
@@ -1871,25 +1888,28 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       stream.getVideoTracks()[0]?.addEventListener(
         'ended',
         () => {
-          if (this.activeCaptureStream === stream) {
-            this.captureStreamActive = false;
-            this.activeCaptureStream = null;
-            this.render();
-          }
+          if (this.activeCaptureStream === stream) this.stopMediaCapture();
         },
         { once: true }
       );
-      this.requestCaptureFrame(stream);
+      // Canvas capture emits frames when pixels are painted. Keep a static board
+      // available after ICE connects and to students joining later without edits.
+      this.render();
+      this.captureRefreshTimer = window.setInterval(() => {
+        if (this.activeCaptureStream === stream) this.render();
+      }, 1000);
       return stream;
     } catch {
-      this.captureStreamActive = false;
-      this.activeCaptureStream = null;
-      this.render();
+      this.stopMediaCapture();
       return null;
     }
   }
 
   stopMediaCapture(): void {
+    if (this.captureRefreshTimer !== undefined) {
+      window.clearInterval(this.captureRefreshTimer);
+      this.captureRefreshTimer = undefined;
+    }
     const stream = this.activeCaptureStream;
     if (!this.captureStreamActive && !stream) {
       return;
@@ -1916,28 +1936,30 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   @HostListener('window:keydown', ['$event'])
   protected handleKeyboardShortcut(event: KeyboardEvent): void {
-    const editableTarget = this.isEditableShortcutTarget(event.target);
-
-    if (editableTarget) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      const trigger = this.whiteboardCanvas?.nativeElement.closest('.whiteboard-pane')
+        ?.querySelector<HTMLButtonElement>('.whiteboard-toolbar button[aria-expanded="true"]');
+      if (this.mathPopoverOpen()) this.closeMathTools();
+      if (this.presentationModeEnabled()) this.exitPresentationMode();
+      this.cancelKeyboardState();
+      trigger?.focus();
       return;
     }
 
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      if (this.mathPopoverOpen()) {
-        this.closeMathTools();
-        return;
-      }
-      if (this.presentationModeEnabled()) {
-        this.exitPresentationMode();
-        return;
-      }
-      this.cancelKeyboardState();
+    if (this.isEditableShortcutTarget(event.target)) {
       return;
     }
 
     const key = event.key.toLowerCase();
     const usesModifier = event.ctrlKey || event.metaKey;
+
+    if (!this.readOnly() && this.canUseTool('select') && usesModifier && key === 'a') {
+      event.preventDefault();
+      this.activeTool.set('select');
+      this.setSelection(this.elements.map((element) => element.id));
+      return;
+    }
 
     if (!this.readOnly() && usesModifier && key === 'z') {
       event.preventDefault();
@@ -2090,6 +2112,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.activePageId.set(snapshot.activePageId && pages.some((page) => page.id === snapshot.activePageId) ? snapshot.activePageId : pages[0]!.id);
     this.historyPast = [];
     this.historyFuture = [];
+    this.bumpHistoryVersion();
     this.ensureActivePage();
     this.applyPageView(this.activePage());
     this.selectedElementIds.set([]);
@@ -2113,29 +2136,69 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       this.pendingCommands.push(command);
       return;
     }
-    const pageId = command.pageId ?? this.activePageId();
-    if (command.pageId && !this.pages().some((page) => page.id === pageId)) {
-      const page: WhiteboardPage = { ...this.createPage('Shared page'), id: pageId };
-      this.pages.update((pages) => [...pages, page]);
+    const previousActivePageId = this.activePageId();
+    const pageId = command.type === 'page-upsert' ? command.page.id : command.pageId ?? previousActivePageId;
+    const normalizedCommand = command.type === 'page-upsert' ? command : { ...command, pageId };
+    this.pages.set(this.applyCommandToPages(this.pages(), normalizedCommand));
+    // Rebase local history on remote work so undo never rewinds another author's edits.
+    this.historyPast = this.historyPast.map((pages) => this.applyCommandToPages(pages, normalizedCommand)).filter((pages) => pages.length);
+    this.historyFuture = this.historyFuture.map((pages) => this.applyCommandToPages(pages, normalizedCommand)).filter((pages) => pages.length);
+    this.bumpHistoryVersion();
+    if (command.type === 'page-select' && this.pages().some((page) => page.id === pageId)) {
       this.activePageId.set(pageId);
-      this.applyPageView(page);
     }
-    this.pages.update((pages) =>
-      pages.map((page) => {
-        if (page.id !== pageId) {
-          return page;
-        }
-        if (command.type === 'clear') {
-          return { ...page, elements: [] };
-        }
-        if (command.type === 'delete') {
-          return { ...page, elements: page.elements.filter((element) => element.id !== command.elementId) };
-        }
-        return { ...page, elements: this.upsertElementInList(page.elements, command.element) };
-      })
-    );
+    this.ensureActivePage();
+    if (this.activePageId() !== previousActivePageId || (command.type === 'page-upsert' && pageId === this.activePageId())) {
+      this.applyPageView(this.activePage());
+    }
     this.selectedElementIds.set([]);
+    this.pruneImageCache();
     this.render();
+  }
+
+  private applyCommandToPages(pages: WhiteboardPage[], command: WhiteboardCommand): WhiteboardPage[] {
+    if (command.type === 'page-select') {
+      return pages;
+    }
+    if (command.type === 'page-delete') {
+      return pages.filter((page) => page.id !== command.pageId);
+    }
+    if (command.type === 'page-upsert') {
+      const metadata = command.page;
+      const existing = pages.find((page) => page.id === metadata.id);
+      const page: WhiteboardPage = {
+        id: metadata.id,
+        title: metadata.title,
+        tags: this.normalizePageTags(metadata.tags),
+        template: this.normalizeTemplateId(metadata.template),
+        view: this.normalizePageView(metadata.view),
+        background: this.normalizePageBackground(metadata.background),
+        elements: existing?.elements ?? []
+      };
+      const next = pages.filter((item) => item.id !== page.id);
+      next.splice(Math.max(0, Math.min(metadata.order, next.length)), 0, page);
+      return next;
+    }
+    const pageId = command.pageId ?? this.activePageId();
+    let next = pages;
+    if (!next.some((page) => page.id === pageId)) {
+      if (command.type !== 'upsert') {
+        return next;
+      }
+      next = [...next, { ...this.createPage('Shared page'), id: pageId }];
+    }
+    return next.map((page) => {
+      if (page.id !== pageId) {
+        return page;
+      }
+      if (command.type === 'clear') {
+        return { ...page, elements: [] };
+      }
+      if (command.type === 'delete') {
+        return { ...page, elements: page.elements.filter((element) => element.id !== command.elementId) };
+      }
+      return { ...page, elements: this.upsertElementInList(page.elements, this.cloneElement(command.element), command.elementIndex) };
+    });
   }
 
   loadCommands(commands: WhiteboardCommand[]): void {
@@ -2152,14 +2215,12 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   snapshotCommands(): WhiteboardCommand[] {
-    const pageId = this.activePageId();
     return [
-      { type: 'clear', pageId },
-      ...this.activePage().elements.map((element) => ({
-        type: 'upsert' as const,
-        element: this.cloneElement(element),
-        pageId
-      }))
+      ...this.pages().flatMap((page, index): WhiteboardCommand[] => [
+        { type: 'page-upsert', page: this.pageMetadata(page, index) },
+        ...page.elements.map((element, elementIndex): WhiteboardCommand => ({ type: 'upsert', element: this.cloneElement(element), pageId: page.id, elementIndex }))
+      ]),
+      { type: 'page-select', pageId: this.activePageId() }
     ];
   }
 
@@ -2524,7 +2585,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (selectedElement) {
       this.elements = this.elements.map((item) => (item.id === selectedElement.id ? element : item));
       this.setSelection([selectedElement.id]);
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.emitElementUpsert(element);
       this.render();
     } else {
       this.addElement(element);
@@ -2702,7 +2763,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (draft.elementId) {
       this.elements = this.elements.map((item) => (item.id === draft.elementId ? element : item));
       this.selectedElementIds.set([draft.elementId]);
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.emitElementUpsert(element);
       this.render();
     } else {
       this.addElement(element);
@@ -2766,11 +2827,13 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!this.canManagePages() || !this.templateOptions.some((option) => option.id === template) || template === this.activeTemplate()) {
       return;
     }
+    const previous = this.clonePages(this.pages());
+    const previousActivePageId = this.activePageId();
     this.pushHistory();
     const activePageId = this.activePageId();
     this.pages.update((pages) => pages.map((page) => (page.id === activePageId ? { ...page, template } : page)));
     this.render();
-    this.stateChanged.emit();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   protected setStrokeWidth(event: Event): void {
@@ -2894,27 +2957,17 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   protected undo(): void {
-    const previous = this.historyPast.pop();
-    if (!previous) {
+    if (this.readOnly()) {
       return;
     }
-    this.historyFuture.push(this.clonePages(this.pages()));
-    this.pages.set(previous);
-    this.ensureActivePage();
-    this.applyPageView(this.activePage());
-    this.selectedElementIds.set([]);
-    this.bumpHistoryVersion();
-    this.pruneImageCache();
-    this.render();
-    this.stateChanged.emit();
-  }
-
-  protected redo(): void {
-    const next = this.historyFuture.pop();
-    if (!next) {
+    const next = this.historyPast.at(-1);
+    if (!next?.length || !this.acceptBoardChange(next, next.some((page) => page.id === this.activePageId()) ? this.activePageId() : next[0]!.id)) {
       return;
     }
-    this.historyPast.push(this.clonePages(this.pages()));
+    const previous = this.pages();
+    const previousActivePageId = this.activePageId();
+    this.historyPast.pop();
+    this.historyFuture.push(previous);
     this.pages.set(next);
     this.ensureActivePage();
     this.applyPageView(this.activePage());
@@ -2922,21 +2975,47 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.bumpHistoryVersion();
     this.pruneImageCache();
     this.render();
-    this.stateChanged.emit();
+    this.commitPageChanges(previous, previousActivePageId);
+  }
+
+  protected redo(): void {
+    if (this.readOnly()) {
+      return;
+    }
+    const next = this.historyFuture.at(-1);
+    if (!next?.length || !this.acceptBoardChange(next, next.some((page) => page.id === this.activePageId()) ? this.activePageId() : next[0]!.id)) {
+      return;
+    }
+    const previous = this.pages();
+    const previousActivePageId = this.activePageId();
+    this.historyFuture.pop();
+    this.historyPast.push(previous);
+    this.pages.set(next);
+    this.ensureActivePage();
+    this.applyPageView(this.activePage());
+    this.selectedElementIds.set([]);
+    this.bumpHistoryVersion();
+    this.pruneImageCache();
+    this.render();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   protected addPage(): void {
     if (!this.canManagePages()) {
       return;
     }
-    this.pushHistory();
     const page = this.createPage(`Board ${this.pages().length + 1}`, this.activeTemplate());
-    this.pages.update((pages) => [...pages, page]);
+    const nextPages = [...this.pages(), page];
+    if (!this.acceptBoardChange(nextPages, page.id)) return;
+    const previous = this.clonePages(this.pages());
+    const previousActivePageId = this.activePageId();
+    this.pushHistory();
+    this.pages.set(nextPages);
     this.activePageId.set(page.id);
     this.applyPageView(page);
     this.selectedElementIds.set([]);
     this.render();
-    this.stateChanged.emit();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   protected addPageBefore(): void {
@@ -2948,18 +3027,27 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   protected selectPage(pageId: string): void {
-    if (pageId === this.activePageId()) {
+    if (pageId === this.activePageId() || !this.acceptBoardChange(this.pages(), pageId)) {
       return;
     }
-    this.persistActivePageView();
     const page = this.pages().find((item) => item.id === pageId);
-    if (!page) {
-      return;
-    }
+    if (!page) return;
+    const previousPage = this.activePage();
+    const previousOrder = this.pages().findIndex((item) => item.id === previousPage.id);
+    const previousMetadata = this.pageMetadata(previousPage, previousOrder);
+    this.persistActivePageView();
+    const currentMetadata = this.pageMetadata(this.activePage(), previousOrder);
     this.activePageId.set(pageId);
     this.applyPageView(page);
     this.selectedElementIds.set([]);
     this.render();
+    if (this.canManagePages()) {
+      if (JSON.stringify(previousMetadata) !== JSON.stringify(currentMetadata)) {
+        this.commandCommitted.emit({ type: 'page-upsert', page: currentMetadata });
+      }
+      this.commandCommitted.emit({ type: 'page-select', pageId });
+    }
+    this.stateChanged.emit();
   }
 
   private selectRelativePage(delta: -1 | 1): void {
@@ -2976,6 +3064,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!this.canManagePages() || this.pages().length <= 1) {
       return;
     }
+    const previous = this.clonePages(this.pages());
+    const previousActivePageId = this.activePageId();
     this.pushHistory();
     const activePageId = this.activePageId();
     const activeIndex = this.pages().findIndex((page) => page.id === activePageId);
@@ -2987,13 +3077,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.selectedElementIds.set([]);
     this.pruneImageCache();
     this.render();
-    this.stateChanged.emit();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   protected duplicateActivePage(): void {
     if (!this.canManagePages()) {
       return;
     }
+    const previous = this.clonePages(this.pages());
+    const previousActivePageId = this.activePageId();
     this.pushHistory();
     const activePage = this.activePage();
     const duplicate: WhiteboardPage = {
@@ -3012,7 +3104,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.applyPageView(duplicate);
     this.selectedElementIds.set([]);
     this.render();
-    this.stateChanged.emit();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   protected renameActivePage(event: Event): void {
@@ -3025,10 +3117,12 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (title === this.activePage().title) {
       return;
     }
+    const previous = this.clonePages(this.pages());
+    const previousActivePageId = this.activePageId();
     this.pushHistory();
     const activePageId = this.activePageId();
     this.pages.update((pages) => pages.map((page) => (page.id === activePageId ? { ...page, title } : page)));
-    this.stateChanged.emit();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   protected setPageSearchQuery(event: Event): void {
@@ -3047,10 +3141,12 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (tags.length === currentTags.length && tags.every((tag, index) => tag === currentTags[index])) {
       return;
     }
+    const previous = this.clonePages(this.pages());
+    const previousActivePageId = this.activePageId();
     this.pushHistory();
     const activePageId = this.activePageId();
     this.pages.update((pages) => pages.map((page) => (page.id === activePageId ? { ...page, tags } : page)));
-    this.stateChanged.emit();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   protected requestEndSession(): void {
@@ -3071,48 +3167,35 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   protected triggerFileImport(): void {
-    if (!this.canImportAssets() || this.assetImporting()) {
-      return;
-    }
-    this.assetImportMode.set('element');
-    this.assetImportStatus.set(null);
-    this.fileInput?.nativeElement.click();
+    this.openAssetPicker('element');
   }
 
   protected triggerBackgroundImport(): void {
-    if (!this.canImportAssets() || this.assetImporting()) {
-      return;
-    }
-    this.assetImportMode.set('background');
-    this.assetImportStatus.set(null);
-    this.fileInput?.nativeElement.click();
+    this.openAssetPicker('background');
   }
 
   protected triggerPdfPageImport(): void {
-    if (!this.canImportAssets() || this.assetImporting()) {
-      return;
-    }
-    this.assetImportMode.set('pdf-pages');
-    this.assetImportStatus.set(null);
-    this.fileInput?.nativeElement.click();
+    this.openAssetPicker('pdf-pages');
   }
 
   protected triggerSlideImageImport(): void {
-    if (!this.canImportAssets() || this.assetImporting()) {
-      return;
-    }
-    this.assetImportMode.set('slide-pages');
-    this.assetImportStatus.set(null);
-    this.fileInput?.nativeElement.click();
+    this.openAssetPicker('slide-pages');
   }
 
   protected triggerDeckImport(): void {
-    if (!this.canImportAssets() || this.assetImporting()) {
-      return;
-    }
-    this.assetImportMode.set('deck-pages');
+    this.openAssetPicker('deck-pages');
+  }
+
+  private openAssetPicker(mode: AssetImportMode): void {
+    if (!this.canImportAssets() || this.assetImporting()) return;
+    this.assetImportMode.set(mode);
     this.assetImportStatus.set(null);
-    this.fileInput?.nativeElement.click();
+    const input = this.fileInput?.nativeElement;
+    if (!input) return;
+    // Native pickers read these attributes immediately, before Angular renders the signals.
+    input.accept = this.assetInputAccept();
+    input.multiple = this.assetInputMultiple();
+    input.click();
   }
 
   protected importFile(event: Event): void {
@@ -3143,12 +3226,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!this.canImportAssets() || !this.activePage().background) {
       return;
     }
+    const previous = this.clonePages(this.pages());
+    const previousActivePageId = this.activePageId();
     this.pushHistory();
     const activePageId = this.activePageId();
     this.pages.update((pages) => pages.map((page) => (page.id === activePageId ? { ...page, background: null } : page)));
     this.assetImportStatus.set({ type: 'success', message: 'Page background removed.' });
     this.pruneImageCache();
     this.render();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   protected fitAssetToPage(): void {
@@ -3168,7 +3254,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       this.pushHistory();
       const nextElement: WhiteboardFileElement = { ...selectedImage, position: { x: rect.x, y: rect.y }, width: rect.width, height: rect.height };
       this.elements = this.elements.map((element) => (element.id === selectedImage.id ? nextElement : element));
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(nextElement), pageId: this.activePageId() });
+      this.emitElementUpsert(nextElement);
       this.assetImportStatus.set({ type: 'success', message: 'Selected image fit to the page.' });
       this.render();
       return;
@@ -3178,6 +3264,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       this.assetImportStatus.set({ type: 'info', message: 'Select an image or add a page background first.' });
       return;
     }
+    const previous = this.clonePages(this.pages());
     this.pushHistory();
     const activePageId = this.activePageId();
     this.pages.update((pages) =>
@@ -3185,43 +3272,45 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     );
     this.assetImportStatus.set({ type: 'success', message: 'Page background fit to canvas.' });
     this.render();
+    this.commitPageChanges(previous);
   }
 
-  protected exportPng(): void {
+  protected async exportPng(): Promise<void> {
     if (!this.canExportBoard()) {
       return;
     }
+    if (!await this.prepareExportImages([this.activePage()])) return;
     const dataUrl = this.exportImage();
     this.downloadDataUrl(dataUrl, `${this.safeFileName(this.activePage().title)}.png`);
   }
 
-  protected exportPdf(): void {
+  protected async exportPdf(): Promise<void> {
     if (!this.canExportBoard()) {
       return;
     }
-    const exported = this.exportSelectedPagesPdfBlob([this.activePageId()], this.activePage().title, this.pdfExportMode());
+    const exported = await this.exportSelectedPagesPdfBlob([this.activePageId()], this.activePage().title, this.pdfExportMode());
     if (!exported) {
       return;
     }
     this.downloadBlob(exported.blob, `${this.safeFileName(this.activePage().title)}.pdf`);
   }
 
-  protected exportAllPagesPdf(): void {
+  protected async exportAllPagesPdf(): Promise<void> {
     if (!this.canExportBoard()) {
       return;
     }
-    const exported = this.exportAllPagesPdfBlob();
+    const exported = await this.exportAllPagesPdfBlob();
     if (!exported) {
       return;
     }
     this.downloadBlob(exported.blob, exported.fileName);
   }
 
-  protected exportSelectedPagesPdf(): void {
+  protected async exportSelectedPagesPdf(): Promise<void> {
     if (!this.canExportSelectedPages()) {
       return;
     }
-    const exported = this.exportSelectedPagesPdfBlob(this.selectedExportPageIds(), `${this.title()} selected pages`);
+    const exported = await this.exportSelectedPagesPdfBlob(this.selectedExportPageIds(), `${this.title()} selected pages`);
     if (!exported) {
       return;
     }
@@ -3242,11 +3331,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.selectedExportPageIds.set([]);
   }
 
-  exportAllPagesPdfBlob(fileBaseName = this.title(), mode = this.pdfExportMode()): { blob: Blob; fileName: string } | null {
+  async exportAllPagesPdfBlob(fileBaseName = this.title(), mode = this.pdfExportMode()): Promise<{ blob: Blob; fileName: string } | null> {
     return this.exportSelectedPagesPdfBlob(this.pages().map((page) => page.id), `${fileBaseName}-pages`, mode);
   }
 
-  exportSelectedPagesPdfBlob(pageIds: string[], fileBaseName = this.title(), mode = this.pdfExportMode()): { blob: Blob; fileName: string } | null {
+  async exportSelectedPagesPdfBlob(pageIds: string[], fileBaseName = this.title(), mode = this.pdfExportMode()): Promise<{ blob: Blob; fileName: string } | null> {
     if (!this.canExportBoard()) {
       return null;
     }
@@ -3256,7 +3345,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
     const selectedIds = new Set(pageIds);
     const selectedPages = this.pages().filter((page) => selectedIds.has(page.id));
-    if (!selectedPages.length) {
+    if (!selectedPages.length || !await this.prepareExportImages(selectedPages)) {
       return null;
     }
     const pages = mode === 'hybrid' ? this.createHybridPdfPages(selectedPages, canvas.width, canvas.height) : this.createRasterPdfPages(selectedPages, canvas.width, canvas.height);
@@ -3264,6 +3353,20 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       blob: this.createPdfBlob(pages),
       fileName: `${this.safeFileName(fileBaseName) || 'whiteboard'}${fileBaseName.endsWith('-pages') ? '' : '-pages'}.pdf`
     };
+  }
+
+  private async prepareExportImages(pages: WhiteboardPage[]): Promise<boolean> {
+    const dataUrls = new Set(pages.flatMap((page) => [
+      ...(page.background?.dataUrl ? [page.background.dataUrl] : []),
+      ...page.elements.flatMap((element) => element.type === 'file' && element.kind === 'image' ? [element.dataUrl] : [])
+    ]));
+    try {
+      await Promise.all([...dataUrls].map((dataUrl) => this.resolveImage(dataUrl)?.decode()));
+      return true;
+    } catch {
+      this.assetImportStatus.set({ type: 'error', message: 'A board image could not be loaded. Reload or replace it before exporting.' });
+      return false;
+    }
   }
 
   private createRasterPdfPages(pages: WhiteboardPage[], width: number, height: number): PdfImagePage[] {
@@ -3315,7 +3418,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (draft.elementId) {
       this.elements = this.elements.map((item) => (item.id === draft.elementId ? element : item));
       this.selectedElementIds.set([draft.elementId]);
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.emitElementUpsert(element);
       this.render();
     } else {
       this.addElement(element);
@@ -3418,7 +3521,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.elements = this.elements.map((element) => (element.id === text.id ? equation : element));
     this.setSelection([text.id]);
     this.closeContextMenu();
-    this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(equation), pageId: this.activePageId() });
+    this.emitElementUpsert(equation);
     this.render();
   }
 
@@ -3447,7 +3550,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.elements = nextElements;
     this.closeContextMenu();
     for (const element of changed) {
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.emitElementUpsert(element);
     }
     this.render();
   }
@@ -3563,7 +3666,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (draft.elementId) {
       this.elements = this.elements.map((item) => (item.id === draft.elementId ? element : item));
       this.selectedElementIds.set([draft.elementId]);
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.emitElementUpsert(element);
       this.render();
     } else {
       this.addElement(element);
@@ -3588,7 +3691,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       this.setSelection([]);
       return;
     }
-    this.setSelectionForElement(element, event.shiftKey);
+    if (!this.selectedElementIds().includes(element.id)) {
+      this.setSelectionForElement(element, event.shiftKey);
+    }
     this.activeTool.set('select');
     const surface = this.whiteboardSurface!.nativeElement.getBoundingClientRect();
     this.contextMenu.set({
@@ -3603,6 +3708,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   private cancelKeyboardState(): void {
     this.shapeMenuOpen.set(false);
+    this.diagramMenuOpen.set(false);
+    this.geometryMenuOpen.set(false);
     this.colorMenuOpen.set(false);
     this.fillColorMenuOpen.set(false);
     this.penMenuOpen.set(false);
@@ -3755,6 +3862,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     const groupId = this.createElementId();
     this.elements = this.elements.map((element) => (selectedIds.includes(element.id) ? { ...element, groupId } : element));
     this.closeContextMenu();
+    this.emitSelectionUpserts();
     this.render();
   }
 
@@ -3773,6 +3881,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       return next;
     });
     this.closeContextMenu();
+    this.emitSelectionUpserts();
     this.render();
   }
 
@@ -3798,7 +3907,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.setSelection(duplicates.map((element) => element.id));
     this.closeContextMenu();
     for (const element of duplicates) {
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.emitElementUpsert(element);
     }
     this.render();
   }
@@ -3923,7 +4032,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       }
       const element = this.hitTest(point);
       if (element) {
-        this.setSelectionForElement(element, event.shiftKey);
+        if (event.shiftKey || !this.selectedElementIds().includes(element.id)) {
+          this.setSelectionForElement(element, event.shiftKey);
+        }
         this.movingSelection = true;
         this.pushHistory();
       } else if (!event.shiftKey) {
@@ -3999,8 +4110,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.drawing = true;
     this.lastPoint = point;
     if (this.isShapeTool(this.activeTool())) {
-      this.shapeStart = point;
-      this.previewElement = this.createShapeElement(point, point, this.activeTool() as WhiteboardShapeTool);
+      const start = this.snapPoint(point);
+      this.lastPoint = start;
+      this.shapeStart = start;
+      this.previewElement = this.createShapeElement(start, start, this.activeTool() as WhiteboardShapeTool);
     } else {
       const strokePoint = this.getStrokePoint(event, point);
       this.lastPoint = strokePoint;
@@ -4193,6 +4306,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       this.drawSelection();
       this.drawSelectionMarquee();
       this.drawEraserCursor();
+      if (this.captureStreamActive) {
+        this.drawLaserPointer();
+      }
     }
     if (this.captureStreamActive) {
       this.requestCaptureFrame(this.activeCaptureStream);
@@ -4534,6 +4650,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         message: error instanceof Error ? error.message : 'Asset import failed.'
       });
     } finally {
+      this.pruneImageCache();
       this.assetImportMode.set('element');
       this.assetImporting.set(false);
     }
@@ -4567,6 +4684,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         message: error instanceof Error ? error.message : 'Slide image import failed.'
       });
     } finally {
+      this.pruneImageCache();
       this.assetImportMode.set('element');
       this.assetImporting.set(false);
     }
@@ -4677,7 +4795,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (this.pdfWorkerConfigured) {
       return;
     }
-    pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL(pdfWorkerUrl, document.baseURI).toString();
     this.pdfWorkerConfigured = true;
   }
 
@@ -4749,25 +4867,90 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return page;
   }
 
+  private assertImportFits(pages: WhiteboardPage[], commands: WhiteboardCommand[], activePageId = this.activePageId()): void {
+    const encoder = new TextEncoder();
+    if (commands.some((command) => encoder.encode(JSON.stringify(command)).byteLength > MAX_IMPORTED_COMMAND_BYTES)) {
+      throw new Error('This imported page or object is too large to share. Use a smaller image or lower-resolution PDF.');
+    }
+    this.assertBoardFits(pages, activePageId);
+  }
+
+  private assertBoardFits(pages: WhiteboardPage[], activePageId = this.activePageId()): void {
+    if (pages.length > MAX_BOARD_PAGES) {
+      throw new Error(`A board can contain up to ${MAX_BOARD_PAGES} pages. Remove a page or start a new board.`);
+    }
+    if (pages.reduce((count, page) => count + page.elements.length, 0) > MAX_BOARD_ELEMENTS) {
+      throw new Error(`A board can contain up to ${MAX_BOARD_ELEMENTS} objects. Remove some objects or start a new board.`);
+    }
+    const encoder = new TextEncoder();
+    // Pages/elements are replaced immutably. Cache unchanged pages so each pen stroke
+    // checks its own page instead of serializing the entire classroom board again.
+    let snapshotBytes = encoder.encode(JSON.stringify({ schemaVersion: 1, activePageId, pages: [] })).byteLength;
+    pages.forEach((page, index) => {
+      let cached = this.pageSizeCache.get(page);
+      if (!cached) {
+        cached = new Map();
+        this.pageSizeCache.set(page, cached);
+      }
+      let pageBytes = cached.get(index);
+      if (pageBytes === undefined) {
+        pageBytes = encoder.encode(JSON.stringify({ ...this.pageMetadata(page, index), elements: page.elements })).byteLength;
+        cached.set(index, pageBytes);
+      }
+      snapshotBytes += pageBytes + (index > 0 ? 1 : 0);
+    });
+    if (snapshotBytes > MAX_IMPORTED_SNAPSHOT_BYTES) {
+      throw new Error('This change exceeds the saved board size limit. Remove some content or start a new board.');
+    }
+  }
+
+  private acceptBoardChange(pages: WhiteboardPage[], activePageId = this.activePageId()): boolean {
+    try {
+      this.assertBoardFits(pages, activePageId);
+      return true;
+    } catch (error) {
+      this.assetImportStatus.set({ type: 'error', message: error instanceof Error ? error.message : 'The board limit was reached.' });
+      return false;
+    }
+  }
+
+  private discardUnchangedHistory(pages: WhiteboardPage[]): void {
+    const previous = this.historyPast.at(-1);
+    if (previous && JSON.stringify(previous) === JSON.stringify(pages)) {
+      this.historyPast.pop();
+      this.bumpHistoryVersion();
+    }
+  }
+
   private insertImportedPages(importedPages: WhiteboardPage[]): void {
     if (!importedPages.length) {
       return;
     }
-    this.pushHistory();
+    const previous = this.clonePages(this.pages());
+    const previousActivePageId = this.activePageId();
     const activePageId = this.activePageId();
     const activeIndex = this.pages().findIndex((page) => page.id === activePageId);
     const insertIndex = activeIndex >= 0 ? activeIndex + 1 : this.pages().length;
-    this.pages.update((pages) => [...pages.slice(0, insertIndex), ...importedPages, ...pages.slice(insertIndex)]);
+    const nextPages = [...this.pages().slice(0, insertIndex), ...importedPages, ...this.pages().slice(insertIndex)];
+    this.assertImportFits(nextPages, importedPages.flatMap((page, index): WhiteboardCommand[] => [
+      { type: 'page-upsert', page: this.pageMetadata(page, insertIndex + index) },
+      ...page.elements.map((element, elementIndex): WhiteboardCommand => ({ type: 'upsert', element, pageId: page.id, elementIndex }))
+    ]), importedPages[0]!.id);
+    this.pushHistory();
+    this.pages.set(nextPages);
     this.activePageId.set(importedPages[0]!.id);
     this.applyPageView(importedPages[0]!);
     this.selectedElementIds.set([]);
     this.render();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   private insertBlankPageRelativeToActive(position: 'before' | 'after'): void {
     if (!this.canManagePages()) {
       return;
     }
+    const previous = this.clonePages(this.pages());
+    const previousActivePageId = this.activePageId();
     this.pushHistory();
     const activePageId = this.activePageId();
     const activeIndex = this.pages().findIndex((page) => page.id === activePageId);
@@ -4778,6 +4961,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.applyPageView(page);
     this.selectedElementIds.set([]);
     this.render();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   private pdfImportErrorMessage(error: unknown): string {
@@ -4829,7 +5013,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   private createPageBackground(file: File, dataUrl: string, image: HTMLImageElement): void {
     const targetPageId = this.activePageId();
-    this.pushHistory();
+    const previous = this.clonePages(this.pages());
+    const previousActivePageId = this.activePageId();
     const background: WhiteboardPageBackground = {
       kind: 'image',
       sourceType: 'image',
@@ -4841,14 +5026,18 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       fit: 'contain',
       importedAt: new Date().toISOString()
     };
-    this.pages.update((pages) => pages.map((page) => (page.id === targetPageId ? { ...page, background } : page)));
+    const nextPages = this.pages().map((page) => page.id === targetPageId ? { ...page, background } : page);
+    const pageIndex = nextPages.findIndex((page) => page.id === targetPageId);
+    this.assertImportFits(nextPages, [{ type: 'page-upsert', page: this.pageMetadata(nextPages[pageIndex]!, pageIndex) }]);
+    this.pushHistory();
+    this.pages.set(nextPages);
     this.assetImportStatus.set({ type: 'success', message: `${file.name} set as page background.` });
     this.render();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   private createFileElement(file: File, dataUrl: string, image: HTMLImageElement): void {
     const targetPageId = this.activePageId();
-    this.pushHistory();
     const maxWidth = 360;
     const scale = Math.min(1, maxWidth / image.naturalWidth);
     const element: WhiteboardFileElement = {
@@ -4861,13 +5050,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       width: Math.max(80, image.naturalWidth * scale),
       height: Math.max(60, image.naturalHeight * scale)
     };
+    const nextPages = this.pages().map((page) => page.id === targetPageId ? { ...page, elements: [...page.elements, element] } : page);
+    this.assertImportFits(nextPages, [{ type: 'upsert', element, pageId: targetPageId }]);
+    this.pushHistory();
     this.addElement(element, targetPageId);
     this.assetImportStatus.set({ type: 'success', message: `${file.name} added as a movable image.` });
   }
 
   private createDocumentElement(file: File, dataUrl: string): void {
     const targetPageId = this.activePageId();
-    this.pushHistory();
     const element: WhiteboardFileElement = {
       id: this.createElementId(),
       type: 'file',
@@ -4878,6 +5069,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       width: 260,
       height: 160
     };
+    const nextPages = this.pages().map((page) => page.id === targetPageId ? { ...page, elements: [...page.elements, element] } : page);
+    this.assertImportFits(nextPages, [{ type: 'upsert', element, pageId: targetPageId }]);
+    this.pushHistory();
     this.addElement(element, targetPageId);
   }
 
@@ -4965,18 +5159,25 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   private addElement(element: WhiteboardElement, pageId = this.activePageId()): void {
     const nextElement = this.cloneElement(element);
-    this.pages.update((pages) =>
-      pages.map((page) => (page.id === pageId ? { ...page, elements: [...page.elements, nextElement] } : page))
-    );
+    const nextPages = this.pages().map((page) => page.id === pageId ? { ...page, elements: [...page.elements, nextElement] } : page);
+    if (!this.acceptBoardChange(nextPages)) {
+      this.discardUnchangedHistory(this.pages());
+      this.previewElement = null;
+      this.render();
+      return;
+    }
+    this.pages.set(nextPages);
     this.previewElement = null;
     if (pageId === this.activePageId()) {
       this.selectedElementIds.set([element.id]);
       this.render();
     }
-    this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId });
+    this.emitElementUpsert(element, pageId);
   }
 
   private insertSubjectTemplateAsPage(template: SubjectTemplateDefinition): void {
+    const previous = this.clonePages(this.pages());
+    const previousActivePageId = this.activePageId();
     this.pushHistory();
     const page = this.createPage(this.uniquePageTitle(template.pageTitle), template.pageTemplate);
     page.tags = [...template.tags];
@@ -4989,12 +5190,13 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.applyPageView(page);
     this.selectedElementIds.set([]);
     this.render();
-    this.stateChanged.emit();
+    this.commitPageChanges(previous, previousActivePageId);
   }
 
   private applySubjectTemplateToCurrentPage(template: SubjectTemplateDefinition): void {
     const pageId = this.activePageId();
     const elements = this.createSubjectTemplateElements(template, { x: 0, y: 0 });
+    const previous = this.clonePages(this.pages());
     this.pushHistory();
     this.pages.update((pages) =>
       pages.map((page) =>
@@ -5010,10 +5212,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     );
     this.setSelection(elements.map((element) => element.id));
     this.render();
-    for (const element of elements) {
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId });
-    }
-    this.stateChanged.emit();
+    this.commitPageChanges(previous);
   }
 
   private insertSubjectTemplateAsObject(template: SubjectTemplateDefinition): void {
@@ -5030,7 +5229,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.setSelection(elements.map((element) => element.id));
     this.render();
     for (const element of elements) {
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId });
+      this.emitElementUpsert(element, pageId);
     }
     this.stateChanged.emit();
   }
@@ -5298,11 +5497,15 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     };
   }
 
-  private upsertElementInList(elements: WhiteboardElement[], element: WhiteboardElement): WhiteboardElement[] {
+  private upsertElementInList(elements: WhiteboardElement[], element: WhiteboardElement, elementIndex?: number): WhiteboardElement[] {
     const nextElement = this.cloneElement(element);
-    return elements.some((item) => item.id === element.id)
-      ? elements.map((item) => (item.id === element.id ? nextElement : item))
-      : [...elements, nextElement];
+    const previousIndex = elements.findIndex((item) => item.id === element.id);
+    const next = elements.filter((item) => item.id !== element.id);
+    const requestedIndex = elementIndex !== undefined && Number.isInteger(elementIndex) && elementIndex >= 0
+      ? elementIndex
+      : previousIndex >= 0 ? previousIndex : next.length;
+    next.splice(Math.min(requestedIndex, next.length), 0, nextElement);
+    return next;
   }
 
   private drawElement(element: WhiteboardElement): void {
@@ -8539,6 +8742,69 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.pages.update((pages) => pages.map((page) => (page.id === activePageId ? { ...page, view } : page)));
   }
 
+  private pageMetadata(page: WhiteboardPage, order: number): WhiteboardPageMetadata {
+    return {
+      id: page.id,
+      title: page.title,
+      tags: [...(page.tags ?? [])],
+      order,
+      template: page.template,
+      view: { ...page.view },
+      background: page.background ? structuredClone(page.background) as unknown as Record<string, unknown> : null
+    };
+  }
+
+  private commitPageChanges(previous: WhiteboardPage[], previousActivePageId = this.activePageId()): void {
+    const next = this.pages();
+    if (!this.acceptBoardChange(next)) {
+      this.pages.set(previous);
+      this.activePageId.set(previousActivePageId);
+      this.ensureActivePage();
+      this.applyPageView(this.activePage());
+      this.discardUnchangedHistory(previous);
+      this.selectedElementIds.set([]);
+      this.render();
+      return;
+    }
+    const canManagePages = this.canManagePages();
+    // Create/restore pages before their elements; remove pages only after replacements exist.
+    next.forEach((page, order) => {
+      const previousOrder = previous.findIndex((item) => item.id === page.id);
+      const oldPage = previous[previousOrder];
+      const metadata = this.pageMetadata(page, order);
+      if (canManagePages && (!oldPage || JSON.stringify(metadata) !== JSON.stringify(this.pageMetadata(oldPage, previousOrder)))) {
+        this.commandCommitted.emit({ type: 'page-upsert', page: metadata });
+      }
+      const oldElements = new Map(oldPage?.elements.map((element) => [element.id, element]) ?? []);
+      const nextIds = new Set(page.elements.map((element) => element.id));
+      for (const element of oldPage?.elements ?? []) {
+        if (!nextIds.has(element.id)) {
+          this.commandCommitted.emit({ type: 'delete', elementId: element.id, pageId: page.id });
+        }
+      }
+      const projectedOrder = (oldPage?.elements ?? []).filter((element) => nextIds.has(element.id)).map((element) => element.id);
+      page.elements.forEach((element, elementIndex) => {
+        const currentIndex = projectedOrder.indexOf(element.id);
+        if (currentIndex !== elementIndex || JSON.stringify(oldElements.get(element.id)) !== JSON.stringify(element)) {
+          this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: page.id, elementIndex });
+          if (currentIndex >= 0) projectedOrder.splice(currentIndex, 1);
+          projectedOrder.splice(elementIndex, 0, element.id);
+        }
+      });
+    });
+    if (canManagePages) {
+      for (const page of previous) {
+        if (!next.some((item) => item.id === page.id)) {
+          this.commandCommitted.emit({ type: 'page-delete', pageId: page.id });
+        }
+      }
+      if (previousActivePageId !== this.activePageId()) {
+        this.commandCommitted.emit({ type: 'page-select', pageId: this.activePageId() });
+      }
+    }
+    this.stateChanged.emit();
+  }
+
   private applyPageView(page: WhiteboardPage): void {
     const view = page.view ?? DEFAULT_PAGE_VIEW;
     this.zoom.set(view.zoom ?? DEFAULT_PAGE_VIEW.zoom);
@@ -8547,7 +8813,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   private ensureActivePage(): void {
-    if (!this.pages().some((page) => page.id === this.activePageId())) {
+    if (this.pages().length && !this.pages().some((page) => page.id === this.activePageId())) {
       this.activePageId.set(this.pages()[0]!.id);
     }
   }
@@ -8674,7 +8940,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.elements = [...this.elements, ...pasted];
     this.setSelection(pasted.map((element) => element.id));
     for (const element of pasted) {
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.emitElementUpsert(element);
     }
     this.render();
   }
@@ -8776,7 +9042,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.pushHistory();
     this.elements = nextElements;
     for (const element of changedElements) {
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.emitElementUpsert(element);
     }
     this.render();
   }
@@ -8808,7 +9074,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.pushHistory();
     this.elements = nextElements;
     for (const element of changedElements) {
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.emitElementUpsert(element);
     }
     this.render();
   }
@@ -8877,6 +9143,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       return;
     }
 
+    const nextPages = this.pages().map((page) => page.id === this.activePageId() ? { ...page, elements: nextElements } : page);
+    if (!this.acceptBoardChange(nextPages)) return;
     if (!this.eraseHistoryPushed) {
       this.pushHistory();
       this.eraseHistoryPushed = true;
@@ -8884,8 +9152,13 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
     this.elements = nextElements;
     this.selectedElementIds.update((ids) => ids.filter((id) => nextElements.some((element) => element.id === id)));
-    for (const command of commands) {
+    for (const command of commands.filter((item) => item.type === 'delete')) {
       this.commandCommitted.emit(command);
+    }
+    for (const command of commands) {
+      if (command.type === 'upsert') {
+        this.emitElementUpsert(command.element);
+      }
     }
   }
 
@@ -9306,6 +9579,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!selectedIds.length) {
       return;
     }
+    const previous = this.clonePages(this.pages());
     this.pushHistory();
     const elements = [...this.elements];
     const orderedIndexes = elements.map((element, index) => ({ element, index })).filter(({ element }) => selectedIds.includes(element.id));
@@ -9319,7 +9593,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
     this.elements = elements;
     this.closeContextMenu();
-    this.emitSelectionUpserts();
+    this.commitPageChanges(previous);
     this.render();
   }
 
@@ -9328,6 +9602,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (!selectedIds.length) {
       return;
     }
+    const previous = this.clonePages(this.pages());
     this.pushHistory();
     const selected: WhiteboardElement[] = [];
     const unselected: WhiteboardElement[] = [];
@@ -9340,7 +9615,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
     this.elements = edge === 'front' ? [...unselected, ...selected] : [...selected, ...unselected];
     this.closeContextMenu();
-    this.emitSelectionUpserts();
+    this.commitPageChanges(previous);
     this.render();
   }
 
@@ -9392,9 +9667,33 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return { delta: adjusted, guides: guides.slice(0, 2) };
   }
 
+  private emitElementUpsert(element: WhiteboardElement, pageId = this.activePageId()): void {
+    if (!this.acceptBoardChange(this.pages())) {
+      const previous = this.historyPast.pop();
+      if (previous) {
+        this.pages.set(previous);
+        this.ensureActivePage();
+        this.applyPageView(this.activePage());
+        this.selectedElementIds.set([]);
+        this.bumpHistoryVersion();
+        this.pruneImageCache();
+        this.render();
+      }
+      return;
+    }
+    const page = this.pages().find((page) => page.id === pageId);
+    const elementIndex = page?.elements.findIndex((item) => item.id === element.id);
+    // A preceding item in a bulk edit may have rolled back the whole edit.
+    if (elementIndex === undefined || elementIndex < 0 || JSON.stringify(page!.elements[elementIndex]) !== JSON.stringify(element)) return;
+    this.commandCommitted.emit({
+      type: 'upsert', element: this.cloneElement(element), pageId,
+      ...(elementIndex !== undefined && elementIndex >= 0 ? { elementIndex } : {})
+    });
+  }
+
   private emitSelectionUpserts(): void {
     for (const element of this.elements.filter((item) => this.selectedElementIds().includes(item.id))) {
-      this.commandCommitted.emit({ type: 'upsert', element: this.cloneElement(element), pageId: this.activePageId() });
+      this.emitElementUpsert(element);
     }
   }
 
@@ -9566,7 +9865,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   private pushHistory(): void {
     this.persistActivePageView();
-    this.historyPast.push(this.clonePages(this.pages()));
+    // All page and element edits replace their values; sharing unchanged snapshots
+    // avoids copying every stroke in a large board for each undo entry.
+    this.historyPast.push(this.pages());
     if (this.historyPast.length > 80) {
       this.historyPast.shift();
     }
@@ -9616,10 +9917,32 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   private showLaser(point: WhiteboardPoint): void {
     this.laserPoint.set(point);
     this.emitCursor(point);
+    this.render();
     if (this.laserTimeout) {
       window.clearTimeout(this.laserTimeout);
     }
-    this.laserTimeout = window.setTimeout(() => this.laserPoint.set(null), 900);
+    this.laserTimeout = window.setTimeout(() => {
+      this.laserPoint.set(null);
+      this.render();
+    }, 900);
+  }
+
+  private drawLaserPointer(): void {
+    const point = this.laserPoint();
+    const context = this.context;
+    if (!point || !context) {
+      return;
+    }
+    context.save();
+    context.fillStyle = 'rgba(242, 96, 118, 0.25)';
+    context.beginPath();
+    context.arc(point.x, point.y, 10, 0, Math.PI * 2);
+    context.fill();
+    context.fillStyle = '#F26076';
+    context.beginPath();
+    context.arc(point.x, point.y, 4, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
   }
 
   private emitCursor(point: WhiteboardPoint): void {
@@ -9942,7 +10265,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     const previousPageId = this.activePageId();
     const previousSelection = this.selectedElementIds();
     const previousPreview = this.previewElement;
-    const previousPages = elementsOverride ? this.clonePages(this.pages()) : null;
+    const previousPages = elementsOverride ? this.pages() : null;
     this.previewElement = null;
     this.activePageId.set(pageId);
     if (elementsOverride) {

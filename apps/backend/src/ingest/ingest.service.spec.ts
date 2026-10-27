@@ -479,7 +479,7 @@ describe('IngestService', () => {
     const harness = createHarness();
     harness.ingests.find.mockReturnValue(query([]));
 
-    await harness.service.onModuleInit();
+    await harness.service.onApplicationBootstrap();
 
     const consumeCall = harness.redis.consumeDurable.mock.calls[0] as unknown[];
     expect(consumeCall[0]).toBe('sfu:ingest-coordination');
@@ -494,7 +494,7 @@ describe('IngestService', () => {
   it('keeps coordination listeners active but skips startup resume when the rollout flag is disabled', async () => {
     const harness = createHarness({ 'ingest.enabled': false });
 
-    await harness.service.onModuleInit();
+    await harness.service.onApplicationBootstrap();
 
     expect(harness.redis.consumeDurable).toHaveBeenCalledTimes(1);
     expect(harness.redis.subscribe).toHaveBeenCalledTimes(1);

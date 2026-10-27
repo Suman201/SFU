@@ -257,7 +257,7 @@ const EMPTY_LIVE_SETTINGS_FORM: LiveSettingsForm = {
   allowTeacherPublishRecording: false,
   allowStudentsDownloadRecording: true,
   autoArchiveExpiredRecordings: true,
-  studentScreenShareEnabled: false,
+  studentScreenShareEnabled: true,
   studentScreenShareRequiresApproval: true,
   maxActiveStudentShares: 1,
   analyticsEnabled: true,
@@ -962,7 +962,7 @@ export class TeacherProfile implements OnInit {
       },
       studentScreenShare: {
         studentScreenShareEnabled: form.studentScreenShareEnabled,
-        studentScreenShareRequiresApproval: form.studentScreenShareRequiresApproval,
+        studentScreenShareRequiresApproval: true,
         maxActiveStudentShares: form.maxActiveStudentShares
       },
       advancedAnalytics: {
@@ -1089,7 +1089,7 @@ export class TeacherProfile implements OnInit {
       allowStudentsDownloadRecording: settings.recordingRetention.allowStudentsDownloadRecording,
       autoArchiveExpiredRecordings: settings.recordingRetention.autoArchiveExpiredRecordings,
       studentScreenShareEnabled: settings.studentScreenShare.studentScreenShareEnabled,
-      studentScreenShareRequiresApproval: settings.studentScreenShare.studentScreenShareRequiresApproval,
+      studentScreenShareRequiresApproval: true,
       maxActiveStudentShares: settings.studentScreenShare.maxActiveStudentShares,
       analyticsEnabled: settings.advancedAnalytics.analyticsEnabled,
       trackEngagementEvents: settings.advancedAnalytics.trackEngagementEvents,

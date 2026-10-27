@@ -148,6 +148,46 @@ describe('TeacherClassSession participant cards', () => {
     fixture.detectChanges();
   });
 
+  it('shows the actual default whiteboard permission in the rendered mode selector', () => {
+    const component = fixture.componentInstance as any;
+    const select = (fixture.nativeElement as HTMLElement).querySelector('.whiteboard-controls select') as HTMLSelectElement | null;
+    const actualSelect = select ?? Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('select')).find((element) => Array.from(element.options).some((option) => option.value === 'annotate'));
+    expect(actualSelect).toBeDefined();
+    expect(actualSelect!.value).toBe(component.selectedWhiteboardPermissionLevel());
+  });
+
+  it('retains live student moderation cards after refreshing the classroom HTTP roster', () => {
+    const component = fixture.componentInstance as any;
+    component.scheduleWhiteboardMemoryLoad = () => {};
+    component.watchSession = () => {};
+    component.roomJoined.set(true);
+    const store = TestBed.inject(RoomStore);
+    store.room.set({ id: 'room-1', participants: [{ id: 'student-participant', userId: 'student-user', role: 'PARTICIPANT', displayName: 'Student One', connected: true, permissions: {}, admitted: true }], producers: [], consumers: [] } as any);
+    component.applyPayload({ ...payload, roomId: 'room-1', participants: [{ id: 'student-user', userId: 'student-user', role: 'student', displayName: 'Student One' }] });
+    fixture.detectChanges();
+    expect(component.participants().length).toBe(1);
+    expect(component.participants()[0].id).toBe('student-participant');
+    expect(component.participants()[0].connected).toBeTrue();
+    expect(component.participants()[0].canModerate).toBeTrue();
+    expect((fixture.nativeElement as HTMLElement).querySelector('[aria-label="Allow Student One to control the whiteboard"]')).not.toBeNull();
+  });
+
+  it('distinguishes a connected listener with no live media from a disconnected student', () => {
+    const component = fixture.componentInstance as any;
+    component.scheduleWhiteboardMemoryLoad = () => {};
+    component.watchSession = () => {};
+    component.roomJoined.set(true);
+    const store = TestBed.inject(RoomStore);
+    store.room.set({ id: 'room-1', participants: [{ id: 'student-participant', userId: 'student-user', role: 'PARTICIPANT', displayName: 'Student One', connected: true, permissions: {}, admitted: true }], producers: [], consumers: [] } as any);
+    component.applyPayload({ ...payload, roomId: 'room-1', participants: [{ id: 'student-user', userId: 'student-user', role: 'student', displayName: 'Student One' }] });
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.participant-media-state.unavailable')?.textContent?.trim()).toBe('No live media');
+    expect(component.participantMediaLabel('student-participant')).toBe('No live media');
+    store.patchParticipant('student-participant', { connected: false }); component.syncParticipantsFromRoom(); fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.participant-media-state.unavailable')?.textContent?.trim()).toBe('Reconnecting');
+    expect(component.participantMediaLabel('student-participant')).toBe('Reconnecting');
+  });
+
   it('shows teacher preflight before publishing an already-live session', () => {
     const root = fixture.nativeElement as HTMLElement;
 

@@ -1,0 +1,108 @@
+{
+  "name": "@native-sfu/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EDCONNECTION Classroom for Windows and macOS",
+  "author": "EDCONNECTION",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "prepare:assets": "node scripts/prepare-assets.cjs",
+    "build": "npm run build:frontend && npm run prepare:assets && electron-builder --config electron-builder.cjs --dir --publish never",
+    "package:mac": "npm run build:frontend && npm run prepare:assets && electron-builder --config electron-builder.cjs --mac --x64 --arm64 --publish never",
+    "package:win": "npm run build:frontend && npm run prepare:assets && electron-builder --config electron-builder.cjs --win --x64 --arm64 --publish never",
+    "test": "node --test",
+    "icons": "node scripts/generate-icons.cjs",
+    "test:native": "node scripts/acceptance.cjs",
+    "build:frontend": "npm run build -w @native-sfu/frontend -- --configuration desktop"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.nativesfu.classroom",
+    "productName": "EDCONNECTION Classroom",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "resources/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/browser",
+        "to": "frontend"
+      },
+      {
+        "from": "assets/runtime-config.json",
+        "to": "runtime-config.json"
+      }
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "protocols": [
+      {
+        "name": "EDCONNECTION Classroom",
+        "schemes": [
+          "sfu-classroom"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.education",
+      "hardenedRuntime": true,
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.plist",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "extendInfo": {
+        "NSCameraUsageDescription": "Use your camera during classes and device checks.",
+        "NSMicrophoneUsageDescription": "Use your microphone during classes and device checks.",
+        "NSAudioCaptureUsageDescription": "Share lesson audio when you choose to share your screen."
+      },
+      "icon": "resources/icon.icns"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "publish": null,
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+  },
+  "productName": "EDCONNECTION Classroom"
+}

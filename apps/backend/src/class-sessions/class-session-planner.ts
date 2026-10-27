@@ -45,7 +45,8 @@ export function planClassSessions(batch: ClassSessionBatchLike, schedules: Batch
     current.setDate(current.getDate() + dayOffset);
 
     while (current <= end) {
-      const sessionDate = current.toISOString().slice(0, 10);
+      // The iteration uses local calendar days; UTC conversion moves positive-offset midnights to yesterday.
+      const sessionDate = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
       const scheduledAt = new Date(`${sessionDate}T${schedule.startTime}:00`);
       sessions.push({
         id: classSessionId(batchId, schedule.dayOfWeek, sessionDate),

@@ -1,3 +1,4 @@
+import { expect, it } from '@jest/globals';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -330,7 +331,7 @@ describe('RoomsService', () => {
 
   it('lets the batch teacher watch planned lifecycle events with a targeted batch lookup', async () => {
     const { service, classSessions, batches, batchSchedules, studentEnrollments } = createService();
-    const sessionId = 'batch-1-MONDAY-2026-06-21';
+    const sessionId = 'batch-1-MONDAY-2026-06-22';
     classSessions.findById.mockResolvedValue(null);
     batches.findOne.mockResolvedValue(plannedBatchDoc());
     batchSchedules.find.mockReturnValueOnce({
@@ -355,7 +356,7 @@ describe('RoomsService', () => {
 
   it('lets admins watch planned lifecycle events with a targeted batch lookup', async () => {
     const { service, classSessions, batches, batchSchedules, studentEnrollments } = createService();
-    const sessionId = 'batch-1-MONDAY-2026-06-21';
+    const sessionId = 'batch-1-MONDAY-2026-06-22';
     classSessions.findById.mockResolvedValue(null);
     batches.findOne.mockResolvedValue(plannedBatchDoc());
     batchSchedules.find.mockReturnValueOnce({
@@ -378,7 +379,7 @@ describe('RoomsService', () => {
 
   it('lets active enrolled students watch planned lifecycle events with the correct batch id', async () => {
     const { service, classSessions, batches, batchSchedules, studentEnrollments } = createService();
-    const sessionId = 'batch-1-MONDAY-2026-06-21';
+    const sessionId = 'batch-1-MONDAY-2026-06-22';
     classSessions.findById.mockResolvedValue(null);
     batches.findOne.mockResolvedValue(plannedBatchDoc());
     batchSchedules.find.mockReturnValueOnce({
@@ -402,7 +403,7 @@ describe('RoomsService', () => {
 
   it('blocks non-enrolled students from watching planned lifecycle events', async () => {
     const { service, classSessions, batches, batchSchedules, studentEnrollments } = createService();
-    const sessionId = 'batch-1-MONDAY-2026-06-21';
+    const sessionId = 'batch-1-MONDAY-2026-06-22';
     classSessions.findById.mockResolvedValue(null);
     batches.findOne.mockResolvedValue(plannedBatchDoc());
     batchSchedules.find.mockReturnValueOnce({
@@ -778,7 +779,7 @@ describe('RoomsService', () => {
       });
       service.onClassSessionLifecycleEvent((event, payload) => lifecycleEvents.push({ event, payload }));
 
-      await service.onModuleInit();
+      await service.onApplicationBootstrap();
       await jest.advanceTimersByTimeAsync(1_000);
 
       expect(classSessions.find).toHaveBeenCalledWith({
@@ -843,7 +844,7 @@ describe('RoomsService', () => {
       pipeTransportCount: 0
     });
 
-    await service.onModuleInit();
+    await service.onApplicationBootstrap();
 
     expect(media.closeRoom).toHaveBeenCalledWith('room-1');
     const completionUpdate = classSessions.findOneAndUpdate.mock.calls[0]?.[1];
@@ -886,7 +887,7 @@ describe('RoomsService', () => {
       }
     ]);
 
-    await service.onModuleInit();
+    await service.onApplicationBootstrap();
 
     expect(classSessions.findOneAndUpdate).not.toHaveBeenCalled();
     expect(classSessions.updateOne).toHaveBeenCalledWith(
@@ -3468,6 +3469,51 @@ describe('RoomsService', () => {
     expect(results.length).toBe(2);
   });
 
+  for (const role of [Role.HOST, Role.CO_HOST]) {
+  it(`restores the current whiteboard controller only to a rejoining ${role}`, async () => {
+    const { service, participants, classSessions } = createService();
+    const moderator = { id: 'teacher-rejoined', userId: 'teacher-user', role, roomId: 'room-1', socketId: 'teacher-socket', admitted: true };
+    const controller = { id: 'student-new', userId: 'student-user', role: Role.PARTICIPANT, displayName: 'Student One', roomId: 'room-1', socketId: 'student-socket', admitted: true };
+    const grantedAt = new Date();
+    (service as any).whiteboardControlByRoomId.set('room-1', { roomId: 'room-1', participantId: 'student-old', userId: 'student-user', permissionLevel: 'draw', pageId: 'page-1', grantedAt, grantedByParticipantId: 'teacher-original' });
+    participants.findOne.mockImplementation((query: any) => query._id ? Promise.resolve(moderator) : { exec: async () => controller });
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', batchId: 'batch-1', roomId: 'room-1', status: 'live' });
+    const delivery = await service.whiteboardControlForParticipant('room-1', moderator.id);
+    expect(delivery?.event).toEqual({ sessionId: 'session-1', batchId: 'batch-1', roomId: 'room-1', participantId: 'student-new', displayName: 'Student One', granted: true, permissionLevel: 'draw', pageId: 'page-1', grantedAt: grantedAt.toISOString(), grantedByParticipantId: 'teacher-original', message: 'Whiteboard control restored.' });
+    expect(delivery?.targets.map((target) => target.socketId)).toEqual(['teacher-socket']);
+    expect((service as any).whiteboardControlByRoomId.get('room-1').participantId).toBe('student-new');
+  });
+
+  }
+
+  it('restores the returning student grant to the student and active moderators', async () => {
+    const { service, participants, classSessions } = createService();
+    const student = { id: 'student-new', userId: 'student-user', role: Role.PARTICIPANT, admitted: true, displayName: 'Student One', socketId: 'student-socket' };
+    const teacher = { id: 'teacher', userId: 'teacher-user', role: Role.HOST, admitted: true, socketId: 'teacher-socket' };
+    (service as any).whiteboardControlByRoomId.set('room-1', { roomId: 'room-1', participantId: 'student-old', userId: student.userId, permissionLevel: 'annotate', pageId: 'page-1', grantedAt: new Date(), grantedByParticipantId: teacher.id });
+    participants.findOne.mockResolvedValue(student);
+    jest.spyOn(service as any, 'whiteboardActiveModerators').mockResolvedValue([teacher]);
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', batchId: 'batch-1', roomId: 'room-1', status: 'live' });
+    const delivery = await service.whiteboardControlForParticipant('room-1', student.id);
+    expect(delivery?.event.participantId).toBe(student.id);
+    expect(delivery?.targets.map((target) => target.socketId).sort()).toEqual(['student-socket', 'teacher-socket']);
+  });
+
+  it('does not restore another student control grant to a rejoining student', async () => {
+    const { service, participants } = createService();
+    (service as any).whiteboardControlByRoomId.set('room-1', { participantId: 'controller', userId: 'controller-user' });
+    participants.findOne.mockResolvedValue({ id: 'other-student', userId: 'other-user', role: Role.PARTICIPANT, admitted: true });
+    expect(await service.whiteboardControlForParticipant('room-1', 'other-student')).toBeUndefined();
+  });
+
+  it('does not restore a stale whiteboard controller to a rejoining teacher', async () => {
+    const { service, participants, classSessions } = createService();
+    (service as any).whiteboardControlByRoomId.set('room-1', { participantId: 'student-old', userId: 'student-user' });
+    participants.findOne.mockImplementation((query: any) => query._id ? Promise.resolve({ id: 'teacher', role: Role.HOST, admitted: true }) : { exec: async () => null });
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', batchId: 'batch-1', roomId: 'room-1', status: 'live' });
+    expect(await service.whiteboardControlForParticipant('room-1', 'teacher')).toBeUndefined();
+  });
+
   it('persists accepted teacher whiteboard commands and updates the current snapshot', async () => {
     const { service, classSessions, participants, whiteboardOperations, whiteboardStates } = createService();
     const teacher = {
@@ -3570,6 +3616,8 @@ describe('RoomsService', () => {
       }))
     });
 
+    whiteboardStates.findOne.mockReturnValue({ exec: jest.fn(async () => ({ lastOperationSeq: 7, snapshotVersion: 12 })) });
+
     const delivery = await service.sendWhiteboardCommand('room-1', 'teacher-participant', command, 'op-1', 0);
 
     expect(delivery.idempotentReplay).toBe(true);
@@ -3578,6 +3626,166 @@ describe('RoomsService', () => {
     expect(delivery.targets).toEqual([]);
     expect(whiteboardOperations.create).not.toHaveBeenCalled();
     expect(whiteboardStates.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('retries operation snapshot CAS against a concurrently saved board without losing it', async () => {
+    const { service, whiteboardStates } = createService();
+    const older = { snapshotVersion: 4, lastOperationSeq: 0, currentSnapshot: { schemaVersion: 1, pages: [{ id: 'page-1', title: 'Before', tags: [], order: 0, elements: [] }] } };
+    const newer = { ...older, snapshotVersion: 5, currentSnapshot: { schemaVersion: 1, pages: [{ id: 'page-1', title: 'Restored', tags: [], order: 0, elements: [{ id: 'saved', type: 'text' }] }] } };
+    whiteboardStates.findOne.mockReturnValueOnce({ exec: async () => older }).mockReturnValueOnce({ exec: async () => older }).mockReturnValue({ exec: async () => newer });
+    whiteboardStates.findOneAndUpdate.mockResolvedValueOnce(null);
+    const result = await (service as any).persistWhiteboardOperation({ id: 'session-1', batchId: 'batch-1', roomId: 'room-1' }, { id: 'teacher', userId: 'teacher', role: Role.HOST }, { type: 'upsert', pageId: 'page-1', element: { id: 'new', type: 'stroke' } }, 'retry-cas');
+    const finalWrite = whiteboardStates.findOneAndUpdate.mock.calls[1];
+    expect((finalWrite[0] as Record<string, unknown>).snapshotVersion).toBe(5);
+    expect(finalWrite[1].$set.currentSnapshot.pages[0].elements.map((element: any) => element.id)).toEqual(['saved', 'new']);
+    expect(result.snapshotVersion).toBe(6);
+  });
+
+  it('repairs a logged operation whose snapshot write failed before acknowledging its retry', async () => {
+    const { service, whiteboardStates, whiteboardOperations } = createService();
+    const command = { type: 'upsert', pageId: 'page-1', element: { id: 'stroke', type: 'stroke' } };
+    whiteboardOperations.findOne.mockReturnValue({ exec: async () => ({ operationId: 'repair', operationSeq: 1, commandHash: (service as any).whiteboardCommandHash(command), createdAt: new Date() }) });
+    const result = await (service as any).persistWhiteboardOperation({ id: 'session-1', batchId: 'batch-1', roomId: 'room-1' }, { id: 'teacher', userId: 'teacher', role: Role.HOST }, command, 'repair');
+    expect(whiteboardOperations.create).not.toHaveBeenCalled();
+    expect(whiteboardStates.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(result.idempotentReplay).toBeUndefined();
+    expect(result.snapshotVersion).toBe(1);
+  });
+
+  it('preserves elements when updating page backgrounds and follows explicit page selection', () => {
+    const { service } = createService();
+    const snapshot = { schemaVersion: 1, activePageId: 'one', pages: [{ id: 'one', title: 'One', tags: [], order: 0, elements: [{ id: 'stroke' }] }] };
+    (service as any).applyWhiteboardCommandToSnapshot(snapshot, { type: 'page-upsert', page: { id: 'one', title: 'Renamed', tags: ['math'], order: 0, background: { sourceType: 'pdf-page' } } });
+    expect(snapshot.pages[0]!.elements).toEqual([{ id: 'stroke' }]);
+    expect(snapshot.pages[0]!.title).toBe('Renamed');
+    (service as any).applyWhiteboardCommandToSnapshot(snapshot, { type: 'page-upsert', page: { id: 'two', title: 'Two', tags: [], order: 1 } });
+    (service as any).applyWhiteboardCommandToSnapshot(snapshot, { type: 'page-select', pageId: 'two' });
+    expect(snapshot.activePageId).toBe('two');
+  });
+
+  it('rejects student page management even when current-page editing is granted', () => {
+    const { service } = createService();
+    expect(() => (service as any).assertStudentWhiteboardCommandAllowed({ roomId: 'room-1', permissionLevel: 'current_page_edit' }, { type: 'page-delete', pageId: 'page-1' })).toThrow('Only teachers');
+  });
+
+  it('allows draw-only undo of an owned stroke and rejects deletion of teacher work', async () => {
+    const { service, participants, whiteboardOperations } = createService();
+    participants.findOne.mockResolvedValue({ id: 'student', userId: 'student-user', role: Role.PARTICIPANT, roomId: 'room-1', admitted: true });
+    (service as any).whiteboardControlByRoomId.set('room-1', { roomId: 'room-1', participantId: 'student', userId: 'student-user', permissionLevel: 'draw', pageId: 'page-1' });
+    whiteboardOperations.findOne.mockReturnValue({ sort: () => ({ exec: async () => ({ actorUserId: 'student-user' }) }) });
+    const participant = await (service as any).assertWhiteboardCommandParticipant('room-1', 'student', { type: 'delete', pageId: 'page-1', elementId: 'own-stroke' });
+    expect(participant.id as string).toBe('student');
+    whiteboardOperations.findOne.mockReturnValue({ sort: () => ({ exec: async () => ({ actorUserId: 'teacher-user' }) }) });
+    let failure: unknown;
+    try { await (service as any).assertWhiteboardCommandParticipant('room-1', 'student', { type: 'delete', pageId: 'page-1', elementId: 'teacher-stroke' }); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(ForbiddenException);
+  });
+
+  it('repairs an interrupted prior operation before accepting the next edit and exposes it for fanout', async () => {
+    const { service, whiteboardStates, whiteboardOperations } = createService();
+    const prior = { type: 'upsert', pageId: 'page-1', element: { id: 'prior', type: 'stroke' } };
+    const pending: any = { operationId: 'pending', operationSeq: 1, command: prior, commandHash: (service as any).whiteboardCommandHash(prior), actorParticipantId: 'teacher', actorUserId: 'teacher', actorRole: Role.HOST, actorName: 'Teacher', createdAt: new Date() };
+    const logs = new Map<string, any>([['pending', pending]]);
+    let database: any = null;
+    whiteboardOperations.findOne.mockImplementation((query: any) => ({ exec: async () => query.operationId ? logs.get(query.operationId) ?? null : [...logs.values()].find((row) => row.operationSeq === query.operationSeq) ?? null }));
+    whiteboardOperations.create.mockImplementation(async (payload: any) => { const value = { ...payload, createdAt: new Date() }; logs.set(payload.operationId, value); return value; });
+    whiteboardStates.findOne.mockImplementation(() => ({ exec: async () => database }));
+    whiteboardStates.findOneAndUpdate.mockImplementation(async (_filter: any, update: any) => { database = { ...database, ...update.$set }; return database; });
+    const result = await (service as any).persistWhiteboardOperation({ id: 'session-1', batchId: 'batch-1', roomId: 'room-1' }, { id: 'teacher', userId: 'teacher', role: Role.HOST }, { type: 'upsert', pageId: 'page-1', element: { id: 'next', type: 'stroke' } }, 'next');
+    expect(result.operationSeq as number).toBe(2);
+    expect(result.recoveredEvents[0].operationId as string).toBe('pending');
+    expect(database.currentSnapshot.pages[0].elements.map((item: any) => item.id)).toEqual(['prior', 'next']);
+  });
+
+  for (const limit of ['pages', 'elements', 'bytes'] as const) {
+    it(`rejects realtime ${limit} overflow before logging or changing the board`, async () => {
+      const { service, whiteboardStates, whiteboardOperations } = createService();
+      const page = { id: 'page-1', title: 'Board', tags: [], order: 0, elements: [] as any[] };
+      const snapshot = { schemaVersion: 1, activePageId: 'page-1', pages: [page] };
+      let command: any = { type: 'upsert', pageId: 'page-1', element: { id: 'new', type: 'stroke' } };
+      if (limit === 'pages') {
+        snapshot.pages = Array.from({ length: 80 }, (_, i) => ({ ...page, id: `page-${i}`, order: i }));
+        command = { type: 'page-upsert', page: { id: 'page-81', title: 'Extra', tags: [], order: 80 } };
+      } else if (limit === 'elements') {
+        page.elements = Array.from({ length: 2500 }, (_, i) => ({ id: `stroke-${i}`, type: 'stroke' }));
+      } else {
+        page.elements = [{ id: 'existing', type: 'text', text: 'x'.repeat(1_499_700) }];
+        command.element.points = Array.from({ length: 50 }, (_, x) => ({ x, y: x }));
+      }
+      const original = JSON.stringify(snapshot);
+      whiteboardStates.findOne.mockReturnValue({ exec: async () => ({ snapshotVersion: 2, lastOperationSeq: 1, currentSnapshot: snapshot }) });
+      const error = await captureError(() => (service as any).persistWhiteboardOperation(
+        { id: 'session-1', batchId: 'batch-1', roomId: 'room-1' },
+        { id: 'teacher', userId: 'teacher', role: Role.HOST }, command, `overflow-${limit}`
+      ));
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(whiteboardOperations.create).not.toHaveBeenCalled();
+      expect(whiteboardStates.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(JSON.stringify(snapshot)).toBe(original);
+    });
+  }
+
+  it('releases an unapplied operation if a concurrent save fills capacity, then accepts a deletion', async () => {
+    const { service, whiteboardStates, whiteboardOperations } = createService();
+    const page = { id: 'page-1', title: 'Board', tags: [], order: 0, elements: [] as any[] };
+    let database: any = { snapshotVersion: 1, lastOperationSeq: 0, currentSnapshot: { schemaVersion: 1, activePageId: 'page-1', pages: [page] } };
+    const logs = new Map<string, any>();
+    whiteboardStates.findOne.mockImplementation(() => ({ exec: async () => database }));
+    whiteboardStates.findOneAndUpdate.mockImplementation(async (_filter: any, update: any) => { database = { ...database, ...update.$set }; return database; });
+    whiteboardOperations.findOne.mockImplementation((query: any) => ({ exec: async () => query.operationId ? logs.get(query.operationId) ?? null : [...logs.values()].find((row) => row.operationSeq === query.operationSeq) ?? null }));
+    whiteboardOperations.create.mockImplementation(async (payload: any) => {
+      const value = { ...payload, createdAt: new Date() };
+      logs.set(payload.operationId, value);
+      if (payload.operationId === 'overflow') {
+        database = { ...database, snapshotVersion: 2, currentSnapshot: { ...database.currentSnapshot, pages: [{ ...page, elements: Array.from({ length: 2500 }, (_, i) => ({ id: `stroke-${i}`, type: 'stroke' })) }] } };
+      }
+      return value;
+    });
+    whiteboardOperations.deleteOne.mockImplementation(async (query: any) => ({ deletedCount: logs.delete(query.operationId) ? 1 : 0 }));
+    const session = { id: 'session-1', batchId: 'batch-1', roomId: 'room-1' };
+    const actor = { id: 'teacher', userId: 'teacher', role: Role.HOST };
+    const error = await captureError(() => (service as any).persistWhiteboardOperation(session, actor,
+      { type: 'upsert', pageId: 'page-1', element: { id: 'overflow', type: 'stroke' } }, 'overflow'));
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(logs.size).toBe(0);
+    expect(database.lastOperationSeq).toBe(0);
+    expect(whiteboardStates.findOneAndUpdate).not.toHaveBeenCalled();
+    const result = await (service as any).persistWhiteboardOperation(session, actor,
+      { type: 'delete', pageId: 'page-1', elementId: 'stroke-0' }, 'remove');
+    expect(result.operationSeq as number).toBe(1);
+    expect(database.currentSnapshot.pages[0].elements.length as number).toBe(2499);
+  });
+
+  it('does not recreate missing pages when delayed delete or clear commands arrive', async () => {
+    const { service, whiteboardStates } = createService();
+    const snapshot = { schemaVersion: 1, activePageId: 'page-0', pages: Array.from({ length: 80 }, (_, i) => ({ id: `page-${i}`, title: 'Board', tags: [], order: i, elements: [] })) };
+    whiteboardStates.findOne.mockReturnValue({ exec: async () => ({ snapshotVersion: 1, lastOperationSeq: 0, currentSnapshot: snapshot }) });
+    for (const command of [{ type: 'delete', pageId: 'removed-page', elementId: 'old-stroke' }, { type: 'clear', pageId: 'removed-page' }]) {
+      await (service as any).persistWhiteboardOperation({ id: 'session-1', batchId: 'batch-1', roomId: 'room-1' },
+        { id: 'teacher', userId: 'teacher', role: Role.HOST }, command);
+      const saved = whiteboardStates.findOneAndUpdate.mock.calls.at(-1)![1].$set.currentSnapshot;
+      expect(saved).toEqual(snapshot);
+    }
+  });
+
+  it('initializes first page metadata without a phantom default page', async () => {
+    const { service, whiteboardStates } = createService();
+    await (service as any).persistWhiteboardOperation({ id: 'session-1', batchId: 'batch-1', roomId: 'room-1' }, { id: 'teacher', userId: 'teacher', role: Role.HOST }, { type: 'page-upsert', page: { id: 'actual-page', title: 'Actual', tags: [], order: 0 } }, 'first-page');
+    const saved = whiteboardStates.findOneAndUpdate.mock.calls[0][1].$set.currentSnapshot;
+    expect(saved.pages.map((page: any) => page.id)).toEqual(['actual-page']);
+  });
+
+  it('restricts authoritative whiteboard refresh notifications to moderators', async () => {
+    const { service, classSessions, participants } = createService();
+    classSessions.findOne.mockResolvedValue({ id: 'session-1', batchId: 'batch-1', roomId: 'room-1', status: 'live' });
+    participants.findOne.mockResolvedValue({ id: 'student', userId: 'student', roomId: 'room-1', role: Role.PARTICIPANT, admitted: true });
+    let failure: unknown;
+    try { await service.refreshWhiteboard('room-1', 'student'); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(ForbiddenException);
+    participants.findOne.mockResolvedValue({ id: 'teacher', userId: 'teacher', roomId: 'room-1', role: Role.HOST, admitted: true });
+    participants.find.mockReturnValue({ exec: async () => [] });
+    const delivery = await service.refreshWhiteboard('room-1', 'teacher');
+    expect(delivery.event).toEqual({ roomId: 'room-1', participantId: 'teacher' });
   });
 
   it('allows a student to raise their own hand during a live class session', async () => {
@@ -5025,6 +5233,268 @@ describe('RoomsService', () => {
   });
 });
 
+describe('Device whiteboard permissions', () => {
+  const denied = { ...DEFAULT_PARTICIPANT_PERMISSIONS, canShareScreen: false };
+  const request = {
+    roomId: 'room-1', transportId: 'transport-1', kind: 'screen' as const, source: 'screen' as const,
+    rtpParameters: {
+      codecs: [{ mimeType: 'video/VP8', payloadType: 96, clockRate: 90_000, rtcpFeedback: [] }],
+      encodings: [{ ssrc: 424242 }], rtcp: { cname: 'device-board', reducedSize: true }
+    }
+  };
+
+  function setup() {
+    const harness = createService();
+    const participant = fakeParticipantDoc({ save: jest.fn(async () => undefined) });
+    const session = fakeClassSessionDoc();
+    harness.classSessions.findOne.mockResolvedValue(session);
+    jest.spyOn(harness.service as any, 'assertParticipant').mockResolvedValue(participant);
+    jest.spyOn(harness.service as any, 'assertModerator').mockResolvedValue(fakeParticipantDoc({ id: 'teacher', role: Role.HOST }));
+    const permission = jest.spyOn(harness.service as any, 'getPermissions').mockResolvedValue(DEFAULT_PARTICIPANT_PERMISSIONS);
+    jest.spyOn(harness.service as any, 'getRoomPolicyContext').mockResolvedValue({
+      room: fakeRoomDoc({ mediaProfile: summaryState().profile }), summary: summaryState()
+    });
+    jest.spyOn(harness.service as any, 'activeStudentScreenShareCount').mockResolvedValue(0);
+    jest.spyOn(harness.service as any, 'recordClassSessionMediaFailure').mockResolvedValue(undefined);
+    harness.media.unregisterProducer.mockResolvedValue(undefined);
+    const closePrevious = jest.spyOn(harness.service as any, 'closeExistingParticipantScreenProducers').mockResolvedValue(['old-screen']);
+    return { ...harness, participant, session, permission, closePrevious };
+  }
+
+  it('requires an explicit teacher grant even when a legacy class disabled approval', () => {
+    const { service } = createService();
+    const entitlements = (service as any).classSessionEntitlements(fakeClassSessionDoc({
+      liveSettings: { studentScreenShare: { studentScreenShareEnabled: true, studentScreenShareRequiresApproval: false } }
+    }), { id: 'student-1', roles: ['STUDENT'] });
+    expect(entitlements.role).toBe(Role.PARTICIPANT);
+    expect(entitlements.permissions.canShareScreen).toBe(false);
+    expect((service as any).classSessionLiveSettings(fakeClassSessionDoc()).studentScreenShare.studentScreenShareEnabled).toBe(true);
+    expect((service as any).classSessionLiveSettings(fakeClassSessionDoc({
+      liveSettings: { studentScreenShare: { studentScreenShareEnabled: false } }
+    })).studentScreenShare.studentScreenShareEnabled).toBe(false);
+  });
+
+  it('queues a request without granting permission and preserves its queue time', async () => {
+    const { service, participant, permission, permissions, participants } = setup();
+    permission.mockResolvedValue(denied);
+    Object.assign(participant, { screenShareRequestedAt: new Date('2026-10-27T09:00:00Z') });
+    const patch = await service.requestScreenShare('room-1', participant.id, true);
+    expect(patch).toEqual({ screenShareRequested: true, screenShareRequestedAt: '2026-10-27T09:00:00.000Z' });
+    expect(participants.updateOne).toHaveBeenCalledWith({ _id: participant.id, roomId: 'room-1' }, {
+      $set: { screenShareRequested: true, screenShareRequestedAt: new Date('2026-10-27T09:00:00Z') }
+    });
+    expect(permissions.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending request without changing the grant', async () => {
+    const { service, permissions, participants } = setup();
+    expect(await service.requestScreenShare('room-1', 'participant-1', false)).toEqual({ screenShareRequested: false, screenShareRequestedAt: null });
+    expect(participants.updateOne).toHaveBeenCalledWith(expect.anything(), { $set: { screenShareRequested: false }, $unset: { screenShareRequestedAt: '' } });
+    expect(permissions.updateOne).not.toHaveBeenCalled();
+  });
+
+  it.each(['disabled', 'ended', 'teacher', 'malformed'])('rejects a %s request', async (scenario) => {
+    const { service, session, participant, participants } = setup();
+    if (scenario === 'disabled') Object.assign(session, { liveSettings: { studentScreenShare: { studentScreenShareEnabled: false } } });
+    if (scenario === 'ended') session.status = 'completed';
+    if (scenario === 'teacher') participant.role = Role.HOST;
+    await expect(service.requestScreenShare('room-1', participant.id, scenario === 'malformed' ? 'true' as never : true)).rejects.toThrow();
+    expect(participants.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('grants sharing and clears the request through the existing permission update', async () => {
+    const { service, permission, permissions, participants, closePrevious } = setup();
+    permission.mockResolvedValue(denied);
+    expect(await service.updatePermissions('room-1', 'teacher', 'participant-1', { canShareScreen: true })).toEqual({
+      ...DEFAULT_PARTICIPANT_PERMISSIONS, closedProducerIds: [], participantPatch: { screenShareRequested: false, screenShareRequestedAt: null }
+    });
+    expect(permissions.updateOne).toHaveBeenCalledWith({ roomId: 'room-1', participantId: 'participant-1' }, { $set: DEFAULT_PARTICIPANT_PERMISSIONS }, { upsert: true });
+    expect(participants.updateOne).toHaveBeenCalledWith(expect.anything(), { $set: { screenShareRequested: false }, $unset: { screenShareRequestedAt: '' } });
+    expect(closePrevious).not.toHaveBeenCalled();
+  });
+
+  it('revokes permission and closes the active producer before returning notification data', async () => {
+    const { service, permissions, producers, media, closePrevious, participant } = setup();
+    closePrevious.mockRestore();
+    const oldScreen = fakeProducerDoc({ id: 'old-screen', participantId: participant.id, kind: 'screen', source: 'screen' });
+    producers.find.mockResolvedValue([oldScreen]);
+    producers.findById.mockResolvedValue(oldScreen);
+    jest.spyOn(service as any, 'assertCanControlProducer').mockResolvedValue(participant);
+    const result = await service.updatePermissions('room-1', 'teacher', participant.id, { canShareScreen: false });
+    expect(result).toEqual({ ...denied, closedProducerIds: ['old-screen'], participantPatch: { screenShareRequested: false, screenShareRequestedAt: null, screenSharing: false } });
+    expect(oldScreen.status).toBe('closed');
+    expect(media.unregisterProducer).toHaveBeenCalledWith('old-screen');
+    expect(permissions.updateOne.mock.invocationCallOrder[0]).toBeLessThan(media.unregisterProducer.mock.invocationCallOrder[0]!);
+  });
+
+  it.each([{ canShareScreen: 'true' }, { canShareScreen: true, role: 'host' }])('rejects malformed permission patches %j', async (patch) => {
+    const { service, permissions } = setup();
+    await expect(service.updatePermissions('room-1', 'teacher', 'participant-1', patch as never)).rejects.toBeInstanceOf(BadRequestException);
+    expect(permissions.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('does not grant screen sharing in a class whose policy explicitly disables it', async () => {
+    const { service, session, permissions } = setup();
+    Object.assign(session, { liveSettings: { studentScreenShare: { studentScreenShareEnabled: false } } });
+    await expect(service.updatePermissions('room-1', 'teacher', 'participant-1', { canShareScreen: true })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(permissions.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects a student trying to grant permission to themselves', async () => {
+    const { service, permissions, participant } = setup();
+    jest.spyOn(service as any, 'assertModerator').mockRestore();
+    await expect(service.updatePermissions('room-1', participant.id, participant.id, { canShareScreen: true })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(permissions.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unapproved direct producer request before binding media', async () => {
+    const { service, permission, media } = setup();
+    permission.mockResolvedValue(denied);
+    await expect(service.createProducer(request, 'participant-1')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(media.bindProducer).not.toHaveBeenCalled();
+  });
+
+  it('rejects a student spoofing the internal classroom whiteboard source', async () => {
+    const { service, media } = setup();
+    await expect(service.createProducer({ ...request, source: 'whiteboard' }, 'participant-1')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(media.bindProducer).not.toHaveBeenCalled();
+  });
+
+  it.each(['bind', 'register'])('keeps the old source when candidate %s fails', async (stage) => {
+    const { service, media, closePrevious } = setup();
+    (stage === 'bind' ? media.bindProducer : media.registerProducer).mockRejectedValue(new Error('Candidate failed'));
+    await expect(service.createProducer(request, 'participant-1')).rejects.toThrow('Candidate failed');
+    expect(closePrevious).not.toHaveBeenCalled();
+  });
+
+  it.each(['participant', 'event'])('preserves the old source when a candidate %s write fails', async (write) => {
+    const { service, participant, platformEvents, producers, media, closePrevious } = setup();
+    if (write === 'participant') (participant as any).save.mockRejectedValue(new Error('Write failed'));
+    else platformEvents.appendEvent.mockRejectedValue(new Error('Write failed'));
+    await expect(service.createProducer(request, participant.id)).rejects.toThrow('Write failed');
+    const candidate = producers.mock.instances[0] as any;
+    expect(candidate.status).toBe('closed');
+    expect(media.unregisterProducer).toHaveBeenCalledWith(candidate.id);
+    expect(closePrevious).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 1])('repairs sharing state after a rejected candidate with %s remaining sources', async (remainingScreens) => {
+    const { service, participant, participants, platformEvents, producers } = setup();
+    producers.countDocuments.mockResolvedValue(remainingScreens);
+    platformEvents.appendEvent.mockRejectedValue(new Error('Write failed'));
+    await expect(service.createProducer(request, participant.id)).rejects.toThrow('Write failed');
+    expect(participants.updateOne).toHaveBeenCalledWith({ _id: participant.id, roomId: 'room-1' }, { screenSharing: remainingScreens > 0 });
+  });
+
+  it('returns a committed replacement even if the old source closure event fails to persist', async () => {
+    const { service, participant, platformEvents, producers, media, closePrevious } = setup();
+    closePrevious.mockRestore();
+    const oldScreen = fakeProducerDoc({ id: 'old-screen', participantId: participant.id, kind: 'screen', source: 'screen' });
+    producers.find.mockResolvedValue([oldScreen]);
+    producers.findById.mockResolvedValue(oldScreen);
+    producers.countDocuments.mockResolvedValue(1);
+    jest.spyOn(service as any, 'assertCanControlProducer').mockResolvedValue(participant);
+    platformEvents.appendEvent.mockImplementation(async (event: { type: string }) => {
+      if (event.type === 'producer.closed') throw new Error('Audit unavailable');
+    });
+    const result = await service.createProducer(request, participant.id);
+    expect(result.closedProducerIds).toEqual(['old-screen']);
+    expect(result.status).toBe('live');
+    expect(oldScreen.status).toBe('closed');
+    expect(media.unregisterProducer).toHaveBeenCalledWith('old-screen');
+    expect(media.unregisterProducer).not.toHaveBeenCalledWith(result.id);
+  });
+
+  it.each(['consumer', 'participant', 'event'])('returns completed media closure when ancillary %s cleanup fails', async (cleanup) => {
+    const { service, participant, participants, consumers, platformEvents, producers, media } = setup();
+    const producer = fakeProducerDoc({ participantId: participant.id, kind: 'screen', source: 'screen' });
+    producers.findById.mockResolvedValue(producer);
+    jest.spyOn(service as any, 'assertCanControlProducer').mockResolvedValue(participant);
+    if (cleanup === 'consumer') consumers.find.mockRejectedValue(new Error('Cleanup unavailable'));
+    if (cleanup === 'participant') participants.updateOne.mockRejectedValue(new Error('Cleanup unavailable'));
+    if (cleanup === 'event') platformEvents.appendEvent.mockRejectedValue(new Error('Cleanup unavailable'));
+    const result = await service.closeProducer(producer.id, participant.id);
+    expect(result.status).toBe('closed');
+    expect(media.unregisterProducer).toHaveBeenCalledWith(producer.id);
+  });
+
+  it('rejects and cleans a candidate when permission is revoked during publication', async () => {
+    const { service, permission, media, producers, closePrevious } = setup();
+    permission.mockResolvedValueOnce(DEFAULT_PARTICIPANT_PERMISSIONS).mockResolvedValue(denied);
+    await expect(service.createProducer(request, 'participant-1')).rejects.toBeInstanceOf(ForbiddenException);
+    const candidate = producers.mock.instances[0] as any;
+    expect(candidate.status).toBe('closed');
+    expect(media.unregisterProducer).toHaveBeenCalledWith(candidate.id);
+    expect(closePrevious).not.toHaveBeenCalled();
+  });
+
+  it.each(['disabled', 'ended'])('rechecks a class that becomes %s during publication', async (change) => {
+    const { service, session, classSessions, media, producers, closePrevious } = setup();
+    classSessions.findOne.mockResolvedValueOnce(session).mockResolvedValue(fakeClassSessionDoc(change === 'ended'
+      ? { status: 'completed' }
+      : { liveSettings: { studentScreenShare: { studentScreenShareEnabled: false } } }));
+    await expect(service.createProducer(request, 'participant-1')).rejects.toThrow();
+    const candidate = producers.mock.instances[0] as any;
+    expect(candidate.status).toBe('closed');
+    expect(media.unregisterProducer).toHaveBeenCalledWith(candidate.id);
+    expect(closePrevious).not.toHaveBeenCalled();
+  });
+
+  it('replaces its own device source only after the new producer is registered and persisted', async () => {
+    const { service, media, producers, closePrevious } = setup();
+    const producer = await service.createProducer(request, 'participant-1');
+    const candidate = producers.mock.instances[0] as any;
+    expect(producer.closedProducerIds).toEqual(['old-screen']);
+    expect(closePrevious).toHaveBeenCalledWith('room-1', 'participant-1', producer.id);
+    expect(media.registerProducer.mock.invocationCallOrder[0]).toBeLessThan(closePrevious.mock.invocationCallOrder[0]!);
+    expect(candidate.save.mock.invocationCallOrder[0]).toBeLessThan(closePrevious.mock.invocationCallOrder[0]!);
+    expect(producers.exists).toHaveBeenCalledWith({ roomId: 'room-1', participantId: { $ne: 'participant-1' }, kind: 'screen', source: { $ne: 'whiteboard' }, status: { $ne: 'closed' } });
+  });
+
+  it('rejects a second participant device source without replacing the first', async () => {
+    const { service, producers, media, closePrevious } = setup();
+    producers.exists.mockResolvedValue({ _id: 'other-device' });
+    await expect(service.createProducer(request, 'participant-1')).rejects.toBeInstanceOf(ConflictException);
+    expect(closePrevious).not.toHaveBeenCalled();
+    expect(media.unregisterProducer).toHaveBeenCalledWith((producers.mock.instances[0] as any).id);
+  });
+
+  it('allows the teacher classroom canvas to coexist with a device source', async () => {
+    const { service, participant, producers } = setup();
+    participant.role = Role.HOST;
+    producers.exists.mockResolvedValue({ _id: 'student-device' });
+    const result = await service.createProducer({ ...request, source: 'whiteboard' }, participant.id);
+    expect(result.source).toBe('whiteboard');
+    expect(producers.exists).not.toHaveBeenCalled();
+  });
+
+  it('does not let a moderator resume a screen whose owner lost permission', async () => {
+    const { service, producers, permission, media } = setup();
+    const producer = fakeProducerDoc({ kind: 'screen', source: 'screen', participantId: 'participant-1', status: 'paused' });
+    producers.findById.mockResolvedValue(producer);
+    jest.spyOn(service as any, 'assertCanControlProducer').mockResolvedValue(fakeParticipantDoc({ id: 'teacher', role: Role.HOST }));
+    permission.mockResolvedValue(denied);
+    await expect(service.setProducerStatus(producer.id, 'teacher', 'live')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(media.setProducerPaused).not.toHaveBeenCalled();
+  });
+
+  it('does not resume an already stopped source', async () => {
+    const { service, producers, media } = setup();
+    producers.findById.mockResolvedValue(fakeProducerDoc({ status: 'closed', kind: 'screen' }));
+    await expect(service.setProducerStatus('producer-1', 'participant-1', 'live')).rejects.toBeInstanceOf(ConflictException);
+    expect(media.setProducerPaused).not.toHaveBeenCalled();
+  });
+
+  it('clears the grant, request, queue timestamp and prior presentation on student rejoin', async () => {
+    const { service, participant, participants, permissions, closePrevious } = setup();
+    const closed = await (service as any).applyClassSessionEntitlements(fakeRoomDoc(), participant, { role: Role.PARTICIPANT, permissions: denied });
+    expect(closed).toEqual(['old-screen']);
+    expect(participants.updateOne).toHaveBeenCalledWith({ _id: participant.id, roomId: 'room-1' }, { $set: { screenShareRequested: false }, $unset: { screenShareRequestedAt: '' } });
+    expect(permissions.updateOne).toHaveBeenCalledWith({ roomId: 'room-1', participantId: participant.id }, { $set: denied }, { upsert: true });
+    expect(closePrevious).toHaveBeenCalledWith('room-1', participant.id);
+  });
+});
+
 function createService(): {
   service: RoomsService;
   rooms: { create: jest.Mock; findById: jest.Mock; updateOne: jest.Mock };
@@ -5034,13 +5504,13 @@ function createService(): {
   classSessions: { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; findOneAndUpdate: jest.Mock; updateOne: jest.Mock };
   participants: { create: jest.Mock; findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; countDocuments: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   permissions: { create: jest.Mock; find: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock };
-  producers: jest.Mock & { findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; countDocuments: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
+  producers: jest.Mock & { exists: jest.Mock; findById: jest.Mock; findOne: jest.Mock; find: jest.Mock; countDocuments: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   consumers: { findById: jest.Mock; find: jest.Mock; countDocuments: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   moderation: { create: jest.Mock; exists: jest.Mock; updateMany: jest.Mock };
   chatAttachments: { create: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock; updateMany: jest.Mock };
   chat: { create: jest.Mock; find: jest.Mock; countDocuments: jest.Mock };
   chatReadStates: { find: jest.Mock; findOneAndUpdate: jest.Mock };
-  whiteboardOperations: { findOne: jest.Mock; create: jest.Mock };
+  whiteboardOperations: { findOne: jest.Mock; create: jest.Mock; deleteOne: jest.Mock };
   whiteboardStates: { findOne: jest.Mock; findOneAndUpdate: jest.Mock };
   redis: { markPresence: jest.Mock; removePresence: jest.Mock; participantPresence: jest.Mock; participantsPresence: jest.Mock };
   media: {
@@ -5206,6 +5676,7 @@ function createService(): {
       });
     }),
     {
+      exists: jest.fn(async () => null),
       findById: jest.fn(),
       findOne: jest.fn(),
       find: jest.fn(async () => []),
@@ -5252,6 +5723,7 @@ function createService(): {
     findOneAndUpdate: jest.fn()
   };
   const whiteboardOperations = {
+    deleteOne: jest.fn(async (_filter: Record<string, unknown>) => ({ deletedCount: 1 })),
     findOne: jest.fn(() => ({
       exec: jest.fn(async () => null)
     })),

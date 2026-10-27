@@ -1,11 +1,13 @@
+import { assertWhiteboardSnapshotWithinLimits } from '../common/whiteboard-limits';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   OnModuleDestroy,
-  OnModuleInit,
+  OnApplicationBootstrap,
   Optional,
   ServiceUnavailableException
 } from '@nestjs/common';
@@ -228,10 +230,12 @@ interface WhiteboardLockState {
 }
 
 interface PersistedWhiteboardOperationResult {
+  recoveredEvents?: WhiteboardCommandEvent[];
   operationId: string;
   operationSeq: number;
   createdAt: Date;
   idempotentReplay?: boolean;
+  snapshotVersion?: number;
 }
 
 export interface WhiteboardControlDelivery {
@@ -244,6 +248,7 @@ export interface WhiteboardControlDelivery {
 }
 
 export interface WhiteboardRealtimeDelivery<TEvent> {
+  recoveredEvents?: TEvent[];
   event: TEvent;
   targets: SocketDeliveryTarget[];
   idempotentReplay?: boolean;
@@ -540,7 +545,8 @@ interface LocalRoomCleanupMetrics {
 }
 
 @Injectable()
-export class RoomsService implements OnModuleInit, OnModuleDestroy {
+export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
+  private readonly logger = new Logger(RoomsService.name);
   private readonly layerEventListeners = new Set<(event: ConsumerLayerEvent) => void>();
   private readonly producerDynacastEventListeners = new Set<(event: ProducerDynacastEvent) => void>();
   private readonly consumerQualityEventListeners = new Set<(state: ConsumerQualityState) => void>();
@@ -652,7 +658,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async onModuleInit(): Promise<void> {
+  async onApplicationBootstrap(): Promise<void> {
     await this.restoreClassSessionTeacherReconnectGrace();
     this.classSessionTeacherReconnectSweepTimer = setInterval(() => {
       void this.processExpiredClassSessionTeacherReconnectGrace();
@@ -886,7 +892,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return this.getRoom(roomDoc.id);
   }
 
-  async joinRoom(user: SocketUser, socketId: string, request: JoinRoomRequest): Promise<JoinRoomResponse> {
+  async joinRoom(user: SocketUser, socketId: string, request: JoinRoomRequest): Promise<JoinRoomResponse & { closedProducerIds?: string[] }> {
     const startedAt = performance.now();
     const classSession: ClassSessionMongoDocument | null = await this.classSessions.findOne({ roomId: request.roomId });
     try {
@@ -908,9 +914,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const existingParticipant = await this.participants.findOne({ roomId: room.id, userId: user.id, leftAt: { $exists: false } });
     const classSessionEntitlements = classSession ? this.classSessionEntitlements(classSession, user) : undefined;
     if (existingParticipant) {
-      if (classSessionEntitlements) {
-        await this.applyClassSessionEntitlements(room, existingParticipant, classSessionEntitlements);
-      }
+      const closedProducerIds = classSessionEntitlements ? await this.applyClassSessionEntitlements(room, existingParticipant, classSessionEntitlements) : [];
+
       await this.replaceParticipantSocket(room.id, existingParticipant.id, socketId);
       if (classSession && this.isClassSessionTeacherUser(classSession, user)) {
         const hadReconnectGrace = Boolean(classSession.teacherReconnectDeadlineAt || this.classSessionTeacherReconnectTimers.has(classSession.id));
@@ -935,7 +940,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         room: await this.getRoom(room.id),
         participantId: existingParticipant.id,
         admitted: existingParticipant.admitted,
-        rejoined: true
+        rejoined: true,
+        ...(closedProducerIds.length ? { closedProducerIds } : {})
       };
     }
     const activeCount = await this.participants.countDocuments({ roomId: room.id, admitted: true, leftAt: { $exists: false } });
@@ -1726,6 +1732,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('Screen sharing denied');
     }
     if (classSession && request.kind === 'screen') {
+      this.assertClassSessionRoomIsLive(classSession);
       try {
         await this.assertClassSessionStudentScreenShareAllowed(classSession, participant, permission, source);
       } catch (error) {
@@ -1787,7 +1794,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
     await this.assertProducerCapacity(request.roomId, participantId, request.kind, request.kind === 'screen');
     const status = publishDecision.action === 'soft-throttle' ? 'paused' : 'live';
-    const closedProducerIds = request.kind === 'screen' ? await this.closeExistingParticipantScreenProducers(request.roomId, participantId) : [];
+    // Keep the current presentation until its replacement has been accepted.
+    const closedProducerIds: string[] = [];
     try {
       await this.media.bindProducer(request.transportId, participantId, rtpParameters);
     } catch (error) {
@@ -1820,6 +1828,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       createdAt: new Date().toISOString()
     };
     let registered = false;
+    let persisted = false;
     try {
       await this.media.registerProducer(producer);
       registered = true;
@@ -1833,9 +1842,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         producerDoc.svcState = producer.svc as unknown as Record<string, unknown>;
       }
       await producerDoc.save();
-      if (request.kind === 'screen') {
-        closedProducerIds.push(...await this.closeExistingParticipantScreenProducers(request.roomId, participantId, producerDoc.id));
-      }
+      persisted = true;
       if (publishDecision.action === 'soft-throttle') {
         await this.recordRoomIncidentEvent({
           roomId: request.roomId,
@@ -1856,7 +1863,6 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         participant.screenSharing = true;
         await participant.save();
       }
-      this.metrics.activeProducers.labels(request.kind).inc();
       await this.platformEvents.appendEvent({
         type: 'producer.created',
         roomId: request.roomId,
@@ -1870,6 +1876,20 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
           policyAction: publishDecision.action
         }
       });
+      // All fallible preparation finishes before replacing the current presentation.
+      if (classSession && request.kind === 'screen') {
+        // A permission may be revoked while the transport is being prepared.
+        const latestPermission = await this.getPermissions(request.roomId, participantId);
+        if (!latestPermission.canShareScreen) throw new ForbiddenException('Screen sharing permission was revoked.');
+        const latestSession = await this.requireLiveClassSessionForRoom(request.roomId);
+        await this.assertClassSessionStudentScreenShareAllowed(latestSession, participant, latestPermission, source);
+        if (source === 'whiteboard' && !this.classSessionLiveSettings(latestSession).whiteboard.whiteboardSharingEnabled) throw new ForbiddenException('Whiteboard sharing is disabled for this class.');
+        if (source !== 'whiteboard') await this.assertClassroomDeviceShareAvailable(request.roomId, participantId);
+      }
+      if (request.kind === 'screen') {
+        closedProducerIds.push(...await this.closeExistingParticipantScreenProducers(request.roomId, participantId, producerDoc.id));
+      }
+      this.metrics.activeProducers.labels(request.kind).inc();
       return {
         ...this.toProducer(producerDoc),
         ...(closedProducerIds.length ? { closedProducerIds } : {})
@@ -1878,8 +1898,18 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       if (!ownerLookup.local && this.pipeCoordinator.isEnabled()) {
         await this.releaseRemoteProducerPublicationSafely(producer.id, 'error', 'create_producer_error');
       }
+      if (persisted) {
+        producerDoc.status = 'closed';
+        producerDoc.closedAt = new Date();
+        await producerDoc.save().catch(() => undefined);
+      }
       if (registered) {
         await this.media.unregisterProducer(producer.id).catch(() => undefined);
+      }
+      if (persisted && request.kind === 'screen') {
+        await this.runProducerCleanup(producer.id, 'screen sharing state', async () => {
+          await this.refreshParticipantScreenSharing(request.roomId, participantId);
+        });
       }
       await this.recordClassSessionMediaFailure(classSession, 'publish', request.kind, this.auditErrorReason(error), participant);
       throw error;
@@ -1896,7 +1926,22 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (!ownerLookup.local && (!this.pipeCoordinator.isEnabled() || !producerHostedLocally)) {
       await this.nodeRegistry.assertLocalRoomOwner(producer.roomId);
     }
+    if (producer.status === 'closed') throw new ConflictException('This media source has already stopped.');
     const actor = await this.assertCanControlProducer(producer, participantId);
+    if (status === 'live' && producer.kind === 'screen') {
+      const owner = await this.assertParticipant(producer.roomId, producer.participantId);
+      const permissions = await this.getPermissions(producer.roomId, producer.participantId);
+      if (!permissions.canShareScreen) throw new ForbiddenException('Screen sharing denied');
+      const classSession = await this.classSessions.findOne({ roomId: producer.roomId });
+      if (classSession) {
+        this.assertClassSessionRoomIsLive(classSession);
+        await this.assertClassSessionStudentScreenShareAllowed(classSession, owner, permissions, producer.source);
+        if (producer.source === 'whiteboard' && !this.classSessionLiveSettings(classSession).whiteboard.whiteboardSharingEnabled) {
+          throw new ForbiddenException('Whiteboard sharing is disabled for this class.');
+        }
+        if (producer.source !== 'whiteboard') await this.assertClassroomDeviceShareAvailable(producer.roomId, producer.participantId);
+      }
+    }
     if (status === 'live' && actor.id === producer.participantId) {
       const permissions = await this.getPermissions(producer.roomId, producer.participantId);
       if (producer.kind === 'audio' && !permissions.canPublishAudio) {
@@ -2219,47 +2264,64 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (!ownerLookup.local && this.pipeCoordinator.isEnabled() && producerHostedLocally) {
       await this.releaseRemoteProducerPublicationSafely(producerId, 'producer_closed', 'close_producer');
     }
-    const dependentConsumers = await this.consumers.find({ roomId: producer.roomId, producerId, status: { $ne: 'closed' } });
-    if (dependentConsumers.length) {
-      await this.consumers.updateMany(
-        { roomId: producer.roomId, producerId, status: { $ne: 'closed' } },
-        { status: 'closed', closedAt: producer.closedAt ?? new Date() }
-      );
-      if (this.pipeCoordinator.isEnabled()) {
-        for (const consumer of dependentConsumers) {
-          await this.releaseRemoteConsumerFeedSafely(consumer.id, 'consumer_closed', 'close_producer_consumer');
+    await this.runProducerCleanup(producerId, 'consumer state', async () => {
+      const dependentConsumers = await this.consumers.find({ roomId: producer.roomId, producerId, status: { $ne: 'closed' } });
+      if (dependentConsumers.length) {
+        await this.consumers.updateMany(
+          { roomId: producer.roomId, producerId, status: { $ne: 'closed' } },
+          { status: 'closed', closedAt: producer.closedAt ?? new Date() }
+        );
+        if (this.pipeCoordinator.isEnabled()) {
+          for (const consumer of dependentConsumers) {
+            await this.releaseRemoteConsumerFeedSafely(consumer.id, 'consumer_closed', 'close_producer_consumer');
+          }
         }
-      }
-      this.metrics.activeConsumers.dec(dependentConsumers.length);
-    }
-    if (producer.kind === 'screen') {
-      const remainingScreens = await this.producers.countDocuments({
-        roomId: producer.roomId,
-        participantId: producer.participantId,
-        kind: 'screen',
-        status: { $ne: 'closed' }
-      });
-      if (remainingScreens === 0) {
-        await this.participants.updateOne({ _id: producer.participantId, roomId: producer.roomId }, { screenSharing: false });
-      }
-    }
-    this.metrics.activeProducers.labels(producer.kind).dec();
-    await this.platformEvents.appendEvent({
-      type: 'producer.closed',
-      roomId: producer.roomId,
-      actor: this.platformActorFromParticipantContext(
-        actor,
-        participantId,
-        actor?.id === producer.participantId ? 'participant' : 'operator'
-      ),
-      payload: {
-        room: {
-          roomId: producer.roomId
-        },
-        producer: this.platformProducerReference(producer)
+        this.metrics.activeConsumers.dec(dependentConsumers.length);
       }
     });
+    if (producer.kind === 'screen') {
+      await this.runProducerCleanup(producerId, 'screen sharing state', async () => {
+        await this.refreshParticipantScreenSharing(producer.roomId, producer.participantId);
+      });
+    }
+    this.metrics.activeProducers.labels(producer.kind).dec();
+    await this.runProducerCleanup(producerId, 'closure event', async () => {
+      await this.platformEvents.appendEvent({
+        type: 'producer.closed',
+        roomId: producer.roomId,
+        actor: this.platformActorFromParticipantContext(
+          actor,
+          participantId,
+          actor?.id === producer.participantId ? 'participant' : 'operator'
+        ),
+        payload: {
+          room: {
+            roomId: producer.roomId
+          },
+          producer: this.platformProducerReference(producer)
+        }
+      });
+    });
     return this.toProducer(producer);
+  }
+
+  private async refreshParticipantScreenSharing(roomId: string, participantId: string): Promise<void> {
+    const remainingScreens = await this.producers.countDocuments({
+      roomId,
+      participantId,
+      kind: 'screen',
+      status: 'live'
+    });
+    await this.participants.updateOne({ _id: participantId, roomId }, { screenSharing: remainingScreens > 0 });
+  }
+
+  private async runProducerCleanup(producerId: string, operation: string, cleanup: () => Promise<void>): Promise<void> {
+    try {
+      await cleanup();
+    } catch (error) {
+      // Media closure has already succeeded. Clients must still receive producer:closed.
+      this.logger.warn(`Producer ${producerId} ${operation} cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   async createConsumer(request: CreateConsumerRequest, participantId: string): Promise<Consumer> {
@@ -3227,13 +3289,45 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async updatePermissions(roomId: string, actorParticipantId: string, participantId: string, patch: Partial<Permissions>): Promise<Permissions> {
+  async updatePermissions(roomId: string, actorParticipantId: string, participantId: string, patch: Partial<Permissions>): Promise<Permissions & { closedProducerIds?: string[]; participantPatch?: ParticipantPatch }> {
     await this.nodeRegistry.assertLocalRoomOwner(roomId);
     await this.assertModerator(roomId, actorParticipantId, false);
+    const participant = await this.assertParticipant(roomId, participantId);
+    const keys: Array<keyof Permissions> = ['canPublishAudio', 'canPublishVideo', 'canShareScreen', 'canChat'];
+    if (!patch || typeof patch !== 'object' || Object.entries(patch).some(([key, value]) => !keys.includes(key as keyof Permissions) || typeof value !== 'boolean')) {
+      throw new BadRequestException('Permission changes must contain supported boolean values.');
+    }
+    if (patch.canShareScreen === true && participant.role === Role.PARTICIPANT) {
+      const session = await this.classSessions.findOne({ roomId });
+      if (session) {
+        this.assertClassSessionRoomIsLive(session);
+        if (!this.classSessionLiveSettings(session).studentScreenShare.studentScreenShareEnabled) throw new ForbiddenException('Student screen sharing is disabled for this class.');
+      }
+    }
     const current = await this.getPermissions(roomId, participantId);
     const next = { ...current, ...patch };
     await this.permissions.updateOne({ roomId, participantId }, { $set: next }, { upsert: true });
-    return next;
+    if (patch.canShareScreen === undefined) return next;
+    await this.participants.updateOne({ _id: participantId, roomId }, { $set: { screenShareRequested: false }, $unset: { screenShareRequestedAt: '' } });
+    const closedProducerIds = patch.canShareScreen ? [] : await this.closeExistingParticipantScreenProducers(roomId, participantId);
+    return { ...next, closedProducerIds, participantPatch: { screenShareRequested: false, screenShareRequestedAt: null, ...(patch.canShareScreen ? {} : { screenSharing: false }) } };
+  }
+
+  async requestScreenShare(roomId: string, participantId: string, requested: boolean): Promise<ParticipantPatch> {
+    await this.nodeRegistry.assertLocalRoomOwner(roomId);
+    if (typeof requested !== 'boolean') throw new BadRequestException('Requested must be a boolean.');
+    const session = await this.requireLiveClassSessionForRoom(roomId);
+    const participant = await this.assertParticipant(roomId, participantId);
+    if (participant.role !== Role.PARTICIPANT) throw new ForbiddenException('Only students request device whiteboard sharing.');
+    if (requested && !this.classSessionLiveSettings(session).studentScreenShare.studentScreenShareEnabled) throw new ForbiddenException('Student screen sharing is disabled for this class.');
+    const permissions = await this.getPermissions(roomId, participantId);
+    if (requested && !permissions.canShareScreen) {
+      const screenShareRequestedAt = participant.screenShareRequestedAt ?? new Date();
+      await this.participants.updateOne({ _id: participantId, roomId }, { $set: { screenShareRequested: true, screenShareRequestedAt } });
+      return { screenShareRequested: true, screenShareRequestedAt: screenShareRequestedAt.toISOString() };
+    }
+    await this.participants.updateOne({ _id: participantId, roomId }, { $set: { screenShareRequested: false }, $unset: { screenShareRequestedAt: '' } });
+    return { screenShareRequested: false, screenShareRequestedAt: null };
   }
 
   async kick(roomId: string, actorParticipantId: string, participantId: string, reason?: string): Promise<void> {
@@ -4959,6 +5053,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Whiteboard command is too large.');
     }
 
+    if (command.type === 'page-upsert' || command.type === 'page-delete' || command.type === 'page-select') {
+      throw new ForbiddenException('Only teachers can manage whiteboard pages.');
+    }
     const commandPageId = this.normalizeWhiteboardPageId(command.pageId);
     if (state.pageId && commandPageId !== state.pageId) {
       throw new ForbiddenException('Whiteboard control is limited to the current page.');
@@ -4968,10 +5065,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('Students cannot clear the class whiteboard.');
     }
     if (command.type === 'delete') {
-      if (state.permissionLevel !== 'current_page_edit') {
-        throw new ForbiddenException('Teacher has not allowed deleting whiteboard objects.');
-      }
-      return;
+      return; // Ownership is verified against the first persisted upsert below.
     }
     if (command.type !== 'upsert') {
       throw new BadRequestException('Whiteboard command type is invalid.');
@@ -5005,6 +5099,15 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       this.whiteboardControlByRoomId.set(roomId, { ...state, participantId: actor.id, displayName: actor.displayName });
     }
     this.assertStudentWhiteboardCommandAllowed(state, command);
+    if (command?.type === 'delete' && state.permissionLevel !== 'current_page_edit') {
+      const creation = await this.whiteboardOperations?.findOne({
+        roomId, 'command.type': 'upsert', 'command.element.id': command.elementId,
+        ...(command.pageId ? { 'command.pageId': command.pageId } : {})
+      }).sort({ operationSeq: 1 }).exec();
+      if (!creation || creation.actorUserId !== actor.userId) {
+        throw new ForbiddenException('You can only undo your own whiteboard objects.');
+      }
+    }
     return actor;
   }
 
@@ -5053,7 +5156,19 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (!command || typeof command !== 'object') {
       throw new BadRequestException('Whiteboard command is invalid.');
     }
+    if (command.type === 'page-upsert') {
+      const page = command.page;
+      const id = this.normalizeWhiteboardPageId(page?.id);
+      if (!id || !page || typeof page.title !== 'string' || !Array.isArray(page.tags) || !Number.isInteger(page.order) || page.order < 0) {
+        throw new BadRequestException('Whiteboard page metadata is invalid.');
+      }
+      return { type: 'page-upsert', page: { id, title: page.title.slice(0, 160), tags: page.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 32), order: page.order, template: page.template, view: page.view, background: page.background } };
+    }
     const pageId = this.normalizeWhiteboardPageId(command.pageId);
+    if (command.type === 'page-delete' || command.type === 'page-select') {
+      if (!pageId) throw new BadRequestException('Whiteboard page is required.');
+      return { type: command.type, pageId };
+    }
     if (command.type === 'clear') {
       return { type: 'clear', ...(pageId ? { pageId } : {}) };
     }
@@ -5067,7 +5182,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       if (!command.element || typeof command.element !== 'object' || typeof command.element.id !== 'string') {
         throw new BadRequestException('Whiteboard upsert command is invalid.');
       }
-      return { type: 'upsert', element: command.element, ...(pageId ? { pageId } : {}) };
+      if (command.elementIndex !== undefined && (!Number.isInteger(command.elementIndex) || command.elementIndex < 0)) throw new BadRequestException('Whiteboard element order is invalid.');
+      return { type: 'upsert', ...(command.elementIndex !== undefined ? { elementIndex: command.elementIndex } : {}), element: command.element, ...(pageId ? { pageId } : {}) };
     }
     throw new BadRequestException('Whiteboard command type is invalid.');
   }
@@ -5143,9 +5259,29 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private applyWhiteboardCommandToSnapshot(snapshot: WhiteboardMemorySnapshot, command: WhiteboardCommand): WhiteboardMemorySnapshot {
+    if (command.type === 'page-upsert') {
+      const existing = snapshot.pages.find((page) => page.id === command.page.id);
+      const page = { ...JSON.parse(JSON.stringify(command.page)), elements: existing?.elements ?? [] };
+      snapshot.pages = snapshot.pages.filter((candidate) => candidate.id !== page.id);
+      snapshot.pages.splice(Math.min(page.order, snapshot.pages.length), 0, page);
+      snapshot.pages.forEach((item, index) => { item.order = index; });
+      if (!snapshot.activePageId) snapshot.activePageId = page.id;
+      return snapshot;
+    }
+    if (command.type === 'page-delete') {
+      snapshot.pages = snapshot.pages.filter((page) => page.id !== command.pageId);
+      snapshot.pages.forEach((page, index) => { page.order = index; });
+      if (snapshot.activePageId === command.pageId) snapshot.activePageId = snapshot.pages[0]?.id;
+      return snapshot;
+    }
+    if (command.type === 'page-select') {
+      if (snapshot.pages.some((page) => page.id === command.pageId)) snapshot.activePageId = command.pageId;
+      return snapshot;
+    }
     if (command.type === 'clear') {
       if (command.pageId) {
-        this.findOrCreateWhiteboardPage(snapshot, command.pageId).elements = [];
+        const page = snapshot.pages.find((candidate) => candidate.id === command.pageId);
+        if (page) page.elements = [];
         return snapshot;
       }
       const activePageId = snapshot.activePageId || snapshot.pages[0]?.id || 'page-1';
@@ -5154,7 +5290,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       return snapshot;
     }
     if (command.type === 'delete') {
-      const pages = command.pageId ? [this.findOrCreateWhiteboardPage(snapshot, command.pageId)] : snapshot.pages;
+      const pages = command.pageId ? snapshot.pages.filter((page) => page.id === command.pageId) : snapshot.pages;
       for (const page of pages) {
         page.elements = page.elements.filter((element) => element.id !== command.elementId);
       }
@@ -5163,7 +5299,10 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     const page = this.findOrCreateWhiteboardPage(snapshot, command.pageId);
     const nextElement = JSON.parse(JSON.stringify(command.element)) as Record<string, unknown>;
     const existingIndex = page.elements.findIndex((element) => element.id === command.element.id);
-    if (existingIndex >= 0) {
+    if (command.elementIndex !== undefined) {
+      if (existingIndex >= 0) page.elements.splice(existingIndex, 1);
+      page.elements.splice(Math.min(command.elementIndex, page.elements.length), 0, nextElement);
+    } else if (existingIndex >= 0) {
       page.elements[existingIndex] = nextElement;
     } else {
       page.elements.push(nextElement);
@@ -5181,110 +5320,107 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     }));
   }
 
+  private readonly whiteboardOperationQueues = new Map<string, Promise<unknown>>();
+
   private async persistWhiteboardOperation(
-    classSession: ClassSessionMongoDocument,
-    actor: ParticipantMongoDocument,
-    command: WhiteboardCommand,
-    rawOperationId?: string,
-    rawBaseSnapshotVersion?: number
+    classSession: ClassSessionMongoDocument, actor: ParticipantMongoDocument, command: WhiteboardCommand,
+    rawOperationId?: string, rawBaseSnapshotVersion?: number
+  ): Promise<PersistedWhiteboardOperationResult> {
+    const previous = this.whiteboardOperationQueues.get(classSession.id) ?? Promise.resolve();
+    const task = previous.catch(() => undefined).then(() => this.persistQueuedWhiteboardOperation(classSession, actor, command, rawOperationId, rawBaseSnapshotVersion));
+    this.whiteboardOperationQueues.set(classSession.id, task);
+    try { return await task; }
+    finally { if (this.whiteboardOperationQueues.get(classSession.id) === task) this.whiteboardOperationQueues.delete(classSession.id); }
+  }
+
+  private async persistQueuedWhiteboardOperation(
+    classSession: ClassSessionMongoDocument, actor: ParticipantMongoDocument, command: WhiteboardCommand,
+    rawOperationId?: string, rawBaseSnapshotVersion?: number
   ): Promise<PersistedWhiteboardOperationResult> {
     const operationId = this.normalizeWhiteboardOperationId(rawOperationId);
     const baseSnapshotVersion = this.normalizeWhiteboardBaseSnapshotVersion(rawBaseSnapshotVersion);
     const commandHash = this.whiteboardCommandHash(command);
-    const now = new Date();
-    if (!this.whiteboardOperations || !this.whiteboardStates) {
-      return { operationId, operationSeq: 0, createdAt: now };
-    }
-
-    const existing = await this.whiteboardOperations.findOne({ sessionId: classSession.id, operationId }).exec();
-    if (existing) {
-      if (existing.commandHash !== commandHash) {
-        throw new ConflictException('Whiteboard operation id was already used for a different command.');
+    if (!this.whiteboardOperations || !this.whiteboardStates) return { operationId, operationSeq: 0, createdAt: new Date() };
+    let operation = await this.whiteboardOperations.findOne({ sessionId: classSession.id, operationId }).exec();
+    if (operation && operation.commandHash !== commandHash) throw new ConflictException('Whiteboard operation id was already used for a different command.');
+    const recoveredEvents: WhiteboardCommandEvent[] = [];
+    if (!operation) {
+      let previous = await this.whiteboardStates.findOne({ sessionId: classSession.id, batchId: classSession.batchId }).exec();
+      const pending = await this.whiteboardOperations.findOne({ sessionId: classSession.id, operationSeq: (previous?.lastOperationSeq ?? 0) + 1 }).exec();
+      if (pending && pending.operationId !== operationId) {
+        const repaired = await this.persistQueuedWhiteboardOperation(classSession, {
+          id: pending.actorParticipantId, userId: pending.actorUserId, role: pending.actorRole, displayName: pending.actorName
+        } as ParticipantMongoDocument, pending.command as WhiteboardCommand, pending.operationId);
+        if (!repaired.idempotentReplay) recoveredEvents.push({ roomId: classSession.roomId!, participantId: pending.actorParticipantId,
+          displayName: pending.actorName, command: pending.command as WhiteboardCommand, operationId: repaired.operationId,
+          operationSeq: repaired.operationSeq, snapshotVersion: repaired.snapshotVersion, createdAt: repaired.createdAt.toISOString() });
+        previous = await this.whiteboardStates.findOne({ sessionId: classSession.id, batchId: classSession.batchId }).exec();
       }
-      return {
-        operationId: existing.operationId,
-        operationSeq: existing.operationSeq,
-        createdAt: existing.createdAt,
-        idempotentReplay: true
-      };
-    }
-
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const previousState = await this.whiteboardStates.findOne({ sessionId: classSession.id, batchId: classSession.batchId }).exec();
-      const operationSeq = (previousState?.lastOperationSeq ?? 0) + 1;
+      // Reject an unsavable board before reserving an operation sequence number.
+      if (command.type === 'upsert' || command.type === 'page-upsert' || command.type === 'page-select') {
+        assertWhiteboardSnapshotWithinLimits(this.applyWhiteboardCommandToSnapshot(
+          this.cloneWhiteboardSnapshot(previous?.currentSnapshot, command.type === 'page-upsert' ? command.page.id : command.pageId), command
+        ));
+      }
       try {
-        const operation = await this.whiteboardOperations.create({
-          operationId,
-          sessionId: classSession.id,
-          batchId: classSession.batchId,
-          roomId: classSession.roomId,
-          whiteboardChannelId: classSession.whiteboardChannelId,
-          operationSeq,
-          ...(baseSnapshotVersion !== undefined ? { baseSnapshotVersion } : {}),
-          actorParticipantId: actor.id,
-          actorUserId: actor.userId,
-          actorRole: actor.role,
-          actorName: actor.displayName,
-          command,
-          commandHash
+        operation = await this.whiteboardOperations.create({
+          operationId, sessionId: classSession.id, batchId: classSession.batchId, roomId: classSession.roomId,
+          whiteboardChannelId: classSession.whiteboardChannelId, operationSeq: (previous?.lastOperationSeq ?? 0) + 1,
+          ...(baseSnapshotVersion !== undefined ? { baseSnapshotVersion } : {}), actorParticipantId: actor.id,
+          actorUserId: actor.userId, actorRole: actor.role, actorName: actor.displayName, command, commandHash
         });
-        const snapshot = this.applyWhiteboardCommandToSnapshot(
-          this.cloneWhiteboardSnapshot(previousState?.currentSnapshot, command.pageId),
-          command
-        );
-        const pages = this.whiteboardSnapshotPageMeta(snapshot);
-        const elementCount = pages.reduce((total, page) => total + page.elementCount, 0);
-        await this.whiteboardStates.findOneAndUpdate(
-          { sessionId: classSession.id, batchId: classSession.batchId },
-          {
-            $set: {
-              sessionId: classSession.id,
-              batchId: classSession.batchId,
-              roomId: classSession.roomId,
-              whiteboardChannelId: classSession.whiteboardChannelId,
-              schemaVersion: 1,
-              snapshotVersion: operationSeq,
-              currentSnapshot: snapshot as unknown as Record<string, unknown>,
-              pages,
-              pageCount: pages.length,
-              elementCount,
-              lastOperationSeq: operationSeq,
-              lastOperationId: operationId,
-              operationCount: operationSeq,
-              updatedByUserId: actor.userId
-            },
-            $setOnInsert: {
-              createdByUserId: actor.userId
-            }
-          },
-          { upsert: true, new: true }
-        );
-        return {
-          operationId: operation.operationId,
-          operationSeq: operation.operationSeq,
-          createdAt: operation.createdAt
-        };
       } catch (error) {
-        const code = typeof error === 'object' && error && 'code' in error ? (error as { code?: unknown }).code : undefined;
-        if (code === 11000) {
-          const replay = await this.whiteboardOperations.findOne({ sessionId: classSession.id, operationId }).exec();
-          if (replay) {
-            if (replay.commandHash !== commandHash) {
-              throw new ConflictException('Whiteboard operation id was already used for a different command.');
-            }
-            return {
-              operationId: replay.operationId,
-              operationSeq: replay.operationSeq,
-              createdAt: replay.createdAt,
-              idempotentReplay: true
-            };
-          }
-          continue;
+        if ((error as { code?: number })?.code !== 11000) throw error;
+        operation = await this.whiteboardOperations.findOne({ sessionId: classSession.id, operationId }).exec();
+        if (!operation || operation.commandHash !== commandHash) throw new ConflictException('Another board operation is pending. Please retry.');
+      }
+    }
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const state = await this.whiteboardStates.findOne({ sessionId: classSession.id, batchId: classSession.batchId }).exec();
+      const lastSeq = state?.lastOperationSeq ?? 0;
+      if (lastSeq >= operation.operationSeq) {
+        // A replay must not claim a newer revision the client has not received.
+        return { operationId, operationSeq: operation.operationSeq, createdAt: operation.createdAt, idempotentReplay: true };
+      }
+      if (lastSeq !== operation.operationSeq - 1) throw new ConflictException('An earlier board operation must be synchronized first.');
+      const snapshot = this.applyWhiteboardCommandToSnapshot(this.cloneWhiteboardSnapshot(state?.currentSnapshot, command.type === 'page-upsert' ? command.page.id : command.pageId), command);
+      if (command.type === 'upsert' || command.type === 'page-upsert' || command.type === 'page-select') {
+        try {
+          assertWhiteboardSnapshotWithinLimits(snapshot);
+        } catch (error) {
+          // A concurrent HTTP save can exhaust capacity after the preflight above.
+          // This operation has not reached the snapshot; release its reserved sequence
+          // so a rejected edit cannot block subsequent deletions or valid commands.
+          await this.whiteboardOperations.deleteOne({ sessionId: classSession.id, operationId, operationSeq: operation.operationSeq });
+          throw error;
         }
+      }
+      const pages = this.whiteboardSnapshotPageMeta(snapshot);
+      const snapshotVersion = (state?.snapshotVersion ?? 0) + 1;
+      const filter = {
+        sessionId: classSession.id, batchId: classSession.batchId,
+        ...(state ? { snapshotVersion: state.snapshotVersion, ...(lastSeq === 0 ? { $or: [{ lastOperationSeq: 0 }, { lastOperationSeq: { $exists: false } }] } : { lastOperationSeq: lastSeq }) } : { snapshotVersion: { $exists: false } })
+      };
+      let saved;
+      try {
+        saved = await this.whiteboardStates.findOneAndUpdate(filter, {
+          $set: {
+            sessionId: classSession.id, batchId: classSession.batchId, roomId: classSession.roomId,
+            whiteboardChannelId: classSession.whiteboardChannelId, schemaVersion: 1, snapshotVersion,
+            currentSnapshot: snapshot as unknown as Record<string, unknown>, pages, pageCount: pages.length,
+            elementCount: pages.reduce((total, page) => total + page.elementCount, 0), lastOperationSeq: operation.operationSeq,
+            lastOperationId: operationId, operationCount: operation.operationSeq, updatedByUserId: actor.userId
+          }, $setOnInsert: { createdByUserId: actor.userId }
+        }, { upsert: !state, new: true });
+      } catch (error) {
+        if ((error as { code?: number })?.code === 11000) continue;
         throw error;
       }
+      if (!saved) continue;
+      // A repaired replay was never acknowledged; fan it out exactly like a new operation.
+      return { operationId, operationSeq: operation.operationSeq, snapshotVersion, createdAt: operation.createdAt, ...(recoveredEvents.length ? { recoveredEvents } : {}) };
     }
-    throw new ConflictException('Whiteboard operation could not be persisted. Please retry.');
+    throw new ConflictException('Whiteboard changed while applying this operation. Retry the same operation id.');
   }
 
   private isTeacherChatParticipant(participant: ParticipantMongoDocument): boolean {
@@ -5490,6 +5626,13 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async refreshWhiteboard(roomId: string, actorParticipantId: string): Promise<WhiteboardRealtimeDelivery<{ roomId: string; participantId: string }>> {
+    await this.nodeRegistry.assertLocalRoomOwner(roomId);
+    await this.requireLiveClassSessionForRoom(roomId);
+    const actor = await this.assertModerator(roomId, actorParticipantId, false);
+    return { event: { roomId, participantId: actor.id }, targets: await this.whiteboardRealtimeTargets(roomId, actor) };
+  }
+
   async sendWhiteboardCommand(
     roomId: string,
     actorParticipantId: string,
@@ -5508,6 +5651,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       displayName: actor.displayName,
       operationId: persisted.operationId,
       operationSeq: persisted.operationSeq,
+      snapshotVersion: persisted.snapshotVersion,
       createdAt: persisted.createdAt.toISOString(),
       ...(persisted.idempotentReplay ? { idempotentReplay: true } : {}),
       command: normalizedCommand
@@ -5515,6 +5659,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     return {
       event,
       targets: persisted.idempotentReplay ? [] : await this.whiteboardRealtimeTargets(roomId, actor),
+      recoveredEvents: persisted.recoveredEvents,
       ...(persisted.idempotentReplay ? { idempotentReplay: true } : {})
     };
   }
@@ -5553,7 +5698,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       return undefined;
     }
     const participant = await this.participants.findOne({ _id: participantId, roomId, admitted: true, leftAt: { $exists: false } });
-    if (!participant || participant.role !== Role.PARTICIPANT || participant.userId !== state.userId) {
+    const moderator = participant?.role === Role.HOST || participant?.role === Role.CO_HOST;
+    if (!participant || (!moderator && (participant.role !== Role.PARTICIPANT || participant.userId !== state.userId))) {
       return undefined;
     }
     let classSession: ClassSessionMongoDocument;
@@ -5563,16 +5709,18 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       this.whiteboardControlByRoomId.delete(roomId);
       return undefined;
     }
-    if (state.participantId !== participant.id) {
-      this.whiteboardControlByRoomId.set(roomId, { ...state, participantId: participant.id, displayName: participant.displayName });
+    const controller = moderator ? await this.activeParticipantForWhiteboardState(roomId, state) : participant;
+    if (!controller) return undefined;
+    if (state.participantId !== controller.id) {
+      this.whiteboardControlByRoomId.set(roomId, { ...state, participantId: controller.id, displayName: controller.displayName });
     }
     return {
       event: {
         sessionId: classSession.id,
         batchId: classSession.batchId,
         roomId,
-        participantId: participant.id,
-        displayName: participant.displayName,
+        participantId: controller.id,
+        displayName: controller.displayName,
         granted: true,
         permissionLevel: state.permissionLevel,
         ...(state.pageId ? { pageId: state.pageId } : {}),
@@ -5580,7 +5728,9 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         grantedByParticipantId: state.grantedByParticipantId,
         message: 'Whiteboard control restored.'
       },
-      targets: await this.participantSocketTargets(roomId, [participant])
+      targets: moderator
+        ? await this.participantSocketTargets(roomId, [participant])
+        : await this.whiteboardControlTargets(roomId, controller)
     };
   }
 
@@ -7624,9 +7774,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
         ...CLASS_SESSION_STUDENT_PERMISSIONS,
         canPublishAudio: liveSettings.media.allowStudentsToUnmuteSelf,
         canPublishVideo: liveSettings.media.allowStudentsToStartCameraSelf,
-        canShareScreen:
-          liveSettings.studentScreenShare.studentScreenShareEnabled &&
-          !liveSettings.studentScreenShare.studentScreenShareRequiresApproval,
+        // A class participant always needs an explicit teacher grant, including legacy auto-approval settings.
+        canShareScreen: false,
         canChat: liveSettings.chat.privateTeacherStudentChatEnabled || liveSettings.chat.teacherBroadcastEnabled
       }
     };
@@ -7646,7 +7795,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       notifications: { ...SYSTEM_LIVE_CLASS_SETTINGS.notifications, ...settings?.notifications },
       questionQueue: { ...SYSTEM_LIVE_CLASS_SETTINGS.questionQueue, ...settings?.questionQueue },
       recordingRetention: { ...SYSTEM_LIVE_CLASS_SETTINGS.recordingRetention, ...settings?.recordingRetention },
-      studentScreenShare: { ...SYSTEM_LIVE_CLASS_SETTINGS.studentScreenShare, ...settings?.studentScreenShare },
+      studentScreenShare: { ...SYSTEM_LIVE_CLASS_SETTINGS.studentScreenShare, ...settings?.studentScreenShare, studentScreenShareRequiresApproval: true },
       advancedAnalytics: { ...SYSTEM_LIVE_CLASS_SETTINGS.advancedAnalytics, ...settings?.advancedAnalytics },
       inactiveDetection: { ...SYSTEM_LIVE_CLASS_SETTINGS.inactiveDetection, ...settings?.inactiveDetection },
       bandwidthPolicy: { ...SYSTEM_LIVE_CLASS_SETTINGS.bandwidthPolicy, ...settings?.bandwidthPolicy },
@@ -7670,13 +7819,18 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     if (!settings.studentScreenShareEnabled) {
       throw new ForbiddenException('Student screen sharing is disabled for this class.');
     }
-    if (settings.studentScreenShareRequiresApproval && !permission.canShareScreen) {
+    if (!permission.canShareScreen) {
       throw new ForbiddenException('Screen sharing requires teacher approval.');
     }
     const activeStudentShares = await this.activeStudentScreenShareCount(session.roomId ?? participant.roomId, participant.id);
     if (activeStudentShares >= settings.maxActiveStudentShares) {
       throw new ConflictException('The active student screen share limit has been reached.');
     }
+  }
+
+  private async assertClassroomDeviceShareAvailable(roomId: string, participantId: string): Promise<void> {
+    const existing = await this.producers.exists({ roomId, participantId: { $ne: participantId }, kind: 'screen', source: { $ne: 'whiteboard' }, status: { $ne: 'closed' } });
+    if (existing) throw new ConflictException('Another device whiteboard is being shared. Ask the teacher to stop it first.');
   }
 
   private async activeStudentScreenShareCount(roomId: string, excludingParticipantId: string): Promise<number> {
@@ -7706,8 +7860,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
     room: RoomMongoDocument,
     participant: ParticipantMongoDocument,
     entitlements: { role: Role; permissions: Permissions }
-  ): Promise<void> {
-    const participantUpdate: Partial<ParticipantDocument> = {};
+  ): Promise<string[]> {
+    const participantUpdate: Partial<ParticipantDocument> = entitlements.role === Role.PARTICIPANT ? { screenShareRequested: false } : {};
     if (participant.role !== entitlements.role) {
       participantUpdate.role = entitlements.role;
     }
@@ -7718,7 +7872,7 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       participantUpdate.videoEnabled = entitlements.permissions.canPublishVideo;
     }
     if (Object.keys(participantUpdate).length) {
-      await this.participants.updateOne({ _id: participant.id, roomId: room.id }, { $set: participantUpdate });
+      await this.participants.updateOne({ _id: participant.id, roomId: room.id }, { $set: participantUpdate, ...(entitlements.role === Role.PARTICIPANT ? { $unset: { screenShareRequestedAt: '' } } : {}) });
     }
     await this.permissions.updateOne(
       { roomId: room.id, participantId: participant.id },
@@ -7729,6 +7883,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       await this.rooms.updateOne({ _id: room.id }, { $set: { hostId: participant.id } });
       room.hostId = participant.id;
     }
+    // A rejoined student must ask again; close an old tab's presentation as well.
+    return entitlements.role === Role.PARTICIPANT ? this.closeExistingParticipantScreenProducers(room.id, participant.id) : [];
   }
 
   private isAdminSocketUser(user: SocketUser): boolean {
@@ -8512,6 +8668,8 @@ export class RoomsService implements OnModuleInit, OnModuleDestroy {
       videoEnabled: doc.videoEnabled,
       screenSharing: doc.screenSharing,
       handRaised: doc.handRaised,
+      screenShareRequested: Boolean(doc.screenShareRequested),
+      ...(doc.screenShareRequested && doc.screenShareRequestedAt ? { screenShareRequestedAt: doc.screenShareRequestedAt.toISOString() } : {}),
       ...(doc.handRaisedAt ? { handRaisedAt: doc.handRaisedAt.toISOString() } : {}),
       allowedToSpeak: doc.allowedToSpeak,
       ...(doc.allowedToSpeakAt ? { allowedToSpeakAt: doc.allowedToSpeakAt.toISOString() } : {}),

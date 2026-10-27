@@ -592,12 +592,7 @@
               <small [class.override]="liveSettingOverridden('studentScreenShareEnabled')">{{ liveSettingInheritanceLabel('studentScreenShareEnabled') }}</small>
               <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('studentScreenShareEnabled')" (click)="resetLiveSettingField('studentScreenShareEnabled', $event)">Inherit</button>
             </label>
-            <label class="toggle-row">
-              <input type="checkbox" [checked]="liveSettingsForm().studentScreenShareRequiresApproval" (change)="updateLiveSettingsForm('studentScreenShareRequiresApproval', checkedValue($event))" />
-              <span>Require share approval</span>
-              <small [class.override]="liveSettingOverridden('studentScreenShareRequiresApproval')">{{ liveSettingInheritanceLabel('studentScreenShareRequiresApproval') }}</small>
-              <button type="button" class="inherit-button" [disabled]="!liveSettingOverridden('studentScreenShareRequiresApproval')" (click)="resetLiveSettingField('studentScreenShareRequiresApproval', $event)">Inherit</button>
-            </label>
+            <p>Teacher approval is always required before a student can share a device whiteboard or screen.</p>
             <label class="number-row">
               <span>Active student shares</span>
               <input type="number" min="1" max="4" [value]="liveSettingsForm().maxActiveStudentShares" (input)="updateLiveSettingsForm('maxActiveStudentShares', numberValue($event, liveSettingsForm().maxActiveStudentShares))" />

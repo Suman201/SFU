@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src data:; style-src 'self'; script-src 'self'"
+    />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Share lesson content</title>
+    <link rel="stylesheet" href="native.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Choose what to share</h1>
+      <p>
+        Only the screen or window you select will be shared with the classroom.
+      </p>
+      <div
+        id="sources"
+        class="sources"
+        aria-label="Available screens and windows"
+      ></div>
+      <label class="check"
+        ><input type="checkbox" id="audio" /> Include system audio when
+        supported</label
+      >
+      <footer>
+        <button id="cancel">Cancel</button
+        ><button id="share" class="primary" disabled>Share selected</button>
+      </footer>
+      <p id="error" role="alert"></p>
+    </main>
+    <script src="picker.js"></script>
+  </body>
+</html>

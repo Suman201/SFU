@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
   OnModuleDestroy,
-  OnModuleInit,
+  OnApplicationBootstrap,
   ServiceUnavailableException
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -152,7 +152,7 @@ const OWNER_RECONCILE_DELAY_MS = 250;
 const INGEST_CONFIGURED_SECRET_MASK = '[configured]';
 
 @Injectable()
-export class IngestService implements OnModuleInit, OnModuleDestroy {
+export class IngestService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(IngestService.name);
   private readonly enabled: boolean;
   private readonly runtimes = new Map<string, ManagedIngestRuntime>();
@@ -181,7 +181,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async onModuleInit(): Promise<void> {
+  async onApplicationBootstrap(): Promise<void> {
     await this.redis.consumeDurable<IngestCoordinationEnvelope>(
       INGEST_COORDINATION_STREAM,
       `ingest-coordination:${this.nodeRegistry.localNodeId()}`,

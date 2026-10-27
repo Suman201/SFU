@@ -39,7 +39,7 @@ describe('RoomSignalService', () => {
     const harness = createHarness('node-a');
     const listener = jest.fn();
     harness.service.onSignal(listener);
-    await harness.service.onModuleInit();
+    await harness.service.onApplicationBootstrap();
 
     await harness.deliver({
       eventId: 'event-1',
@@ -57,7 +57,7 @@ describe('RoomSignalService', () => {
     const harness = createHarness('node-b', { dedupeAccepted: false });
     const listener = jest.fn();
     harness.service.onSignal(listener);
-    await harness.service.onModuleInit();
+    await harness.service.onApplicationBootstrap();
 
     await harness.deliver({
       eventId: 'event-2',
@@ -75,7 +75,7 @@ describe('RoomSignalService', () => {
     const harness = createHarness('node-b');
     const listener = jest.fn();
     harness.service.onSignal(listener);
-    await harness.service.onModuleInit();
+    await harness.service.onApplicationBootstrap();
 
     await harness.deliver(
       {

@@ -5,6 +5,7 @@ import {
   Ack as WsAck,
   ConnectedSocket,
   MessageBody,
+  OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
@@ -118,7 +119,7 @@ function uniqueNonEmpty(values: readonly (string | undefined)[]): string[] {
 @WebSocketGateway({
   namespace: '/sfu'
 })
-export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(RoomsGateway.name);
   private readonly connectionAttempts = new Map<string, { count: number; resetAt: number }>();
   private readonly eventAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -204,31 +205,36 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  afterInit(server: Server<ClientToServerEvents, ServerToClientEvents>): void {
+    // Socket.IO waits for namespace middleware before delivering `connect` or
+    // application events. Nest does not await an async handleConnection hook.
+    server.use((socket, next) => {
+      void this.authenticateSocket(socket).then(() => next()).catch((error) => {
+        this.logger.warn(`Socket auth failed requestId=${socket.data.requestId}: ${error instanceof Error ? error.message : String(error)}`);
+        next(new Error('Unauthenticated socket'));
+      });
+    });
+  }
+
   async handleConnection(socket: SfuSocket): Promise<void> {
+    if (socket.data.user) return; // Already authenticated by namespace middleware.
+    try {
+      await this.authenticateSocket(socket);
+    } catch {
+      socket.disconnect(true);
+    }
+  }
+
+  private async authenticateSocket(socket: SfuSocket): Promise<void> {
     socket.data.requestId = randomUUID();
     if (this.isConnectionThrottled(socket)) {
-      this.logger.warn(`Socket connection throttled requestId=${socket.data.requestId}`);
-      socket.disconnect(true);
-      return;
+      throw new Error('Socket connection throttled');
     }
     const token = this.extractToken(socket);
-    if (!token) {
-      this.logger.warn(`Socket missing bearer token requestId=${socket.data.requestId}`);
-      socket.disconnect(true);
-      return;
-    }
-    try {
-      const payload = await this.auth.verifyAccessToken(token);
-      socket.data.user = {
-        id: payload.sub,
-        email: payload.email,
-        roles: payload.roles
-      };
-      this.installSocketRateLimiter(socket);
-    } catch (error) {
-      this.logger.warn(`Socket auth failed requestId=${socket.data.requestId}: ${error instanceof Error ? error.message : String(error)}`);
-      socket.disconnect(true);
-    }
+    if (!token) throw new Error('Socket missing bearer token');
+    const payload = await this.auth.verifyAccessToken(token);
+    socket.data.user = { id: payload.sub, email: payload.email, roles: payload.roles };
+    this.installSocketRateLimiter(socket);
   }
 
   async handleDisconnect(socket: SfuSocket): Promise<void> {
@@ -283,7 +289,8 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('room:join')
   joinRoom(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: JoinRoomRequest, @WsAck() ack: SocketAck<JoinRoomResponse>): Promise<void> {
     return socketAck(ack, async () => {
-      const response = await this.rooms.joinRoom(this.requireUser(socket), socket.id, request);
+      const { closedProducerIds = [], ...response } = await this.rooms.joinRoom(this.requireUser(socket), socket.id, request);
+      for (const producerId of closedProducerIds) await this.emitRoomEvent(request.roomId, 'producer:closed', producerId);
       socket.data.roomId = request.roomId;
       socket.data.participantId = response.participantId;
       if (response.admitted) {
@@ -616,8 +623,10 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('permission:update')
   updatePermission(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: Parameters<ClientToServerEvents['permission:update']>[0], @WsAck() ack: SocketAck<void>): Promise<void> {
     return socketAck(ack, async () => {
-      const permissions = await this.rooms.updatePermissions(request.roomId, this.requireParticipant(socket), request.participantId, request.permissions);
+      const { closedProducerIds = [], participantPatch, ...permissions } = await this.rooms.updatePermissions(request.roomId, this.requireParticipant(socket), request.participantId, request.permissions);
       await this.emitRoomEvent(request.roomId, 'permissions:updated', request.participantId, permissions);
+      for (const producerId of closedProducerIds) await this.emitRoomEvent(request.roomId, 'producer:closed', producerId);
+      if (participantPatch) await this.emitRoomEvent(request.roomId, 'participant:updated', request.participantId, participantPatch);
     });
   }
 
@@ -757,6 +766,19 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  @SubscribeMessage('whiteboard:refresh')
+  refreshWhiteboard(
+    @ConnectedSocket() socket: SfuSocket,
+    @MessageBody() request: { roomId: string },
+    @WsAck() ack: SocketAck<{ roomId: string; participantId: string }>
+  ): Promise<void> {
+    return socketAck(ack, async () => {
+      const delivery = await this.rooms.refreshWhiteboard(request.roomId, this.requireParticipant(socket));
+      await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:refresh', delivery.event);
+      return delivery.event;
+    });
+  }
+
   @SubscribeMessage('whiteboard:command')
   sendWhiteboardCommand(
     @ConnectedSocket() socket: SfuSocket,
@@ -771,6 +793,9 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         request.operationId,
         request.baseSnapshotVersion
       );
+      for (const recovered of delivery.recoveredEvents ?? []) {
+        await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:command', recovered);
+      }
       if (!delivery.idempotentReplay) {
         await this.emitTargetedRoomEvent(request.roomId, delivery.targets, 'whiteboard:command', delivery.event);
       }
@@ -825,6 +850,16 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WsAck() ack: SocketAck<StudentMediaModerationEvent>
   ): Promise<void> {
     return this.moderateStudentMedia(socket, request, 'restore-camera', ack);
+  }
+
+  @SubscribeMessage('screen:request')
+  requestScreenShare(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: Parameters<ClientToServerEvents['screen:request']>[0], @WsAck() ack: SocketAck<ParticipantPatch>): Promise<void> {
+    return socketAck(ack, async () => {
+      const participantId = this.requireParticipant(socket);
+      const patch = await this.rooms.requestScreenShare(request.roomId, participantId, request.requested);
+      await this.emitRoomEvent(request.roomId, 'participant:updated', participantId, patch);
+      return patch;
+    });
   }
 
   @SubscribeMessage('screen:start')
@@ -1214,6 +1249,11 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (bucket === 'media') {
       return this.config?.get<number>('security.socketMediaRateLimitMax', 240) ?? 240;
     }
+    if (bucket === 'whiteboard') {
+      // A transform and its undo can each emit one command for all 2,500 objects.
+      // Keep board edits separate from moderation and frequent cursor packets.
+      return this.config?.get<number>('security.socketWhiteboardRateLimitMax', 6000) ?? 6000;
+    }
     if (bucket === 'realtime') {
       return this.config?.get<number>('security.socketRealtimeRateLimitMax', 1200) ?? 1200;
     }
@@ -1243,9 +1283,10 @@ export class RoomsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 }
 
-type SocketRateBucket = 'default' | 'join' | 'media' | 'realtime';
+type SocketRateBucket = 'default' | 'join' | 'media' | 'realtime' | 'whiteboard';
 
 function socketRateBucket(event: string): SocketRateBucket {
+  if (event === 'whiteboard:command') return 'whiteboard';
   if (event === 'room:create' || event === 'room:join' || event === 'session:watch') {
     return 'join';
   }

@@ -1,3 +1,5 @@
+import type { WhiteboardMemoryPage } from './whiteboard-memory';
+
 export interface WhiteboardPoint {
   x: number;
   y: number;
@@ -25,8 +27,12 @@ export interface WhiteboardCursor {
 }
 
 export type WhiteboardCommand =
+  | { type: 'page-upsert'; page: Omit<WhiteboardMemoryPage, 'elements'>; pageId?: string }
+  | { type: 'page-delete'; pageId: string }
+  | { type: 'page-select'; pageId: string }
   | {
       type: 'upsert';
+      elementIndex?: number;
       element: WhiteboardElement;
       pageId?: string;
     }

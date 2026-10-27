@@ -718,7 +718,7 @@ export class ClassSessionService {
   private unwrapResponse<T>(response: T | ApiEnvelope<T>): T {
     if (response && typeof response === 'object' && 'data' in response) {
       const data = (response as ApiEnvelope<T>).data;
-      if (data !== undefined && data !== null) {
+      if (data !== undefined) {
         return data;
       }
     }

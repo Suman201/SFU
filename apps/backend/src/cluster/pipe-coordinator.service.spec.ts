@@ -444,8 +444,8 @@ describe('PipeCoordinatorService', () => {
     const owner = createHarness('node-a', { media: ownerMedia, advertiseIp: '' });
     const remote = createHarness('node-b', { media: remoteMedia, advertiseIp: '' });
 
-    await owner.service.onModuleInit();
-    await remote.service.onModuleInit();
+    await owner.service.onApplicationBootstrap();
+    await remote.service.onApplicationBootstrap();
 
     const ownerCommandHandler = durableHandler(owner.redis, 'pipe-coordinator:commands:node-a');
     const ownerAckHandler = durableHandler(owner.redis, 'pipe-coordinator:acks:node-a');

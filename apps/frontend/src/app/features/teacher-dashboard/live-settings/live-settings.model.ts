@@ -171,7 +171,7 @@ export const EMPTY_LIVE_SETTINGS_FORM: LiveSettingsForm = {
   allowTeacherPublishRecording: false,
   allowStudentsDownloadRecording: true,
   autoArchiveExpiredRecordings: true,
-  studentScreenShareEnabled: false,
+  studentScreenShareEnabled: true,
   studentScreenShareRequiresApproval: true,
   maxActiveStudentShares: 1,
   analyticsEnabled: true,
@@ -308,8 +308,7 @@ export const LIVE_SETTINGS_SECTIONS: readonly LiveSettingsSection[] = [
       field('allowStudentUpvotes', 'questionQueue', 'allowStudentUpvotes', 'Student upvotes', 'Students can upvote questions.', 'toggle'),
       field('teacherCanMarkAnswered', 'questionQueue', 'teacherCanMarkAnswered', 'Mark answered', 'Teacher can mark questions as answered.', 'toggle'),
       field('maxOpenQuestionsPerStudent', 'questionQueue', 'maxOpenQuestionsPerStudent', 'Max open questions', 'Maximum unanswered questions per student.', 'number', { min: 1, max: 20 }),
-      field('studentScreenShareEnabled', 'studentScreenShare', 'studentScreenShareEnabled', 'Student screen share', 'Allow students to share their screen.', 'toggle'),
-      field('studentScreenShareRequiresApproval', 'studentScreenShare', 'studentScreenShareRequiresApproval', 'Require share approval', 'Teacher must approve student screen share.', 'toggle'),
+      field('studentScreenShareEnabled', 'studentScreenShare', 'studentScreenShareEnabled', 'Student screen share', 'Students can request to share a device whiteboard or screen. Teacher approval is always required.', 'toggle'),
       field('maxActiveStudentShares', 'studentScreenShare', 'maxActiveStudentShares', 'Max student shares', 'Maximum active student screen shares.', 'number', { min: 1, max: 5 })
     ]
   },
@@ -428,7 +427,7 @@ export function liveSettingsFormFromSettings(settings: LiveClassSettings): LiveS
     allowStudentsDownloadRecording: settings.recordingRetention.allowStudentsDownloadRecording,
     autoArchiveExpiredRecordings: settings.recordingRetention.autoArchiveExpiredRecordings,
     studentScreenShareEnabled: settings.studentScreenShare.studentScreenShareEnabled,
-    studentScreenShareRequiresApproval: settings.studentScreenShare.studentScreenShareRequiresApproval,
+    studentScreenShareRequiresApproval: true,
     maxActiveStudentShares: settings.studentScreenShare.maxActiveStudentShares,
     analyticsEnabled: settings.advancedAnalytics.analyticsEnabled,
     trackEngagementEvents: settings.advancedAnalytics.trackEngagementEvents,

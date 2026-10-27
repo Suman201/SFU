@@ -1743,10 +1743,14 @@ h1 {
   display: flex;
   align-items: center;
   gap: 7px;
-  min-width: 0;
+  min-width: min(140px, 40%);
   flex: 1;
   overflow-x: auto;
   scrollbar-width: thin;
+}
+
+.page-tab-list > button {
+  flex: 0 0 auto;
 }
 
 .page-empty-state {
@@ -1764,8 +1768,14 @@ h1 {
   display: flex;
   align-items: center;
   gap: 7px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.page-tools > * {
+  flex-shrink: 0;
 }
 
 .page-tabs button {
@@ -3442,4 +3452,42 @@ h1 {
     width: 100%;
     border-radius: 16px;
   }
+}
+
+// Keep pen settings independently reachable with touch and keyboard.
+.pen-group-container,
+.shape-group-container {
+  flex-direction: column;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.whiteboard-pane button:focus-visible {
+  outline: 2px solid var(--wb-primary);
+  outline-offset: 2px;
+}
+
+.tool-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.menu-help {
+  margin: 6px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 900px) {
+  .pen-group-container,
+  .shape-group-container {
+    flex-direction: row;
+  }
+}
+
+// Keep the open menu's own toggle reachable above its dismiss backdrop.
+.whiteboard-toolbar button[aria-expanded='true'] {
+  position: relative;
+  z-index: 81;
 }

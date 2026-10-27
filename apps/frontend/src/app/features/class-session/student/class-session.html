@@ -1,3 +1,6 @@
+@if (recoveredWhiteboardChanges()) {
+  <div class="student-recovery-notice" role="status"><span>{{ recoveredWhiteboardChanges() }} unsynchronized board changes saved on this device.</span><button type="button" [disabled]="studentWhiteboardReadOnly() || retryingWhiteboardChanges()" (click)="retryRecoveredStrokes()">Retry saved writing</button><button type="button" (click)="discardRecoveredStrokes()">Discard</button></div>
+}
 @if (loading()) {
   <main class="student-session-state">
     <h1>Checking class status</h1>
@@ -7,8 +10,8 @@
   <main class="student-session-state">
     <h1>Class unavailable</h1>
     <p>{{ error() }}</p>
-    <a class="button secondary" routerLink="/student/support" [queryParams]="{ issueType: 'access', subject: 'Class access issue' }">Get help</a>
-    <a class="button primary" routerLink="/student/dashboard">Back to dashboard</a>
+    <a class="button secondary" [routerLink]="desktopSession ? '/desktop/settings' : '/student/support'" [queryParams]="{ issueType: 'access', subject: 'Class access issue' }">Get help</a>
+    <a class="button primary" [routerLink]="desktopSession ? '/desktop/upcoming' : '/student/dashboard'">{{ desktopSession ? 'Back to classes' : 'Back to dashboard' }}</a>
   </main>
 } @else if (!sessionLive()) {
   <main class="student-session-state">
@@ -46,7 +49,7 @@
     @if (session(); as waitingSession) {
       <a
         class="button secondary"
-        routerLink="/student/support"
+        [routerLink]="desktopSession ? '/desktop/settings' : '/student/support'"
         [queryParams]="{
           issueType: waitingSession.status === 'completed' ? 'recording_access' : 'access',
           batchId: waitingSession.batchId,
@@ -58,11 +61,16 @@
         Get help
       </a>
     }
-    <a class="button primary" routerLink="/student/dashboard">Back to dashboard</a>
+    <a class="button primary" [routerLink]="desktopSession ? '/desktop/upcoming' : '/student/dashboard'">{{ desktopSession ? 'Back to classes' : 'Back to dashboard' }}</a>
   </main>
 } @else {
 <main class="student-session-shell" [class.has-pip]="pipProducer()" [class.prejoin-open]="!roomJoined()">
   <section class="video-stage" aria-label="Class video">
+  @if (roomJoined()) {
+    <div class="student-whiteboard-source">
+      <sfu-whiteboard-source [source]="whiteboardSourceChoice()" [student]="true" [disabled]="!deviceSharingConnected()" [busy]="deviceShareBusy()" [sharing]="deviceSharing()" [canShare]="canShareDevice()" [requestPending]="deviceShareRequested()" [presenter]="devicePresenterName()" [notice]="deviceShareNotice()" (sourceChange)="selectWhiteboardSource($event)" (share)="shareDeviceWhiteboard()" (stop)="stopDeviceShare()" (request)="requestDeviceSharing()" (cancelRequest)="requestDeviceSharing(false)" />
+    </div>
+  }
     <div class="video-frame" [class.screen-mode]="hasScreenShare()" [class.empty]="!stageStream()">
       @if (teacherReconnecting()) {
         <div class="teacher-reconnect-banner" role="status">
@@ -77,7 +85,7 @@
         </div>
       }
       @if (stageStream(); as stream) {
-        <video class="stage-video" autoplay muted playsinline [sfuMediaStream]="stream" (playbackBlocked)="handleTeacherVideoPlaybackBlocked($event)"></video>
+        <video aria-label="Classroom presentation" class="stage-video" autoplay [muted]="true" playsinline [sfuMediaStream]="stream" (playbackBlocked)="handleTeacherVideoPlaybackBlocked($event)"></video>
       } @else {
         <div class="video-placeholder" aria-live="polite">
           <span class="speaker-avatar large">{{ stageInitials() }}</span>
@@ -96,7 +104,7 @@
       @if (pipProducer()) {
         <aside class="teacher-pip" aria-label="Teacher camera">
           @if (pipStream(); as stream) {
-            <video autoplay muted playsinline [sfuMediaStream]="stream" (playbackBlocked)="handleTeacherVideoPlaybackBlocked($event)"></video>
+            <video autoplay [muted]="true" playsinline [sfuMediaStream]="stream" (playbackBlocked)="handleTeacherVideoPlaybackBlocked($event)"></video>
           } @else {
             <div class="pip-placeholder">
               <span class="speaker-avatar">{{ stageInitials() }}</span>
@@ -124,6 +132,7 @@
             <h1 id="student-prejoin-title">Ready to join?</h1>
           </div>
           <div class="prejoin-status-group">
+            <sfu-device-setup-dialog [previewStream]="localStream()" [error]="deviceError()" (microphoneSelected)="switchMicrophone($event)" (cameraSelected)="switchCamera($event)" />
             @if (recordingStatusLabel()) {
               <span class="student-recording-badge compact" [class.live]="recordingActive()">
                 <span aria-hidden="true"></span>
@@ -136,7 +145,7 @@
 
         <div class="prejoin-preview" [class.camera-off]="!localVideoPreviewStream()">
           @if (localVideoPreviewStream(); as stream) {
-            <video autoplay muted playsinline [sfuMediaStream]="stream"></video>
+            <video autoplay [muted]="true" playsinline [sfuMediaStream]="stream"></video>
           } @else {
             <div class="prejoin-preview-placeholder">
               <span class="speaker-avatar large">{{ studentInitials() }}</span>
@@ -355,6 +364,8 @@
       <span class="hand-icon" aria-hidden="true"></span>
       {{ handRaiseLabel() }}
     </button>
+    <sfu-device-setup-dialog [previewStream]="localStream()" [error]="deviceError()" (microphoneSelected)="switchMicrophone($event)" (cameraSelected)="switchCamera($event)" />
+    <sfu-classroom-connection-tools />
     <span class="local-media-status" aria-live="polite">{{ localMediaStatus() }}</span>
     <span class="speaking-permission-status" [class.waiting]="handRaised()" [class.allowed]="allowedToSpeak()" aria-live="polite">
       {{ speakingPermissionLabel() }}
@@ -379,6 +390,7 @@
   }
 
   @if (roomJoined()) {
+  <button class="student-support-button" type="button" (click)="leaveClassroom()">Leave class</button>
   @if (whiteboardAvailable()) {
     <button
       class="student-whiteboard-button"
@@ -408,7 +420,7 @@
   @if (session(); as activeSession) {
     <a
       class="student-support-button"
-      routerLink="/student/support"
+      [routerLink]="desktopSession ? '/desktop/settings' : '/student/support'"
       [queryParams]="{
         issueType: 'audio_video',
         batchId: activeSession.batchId,
@@ -502,6 +514,7 @@
         [allowClear]="false"
         [cursors]="whiteboardCursors()"
         (commandCommitted)="handleStudentWhiteboardCommand($event)"
+        (stateChanged)="handleStudentWhiteboardStateChanged()"
         (cursorMoved)="handleStudentWhiteboardCursor($event)"
       />
     </aside>

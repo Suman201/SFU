@@ -282,6 +282,21 @@ export class RecordingsService {
     return this.stopClassSessionRecordingDocument(recording, session, batch, actor, 'manual_stop');
   }
 
+  async failClassSessionCapture(sessionId: string, recordingId: string, actor: AuthenticatedUser): Promise<Recording> {
+    const session = await this.classSessions.findById(sessionId);
+    if (!session) throw new NotFoundException('Class session not found.');
+    const batch = await this.findBatch(session.batchId);
+    this.assertCanManageBatch(batch, actor);
+    const recording = await this.findClassSessionRecording(sessionId, recordingId);
+    if (!recording) throw new NotFoundException('Recording not found.');
+    if (recording.status === 'failed') return this.toRecording(recording);
+    const reason = 'Lesson recording could not start on the teacher device.';
+    const failed = await this.failRecording(recording, reason);
+    await this.appendClassSessionRecordingPlatformEvent('recording.failed', recording, batch, actor, reason);
+    await this.recordClassSessionRecordingActivity('recording.failed', recording, session, batch, actor, reason);
+    return failed;
+  }
+
   async stopActiveClassSessionRecording(input: {
     sessionId: string;
     actorUserId: string;
@@ -596,6 +611,7 @@ export class RecordingsService {
     }
     const recording = await this.findAdminRecording(recordingId);
     recording.retentionExpiresAt = expiresAt;
+    recording.mediaArchivePreserved = undefined;
     await recording.save();
     const hydration = await this.hydrateAdminRecording(recording);
     const engagement = await this.engagementForRecordings([recording], hydration.batch);
@@ -616,6 +632,7 @@ export class RecordingsService {
     this.assertAdmin(user);
     const recording = await this.findAdminRecording(recordingId);
     recording.retentionExpiresAt = new Date();
+    recording.mediaArchivePreserved = true;
     await recording.save();
     const hydration = await this.hydrateAdminRecording(recording);
     const engagement = await this.engagementForRecordings([recording], hydration.batch);

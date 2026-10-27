@@ -91,6 +91,7 @@ import type {
   WhiteboardMemoryVersionListResponse
 } from '@native-sfu/contracts';
 import { Model, type AnyBulkWriteOperation } from 'mongoose';
+import { assertWhiteboardSnapshotWithinLimits, WHITEBOARD_MEMORY_MAX_PAGES } from '../common/whiteboard-limits';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { ClassSessionActivityService } from '../class-session-activity/class-session-activity.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -153,9 +154,6 @@ const CLASS_MATERIAL_ALLOWED_MIME_TYPES = new Set([
   'text/plain'
 ]);
 const WHITEBOARD_MEMORY_SCHEMA_VERSION = 1;
-const WHITEBOARD_MEMORY_MAX_BYTES = 1_500_000;
-const WHITEBOARD_MEMORY_MAX_PAGES = 80;
-const WHITEBOARD_MEMORY_MAX_ELEMENTS = 2_500;
 const WHITEBOARD_MEMORY_MAX_VERSIONS = 25;
 const ASSIGNMENT_SUBMISSION_STATUS_KEYS: Array<keyof AssignmentSubmissionSummary> = [
   'assigned',
@@ -2163,7 +2161,22 @@ export class ClassSessionsService {
     const normalized = this.normalizeWhiteboardSnapshot(request.snapshot);
     const summary = this.whiteboardSnapshotSummary(normalized);
     const previous = await this.whiteboardStates.findOne({ sessionId: resolution.planned.id, batchId: resolution.batch.id });
-    const snapshotVersion = (previous?.snapshotVersion ?? 0) + 1;
+    const expectedSnapshotVersion = request.expectedSnapshotVersion ?? 0;
+    const expectedLastOperationSeq = request.expectedLastOperationSeq ?? 0;
+    if (
+      !Number.isSafeInteger(expectedSnapshotVersion) || expectedSnapshotVersion < 0 ||
+      !Number.isSafeInteger(expectedLastOperationSeq) || expectedLastOperationSeq < 0
+    ) {
+      throw new BadRequestException('Whiteboard save versions must be non-negative integers.');
+    }
+    if (
+      (previous && (request.expectedSnapshotVersion === undefined || request.expectedLastOperationSeq === undefined)) ||
+      expectedSnapshotVersion !== (previous?.snapshotVersion ?? 0) ||
+      expectedLastOperationSeq !== (previous?.lastOperationSeq ?? 0)
+    ) {
+      throw new ConflictException('The whiteboard changed since this snapshot was prepared. Reconcile the current board before saving again.');
+    }
+    const snapshotVersion = expectedSnapshotVersion + 1;
     const channelIds = classSessionChannelIds(resolution.planned.id);
     const roomId = resolution.persisted?.roomId ?? channelIds.roomId;
     const reason = this.normalizeWhiteboardSaveReason(request.reason ?? 'autosave');
@@ -2186,20 +2199,39 @@ export class ClassSessionsService {
         pages,
         pageCount: summary.pageCount,
         elementCount: summary.elementCount,
-        compactedThroughSeq: previous?.lastOperationSeq ?? previous?.compactedThroughSeq ?? 0,
+        compactedThroughSeq: expectedLastOperationSeq,
         updatedByUserId: user.sub
       },
       $setOnInsert: {
         createdByUserId: user.sub
       }
     };
-    const state = await this.whiteboardStates.findOneAndUpdate(
-      { sessionId: resolution.planned.id, batchId: resolution.batch.id },
-      update,
-      { new: true, upsert: true }
-    );
+    // Compare again in MongoDB: a command or another save may arrive after the read above.
+    // Only initial creation may upsert; a failed comparison must never create a replacement.
+    const filter = {
+      sessionId: resolution.planned.id,
+      batchId: resolution.batch.id,
+      ...(previous
+        ? {
+            snapshotVersion: expectedSnapshotVersion,
+            ...(expectedLastOperationSeq === 0
+              ? { $or: [{ lastOperationSeq: 0 }, { lastOperationSeq: { $exists: false } }] }
+              : { lastOperationSeq: expectedLastOperationSeq })
+          }
+        : { snapshotVersion: { $exists: false } })
+    };
+    let state: ClassSessionWhiteboardStateMongoDocument | null;
+    try {
+      state = await this.whiteboardStates.findOneAndUpdate(filter, update, { new: true, upsert: !previous });
+    } catch (error) {
+      // Two first writes can race on the unique sessionId index. The loser must reload.
+      if (typeof error === 'object' && error && 'code' in error && error.code === 11000) {
+        throw new ConflictException('The whiteboard changed while saving. Reconcile the current board before saving again.');
+      }
+      throw error;
+    }
     if (!state) {
-      throw new ConflictException('Whiteboard state could not be saved.');
+      throw new ConflictException('The whiteboard changed while saving. Reconcile the current board before saving again.');
     }
     if (request.createVersion || reason !== 'autosave') {
       const version = await this.createWhiteboardVersion(resolution, normalized, summary, snapshotVersion, reason, user.sub, roomId);
@@ -2220,6 +2252,8 @@ export class ClassSessionsService {
     const state = await this.saveWhiteboardMemory(sessionId, batchId ?? request.batchId, user, {
       batchId: request.batchId,
       snapshot: request.snapshot,
+      expectedSnapshotVersion: request.expectedSnapshotVersion,
+      expectedLastOperationSeq: request.expectedLastOperationSeq,
       reason: request.reason ?? 'manual-save',
       createVersion: true
     });
@@ -2266,6 +2300,8 @@ export class ClassSessionsService {
     return this.saveWhiteboardMemory(sessionId, batchId ?? request.batchId, user, {
       batchId: request.batchId,
       snapshot,
+      expectedSnapshotVersion: request.expectedSnapshotVersion,
+      expectedLastOperationSeq: request.expectedLastOperationSeq,
       reason: 'restore',
       createVersion: true
     });
@@ -2319,6 +2355,8 @@ export class ClassSessionsService {
     return this.saveWhiteboardMemory(sessionId, batchId ?? request.batchId, user, {
       batchId: request.batchId,
       snapshot,
+      expectedSnapshotVersion: request.expectedSnapshotVersion,
+      expectedLastOperationSeq: request.expectedLastOperationSeq,
       reason: 'restore',
       createVersion: true
     });
@@ -5379,14 +5417,7 @@ export class ClassSessionsService {
       activePageId,
       pages: normalizedPages
     };
-    const summary = this.whiteboardSnapshotSummary(normalized);
-    if (summary.elementCount > WHITEBOARD_MEMORY_MAX_ELEMENTS) {
-      throw new BadRequestException(`Whiteboard snapshot cannot exceed ${WHITEBOARD_MEMORY_MAX_ELEMENTS} elements.`);
-    }
-    const bytes = Buffer.byteLength(JSON.stringify(normalized), 'utf8');
-    if (bytes > WHITEBOARD_MEMORY_MAX_BYTES) {
-      throw new BadRequestException('Whiteboard snapshot is too large.');
-    }
+    assertWhiteboardSnapshotWithinLimits(normalized);
     return normalized;
   }
 

@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { ServerToClientEvents } from '@native-sfu/contracts';
 import { MetricsService } from '../metrics/metrics.service';
@@ -25,7 +25,7 @@ export interface RoomSignalTarget {
 }
 
 @Injectable()
-export class RoomSignalService implements OnModuleInit {
+export class RoomSignalService implements OnApplicationBootstrap {
   private readonly listeners = new Set<(envelope: RoomSignalEnvelope) => void>();
 
   constructor(
@@ -34,7 +34,7 @@ export class RoomSignalService implements OnModuleInit {
     private readonly metrics: MetricsService
   ) {}
 
-  async onModuleInit(): Promise<void> {
+  async onApplicationBootstrap(): Promise<void> {
     const consumerKey = `room-signals:${this.registry.localNodeId()}`;
     await this.redis.consumeDurable<RoomSignalEnvelope>(
       ROOM_SIGNAL_STREAM,

@@ -52,6 +52,7 @@ export const appConfig = () => ({
     socketJoinRateLimitMax: Number(process.env.SOCKET_JOIN_RATE_LIMIT_MAX ?? 30),
     socketMediaRateLimitMax: Number(process.env.SOCKET_MEDIA_RATE_LIMIT_MAX ?? 240),
     socketRealtimeRateLimitMax: Number(process.env.SOCKET_REALTIME_RATE_LIMIT_MAX ?? 1200),
+    socketWhiteboardRateLimitMax: Number(process.env.SOCKET_WHITEBOARD_RATE_LIMIT_MAX ?? 6000),
     socketMaxPayloadBytes: Number(process.env.SOCKET_MAX_PAYLOAD_BYTES ?? 1_048_576),
     operationsToken: envOrSecretFile('OPERATIONS_TOKEN')
   },

@@ -64,6 +64,20 @@ describe('SessionChat delivery state', () => {
     fixture.detectChanges();
   });
 
+  it('settles terminal cleanup without repeatedly rewriting unchanged message and attachment state', () => {
+    const component = fixture.componentInstance as any;
+    const messages = component.messages(); const attachments = component.pendingAttachments();
+    fixture.detectChanges(); fixture.detectChanges();
+    expect(component.messages()).toBe(messages);
+    expect(component.pendingAttachments()).toBe(attachments);
+    fixture.componentRef.setInput('live', true); fixture.detectChanges();
+    component.messages.set([{ id: 'pending', deliveryState: 'sending', createdAt: '2026-10-27T00:00:00.000Z', message: 'Draft', scope: 'private' }]);
+    fixture.componentRef.setInput('live', false); fixture.detectChanges();
+    expect(component.messages()[0].deliveryState).toBe('failed');
+    const finished = component.messages(); fixture.detectChanges();
+    expect(component.messages()).toBe(finished);
+  });
+
   it('renders Delivered and Read labels for authored private messages', () => {
     const component = fixture.componentInstance as unknown as {
       messages: { set(value: unknown[]): void };

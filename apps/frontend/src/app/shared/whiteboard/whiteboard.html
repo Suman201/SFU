@@ -2,7 +2,7 @@
   <div class="whiteboard-toolbar">
     <div class="board-actions" aria-label="Whiteboard tools">
       <div class="menu-group-container">
-        <button class="history-button" type="button" title="Menu" aria-label="Menu" (click)="toggleMenu($event)">
+        <button class="history-button" type="button" title="Menu" aria-label="Menu" [attr.aria-expanded]="menuOpen()" (click)="toggleMenu($event)">
           <svg width="800px" height="800px" viewBox="0 0 24 24" fill="none">
             <path d="M4 6H20M7 12H17M9 18H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round" />
@@ -12,7 +12,7 @@
         @if (menuOpen()) {
         <div class="shape-dropdown-overlay" (click)="menuOpen.set(false)"></div>
         <div class="menu-dropdown">
-          <button class="menu-item" type="button" [disabled]="!canUndo()" (click)="undo(); menuOpen.set(false)">
+          <button class="menu-item" type="button" [disabled]="readOnly() || !canUndo()" (click)="undo(); menuOpen.set(false)">
             <svg width="800px" height="800px" viewBox="0 0 24 24" fill="none">
               <path
                 d="M4 7H15C16.8692 7 17.8039 7 18.5 7.40193C18.9561 7.66523 19.3348 8.04394 19.5981 8.49999C20 9.19615 20 10.1308 20 12C20 13.8692 20 14.8038 19.5981 15.5C19.3348 15.9561 18.9561 16.3348 18.5 16.5981C17.8039 17 16.8692 17 15 17H8.00001M4 7L7 4M4 7L7 10"
@@ -20,7 +20,7 @@
             </svg>
             <span>Undo</span>
           </button>
-          <button class="menu-item" type="button" [disabled]="!canRedo()" (click)="redo(); menuOpen.set(false)">
+          <button class="menu-item" type="button" [disabled]="readOnly() || !canRedo()" (click)="redo(); menuOpen.set(false)">
             <svg width="800px" height="800px" viewBox="-0.5 0 25 25" fill="none">
               <path
                 d="M14 21.4199H9C7.14348 21.4199 5.36302 20.6824 4.05026 19.3696C2.73751 18.0569 2 16.2764 2 14.4199C2 12.5634 2.73751 10.783 4.05026 9.47021C5.36302 8.15746 7.14348 7.41992 9 7.41992H22"
@@ -32,11 +32,11 @@
           </button>
           <hr class="menu-divider">
           <button class="menu-item" type="button" (click)="resetView(); menuOpen.set(false)">
-            <span class="menu-icon reset-icon"></span>
+            <span class="menu-icon reset-icon" aria-hidden="true"></span>
             <span>Reset View ({{ zoomPercent() }})</span>
           </button>
           <button class="menu-item" type="button" (click)="zoomIn(); $event.stopPropagation()">
-            <!-- <span class="menu-icon zoom-in-icon">+</span> -->
+            <!-- <span class="menu-icon zoom-in-icon" aria-hidden="true">+</span> -->
             <svg width="800px" height="800px" viewBox="0 0 24 24" fill="none">
               <path opacity="0.15"
                 d="M10 17C13.866 17 17 13.866 17 10C17 6.13401 13.866 3 10 3C6.13401 3 3 6.13401 3 10C3 13.866 6.13401 17 10 17Z"
@@ -48,7 +48,7 @@
             <span>Zoom In</span>
           </button>
           <button class="menu-item" type="button" (click)="zoomOut(); $event.stopPropagation()">
-            <!-- <span class="menu-icon zoom-out-icon">-</span> -->
+            <!-- <span class="menu-icon zoom-out-icon" aria-hidden="true">-</span> -->
             <svg width="800px" height="800px" viewBox="0 0 24 24" fill="none">
               <path opacity="0.15"
                 d="M10 17C13.866 17 17 13.866 17 10C17 6.13401 13.866 3 10 3C6.13401 3 3 6.13401 3 10C3 13.866 6.13401 17 10 17Z"
@@ -63,79 +63,76 @@
             <span>Angle snap</span>
             <select [value]="angleSnapDegrees()" aria-label="Angle snap increment" (change)="setAngleSnapDegrees($event)">
               @for (option of angleSnapOptions; track option) {
-              <option [value]="option">{{ option === 0 ? 'Off' : option + '°' }}</option>
+              <option [value]="option" [selected]="option === angleSnapDegrees()">{{ option === 0 ? 'Off' : option + '°' }}</option>
               }
             </select>
           </label>
           <button class="menu-item" type="button" (click)="toggleMeasurements(); $event.stopPropagation()">
-            <span class="menu-icon measure-menu-icon"></span>
+            <span class="menu-icon measure-menu-icon" aria-hidden="true"></span>
             <span>{{ showMeasurements() ? 'Hide' : 'Show' }} measurements</span>
           </button>
           @if (allowPresentationMode()) {
           <button class="menu-item" type="button" [disabled]="readOnly()" (click)="enterPresentationMode(); menuOpen.set(false)">
-            <span class="menu-icon presentation-menu-icon"></span>
+            <span class="menu-icon presentation-menu-icon" aria-hidden="true"></span>
             <span>Presentation mode</span>
           </button>
           }
           <button class="menu-item" type="button" [disabled]="readOnly()" (click)="openMathTools(); menuOpen.set(false)">
-            <span class="menu-icon math-menu-icon"></span>
+            <span class="menu-icon math-menu-icon" aria-hidden="true"></span>
             <span>Math tools</span>
           </button>
           @if (allowSubjectTemplates()) {
           <button class="menu-item" type="button" [disabled]="readOnly()" (click)="openSubjectTemplates(); menuOpen.set(false)">
-            <span class="menu-icon subject-menu-icon"></span>
+            <span class="menu-icon subject-menu-icon" aria-hidden="true"></span>
             <span>Subject templates</span>
           </button>
           }
           <hr class="menu-divider">
           <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerFileImport(); menuOpen.set(false)">
-            <span class="menu-icon import-menu-icon"></span>
+            <span class="menu-icon import-menu-icon" aria-hidden="true"></span>
             <span>Import image/PDF object</span>
           </button>
           <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerBackgroundImport(); menuOpen.set(false)">
-            <span class="menu-icon background-menu-icon"></span>
+            <span class="menu-icon background-menu-icon" aria-hidden="true"></span>
             <span>{{ activePage().background ? 'Replace' : 'Add' }} page background</span>
           </button>
           <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerPdfPageImport(); menuOpen.set(false)">
-            <span class="menu-icon pdf-icon">PDF</span>
+            <span class="menu-icon pdf-icon" aria-hidden="true">PDF</span>
             <span>{{ assetImporting() ? 'Importing PDF...' : 'Import PDF pages' }}</span>
           </button>
           <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerSlideImageImport(); menuOpen.set(false)">
-            <span class="menu-icon slides-menu-icon"></span>
+            <span class="menu-icon slides-menu-icon" aria-hidden="true"></span>
             <span>{{ assetImporting() ? 'Importing slides...' : 'Import slide images' }}</span>
           </button>
-          <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="triggerDeckImport(); menuOpen.set(false)">
-            <span class="menu-icon slides-menu-icon"></span>
-            <span>{{ assetImporting() ? 'Preparing deck...' : 'Import PPT/PPTX deck' }}</span>
-          </button>
+          <p class="menu-help" role="note">PowerPoint files: export as PDF or slide images first, then use an import option above.</p>
           <button class="menu-item" type="button" [disabled]="!canImportAssets() || assetImporting()" (click)="fitAssetToPage(); menuOpen.set(false)">
-            <span class="menu-icon fit-menu-icon"></span>
+            <span class="menu-icon fit-menu-icon" aria-hidden="true"></span>
             <span>Fit asset to page</span>
           </button>
           <button class="menu-item" type="button" [disabled]="!canImportAssets() || !activePage().background || assetImporting()"
             (click)="resetPageBackground(); menuOpen.set(false)">
-            <span class="menu-icon reset-icon"></span>
+            <span class="menu-icon reset-icon" aria-hidden="true"></span>
             <span>Reset page background</span>
           </button>
           <hr class="menu-divider">
           <button class="menu-item" type="button" [disabled]="!canExportBoard()" (click)="exportPng(); menuOpen.set(false)">
-            <span class="menu-icon png-icon">PNG</span>
+            <span class="menu-icon png-icon" aria-hidden="true">PNG</span>
             <span>Export page PNG</span>
           </button>
           <label class="menu-select-row">
             <span>PDF export</span>
             <select [value]="pdfExportMode()" aria-label="PDF export mode" (change)="setPdfExportMode($event)">
               @for (option of pdfExportOptions; track option.id) {
-              <option [value]="option.id">{{ option.label }}</option>
+              <option [value]="option.id" [selected]="option.id === pdfExportMode()">{{ option.label }}</option>
               }
             </select>
           </label>
           <button class="menu-item" type="button" [disabled]="!canExportBoard()" (click)="exportPdf(); menuOpen.set(false)">
-            <span class="menu-icon pdf-icon">PDF</span>
+            <span class="menu-icon pdf-icon" aria-hidden="true">PDF</span>
             <span>Export page PDF</span>
           </button>
           <button class="menu-item" type="button" [disabled]="!canExportBoard()" (click)="exportAllPagesPdf(); menuOpen.set(false)">
-            <span class="menu-icon pdf-icon">PDF</span>
+            <span class="menu-icon pdf-icon" aria-hidden="true">PDF</span>
             <span>Export all pages</span>
           </button>
           <div class="export-pages-panel" aria-label="Select pages to export">
@@ -165,7 +162,7 @@
               [disabled]="!canExportSelectedPages()"
               (click)="exportSelectedPagesPdf(); menuOpen.set(false)"
             >
-              <span class="menu-icon pdf-icon">PDF</span>
+              <span class="menu-icon pdf-icon" aria-hidden="true">PDF</span>
               <span>Export selected pages</span>
             </button>
           </div>
@@ -176,8 +173,20 @@
       <span class="tool-divider" aria-hidden="true"></span>
 
       @if (!readOnly()) {
+      <button class="icon-button tool-button" type="button" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo"
+        [disabled]="!canUndo()" (click)="undo()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 4 3 9l5 5M3 9h11a6 6 0 0 1 0 12h-3" />
+        </svg>
+      </button>
+      <button class="icon-button tool-button" type="button" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo"
+        [disabled]="!canRedo()" (click)="redo()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m16 4 5 5-5 5M21 9H10a6 6 0 0 0 0 12h3" />
+        </svg>
+      </button>
       <button class="icon-button tool-button" [class.active]="activeTool() === 'select'" type="button"
-        title="Select and move" aria-label="Select and move" [attr.aria-pressed]="activeTool() === 'select'"
+        title="Select and move (Ctrl/Cmd+A selects all)" aria-label="Select and move" [attr.aria-pressed]="activeTool() === 'select'"
         [disabled]="!canUseTool('select')"
         (click)="selectTool('select')">
         <span class="tool-icon select-icon" aria-hidden="true"></span>
@@ -187,12 +196,19 @@
           [title]="'Pen: ' + activePenStyle()" [attr.aria-label]="'Pen: ' + activePenStyle()"
           [attr.aria-pressed]="activeTool() === 'pen'" [disabled]="!canUseTool('pen')" (click)="selectTool('pen')">
           <span class="tool-icon pen-icon" aria-hidden="true"></span>
-          <span class="chevron-icon" (click)="togglePenMenu($event)"></span>
+        </button>
+        <button class="icon-button tool-button pen-settings-button" type="button" title="Pen settings" aria-label="Pen settings"
+          [attr.aria-expanded]="penMenuOpen()" [class.active]="penMenuOpen()" [disabled]="!canUseTool('pen')"
+          (click)="togglePenMenu($event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <path d="M4 6h6m4 0h6M4 12h12m4 0h0M4 18h2m4 0h10" />
+            <circle cx="12" cy="6" r="2" /><circle cx="18" cy="12" r="2" /><circle cx="8" cy="18" r="2" />
+          </svg>
         </button>
 
         @if (penMenuOpen()) {
         <div class="shape-dropdown-overlay" (click)="penMenuOpen.set(false)"></div>
-        <div class="pen-dropdown">
+        <div class="pen-dropdown" role="group" aria-label="Pen settings">
           <div class="pen-style-grid" aria-label="Pen style">
             @for (option of penStyleOptions; track option.id) {
             <button type="button" [class.active]="activePenStyle() === option.id" [title]="option.description"
@@ -209,7 +225,7 @@
           <div class="brush-presets" aria-label="Pen stroke sizes">
             @for (size of brushSizes; track size) {
             <button class="brush-size" [class.active]="strokeWidth() === size" type="button" title="Pen size"
-              aria-label="Pen size" (click)="selectBrushSize(size)">
+              [attr.aria-label]="'Pen size ' + size + ' pixels'" [attr.aria-pressed]="strokeWidth() === size" (click)="selectBrushSize(size)">
               <span [style.width.px]="size + 6" [style.height.px]="size + 6"></span>
             </button>
             }
@@ -276,7 +292,10 @@
         <button class="icon-button tool-button main-shape-btn" [class.active]="isShapeTool(activeTool())" type="button"
           [title]="activeShapeTool()" [attr.aria-label]="activeShapeTool()" [disabled]="!canUseTool(activeShapeTool())" (click)="selectTool(activeShapeTool())">
           <span class="tool-icon" [class]="activeShapeTool() + '-icon'" aria-hidden="true"></span>
-          <span class="chevron-icon" (click)="toggleShapeMenu($event)"></span>
+        </button>
+        <button class="icon-button tool-button" type="button" title="Shape options" aria-label="Shape options"
+          [attr.aria-expanded]="shapeMenuOpen()" [disabled]="!canUseTool(activeShapeTool())" (click)="toggleShapeMenu($event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
         </button>
 
         @if (shapeMenuOpen()) {
@@ -310,7 +329,10 @@
         <button class="icon-button tool-button main-diagram-btn" [class.active]="isDiagramTool(activeTool())" type="button"
           [title]="activeDiagramTool()" [attr.aria-label]="activeDiagramTool()" [disabled]="!canUseTool(activeDiagramTool())" (click)="selectTool(activeDiagramTool())">
           <span class="tool-icon diagram-icon" aria-hidden="true"></span>
-          <span class="chevron-icon" (click)="toggleDiagramMenu($event)"></span>
+        </button>
+        <button class="icon-button tool-button" type="button" title="Diagram options" aria-label="Diagram options"
+          [attr.aria-expanded]="diagramMenuOpen()" [disabled]="!canUseTool(activeDiagramTool())" (click)="toggleDiagramMenu($event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
         </button>
 
         @if (diagramMenuOpen()) {
@@ -333,7 +355,7 @@
 
       <div class="fill-color-group-container">
         <button class="color-swatch fill-color-btn" [class.active]="fillEnabled()" [style.background]="fillColor()"
-          type="button" title="Fill color" aria-label="Fill color" [disabled]="!canUseTool('select')" (click)="toggleFillColorMenu($event)">
+          type="button" title="Fill color" aria-label="Fill color" [attr.aria-expanded]="fillColorMenuOpen()" [disabled]="!canUseTool('select')" (click)="toggleFillColorMenu($event)">
           <span class="chevron-icon"></span>
         </button>
 
@@ -342,11 +364,11 @@
         <div class="color-dropdown fill-color-dropdown">
           @for (color of colors; track color) {
           <button class="color-swatch" [class.active]="fillColor() === color" [style.background]="color" type="button"
-            title="Fill color" aria-label="Fill color" (click)="selectFillColor(color)"></button>
+            title="Fill color" [attr.aria-label]="'Fill color ' + color" [attr.aria-pressed]="fillColor() === color" (click)="selectFillColor(color)"></button>
           }
           @for (color of customRecentColors(); track color) {
           <button class="color-swatch recent-color" [class.active]="fillColor() === color" [style.background]="color" type="button"
-            title="Recent fill color" aria-label="Recent fill color" (click)="selectFillColor(color)"></button>
+            title="Recent fill color" [attr.aria-label]="'Recent fill color ' + color" [attr.aria-pressed]="fillColor() === color" (click)="selectFillColor(color)"></button>
           }
           <label class="custom-color-picker" title="Custom fill color" aria-label="Custom fill color">
             <input type="color" [value]="fillColor()" (change)="setCustomFillColor($event)" />
@@ -397,7 +419,7 @@
 
       <div class="color-group-container">
         <button class="color-swatch main-color-btn" [style.background]="strokeColor()" type="button"
-          title="Drawing color" aria-label="Drawing color" (click)="toggleColorMenu($event)">
+          title="Drawing color" aria-label="Drawing color" [attr.aria-expanded]="colorMenuOpen()" (click)="toggleColorMenu($event)">
           <span class="chevron-icon"></span>
         </button>
 
@@ -406,11 +428,11 @@
         <div class="color-dropdown">
           @for (color of colors; track color) {
           <button class="color-swatch" [class.active]="strokeColor() === color" [style.background]="color" type="button"
-            title="Drawing color" aria-label="Drawing color" (click)="selectColor(color)"></button>
+            title="Drawing color" [attr.aria-label]="'Drawing color ' + color" [attr.aria-pressed]="strokeColor() === color" (click)="selectColor(color)"></button>
           }
           @for (color of customRecentColors(); track color) {
           <button class="color-swatch recent-color" [class.active]="strokeColor() === color" [style.background]="color" type="button"
-            title="Recent drawing color" aria-label="Recent drawing color" (click)="selectColor(color)"></button>
+            title="Recent drawing color" [attr.aria-label]="'Recent drawing color ' + color" [attr.aria-pressed]="strokeColor() === color" (click)="selectColor(color)"></button>
           }
           <label class="custom-color-picker" title="Custom drawing color" aria-label="Custom drawing color">
             <input type="color" [value]="strokeColor()" (change)="setCustomStrokeColor($event)" />
@@ -423,7 +445,7 @@
       <div class="brush-group-container">
         <button class="icon-button tool-button main-brush-btn" [class.active]="activeTool() === 'pen' || activeTool() === 'eraser'" type="button"
           [title]="activeTool() === 'eraser' ? 'Eraser settings' : 'Brush settings'"
-          [attr.aria-label]="activeTool() === 'eraser' ? 'Eraser settings' : 'Brush settings'" (click)="toggleBrushMenu($event)">
+          [attr.aria-label]="activeTool() === 'eraser' ? 'Eraser settings' : 'Brush settings'" [attr.aria-expanded]="brushMenuOpen()" (click)="toggleBrushMenu($event)">
           <span class="brush-preview" [class.eraser-preview]="activeTool() === 'eraser'"
             [class.pen-brush-preview]="activeTool() !== 'eraser'"
             [class.pen-brush-dashed]="activeTool() !== 'eraser' && activePenStyle() === 'dashed'"
@@ -453,7 +475,7 @@
           <div class="brush-presets eraser-presets" aria-label="Eraser sizes">
             @for (size of eraserSizes; track size) {
             <button class="brush-size" [class.active]="eraserSize() === size" type="button" title="Eraser size"
-              aria-label="Eraser size" (click)="selectEraserSize(size)">
+              [attr.aria-label]="'Eraser size ' + size + ' pixels'" [attr.aria-pressed]="eraserSize() === size" (click)="selectEraserSize(size)">
               <span [style.width.px]="size" [style.height.px]="size"></span>
             </button>
             }
@@ -467,7 +489,7 @@
           <div class="brush-presets" aria-label="Brush sizes">
             @for (size of brushSizes; track size) {
             <button class="brush-size" [class.active]="strokeWidth() === size" type="button" title="Brush size"
-              aria-label="Brush size" (click)="selectBrushSize(size)">
+              [attr.aria-label]="'Brush size ' + size + ' pixels'" [attr.aria-pressed]="strokeWidth() === size" (click)="selectBrushSize(size)">
               <span [style.width.px]="size + 6" [style.height.px]="size + 6"></span>
             </button>
             }
@@ -545,11 +567,11 @@
         <div class="math-color-row" aria-label="Equation color">
           @for (color of colors; track color) {
           <button class="color-swatch" [class.active]="strokeColor() === color" [style.background]="color" type="button"
-            title="Equation color" aria-label="Equation color" (click)="setMathEquationColor(color)"></button>
+            title="Equation color" [attr.aria-label]="'Equation color ' + color" [attr.aria-pressed]="strokeColor() === color" (click)="setMathEquationColor(color)"></button>
           }
           @for (color of customRecentColors(); track color) {
           <button class="color-swatch recent-color" [class.active]="strokeColor() === color" [style.background]="color" type="button"
-            title="Recent equation color" aria-label="Recent equation color" (click)="setMathEquationColor(color)"></button>
+            title="Recent equation color" [attr.aria-label]="'Recent equation color ' + color" [attr.aria-pressed]="strokeColor() === color" (click)="setMathEquationColor(color)"></button>
           }
           <label class="custom-color-picker" title="Custom equation color" aria-label="Custom equation color">
             <input type="color" [value]="strokeColor()" (change)="setCustomStrokeColor($event)" />
@@ -781,7 +803,7 @@
             <select [value]="matrix.augmentedColumn ?? ''" (change)="setMatrixAugmentedColumn($event)">
               <option value="">None</option>
               @for (column of matrixAugmentedColumnOptions(matrix.columns); track column) {
-              <option [value]="column">Before {{ column + 1 }}</option>
+              <option [value]="column" [selected]="column === matrix.augmentedColumn">Before {{ column + 1 }}</option>
               }
             </select>
           </label>
@@ -919,7 +941,7 @@
           <select class="template-select" [value]="activeTemplate()" aria-label="Board template"
             (change)="selectTemplateFromEvent($event)">
             @for (template of templateOptions; track template.id) {
-            <option [value]="template.id">{{ template.label }}</option>
+            <option [value]="template.id" [selected]="template.id === activeTemplate()">{{ template.label }}</option>
             }
           </select>
         </label>
@@ -936,12 +958,12 @@
         @if (activePage().background; as background) {
         <span class="asset-chip" [title]="background.fileName">Bg: {{ background.fileName }}</span>
         }
-        @if (assetImportStatus(); as status) {
-        <span class="asset-status" [class.success]="status.type === 'success'" [class.error]="status.type === 'error'"
-          [class.info]="status.type === 'info'">{{ status.message }}</span>
-        }
         } @else {
         <span class="template-chip">{{ activeTemplateLabel() }}</span>
+        }
+        @if (assetImportStatus(); as status) {
+        <span class="asset-status" role="status" [title]="status.message" [class.success]="status.type === 'success'" [class.error]="status.type === 'error'"
+          [class.info]="status.type === 'info'">{{ status.message }}</span>
         }
       </div>
       @if (showEndSession()) {
@@ -956,7 +978,7 @@
       [class.laser-mode]="activeTool() === 'laser'" aria-label="Whiteboard drawing area" (click)="closeContextMenu()"
       (contextmenu)="openContextMenu($event)">
       <div class="board-stage" [style.transform]="boardTransform()">
-        <canvas #whiteboardCanvas class="whiteboard-canvas" aria-label="Writable class whiteboard"
+        <canvas #whiteboardCanvas class="whiteboard-canvas" [attr.aria-label]="readOnly() ? 'Read-only class whiteboard' : 'Writable class whiteboard'"
           (pointerdown)="startDrawing($event)" (pointermove)="draw($event)" (pointerup)="stopDrawing($event)"
           (pointercancel)="stopDrawing($event)" (pointerleave)="stopDrawing($event)"></canvas>
 
@@ -1203,8 +1225,8 @@
         <button type="button" role="menuitem" [disabled]="!canDistributeSelectedVertically()"
           (click)="distributeSelectedVertically()">Distribute vertically</button>
         <span class="context-menu-divider" aria-hidden="true"></span>
-        <button type="button" role="menuitem" (click)="flipSelected('left')">Flip left</button>
-        <button type="button" role="menuitem" (click)="flipSelected('right')">Flip right</button>
+        <button type="button" role="menuitem" (click)="flipSelected('left')">Rotate left</button>
+        <button type="button" role="menuitem" (click)="flipSelected('right')">Rotate right</button>
         <button type="button" role="menuitem" (click)="flipSelected('horizontal')">Flip horizontal</button>
         <button type="button" role="menuitem" (click)="flipSelected('vertical')">Flip vertical</button>
         <span class="context-menu-divider" aria-hidden="true"></span>

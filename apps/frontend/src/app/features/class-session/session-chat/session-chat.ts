@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, effect, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { FormField, FormRoot, form as signalForm } from '@angular/forms/signals';
 import type {
   ChatAttachment,
@@ -229,7 +229,7 @@ export class SessionChat {
     });
     effect(() => {
       if (!this.live()) {
-        this.handleTerminalChatState();
+        untracked(() => this.handleTerminalChatState());
       }
     });
   }
@@ -579,9 +579,9 @@ export class SessionChat {
     const hadPendingWork = this.sending() || this.uploadingAttachments() > 0 || this.pendingAttachments().length > 0;
     this.sending.set(false);
     this.uploadingAttachments.set(0);
-    this.pendingAttachments.set([]);
+    if (this.pendingAttachments().length) this.pendingAttachments.set([]);
     this.messages.update((messages) =>
-      messages.map((message) =>
+      messages.some((message) => message.deliveryState === 'sending') ? messages.map((message) =>
         message.deliveryState === 'sending'
           ? {
               ...message,
@@ -589,7 +589,7 @@ export class SessionChat {
               failedRequest: message.failedRequest
             }
           : message
-      )
+      ) : messages
     );
     if (hadPendingWork) {
       this.chatError.set(CHAT_ENDED_MESSAGE);

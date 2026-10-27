@@ -671,10 +671,7 @@
             <input type="checkbox" [checked]="liveSettingsForm().studentScreenShareEnabled" (change)="updateLiveSettingsForm('studentScreenShareEnabled', checkedValue($event))" />
             <span>Student screen share</span>
           </label>
-          <label class="toggle-row">
-            <input type="checkbox" [checked]="liveSettingsForm().studentScreenShareRequiresApproval" (change)="updateLiveSettingsForm('studentScreenShareRequiresApproval', checkedValue($event))" />
-            <span>Require share approval</span>
-          </label>
+          <p>Teacher approval is always required before a student can share a device whiteboard or screen.</p>
           <label class="number-row">
             <span>Active student shares</span>
             <input type="number" min="1" max="4" [value]="liveSettingsForm().maxActiveStudentShares" (input)="updateLiveSettingsForm('maxActiveStudentShares', numberValue($event, liveSettingsForm().maxActiveStudentShares))" />

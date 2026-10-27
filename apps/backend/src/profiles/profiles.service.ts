@@ -178,7 +178,7 @@ export const SYSTEM_LIVE_CLASS_SETTINGS: LiveClassSettings = {
     autoArchiveExpiredRecordings: true
   },
   studentScreenShare: {
-    studentScreenShareEnabled: false,
+    studentScreenShareEnabled: true,
     studentScreenShareRequiresApproval: true,
     maxActiveStudentShares: 1
   },
@@ -1183,10 +1183,8 @@ export class ProfilesService {
           studentScreenShare.studentScreenShareEnabled,
           SYSTEM_LIVE_CLASS_SETTINGS.studentScreenShare.studentScreenShareEnabled
         ),
-        studentScreenShareRequiresApproval: this.booleanSetting(
-          studentScreenShare.studentScreenShareRequiresApproval,
-          SYSTEM_LIVE_CLASS_SETTINGS.studentScreenShare.studentScreenShareRequiresApproval
-        ),
+        // Retained for older clients; classroom device sharing always needs teacher permission.
+        studentScreenShareRequiresApproval: true,
         maxActiveStudentShares: this.integerSetting(
           studentScreenShare.maxActiveStudentShares,
           SYSTEM_LIVE_CLASS_SETTINGS.studentScreenShare.maxActiveStudentShares,
@@ -1482,6 +1480,9 @@ export class ProfilesService {
         'studentScreenShareEnabled',
         'studentScreenShareRequiresApproval'
       ]);
+      if (source.studentScreenShareRequiresApproval !== undefined) {
+        normalized.studentScreenShareRequiresApproval = true;
+      }
       if (source.maxActiveStudentShares !== undefined) {
         normalized.maxActiveStudentShares = this.integerSetting(
           source.maxActiveStudentShares,

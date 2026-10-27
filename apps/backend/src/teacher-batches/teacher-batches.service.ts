@@ -25,6 +25,7 @@ import type {
   LiveClassSettingsPatch
 } from '@native-sfu/contracts';
 import { Connection, ClientSession, FilterQuery, Model } from 'mongoose';
+import { withScheduleHistory } from './schedule-history';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import {
@@ -146,14 +147,34 @@ export class TeacherBatchesService {
         await this.batches.updateOne({ _id: id, teacherId, deletedAt: { $exists: false } }, { $set: update }, { session });
       }
       if (schedule) {
-        await this.schedules.deleteMany({ batchId: id }, { session });
-        await this.schedules.insertMany(
-          schedule.map((item) => ({ batchId: id, dayOfWeek: item.dayOfWeek, startTime: item.startTime })),
-          { session }
-        );
+        await this.replaceSchedule({ id, name: update.name ?? existing.name, startDate: update.startDate ?? existing.startDate, endDate: update.endDate ?? existing.endDate }, schedule, session);
       }
       return this.findOne(teacherId, id, session);
     });
+  }
+
+  private async replaceSchedule(
+    batch: { id: string; name: string; startDate: Date; endDate: Date },
+    next: BatchScheduleDto[],
+    transaction: ClientSession | undefined
+  ): Promise<void> {
+    const previous = await this.schedules.find({ batchId: batch.id }).session(transaction ?? null);
+    const changedAt = new Date();
+    const replacement = withScheduleHistory(next, previous, changedAt);
+    await this.schedules.deleteMany({ batchId: batch.id }, { session: transaction });
+    await this.schedules.insertMany(replacement.map((item) => ({ ...item, batchId: batch.id })), { session: transaction });
+    const planned = new Map(planClassSessions(batch, replacement as BatchScheduleMongoDocument[]).map((item) => [item.id, item]));
+    const persisted = await this.classSessions.find({ batchId: batch.id, status: 'scheduled' }).session(transaction ?? null);
+    for (const current of persisted) {
+      const nextSession = planned.get(current.id);
+      if (nextSession && nextSession.scheduledAt.getTime() !== current.scheduledAt.getTime()) {
+        await this.classSessions.updateOne({ _id: current.id, status: 'scheduled' }, { $set: {
+          scheduledAt: nextSession.scheduledAt, originalScheduledAt: current.originalScheduledAt ?? current.scheduledAt, rescheduledAt: changedAt
+        } }, { session: transaction });
+      } else if (!nextSession && current.scheduledAt.getTime() >= changedAt.getTime()) {
+        await this.classSessions.updateOne({ _id: current.id, status: 'scheduled' }, { $set: { status: 'cancelled', cancelledAt: changedAt } }, { session: transaction });
+      }
+    }
   }
 
   async updateStatus(teacherId: string, id: string, status: BatchStatus): Promise<Record<string, unknown>> {
@@ -357,11 +378,7 @@ export class TeacherBatchesService {
         }
       }
       if (schedule) {
-        await this.schedules.deleteMany({ batchId }, { session });
-        await this.schedules.insertMany(
-          schedule.map((item) => ({ batchId, dayOfWeek: item.dayOfWeek, startTime: item.startTime })),
-          { session }
-        );
+        await this.replaceSchedule({ id: batchId, name: update.name ?? existing.name, startDate: update.startDate ?? existing.startDate, endDate: update.endDate ?? existing.endDate }, schedule, session);
       }
       return this.adminBatchDetail(batchId, session);
     });

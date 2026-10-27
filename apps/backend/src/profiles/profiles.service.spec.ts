@@ -1,8 +1,23 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
-import { ProfilesService } from './profiles.service';
+import { ProfilesService, SYSTEM_LIVE_CLASS_SETTINGS } from './profiles.service';
 
 describe('ProfilesService', () => {
+  it('normalizes legacy automatic student sharing to mandatory teacher approval', () => {
+    const { service } = createHarness({});
+    const patch = service.normalizeLiveSettingsPatch({ studentScreenShare: {
+      studentScreenShareEnabled: false, studentScreenShareRequiresApproval: false, maxActiveStudentShares: 3
+    } });
+    expect(patch.studentScreenShare).toEqual({
+      studentScreenShareEnabled: false, studentScreenShareRequiresApproval: true, maxActiveStudentShares: 3
+    });
+    expect(service.resolveLiveSettings(SYSTEM_LIVE_CLASS_SETTINGS, {
+      studentScreenShare: { studentScreenShareRequiresApproval: false }
+    }).studentScreenShare).toEqual({
+      studentScreenShareEnabled: true, studentScreenShareRequiresApproval: true, maxActiveStudentShares: 1
+    });
+  });
+
   it('loads and updates a teacher profile with public fields', async () => {
     const teacher = userDoc({
       id: 'teacher-1',

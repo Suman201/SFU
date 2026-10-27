@@ -33,6 +33,74 @@ describe('RoomsGateway', () => {
     expect(socket.data.requestId).toBeDefined();
   });
 
+  it('waits for socket authentication before accepting a reconnect', async () => {
+    const { gateway } = createGatewayHarness();
+    let middleware: any;
+    gateway.afterInit({ use: (handler: any) => { middleware = handler; } } as never);
+    let resolveToken!: (claims: any) => void;
+    const verification = new Promise((resolve) => { resolveToken = resolve; });
+    const verify = jest.fn(() => verification);
+    (gateway as any).auth.verifyAccessToken = verify;
+    const socket: any = { data: {}, handshake: { auth: { token: 'test-token' }, headers: {}, address: '127.0.0.1' }, use: jest.fn(), disconnect: jest.fn() };
+    const next = jest.fn();
+    middleware(socket, next);
+    await Promise.resolve();
+    expect(next).not.toHaveBeenCalled();
+    expect(socket.data.user).toBeUndefined();
+    resolveToken({ sub: 'student-1', email: 'student@example.com', roles: ['STUDENT'] });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(next).toHaveBeenCalledWith();
+    expect(socket.data.user.id as string).toBe('student-1');
+    await gateway.handleConnection(socket);
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(socket.use).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an invalid token in namespace middleware before accepting a socket', async () => {
+    const { gateway } = createGatewayHarness();
+    let middleware: any;
+    gateway.afterInit({ use: (handler: any) => { middleware = handler; } } as never);
+    (gateway as any).auth.verifyAccessToken = jest.fn(async () => { throw new Error('Invalid token'); });
+    const socket: any = { data: {}, handshake: { auth: { token: 'invalid-token' }, headers: {}, address: '127.0.0.1' }, use: jest.fn() };
+    const next = jest.fn();
+    middleware(socket, next);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(next.mock.calls[0][0]).toBeInstanceOf(Error);
+    expect(socket.data.user).toBeUndefined();
+    expect(socket.use).not.toHaveBeenCalled();
+  });
+
+  it('allows a full-board edit and undo without spending control or cursor allowances', () => {
+    const { gateway } = createGatewayHarness();
+    let middleware: any;
+    const socket: any = { data: { user: { id: 'teacher-bulk' } }, use: (handler: any) => { middleware = handler; }, disconnect: jest.fn() };
+    (gateway as any).installSocketRateLimiter(socket);
+    const next = jest.fn();
+    for (let index = 0; index < 5000; index += 1) middleware(['whiteboard:command', {}], next);
+    for (let index = 0; index < 1200; index += 1) middleware(['whiteboard:cursor', {}], next);
+    for (let index = 0; index < 300; index += 1) middleware(['room:state', {}], next);
+    expect(next.mock.calls.every((call) => call.length === 0)).toBe(true);
+    expect(socket.disconnect).not.toHaveBeenCalled();
+    middleware(['room:state', {}], next);
+    expect(next.mock.calls.at(-1)?.[0]).toBeInstanceOf(Error);
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('still enforces a configurable per-user whiteboard command limit', () => {
+    const { gateway } = createGatewayHarness();
+    (gateway as any).config = { get: (key: string, fallback: number) => key === 'security.socketWhiteboardRateLimitMax' ? 2 : fallback };
+    let middleware: any;
+    const socket: any = { data: { user: { id: 'teacher-limited' } }, use: (handler: any) => { middleware = handler; }, disconnect: jest.fn() };
+    (gateway as any).installSocketRateLimiter(socket);
+    const next = jest.fn();
+    middleware(['whiteboard:command', {}], next);
+    middleware(['whiteboard:command', {}], next);
+    expect(socket.disconnect).not.toHaveBeenCalled();
+    middleware(['whiteboard:command', {}], next);
+    expect(next.mock.calls.at(-1)?.[0]).toBeInstanceOf(Error);
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+  });
+
   describe('Dynacast signaling', () => {
     it('re-emits cross-node room signals onto the local Socket.IO room', () => {
       const { emitSignal, emissions } = createGatewayHarness();
@@ -1362,6 +1430,37 @@ describe('RoomsGateway', () => {
   });
 });
 
+describe('Device whiteboard signaling', () => {
+  it('acknowledges and broadcasts a student request through participant state', async () => {
+    const { gateway, rooms, emissions, signals } = createGatewayHarness();
+    const patch = { screenShareRequested: true, screenShareRequestedAt: '2026-10-27T09:00:00.000Z' };
+    rooms.requestScreenShare.mockResolvedValue(patch);
+    const ack = jest.fn();
+    await gateway.requestScreenShare({ data: { participantId: 'student' } } as never, { roomId: 'room-1', requested: true }, ack);
+    expect(rooms.requestScreenShare).toHaveBeenCalledWith('room-1', 'student', true);
+    expect(ack).toHaveBeenCalledWith({ ok: true, data: patch });
+    expect(emissions).toEqual([{ target: 'room-1', event: 'participant:updated', payload: ['student', patch] }]);
+    expect(signals.publish).toHaveBeenCalledWith('room-1', 'participant:updated', 'student', patch);
+  });
+
+  it('publishes revocation, stream closure and cleared request without leaking internal response fields', async () => {
+    const { gateway, rooms, emissions, signals } = createGatewayHarness();
+    const permissions = { canPublishAudio: true, canPublishVideo: true, canShareScreen: false, canChat: true };
+    const patch = { screenShareRequested: false, screenShareRequestedAt: null, screenSharing: false };
+    rooms.updatePermissions.mockResolvedValue({ ...permissions, closedProducerIds: ['old-screen'], participantPatch: patch });
+    const ack = jest.fn();
+    await gateway.updatePermission({ data: { participantId: 'teacher' } } as never, { roomId: 'room-1', participantId: 'student', permissions: { canShareScreen: false } }, ack);
+    expect(rooms.updatePermissions).toHaveBeenCalledWith('room-1', 'teacher', 'student', { canShareScreen: false });
+    expect(emissions).toEqual([
+      { target: 'room-1', event: 'permissions:updated', payload: ['student', permissions] },
+      { target: 'room-1', event: 'producer:closed', payload: 'old-screen' },
+      { target: 'room-1', event: 'participant:updated', payload: ['student', patch] }
+    ]);
+    expect(signals.publish).toHaveBeenCalledWith('room-1', 'producer:closed', 'old-screen');
+    expect(ack.mock.calls[0]?.[0]?.ok).toBe(true);
+  });
+});
+
 interface GatewayRoomsHarness {
   onConsumerLayerEvent: jest.Mock;
   onProducerDynacastEvent: jest.Mock;
@@ -1386,6 +1485,8 @@ interface GatewayRoomsHarness {
   getRoomSnapshotHistory: jest.Mock;
   runRoomRecoveryAction: jest.Mock;
   joinRoom: jest.Mock;
+  requestScreenShare: jest.Mock;
+  updatePermissions: jest.Mock;
   admit: jest.Mock;
   sendChat: jest.Mock;
   markChatRead: jest.Mock;
@@ -1580,6 +1681,8 @@ function createGatewayHarness(options: { targetMissing?: boolean } = {}): {
       }
     })),
     joinRoom: jest.fn(),
+    requestScreenShare: jest.fn(),
+    updatePermissions: jest.fn(),
     admit: jest.fn(),
     sendChat: jest.fn(),
     markChatRead: jest.fn(),

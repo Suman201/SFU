@@ -24,6 +24,9 @@ export type LocalUiStack = {
   nodeBUrl?: string;
   operationsToken: string;
   stop: () => Promise<void>;
+  /** Bounded logs for diagnosing real runtime failures after successful startup. */
+  getLogs: () => string;
+  materialDirectory?: string;
 };
 
 export async function startLocalUiStack(options: LocalUiStackOptions): Promise<LocalUiStack> {
@@ -101,6 +104,7 @@ export async function startLocalUiStack(options: LocalUiStackOptions): Promise<L
       nodeAUrl: nodeUrls[0]!,
       nodeBUrl: nodeUrls[1],
       operationsToken,
+      getLogs: () => managed.map((entry) => `[${entry.name}]\n${entry.output.slice(-100).join('\n').slice(-60_000)}`).join('\n\n'),
       stop: async () => {
         for (const processHandle of managed.reverse()) {
           await stopManagedProcess(processHandle);

@@ -134,6 +134,121 @@ describe('AuthService', () => {
     expect(service.authenticated()).toBe(true);
   });
 
+  it('restores an expired remembered session by rotating refresh tokens', () => {
+    document.cookie = `native-sfu.auth.accessToken=${jwt({ sub: 'student-1', roles: ['STUDENT'], exp: 1 })}; Path=/`;
+    document.cookie = 'native-sfu.auth.refreshToken=remembered-refresh; Path=/';
+    let restored = '';
+    service.checkSession().subscribe((user) => restored = user?.id ?? '');
+    const refresh = http.expectOne(`${API_BASE_URL}/auth/refresh`);
+    expect(refresh.request.body).toEqual({ refreshToken: 'remembered-refresh' });
+    const token = jwt({ sub: 'student-1', roles: ['STUDENT'], exp: futureExp() });
+    refresh.flush({ accessToken: token, refreshToken: 'rotated-refresh', user: { id: 'student-1', roles: ['STUDENT'] } });
+    http.expectOne(`${API_BASE_URL}/auth/me`).flush({ id: 'student-1', roles: ['STUDENT'] });
+    expect(restored).toBe('student-1');
+    expect(readCookie('native-sfu.auth.refreshToken')).toBe('rotated-refresh');
+    expect(sessionStorage.getItem('native-sfu.auth.accessToken')).toBeNull();
+  });
+
+  it('shares one refresh rotation across simultaneous requests', () => {
+    sessionStorage.setItem('native-sfu.auth.accessToken', jwt({ sub: 'student-1', exp: 1 }));
+    sessionStorage.setItem('native-sfu.auth.refreshToken', 'old-refresh');
+    const tokens: Array<string | null> = [];
+    service.ensureAccessToken().subscribe((token) => tokens.push(token));
+    service.ensureAccessToken().subscribe((token) => tokens.push(token));
+    const token = jwt({ sub: 'student-1', roles: ['STUDENT'], exp: futureExp() });
+    http.expectOne(`${API_BASE_URL}/auth/refresh`).flush({ accessToken: token, refreshToken: 'new-refresh' });
+    expect(tokens).toEqual([token, token]);
+    expect(sessionStorage.getItem('native-sfu.auth.refreshToken')).toBe('new-refresh');
+  });
+
+  it('keeps a remembered refresh token during a temporary server outage', () => {
+    document.cookie = 'native-sfu.auth.refreshToken=retry-me; Path=/';
+    service.checkSession().subscribe();
+    http.expectOne(`${API_BASE_URL}/auth/refresh`).flush({}, { status: 503, statusText: 'Unavailable' });
+    expect(readCookie('native-sfu.auth.refreshToken')).toBe('retry-me');
+    expect(service.authenticated()).toBe(false);
+    expect(service.sessionNotice()).toContain('Reconnect');
+  });
+
+  it('does not restore a user after sign-out during token refresh', () => {
+    sessionStorage.setItem('native-sfu.auth.refreshToken', 'old-refresh');
+    let rejected = false;
+    service.ensureAccessToken().subscribe({ error: () => rejected = true });
+    const request = http.expectOne(`${API_BASE_URL}/auth/refresh`);
+    service.logout();
+    request.flush({ accessToken: jwt({ sub: 'student-1', exp: futureExp() }), refreshToken: 'new-refresh' });
+    expect(rejected).toBe(true);
+    expect(service.authenticated()).toBe(false);
+    expect(service.accessToken()).toBeNull();
+  });
+
+  for (const status of [401, 403, 503]) {
+    it(`preserves a newer login when an older refresh fails with ${status}`, () => {
+      sessionStorage.setItem('native-sfu.auth.refreshToken', 'old-refresh');
+      service.checkSession().subscribe();
+      const previous = http.expectOne(`${API_BASE_URL}/auth/refresh`);
+      service.logout();
+      service.login('new@example.com', 'password').subscribe();
+      const token = jwt({ sub: 'new-user', roles: ['STUDENT'], exp: futureExp() });
+      http.expectOne(`${API_BASE_URL}/auth/login`).flush({ accessToken: token, refreshToken: 'new-refresh' });
+      previous.flush({}, { status, statusText: 'Old session failed' });
+      expect(service.user()?.id).toBe('new-user');
+      expect(service.authenticated()).toBeTrue();
+      expect(service.accessToken()).toBe(token);
+      expect(sessionStorage.getItem('native-sfu.auth.refreshToken')).toBe('new-refresh');
+      expect(service.sessionNotice()).toBe('');
+    });
+  }
+
+  it('ignores an old successful refresh after a different account signs in', () => {
+    sessionStorage.setItem('native-sfu.auth.refreshToken', 'old-refresh');
+    service.checkSession().subscribe();
+    const previous = http.expectOne(`${API_BASE_URL}/auth/refresh`);
+    service.logout();
+    service.login('new@example.com', 'password').subscribe();
+    const token = jwt({ sub: 'new-user', roles: ['STUDENT'], exp: futureExp() });
+    http.expectOne(`${API_BASE_URL}/auth/login`).flush({ accessToken: token, refreshToken: 'new-refresh' });
+    previous.flush({ accessToken: jwt({ sub: 'old-user', exp: futureExp() }), refreshToken: 'old-rotated' });
+    http.expectNone(`${API_BASE_URL}/auth/me`);
+    expect(service.user()?.id).toBe('new-user');
+    expect(service.accessToken()).toBe(token);
+    expect(service.authenticated()).toBeTrue();
+  });
+
+  it('ignores a profile outage from a session restored before a newer login', () => {
+    sessionStorage.setItem('native-sfu.auth.accessToken', jwt({ sub: 'old-user', exp: futureExp() }));
+    service.checkSession().subscribe();
+    const previous = http.expectOne(`${API_BASE_URL}/auth/me`);
+    service.login('new@example.com', 'password').subscribe();
+    http.expectOne(`${API_BASE_URL}/auth/login`).flush({ accessToken: jwt({ sub: 'new-user', exp: futureExp() }) });
+    previous.flush({}, { status: 503, statusText: 'Unavailable' });
+    expect(service.user()?.id).toBe('new-user');
+    expect(service.authenticated()).toBeTrue();
+    expect(service.sessionNotice()).toBe('');
+  });
+
+  for (const outcome of ['success', 'failure']) {
+    it(`ignores an older login ${outcome} after a newer login completes`, () => {
+      let rejected = false;
+      service.login('old@example.com', 'password').subscribe({ error: () => rejected = true });
+      const previous = http.expectOne(`${API_BASE_URL}/auth/login`);
+      service.login('new@example.com', 'password').subscribe();
+      http.expectOne(`${API_BASE_URL}/auth/login`).flush({ accessToken: jwt({ sub: 'new-user', exp: futureExp() }) });
+      if (outcome === 'success') previous.flush({ accessToken: jwt({ sub: 'old-user', exp: futureExp() }) });
+      else previous.flush({}, { status: 401, statusText: 'Unauthorized' });
+      expect(rejected).toBeTrue();
+      expect(service.user()?.id).toBe('new-user');
+      expect(service.authenticated()).toBeTrue();
+    });
+  }
+
+  it('supports both teacher and student roles on a shared account', () => {
+    service.login('both@example.com', 'Password@12345').subscribe();
+    http.expectOne(`${API_BASE_URL}/auth/login`).flush({ accessToken: jwt({ sub: 'both', roles: ['TEACHER', 'STUDENT'], exp: futureExp() }) });
+    expect(service.hasRole('teacher')).toBe(true);
+    expect(service.hasRole('student')).toBe(true);
+  });
+
   it('maps common backend auth failures to friendly messages', () => {
     expect(
       service.authErrorMessage(new HttpErrorResponse({ status: 401, error: { message: 'Invalid email or password' } }))

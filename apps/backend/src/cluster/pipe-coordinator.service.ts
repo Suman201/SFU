@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, ServiceUnavailableException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, OnModuleDestroy, OnApplicationBootstrap, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import type {
@@ -190,7 +190,7 @@ export interface PipeCoordinatorHealthSnapshot {
 }
 
 @Injectable()
-export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
+export class PipeCoordinatorService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(PipeCoordinatorService.name);
   private readonly enabled: boolean;
   private readonly clusterSecret?: string;
@@ -245,7 +245,7 @@ export class PipeCoordinatorService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async onModuleInit(): Promise<void> {
+  async onApplicationBootstrap(): Promise<void> {
     if (!this.enabled) {
       return;
     }

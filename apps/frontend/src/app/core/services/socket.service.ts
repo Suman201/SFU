@@ -29,9 +29,7 @@ export class SocketService {
     }
     this.socket = io(SOCKET_URL, {
       transports: ['websocket'],
-      auth: {
-        token: this.auth.accessToken()
-      }
+      auth: createSocketAuth(this.auth)
     });
     return this.socket;
   }
@@ -78,3 +76,11 @@ export class SocketService {
 }
 
 type ExtractAckData<T> = T extends (response: AckResponse<infer R>) => void ? R : never;
+
+/** Resolve the current token on every Socket.IO handshake, including reconnects. */
+export function createSocketAuth(auth: Pick<AuthService, 'ensureAccessToken'>): (callback: (credentials: { token: string | null }) => void) => void {
+  return (callback) => auth.ensureAccessToken().subscribe({
+    next: (token) => callback({ token }),
+    error: () => callback({ token: null })
+  });
+}

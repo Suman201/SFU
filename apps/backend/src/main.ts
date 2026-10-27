@@ -8,6 +8,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { buildPublicRouteExclusions } from './bootstrap/public-routes';
+import { whiteboardBodyParser } from './bootstrap/whiteboard-body-parser';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { operationsTokenMatches } from './common/guards/operations-token.guard';
 import { SuccessResponseInterceptor } from './common/interceptors/success-response.interceptor';
@@ -26,6 +27,8 @@ async function bootstrap(): Promise<void> {
 
   app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
   app.useWebSocketAdapter(new ConfiguredIoAdapter(app, config));
+
+  app.use('/api/v1/class-sessions/:sessionId/whiteboard', whiteboardBodyParser());
 
   app.enableShutdownHooks();
   app.use(helmet());

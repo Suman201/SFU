@@ -3,6 +3,7 @@ import { authGuard, guestGuard, roleGuard } from './core/services/auth.guards';
 import { RoomComponent } from './features/room/room.component';
 
 export const routes: Routes = [
+  { path: 'desktop', loadChildren: () => import('./features/desktop/desktop.routes').then((module) => module.DESKTOP_CHILD_ROUTES) },
   { path: '', loadComponent: () => import('./features/landing/landing').then((route) => route.Landing) },
   {
     path: 'about',

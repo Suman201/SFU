@@ -1,0 +1,109 @@
+{
+  "generatedAt": "2026-10-27T15:14:59.000394+00:00",
+  "product": "EDCONNECTION Classroom",
+  "version": "0.1.0",
+  "signed": false,
+  "backend": "http://127.0.0.1:3000",
+  "website": "http://localhost:4200",
+  "physicalWhiteboardTested": false,
+  "currentInstallersLaunched": false,
+  "validation": {
+    "frontendUnitTestsPassed": 183,
+    "backendFocusedTestsPassed": 254,
+    "desktopRuntimeTestsPassed": 21,
+    "workspaceBuildPassed": true,
+    "macPackageBuildPassed": true,
+    "windowsPackageBuildPassed": true
+  },
+  "sourceDigestSha256": "22c4940be834e7ccfe650d01f521d18f08cebbc556cb39f8ddf74effeb7ba733",
+  "sourceFiles": 252,
+  "sourceDigestPaths": [
+    "apps/desktop/src",
+    "apps/desktop/resources",
+    "apps/desktop/scripts",
+    "apps/desktop/package.json",
+    "apps/desktop/electron-builder.cjs",
+    "apps/frontend/src",
+    "apps/frontend/angular.json",
+    "apps/frontend/tsconfig.json",
+    "apps/frontend/tsconfig.desktop.json",
+    "apps/frontend/tsconfig.app.json",
+    "packages/contracts/src",
+    "package.json",
+    "package-lock.json",
+    "scripts/desktop.cjs"
+  ],
+  "sourceDigestAlgorithm": "SHA256 of sorted unique git tracked/nonignored paths; each entry is path + NUL + file SHA256 hex + newline",
+  "artifacts": [
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-mac-x64.dmg",
+      "bytes": 127886094,
+      "sha256": "ebea2280330cf6be1915e433432e717d9a4e6f970275aad054d7bab513f8cbd1"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-mac-x64.dmg.blockmap",
+      "bytes": 134978,
+      "sha256": "8963a80fd5d2029be166de6423c5a31365f101f0dc0ff80e15c9400883a57d2e"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-mac-arm64.dmg",
+      "bytes": 123605960,
+      "sha256": "d0d032cb1195994346bf86550a1c793e19bcacc0c3b65c82f8ebd4a86cfea3a7"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-mac-arm64.dmg.blockmap",
+      "bytes": 129739,
+      "sha256": "faddca95de6cee79c2b26526ba66479c5679a1757cb5fbc6ae0f372b08cd94b7"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-mac-x64.zip",
+      "bytes": 124383852,
+      "sha256": "d9163b1ded5bf3112e21608594c70a7b7f5dc685fa3ef0d14148b8814e19b7cb"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-mac-x64.zip.blockmap",
+      "bytes": 131515,
+      "sha256": "e152aab7ad0df1f4c98467e0194dda11d1130cb695eedc44a287ab085a8b3cc6"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-mac-arm64.zip",
+      "bytes": 120135762,
+      "sha256": "c8f9637374da37d1f404040272cabd76684f824a223c2f1127863be305886908"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-mac-arm64.zip.blockmap",
+      "bytes": 127346,
+      "sha256": "b90740d2740a7230e051410d8892115f84f91f53c8db29ebc8bb0ebd5d122234"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-win.exe",
+      "bytes": 242183816,
+      "sha256": "a40054affa52a6f3ddba8e08f33a638e67a03aed9e95e4256e59e58a17412049"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-win.exe.blockmap",
+      "bytes": 253170,
+      "sha256": "39b44573847cb11c46743f8917c12d885ca355c25c1b3d7828b7244e138ddbeb"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-win-x64.exe",
+      "bytes": 124318018,
+      "sha256": "8252367801a9997d4651c2dbe1bb5ba6b1e7ed30ea7bb066733bb6c988c4b0d1"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-win-x64.exe.blockmap",
+      "bytes": 131645,
+      "sha256": "b95002d9381ecd1a8583e6a5170d9b20706c5428d5e4004962a0bb7286e46a6a"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-win-arm64.exe",
+      "bytes": 118434831,
+      "sha256": "40c04489a47926d839d4a17413c35ea7d7516011c4c2bf9778ea7bf903ec3e69"
+    },
+    {
+      "name": "EDCONNECTION Classroom-0.1.0-win-arm64.exe.blockmap",
+      "bytes": 123078,
+      "sha256": "9556b000b9539823fff8791898481ae3f123bc9e6d9e1cc920d6f026532a2c81"
+    }
+  ]
+}

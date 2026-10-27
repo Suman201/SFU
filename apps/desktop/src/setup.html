@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self'; script-src 'self'"
+    />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Connect your classroom</title>
+    <link rel="stylesheet" href="native.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Connect your classroom</h1>
+      <p>
+        Enter the server address provided by your institution. You only need to
+        do this once.
+      </p>
+      <form id="setup">
+        <label for="server">Classroom server</label
+        ><input
+          id="server"
+          type="url"
+          placeholder="https://classroom.yourschool.com"
+          required
+          autofocus
+        /><label for="website">Website address (if different)</label
+        ><input id="website" type="url" placeholder="https://yourschool.com" />
+        <footer>
+          <button class="primary" type="submit">Continue to sign in</button>
+        </footer>
+        <p id="error" role="alert"></p>
+      </form>
+    </main>
+    <script src="setup.js"></script>
+  </body>
+</html>

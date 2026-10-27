@@ -116,6 +116,7 @@ const schema = Joi.object({
   SOCKET_JOIN_RATE_LIMIT_MAX: Joi.number().integer().min(1).max(10_000).default(30),
   SOCKET_MEDIA_RATE_LIMIT_MAX: Joi.number().integer().min(1).max(100_000).default(240),
   SOCKET_REALTIME_RATE_LIMIT_MAX: Joi.number().integer().min(1).max(1_000_000).default(1200),
+  SOCKET_WHITEBOARD_RATE_LIMIT_MAX: Joi.number().integer().min(1).max(100_000).default(6000),
   SOCKET_MAX_PAYLOAD_BYTES: Joi.number().integer().min(16_384).max(10 * 1024 * 1024).default(1024 * 1024),
   LOG_LEVEL: Joi.string().valid('fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent').default('info'),
   SWAGGER_ENABLED: Joi.boolean().truthy('true').falsy('false').default(Joi.ref('NODE_ENV', { adjust: (value) => value !== 'production' })),

@@ -1,7 +1,8 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, signal } from '@angular/core';
-import { Observable, catchError, finalize, map, of, shareReplay, throwError } from 'rxjs';
+import { Observable, catchError, finalize, map, of, shareReplay, switchMap, throwError } from 'rxjs';
 import { API_BASE_URL } from './app-environment';
+import { isDesktopSession } from './desktop-bridge';
 
 export type AuthRole = 'teacher' | 'student';
 export type AuthStatus = 'checking' | 'authenticated' | 'guest';
@@ -64,6 +65,8 @@ export class AuthService {
   private readonly userSignal = signal<AuthUser | null>(null);
   private readonly sessionNoticeSignal = signal('');
   private restoreRequest?: Observable<AuthUser | null>;
+  private refreshRequest?: Observable<string>;
+  private sessionGeneration = 0;
 
   readonly status = this.statusSignal.asReadonly();
   readonly user = this.userSignal.asReadonly();
@@ -75,24 +78,32 @@ export class AuthService {
   constructor(private readonly http: HttpClient) {}
 
   login(email: string, password: string, expectedRole?: AuthRole, rememberMe = false): Observable<LoginResult> {
+    const generation = ++this.sessionGeneration;
     this.statusSignal.set('checking');
     this.sessionNoticeSignal.set('');
     return this.http.post<BackendLoginResponse | ApiEnvelope<BackendLoginResponse>>(`${API_BASE_URL}/auth/login`, { email, password }).pipe(
-      map((response) => this.storeLoginResponse(this.unwrapResponse(response), expectedRole, rememberMe)),
+      map((response) => {
+        if (generation !== this.sessionGeneration) throw new Error('The session changed while signing in.');
+        return this.storeLoginResponse(this.unwrapResponse(response), expectedRole, rememberMe);
+      }),
       catchError((error) => {
-        this.clearSession();
+        if (generation === this.sessionGeneration) this.clearSession();
         return throwError(() => this.toAuthError(error));
       })
     );
   }
 
   register(displayName: string, email: string, password: string): Observable<LoginResult> {
+    const generation = ++this.sessionGeneration;
     this.statusSignal.set('checking');
     this.sessionNoticeSignal.set('');
     return this.http.post<BackendLoginResponse | ApiEnvelope<BackendLoginResponse>>(`${API_BASE_URL}/auth/register`, { displayName, email, password }).pipe(
-      map((response) => this.storeLoginResponse(this.unwrapResponse(response))),
+      map((response) => {
+        if (generation !== this.sessionGeneration) throw new Error('The session changed while signing in.');
+        return this.storeLoginResponse(this.unwrapResponse(response));
+      }),
       catchError((error) => {
-        this.clearSession();
+        if (generation === this.sessionGeneration) this.clearSession();
         return throwError(() => this.toAuthError(error));
       })
     );
@@ -100,36 +111,68 @@ export class AuthService {
 
   checkSession(): Observable<AuthUser | null> {
     const token = this.accessToken();
-    if (!token) {
+    if (!token && !this.readStorage(REFRESH_TOKEN_KEY)) {
       this.clearSession();
       return of(null);
     }
-    if (this.isTokenExpired(token)) {
-      this.clearSession('Your session expired. Please sign in again.');
-      return of(null);
-    }
     const currentUser = this.userSignal();
-    if (currentUser) {
+    if (currentUser && token && !this.isTokenExpired(token)) {
       this.statusSignal.set('authenticated');
       return of(currentUser);
     }
-    if (this.restoreRequest) {
-      return this.restoreRequest;
-    }
-
+    if (this.restoreRequest) return this.restoreRequest;
     this.statusSignal.set('checking');
-    this.restoreRequest = this.http.get<BackendUser | ApiEnvelope<BackendUser>>(`${API_BASE_URL}/auth/me`).pipe(
-      map((profile) => this.applyUser(this.normalizeUser(this.unwrapResponse(profile), this.decodeToken(token)))),
-      catchError(() => {
-        this.clearSession('We could not verify your session. Please sign in again.');
+    const generation = this.sessionGeneration;
+    this.restoreRequest = this.ensureAccessToken().pipe(
+      switchMap((accessToken) => generation === this.sessionGeneration && accessToken
+        ? this.http.get<BackendUser | ApiEnvelope<BackendUser>>(`${API_BASE_URL}/auth/me`).pipe(
+          map((profile) => generation === this.sessionGeneration ? this.applyUser(this.normalizeUser(this.unwrapResponse(profile), this.decodeToken(accessToken))) : null))
+        : of(null)),
+      catchError((error) => {
+        if (generation !== this.sessionGeneration) return of(null);
+        if (error instanceof HttpErrorResponse && (error.status === 0 || error.status >= 500)) {
+          // A temporary outage must not destroy a remembered session or its rotating refresh token.
+          this.statusSignal.set('guest');
+          this.userSignal.set(null);
+          this.sessionNoticeSignal.set('We could not reach the server. Reconnect and try again.');
+        } else {
+          this.clearSession('Your session expired. Please sign in again.');
+        }
         return of(null);
       }),
-      finalize(() => {
-        this.restoreRequest = undefined;
-      }),
-      shareReplay({ bufferSize: 1, refCount: true })
+      finalize(() => { this.restoreRequest = undefined; }),
+      shareReplay({ bufferSize: 1, refCount: false })
     );
     return this.restoreRequest;
+  }
+
+  /** A single rotating refresh request is shared by guards and concurrent API calls. */
+  ensureAccessToken(forceRefresh = false): Observable<string | null> {
+    const token = this.accessToken();
+    if (!forceRefresh && token && !this.isTokenExpired(token)) return of(token);
+    if (this.refreshRequest) return this.refreshRequest;
+    const refreshToken = this.readStorage(REFRESH_TOKEN_KEY);
+    if (!refreshToken) {
+      if (token) this.clearSession('Your session expired. Please sign in again.');
+      return of(null);
+    }
+    const generation = this.sessionGeneration;
+    const remembered = Boolean(this.readCookie(REFRESH_TOKEN_KEY));
+    this.refreshRequest = this.http.post<BackendLoginResponse | ApiEnvelope<BackendLoginResponse>>(`${API_BASE_URL}/auth/refresh`, { refreshToken }).pipe(
+      map((response) => {
+        if (generation !== this.sessionGeneration) throw new Error('The session changed while it was being restored.');
+        return this.storeLoginResponse(this.unwrapResponse(response), undefined, remembered).accessToken;
+      }),
+      catchError((error) => {
+        if (generation === this.sessionGeneration && error instanceof HttpErrorResponse && (error.status === 401 || error.status === 403)) {
+          this.clearSession('Your session expired. Please sign in again.');
+        }
+        return throwError(() => error);
+      }),
+      finalize(() => { this.refreshRequest = undefined; }),
+      shareReplay({ bufferSize: 1, refCount: false })
+    );
+    return this.refreshRequest;
   }
 
   logout(): void {
@@ -147,14 +190,16 @@ export class AuthService {
   }
 
   hasRole(role: AuthRole): boolean {
-    return this.userSignal()?.role === role;
+    return this.userSignal()?.roles.includes(role) ?? false;
   }
 
   redirectPathFor(role: AuthRole): string {
+    if (isDesktopSession()) return '/desktop/upcoming';
     return role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard';
   }
 
   clearSession(notice = ''): void {
+    this.sessionGeneration += 1;
     this.removeStorage(ACCESS_TOKEN_KEY);
     this.removeStorage(REFRESH_TOKEN_KEY);
     this.userSignal.set(null);
@@ -238,7 +283,7 @@ export class AuthService {
 
   private hasUsableToken(): boolean {
     const token = this.accessToken();
-    return Boolean(token && !this.isTokenExpired(token));
+    return Boolean((token && !this.isTokenExpired(token)) || this.readStorage(REFRESH_TOKEN_KEY));
   }
 
   private isTokenExpired(token: string): boolean {

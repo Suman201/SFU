@@ -1241,6 +1241,8 @@
 }
 
 .student-whiteboard-drawer sfu-whiteboard {
+  // The notice is optional; keep the board in the flexible final row.
+  grid-row: 3;
   min-height: 0;
 }
 
@@ -2106,4 +2108,35 @@ sfu-session-chat {
   .student-device-refresh:hover:not(:disabled) {
     transform: none;
   }
+}
+
+.student-recovery-notice { display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;background:#fff8e6;color:#17362b;font-size:13px; }
+.student-recovery-notice button { border:1px solid #458b73;border-radius:6px;background:transparent;padding:5px 8px;cursor:pointer; }
+
+.video-stage:has(.student-whiteboard-source) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.student-whiteboard-source {
+  position: relative;
+  z-index: 12;
+  margin: 14px 300px 0 16px;
+  max-width: 900px;
+  border-radius: 9px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px #0002;
+}
+.student-whiteboard-source sfu-whiteboard-source {
+  --panel: #f8fbf9;
+  --text: #18392e;
+  --muted: #5a7067;
+  --control-bg: #fff;
+  --line: #cadbd1;
+  --line-soft: #dce5df;
+}
+.video-stage:has(.student-whiteboard-source) .video-frame { min-height: 0; }
+@media (max-width: 900px) {
+  .student-whiteboard-source { margin: 70px 16px 0; }
+}
+@media (max-width: 600px) {
+  .student-whiteboard-source { margin: 65px 8px 0; }
 }

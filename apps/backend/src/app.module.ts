@@ -22,6 +22,7 @@ import { appConfig } from './config/app.config';
 import { validateConfig } from './config/env.validation';
 import { ContactModule } from './contact/contact.module';
 import { DatabaseModule } from './database/database.module';
+import { DesktopModule } from './desktop/desktop.module';
 import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
 import { MediaApiModule } from './media/media-api.module';
@@ -111,6 +112,7 @@ import { UsersModule } from './users/users.module';
       })
     }),
     DatabaseModule,
+    DesktopModule,
     RedisModule,
     MetricsModule,
     EventsModule,

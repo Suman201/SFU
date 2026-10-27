@@ -51,14 +51,22 @@ export interface WhiteboardMemoryState {
   updatedAt: string;
 }
 
-export interface SaveWhiteboardMemoryRequest {
+/** Tokens of the board state used to prepare a replacement snapshot. */
+export interface WhiteboardMemoryWritePrecondition {
+  /** Use zero when the board has no persisted snapshot yet. */
+  expectedSnapshotVersion?: number;
+  /** Last realtime operation included in the snapshot, or zero for a new board. */
+  expectedLastOperationSeq?: number;
+}
+
+export interface SaveWhiteboardMemoryRequest extends WhiteboardMemoryWritePrecondition {
   batchId?: string;
   snapshot: WhiteboardMemorySnapshot;
   reason?: WhiteboardMemorySaveReason;
   createVersion?: boolean;
 }
 
-export interface CreateWhiteboardMemoryCheckpointRequest {
+export interface CreateWhiteboardMemoryCheckpointRequest extends WhiteboardMemoryWritePrecondition {
   batchId?: string;
   snapshot: WhiteboardMemorySnapshot;
   reason?: Extract<WhiteboardMemorySaveReason, 'manual-save' | 'export' | 'session-end'>;
@@ -79,11 +87,11 @@ export interface WhiteboardMemoryVersionListResponse {
   versions: WhiteboardMemoryVersion[];
 }
 
-export interface RestoreWhiteboardMemoryVersionRequest {
+export interface RestoreWhiteboardMemoryVersionRequest extends WhiteboardMemoryWritePrecondition {
   batchId?: string;
 }
 
-export interface RestorePreviousWhiteboardMemoryRequest {
+export interface RestorePreviousWhiteboardMemoryRequest extends WhiteboardMemoryWritePrecondition {
   batchId?: string;
   sourceSessionId: string;
 }

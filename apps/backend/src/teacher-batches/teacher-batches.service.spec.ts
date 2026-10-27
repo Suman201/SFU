@@ -1,3 +1,4 @@
+import { expect } from '@jest/globals';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { TeacherBatchesService } from './teacher-batches.service';
@@ -184,7 +185,7 @@ describe('TeacherBatchesService', () => {
 
     expect(classSessions.exists).toHaveBeenCalledWith({ batchId: 'batch-1', status: { $in: ['live', 'completed'] } });
     expect(schedules.deleteMany.mock.calls[0]?.[0]).toEqual({ batchId: 'batch-1' });
-    expect(schedules.insertMany.mock.calls[0]?.[0]).toEqual([{ batchId: 'batch-1', dayOfWeek: 'THURSDAY', startTime: '16:30' }]);
+    expect(schedules.insertMany.mock.calls[0]?.[0]).toEqual([{ batchId: 'batch-1', dayOfWeek: 'THURSDAY', startTime: '16:30', rescheduledAt: expect.any(Date) }]);
   });
 
   it('rejects empty admin batch schedules', async () => {

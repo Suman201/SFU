@@ -14,7 +14,8 @@
     "packages/nest-sfu",
     "apps/backend",
     "apps/frontend",
-    "apps/admin-portal"
+    "apps/admin-portal",
+    "apps/desktop"
   ],
   "scripts": {
     "build": "npm run build --workspaces",
@@ -56,7 +57,14 @@
     "docker:start:multi-node": "docker compose -f infra/docker-compose.multi-node.yml up --build -d",
     "docker:down:multi-node": "docker compose -f infra/docker-compose.multi-node.yml down --remove-orphans",
     "backup:production": "bash scripts/backup-production.sh",
-    "restore:production": "bash scripts/restore-production.sh"
+    "restore:production": "bash scripts/restore-production.sh",
+    "build:desktop": "npm run desktop:build",
+    "dev:desktop": "npm run desktop:dev",
+    "test:desktop": "npm run test -w @native-sfu/desktop",
+    "desktop:dev": "node scripts/desktop.cjs dev",
+    "desktop:build": "node scripts/desktop.cjs build",
+    "desktop:package:mac": "node scripts/desktop.cjs package:mac",
+    "desktop:package:win": "node scripts/desktop.cjs package:win"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0"

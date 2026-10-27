@@ -17,6 +17,8 @@ export interface Participant {
   videoEnabled: boolean;
   screenSharing: boolean;
   handRaised: boolean;
+  screenShareRequested?: boolean;
+  screenShareRequestedAt?: string;
   handRaisedAt?: string;
   allowedToSpeak?: boolean;
   allowedToSpeakAt?: string;
@@ -36,6 +38,8 @@ export interface ParticipantPatch {
   videoEnabled?: boolean;
   screenSharing?: boolean;
   handRaised?: boolean;
+  screenShareRequested?: boolean;
+  screenShareRequestedAt?: string | null;
   handRaisedAt?: string | null;
   allowedToSpeak?: boolean;
   allowedToSpeakAt?: string | null;

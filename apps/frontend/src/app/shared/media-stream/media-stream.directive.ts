@@ -1,14 +1,20 @@
-import { Directive, ElementRef, EventEmitter, Input, OnChanges, Output } from '@angular/core';
+import { AudioOutputService } from '../../core/services/audio-output.service';
+import { Directive, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, Output } from '@angular/core';
 
 @Directive({
-  selector: 'audio[sfuMediaStream], video[sfuMediaStream]',
+  selector: 'audio[sfuMediaStream], video[sfuMediaStream], audio[sfuAudioOutput], video[sfuAudioOutput]',
   standalone: true
 })
-export class MediaStreamDirective implements OnChanges {
+export class MediaStreamDirective implements OnChanges, OnDestroy {
   @Input('sfuMediaStream') stream: MediaStream | null = null;
   @Output() playbackBlocked = new EventEmitter<unknown>();
 
-  constructor(private readonly element: ElementRef<HTMLMediaElement>) {}
+  private readonly unregisterOutput: () => void;
+  constructor(private readonly element: ElementRef<HTMLMediaElement>, audioOutput: AudioOutputService = new AudioOutputService()) {
+    this.unregisterOutput = audioOutput.register(element.nativeElement);
+  }
+
+  ngOnDestroy(): void { this.unregisterOutput(); }
 
   ngOnChanges(): void {
     const target = this.element.nativeElement;

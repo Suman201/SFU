@@ -50,6 +50,19 @@
               },
               "sourceMap": true,
               "extractLicenses": false
+            },
+            "desktop": {
+              "browser": "src/main.desktop.ts",
+              "tsConfig": "tsconfig.desktop.json",
+              "outputPath": "dist/desktop",
+              "outputHashing": "all",
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "700kb",
+                  "maximumError": "1mb"
+                }
+              ]
             }
           }
         },
@@ -63,7 +76,14 @@
               "buildTarget": "frontend:build:development"
             }
           },
-          "defaultConfiguration": "development"
+          "defaultConfiguration": "development",
+          "options": {
+            "prebundle": {
+              "exclude": [
+                "pdfjs-dist/build/pdf.worker.min.mjs"
+              ]
+            }
+          }
         },
         "test": {
           "builder": "@angular-devkit/build-angular:karma",
@@ -73,7 +93,8 @@
             "sourceMap": false,
             "styles": [
               "src/styles.scss"
-            ]
+            ],
+            "builderMode": "application"
           }
         }
       }

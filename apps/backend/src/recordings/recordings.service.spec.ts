@@ -225,7 +225,7 @@ describe('RecordingsService', () => {
       status: 'stopped',
       path: '/private/recordings/session-1/recording-1.json',
       storageKey: 'class-sessions/session-1/recording-1.json',
-      retentionExpiresAt: new Date('2026-08-01T00:00:00.000Z'),
+      retentionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       stoppedAt: new Date('2026-06-22T10:30:00.000Z'),
       durationSeconds: 1800,
       size: 512
@@ -313,7 +313,7 @@ describe('RecordingsService', () => {
       status: 'stopped',
       publishedAt: new Date('2026-06-22T12:00:00.000Z'),
       durationSeconds: 1800,
-      retentionExpiresAt: new Date('2026-08-01T00:00:00.000Z')
+      retentionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
     });
     harness.recordings.findOne.mockReturnValue(queryResult(recording));
     harness.playbackProgress.findOne.mockReturnValue(queryResult(null));

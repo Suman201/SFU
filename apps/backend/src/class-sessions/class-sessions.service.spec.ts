@@ -1,3 +1,4 @@
+import { expect } from '@jest/globals';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -400,11 +401,16 @@ describe('ClassSessionsService', () => {
     classSessions.find.mockReturnValue({ sort: jest.fn(() => ({ exec: jest.fn(async () => []) })) });
     studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(true);
 
-    const payload = await service.getCurrentForBatch('batch-1', student());
+    const now = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-08-02T00:00:00.000Z'));
+    try {
+      const payload = await service.getCurrentForBatch('batch-1', student());
 
-    expect(payload.batchId).toBe('batch-1');
-    expect(payload.role).toBe('student');
-    expect(studentEnrollments.isStudentEnrolledInBatch).toHaveBeenCalledWith('student-1', 'batch-1');
+      expect(payload.batchId).toBe('batch-1');
+      expect(payload.role).toBe('student');
+      expect(studentEnrollments.isStudentEnrolledInBatch).toHaveBeenCalledWith('student-1', 'batch-1');
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('includes enrolled offline students in teacher classroom payloads', async () => {
@@ -1639,6 +1645,115 @@ describe('ClassSessionsService', () => {
     expect(state.summary.pageCount).toBe(1);
     expect(state.summary.elementCount).toBe(1);
     expect(loaded?.snapshot.pages[0]?.title).toBe('Limits warmup');
+    expect(whiteboardVersions.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a delayed teacher snapshot after a newer student operation without overwriting it', async () => {
+    const { service, classSessions, whiteboardStates, whiteboardVersions } = createService();
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'live', roomId: 'room-1' }));
+    const newerSnapshot = whiteboardSnapshot();
+    newerSnapshot.pages[0]!.elements.push({ id: 'student-stroke', type: 'stroke' });
+    const current = whiteboardStateDoc({ snapshotVersion: 12, lastOperationSeq: 11, currentSnapshot: newerSnapshot });
+    whiteboardStates.findOne.mockResolvedValue(current);
+
+    await expect(service.saveWhiteboardMemory(sessionId, 'batch-1', teacher, {
+      snapshot: whiteboardSnapshot(), reason: 'autosave', expectedSnapshotVersion: 11, expectedLastOperationSeq: 10
+    })).rejects.toBeInstanceOf(ConflictException);
+
+    expect(whiteboardStates.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(whiteboardVersions.create).not.toHaveBeenCalled();
+    expect(newerSnapshot.pages[0]!.elements.at(-1)?.id).toBe('student-stroke');
+  });
+
+  it('requires both observed versions when replacing an existing whiteboard', async () => {
+    const { service, classSessions, whiteboardStates } = createService();
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'live', roomId: 'room-1' }));
+    whiteboardStates.findOne.mockResolvedValue(whiteboardStateDoc({ snapshotVersion: 1, lastOperationSeq: 0 }));
+
+    await expect(service.saveWhiteboardMemory(sessionId, 'batch-1', teacher, {
+      snapshot: whiteboardSnapshot(), reason: 'autosave'
+    })).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.saveWhiteboardMemory(sessionId, 'batch-1', teacher, {
+      snapshot: whiteboardSnapshot(), reason: 'autosave', expectedSnapshotVersion: 1
+    })).rejects.toBeInstanceOf(ConflictException);
+    expect(whiteboardStates.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('saves a current snapshot with an atomic version comparison and compacts only included operations', async () => {
+    const { service, classSessions, whiteboardStates } = createService();
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'live', roomId: 'room-1' }));
+    whiteboardStates.findOne.mockResolvedValue(whiteboardStateDoc({ snapshotVersion: 12, lastOperationSeq: 8 }));
+    whiteboardStates.findOneAndUpdate.mockResolvedValue(whiteboardStateDoc({ snapshotVersion: 13, lastOperationSeq: 8, compactedThroughSeq: 8 }));
+
+    const saved = await service.saveWhiteboardMemory(sessionId, 'batch-1', teacher, {
+      snapshot: whiteboardSnapshot(), reason: 'autosave', expectedSnapshotVersion: 12, expectedLastOperationSeq: 8
+    });
+
+    expect(saved.snapshotVersion).toBe(13);
+    expect(saved.compactedThroughSeq).toBe(8);
+    expect(whiteboardStates.findOneAndUpdate).toHaveBeenCalledWith(
+      { sessionId, batchId: 'batch-1', snapshotVersion: 12, lastOperationSeq: 8 },
+      expect.objectContaining({ $set: expect.objectContaining({ snapshotVersion: 13, compactedThroughSeq: 8 }) }),
+      { new: true, upsert: false }
+    );
+  });
+
+  it('rejects a save if the board changes between the read and atomic update', async () => {
+    const { service, classSessions, whiteboardStates, whiteboardVersions } = createService();
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'live', roomId: 'room-1' }));
+    whiteboardStates.findOne.mockResolvedValue(whiteboardStateDoc({ snapshotVersion: 12, lastOperationSeq: 8 }));
+    whiteboardStates.findOneAndUpdate.mockResolvedValue(null);
+
+    await expect(service.saveWhiteboardMemory(sessionId, 'batch-1', teacher, {
+      snapshot: whiteboardSnapshot(), reason: 'manual-save', createVersion: true,
+      expectedSnapshotVersion: 12, expectedLastOperationSeq: 8
+    })).rejects.toBeInstanceOf(ConflictException);
+
+    expect(whiteboardStates.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(whiteboardVersions.create).not.toHaveBeenCalled();
+  });
+
+  it('returns a conflict when a concurrent first operation creates the board before its initial save', async () => {
+    const { service, classSessions, whiteboardStates } = createService();
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'live', roomId: 'room-1' }));
+    whiteboardStates.findOne.mockResolvedValue(null);
+    whiteboardStates.findOneAndUpdate.mockRejectedValue({ code: 11000 });
+
+    await expect(service.saveWhiteboardMemory(sessionId, 'batch-1', teacher, {
+      snapshot: whiteboardSnapshot(), reason: 'autosave', expectedSnapshotVersion: 0, expectedLastOperationSeq: 0
+    })).rejects.toBeInstanceOf(ConflictException);
+    expect(whiteboardStates.findOneAndUpdate).toHaveBeenCalledWith(
+      { sessionId, batchId: 'batch-1', snapshotVersion: { $exists: false } },
+      expect.any(Object), { new: true, upsert: true }
+    );
+  });
+
+  it('rejects invalid whiteboard version tokens', async () => {
+    const { service, classSessions, whiteboardStates } = createService();
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'live', roomId: 'room-1' }));
+    await expect(service.saveWhiteboardMemory(sessionId, 'batch-1', teacher, {
+      snapshot: whiteboardSnapshot(), expectedSnapshotVersion: -1, expectedLastOperationSeq: 0
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(whiteboardStates.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('applies the same concurrency guard to checkpoint and restore requests', async () => {
+    const { service, classSessions, whiteboardStates, whiteboardVersions } = createService();
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'live', roomId: 'room-1' }));
+    whiteboardStates.findOne.mockResolvedValue(whiteboardStateDoc({ snapshotVersion: 5, lastOperationSeq: 3 }));
+    whiteboardVersions.findOne.mockResolvedValue(whiteboardVersionDoc());
+    const precondition = { expectedSnapshotVersion: 4, expectedLastOperationSeq: 2 };
+
+    await expect(service.createWhiteboardCheckpoint(sessionId, 'batch-1', teacher, {
+      snapshot: whiteboardSnapshot(), ...precondition
+    })).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.restoreWhiteboardVersion(sessionId, 'version-1', 'batch-1', teacher, precondition))
+      .rejects.toBeInstanceOf(ConflictException);
+    await expect(service.restorePreviousWhiteboardMemory(sessionId, 'batch-1', teacher, {
+      sourceSessionId: 'previous-session', ...precondition
+    })).rejects.toBeInstanceOf(ConflictException);
+
+    expect(whiteboardStates.findOneAndUpdate).not.toHaveBeenCalled();
     expect(whiteboardVersions.create).not.toHaveBeenCalled();
   });
 

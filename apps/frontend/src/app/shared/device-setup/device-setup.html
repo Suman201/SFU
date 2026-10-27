@@ -1,0 +1,25 @@
+<div class="device-setup">
+  <p class="intro">Choose your devices and check them here. Previews stay on this computer.</p>
+  <div class="device-grid">
+    <section class="device-card" aria-labelledby="microphone-heading">
+      <h2 id="microphone-heading">Microphone</h2>
+      <label>Input device<select aria-label="Microphone device" [ngModel]="webrtc.selectedAudioDeviceId() || ''" (ngModelChange)="selectMicrophone($event)"><option value="">System default</option>@for (device of webrtc.devices().audioInputs; track device.id) { <option [value]="device.id">{{ device.label }}</option> }</select></label>
+      <div class="test-row"><button type="button" [disabled]="deviceBusy()" (click)="testMicrophone()">{{ microphoneStream() ? 'Stop microphone test' : 'Test microphone' }}</button><meter min="0" max="100" [value]="microphoneLevel()" aria-label="Microphone level"></meter></div>
+      <p class="hint">Speak normally and watch the level meter.</p>
+    </section>
+    <section class="device-card" aria-labelledby="speaker-heading">
+      <h2 id="speaker-heading">Speakers</h2>
+      <label>Output device<select aria-label="Speaker device" [ngModel]="webrtc.selectedSpeakerDeviceId() || ''" (ngModelChange)="selectSpeaker($event)"><option value="">System default</option>@for (device of webrtc.devices().audioOutputs || []; track device.id) { <option [value]="device.id">{{ device.label }}</option> }</select></label>
+      <button type="button" [disabled]="speakerBusy()" (click)="testSpeaker()">{{ speakerBusy() ? 'Playing test tone…' : 'Test speakers' }}</button>
+      <p class="hint">You should hear a short tone through the selected output.</p>
+    </section>
+    <section class="device-card camera-card" aria-labelledby="camera-heading">
+      <div class="camera-controls"><h2 id="camera-heading">Webcam</h2><label>Camera device<select aria-label="Webcam device" [ngModel]="webrtc.selectedVideoDeviceId() || ''" (ngModelChange)="selectCamera($event)"><option value="">System default</option>@for (device of webrtc.devices().videoInputs; track device.id) { <option [value]="device.id">{{ device.label }}</option> }</select></label><button type="button" [disabled]="deviceBusy()" (click)="testCamera()">{{ displayedCamera() ? 'Stop camera preview' : 'Preview camera' }}</button><p class="hint">{{ live() ? 'This preview is private. Your classroom devices keep running when you close settings.' : 'Your preview is private. Closing device setup stops the preview.' }}</p></div>
+      <div class="camera-preview">@if (displayedCamera()) { <video #previewVideo autoplay [muted]="true" playsinline [sfuMediaStream]="displayedCamera()" (playbackBlocked)="onPreviewBlocked()" aria-label="Private webcam preview"></video> } @else { <span>{{ deviceBusy() ? 'Starting webcam…' : webrtc.devices().videoInputs.length ? 'Camera preview is off' : 'No webcam detected. Connect a camera and refresh devices.' }}</span> }</div>
+    </section>
+  </div>
+  @if (previewBlocked()) { <button type="button" (click)="resumePreview()">Resume preview</button> }
+  <div class="device-footer"><p class="hint">Choices are remembered on this computer.</p><button type="button" class="quiet" (click)="refreshDevices()">Refresh devices</button></div>
+  @if (deviceNotice()) { <p class="notice" role="status">{{ deviceNotice() }}</p> }
+  @if (deviceError()) { <p class="error" role="alert">{{ deviceError() }}</p> }
+</div>

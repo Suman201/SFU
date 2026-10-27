@@ -154,6 +154,7 @@ export interface WhiteboardCommandRequest {
 }
 
 export interface WhiteboardCommandEvent {
+  snapshotVersion?: number;
   roomId: string;
   participantId: string;
   displayName: string;
@@ -237,12 +238,14 @@ export interface ClientToServerEvents {
   'whiteboard:grant-control': (request: WhiteboardControlRequest, ack: Ack<WhiteboardControlEvent>) => void;
   'whiteboard:revoke-control': (request: Partial<WhiteboardControlRequest> & { roomId: string }, ack: Ack<WhiteboardControlEvent>) => void;
   'whiteboard:set-lock': (request: WhiteboardLockRequest, ack: Ack<WhiteboardLockEvent>) => void;
+  'whiteboard:refresh': (request: { roomId: string }, ack: Ack<{ roomId: string; participantId: string }>) => void;
   'whiteboard:command': (request: WhiteboardCommandRequest, ack: Ack<WhiteboardCommandEvent>) => void;
   'whiteboard:cursor': (request: WhiteboardCursorRequest, ack: Ack<WhiteboardCursorEvent>) => void;
   'student:mute-mic': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
   'student:unmute-mic': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
   'student:stop-camera': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
   'student:restore-camera': (request: StudentMediaModerationRequest, ack: Ack<StudentMediaModerationEvent>) => void;
+  'screen:request': (request: { roomId: string; requested: boolean }, ack: Ack<ParticipantPatch>) => void;
   'screen:start': (request: CreateProducerRequest, ack: Ack<Producer>) => void;
   'screen:stop': (request: { producerId: string }, ack: Ack<void>) => void;
   'chat:send': (request: SendChatMessageRequest, ack: Ack<SendChatMessageResponse>) => void;
@@ -278,6 +281,7 @@ export interface ServerToClientEvents {
   'whiteboard:control-granted': (event: WhiteboardControlEvent) => void;
   'whiteboard:control-revoked': (event: WhiteboardControlEvent) => void;
   'whiteboard:lock-changed': (event: WhiteboardLockEvent) => void;
+  'whiteboard:refresh': (event: { roomId: string; participantId: string }) => void;
   'whiteboard:command': (event: WhiteboardCommandEvent) => void;
   'whiteboard:cursor': (event: WhiteboardCursorEvent) => void;
   'producer:created': (producer: Producer) => void;

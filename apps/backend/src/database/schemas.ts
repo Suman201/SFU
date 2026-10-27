@@ -745,6 +745,12 @@ export class BatchScheduleDocument {
   @Prop({ required: true, match: /^([01]\d|2[0-3]):[0-5]\d$/ })
   startTime!: string;
 
+  @Prop({ type: Date })
+  rescheduledAt?: Date;
+
+  @Prop()
+  originalStartTime?: string;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
@@ -771,6 +777,12 @@ export class ClassSessionDocument {
 
   @Prop({ required: true, type: Date, index: true })
   scheduledAt!: Date;
+
+  @Prop({ type: Date })
+  rescheduledAt?: Date;
+
+  @Prop({ type: Date })
+  originalScheduledAt?: Date;
 
   @Prop({ required: true, min: 1, default: 60 })
   durationMinutes!: number;
@@ -2492,6 +2504,12 @@ export class ParticipantDocument {
   handRaisedAt?: Date;
 
   @Prop({ default: false })
+  screenShareRequested!: boolean;
+
+  @Prop({ type: Date })
+  screenShareRequestedAt?: Date;
+
+  @Prop({ default: false })
   allowedToSpeak!: boolean;
 
   @Prop({ type: Date })
@@ -3066,6 +3084,49 @@ export class RecordingDocument {
 
   @Prop({ type: Date, index: true })
   unpublishedAt?: Date;
+
+  // Composed lesson video is stored separately from the legacy SFU track manifest.
+  @Prop()
+  mediaCaptureId?: string;
+
+  @Prop({ enum: ['uploading', 'processing', 'ready', 'failed'] })
+  mediaUploadState?: 'uploading' | 'processing' | 'ready' | 'failed';
+
+  @Prop({ default: 0 })
+  mediaUploadBytes?: number;
+
+  @Prop()
+  mediaPath?: string;
+
+  @Prop()
+  mediaMimeType?: string;
+
+  @Prop()
+  mediaSize?: number;
+
+  @Prop()
+  mediaDurationSeconds?: number;
+
+  @Prop()
+  mediaChunkCount?: number;
+
+  @Prop({ type: Date })
+  mediaReadyAt?: Date;
+
+  @Prop()
+  mediaFailureReason?: string;
+
+  @Prop({ type: Date })
+  mediaPurgedAt?: Date;
+
+  @Prop()
+  mediaArchivePreserved?: boolean;
+
+  @Prop({ type: Date })
+  mediaProcessingUntil?: Date;
+
+  @Prop()
+  mediaProcessingToken?: string;
 
   @Prop()
   consentVersion?: string;
