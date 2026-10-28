@@ -31,6 +31,7 @@ export interface EmailMessageInput {
   html?: string;
   from?: string;
   replyTo?: string;
+  attachments?: Array<{ filename: string; content: Buffer; contentType: string }>;
 }
 
 export interface PushMessageInput {

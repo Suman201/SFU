@@ -164,6 +164,7 @@ export const appConfig = () => ({
     localPath: process.env.CLASS_MATERIAL_LOCAL_PATH ?? './class-materials',
     maxFileSizeBytes: Number(process.env.CLASS_MATERIAL_MAX_FILE_SIZE_BYTES ?? 10 * 1024 * 1024)
   },
+  invoices: { emailPollMs: Number(process.env.INVOICE_EMAIL_POLL_MS ?? 30000) },
   tutorVerification: {
     sweepMs: Number(process.env.TUTOR_VERIFICATION_SWEEP_MS ?? 60000),
     pdfinfoPath: process.env.TUTOR_PDFINFO_PATH?.trim() || 'pdfinfo',

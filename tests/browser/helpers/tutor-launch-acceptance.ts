@@ -79,6 +79,7 @@ export async function startLocalSmtpSink() {
     port: (server.address() as any).port,
     messages,
     failures: () => failures,
+    rejectNext: () => { rejectFirst = true; },
     close: async () => {
       for (const socket of sockets) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));

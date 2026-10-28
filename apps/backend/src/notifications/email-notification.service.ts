@@ -36,7 +36,8 @@ export class EmailNotificationService {
         replyTo: message.replyTo ?? this.replyToAddress(),
         subject: message.subject,
         text: message.text,
-        html: message.html
+        html: message.html,
+        ...(message.attachments?.length ? { attachments: message.attachments } : {})
       });
       result.delivered = recipients.length;
       return result;

@@ -17,6 +17,8 @@ export const routes: Routes = [
     loadComponent: () => import('./features/shell/admin-shell').then((route) => route.AdminShell),
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
+      { path: 'invoices', loadComponent: () => import('./features/invoices/invoices').then(m => m.InvoicesAdmin) },
+      { path: 'invoices/:id', loadComponent: () => import('./features/invoices/invoices').then(m => m.InvoicesAdmin) },
       { path: 'teaching-catalog', loadComponent: () => import('./features/teaching-catalog/teaching-catalog').then(m => m.TeachingCatalogAdmin) },
       { path: 'tutor-applications', loadComponent: () => import('./features/teaching-catalog/tutor-applications').then(m => m.TutorApplicationsAdmin) },
       {

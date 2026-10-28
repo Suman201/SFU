@@ -1,0 +1,708 @@
+<div class="invoice-page">
+  <header class="page-heading">
+    <div>
+      <p class="eyebrow">BILLING</p>
+      <h1>
+        {{mode()==='settings'?'Invoice settings':mode()==='editor'?'Create an
+        invoice':mode()==='detail'?(detail()?.number||'Invoice
+        draft'):'Invoices'}}
+      </h1>
+      <p>
+        {{mode()==='list'?'Create, issue and email invoices to your
+        customers.':mode()==='settings'?'Your business details and payment
+        instructions.':mode()==='editor'?'Add billing details and the services
+        provided.':'Invoice details, payment records and email delivery.'}}
+      </p>
+    </div>
+    <div class="heading-actions">
+      @if(mode()==='list'){<button
+        class="secondary-button"
+        type="button"
+        (click)="openSettings()"
+      >
+        Invoice settings</button
+      ><button class="primary-button" type="button" (click)="create()">
+        + New invoice</button
+      >}@else{<button class="secondary-button" type="button" (click)="back()">
+        ← All invoices</button
+      >}
+    </div>
+  </header>
+  @if(error()){
+  <p class="notice error" role="alert">{{error()}}</p>
+  }@if(notice()){
+  <p class="notice success" role="status">{{notice()}}</p>
+  } @if(mode()==='list'){
+  <section class="data-table-shell">
+    <form class="data-table-toolbar" (ngSubmit)="load(1)">
+      <div class="data-table-filters">
+        <input
+          type="search"
+          aria-label="Search invoices"
+          name="q"
+          [(ngModel)]="search"
+          placeholder="Search invoice, customer or email"
+          maxlength="100"
+        /><select
+          aria-label="Invoice status"
+          name="status"
+          [(ngModel)]="status"
+          (ngModelChange)="load(1)"
+        >
+          <option value="all">All statuses</option>
+          <option value="draft">Draft</option>
+          <option value="issued">Issued</option>
+          <option value="paid">Paid</option>
+          <option value="void">Void</option></select
+        ><button class="secondary-button" type="submit">Search</button>
+      </div>
+      <span class="result-count">{{data().total}} invoices</span>
+    </form>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Invoice</th>
+            <th>Customer</th>
+            <th>Invoice / due date</th>
+            <th>Total</th>
+            <th>Status</th>
+            <th>Email</th>
+            <th><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          @if(loading()){
+          <tr>
+            <td colspan="7" class="empty-state">Loading invoices…</td>
+          </tr>
+          }@else{@for(item of data().items;track item.id){
+          <tr>
+            <td>
+              <a class="invoice-link" [routerLink]="['/invoices',item.id]"
+                >{{item.number||'Draft invoice'}}</a
+              ><small>{{item.reference||'—'}}</small>
+            </td>
+            <td>
+              <strong>{{item.customer.name}}</strong
+              ><small>{{item.customer.email}}</small>
+            </td>
+            <td>{{item.invoiceDate}}<small>Due {{item.dueDate}}</small></td>
+            <td class="amount">
+              {{money(item.totals.totalMinor,item.currency)}}<small
+                >{{item.currency}}</small
+              >
+            </td>
+            <td>
+              <span class="data-pill" [attr.data-status]="item.status"
+                >{{item.status}}</span
+              >
+            </td>
+            <td>
+              <span
+                class="email-state"
+                [class.email-failed]="emailLabel(item)==='Failed'"
+                >{{emailLabel(item)}}</span
+              >
+            </td>
+            <td>
+              <a class="table-action" [routerLink]="['/invoices',item.id]"
+                >Open →</a
+              >
+            </td>
+          </tr>
+          }@empty{
+          <tr>
+            <td colspan="7" class="empty-state">
+              <strong>No invoices yet</strong>
+              <p>Create an invoice to get started, or change your filters.</p>
+            </td>
+          </tr>
+          }}
+        </tbody>
+      </table>
+    </div>
+    <footer class="table-footer">
+      <span>Page {{data().page}}</span
+      ><button
+        class="secondary-button"
+        type="button"
+        [disabled]="data().page===1||loading()"
+        (click)="load(data().page-1)"
+      >
+        Previous</button
+      ><button
+        class="secondary-button"
+        type="button"
+        [disabled]="data().page*data().limit>=data().total||loading()"
+        (click)="load(data().page+1)"
+      >
+        Next
+      </button>
+    </footer>
+  </section>
+  } @if(mode()==='editor'){
+  <form class="editor-layout" (submit)="save($event)">
+    <div class="editor-main">
+      <section class="panel">
+        <h2>Bill to</h2>
+        <div class="form-grid">
+          <label
+            >Customer name<input
+              name="customerName"
+              [(ngModel)]="form.customer.name"
+              required
+              minlength="2"
+              maxlength="150" /></label
+          ><label
+            >Customer email<input
+              name="customerEmail"
+              type="email"
+              [(ngModel)]="form.customer.email"
+              required
+              maxlength="200" /></label
+          ><label class="wide"
+            >Billing address<textarea
+              name="customerAddress"
+              [(ngModel)]="form.customer.address"
+              required
+              minlength="5"
+              maxlength="500"
+              rows="3"
+            ></textarea></label
+          ><label
+            >Country code<input
+              name="customerCountry"
+              [(ngModel)]="form.customer.countryCode"
+              required
+              pattern="[A-Za-z]{2}"
+              maxlength="2"
+              placeholder="DE" /></label
+          ><label
+            >Customer VAT number <span class="optional">Optional</span
+            ><input
+              name="customerVat"
+              [(ngModel)]="form.customer.vatNumber"
+              maxlength="50"
+          /></label>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Invoice details</h2>
+        <div class="form-grid three">
+          <label
+            >Invoice date<input
+              name="invoiceDate"
+              type="date"
+              [(ngModel)]="form.invoiceDate"
+              required /></label
+          ><label
+            >Due date<input
+              name="dueDate"
+              type="date"
+              [min]="form.invoiceDate"
+              [(ngModel)]="form.dueDate"
+              required /></label
+          ><label
+            >Supply date<input
+              name="supplyDate"
+              type="date"
+              [(ngModel)]="form.supplyDate"
+              required /></label
+          ><label
+            >Currency<select name="currency" [(ngModel)]="form.currency">
+              @for(currency of currencies;track currency){
+              <option [value]="currency">{{currency}}</option>
+              }
+            </select></label
+          ><label class="span-two"
+            >Reference <span class="optional">Optional</span
+            ><input
+              name="reference"
+              [(ngModel)]="form.reference"
+              maxlength="100"
+              placeholder="Class, booking or purchase reference"
+          /></label>
+        </div>
+      </section>
+      <section class="panel items-panel">
+        <div class="section-heading">
+          <h2>Services</h2>
+          <span>Prices exclude tax</span>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table line-editor">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Quantity</th>
+                <th>Unit price</th>
+                <th>Tax %</th>
+                <th>Amount</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for(line of form.lines;track $index;let i=$index){
+              <tr>
+                <td>
+                  <textarea
+                    [attr.aria-label]="'Item description '+(i+1)"
+                    [name]="'description'+i"
+                    [(ngModel)]="line.description"
+                    rows="2"
+                    required
+                    minlength="2"
+                    maxlength="240"
+                  ></textarea>
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    [attr.aria-label]="'Quantity '+(i+1)"
+                    [name]="'quantity'+i"
+                    [(ngModel)]="line.quantity"
+                    min="0.001"
+                    max="1000"
+                    step="0.001"
+                    required
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    [attr.aria-label]="'Unit price '+(i+1)"
+                    [name]="'price'+i"
+                    [(ngModel)]="line.price"
+                    min="0"
+                    max="1000000"
+                    step="0.01"
+                    required
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    [attr.aria-label]="'Tax rate '+(i+1)"
+                    [name]="'tax'+i"
+                    [(ngModel)]="line.tax"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    required
+                  />
+                </td>
+                <td class="amount">
+                  {{money(totals()?.lines?.[i]?.netMinor||0)}}
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    class="text-button"
+                    [attr.aria-label]="'Remove item '+(i+1)"
+                    [disabled]="form.lines.length===1"
+                    (click)="removeLine(i)"
+                  >
+                    ×
+                  </button>
+                </td>
+              </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <button
+          class="text-button add-item"
+          type="button"
+          [disabled]="form.lines.length>=50"
+          (click)="addLine()"
+        >
+          + Add item
+        </button>
+      </section>
+      <section class="panel">
+        <h2>Additional information</h2>
+        <div class="form-grid">
+          <label class="wide"
+            >Tax information<textarea
+              name="taxNote"
+              [(ngModel)]="form.taxNote"
+              maxlength="500"
+              rows="2"
+              placeholder="Explain any zero tax, exemption or reverse-charge treatment."
+            ></textarea></label
+          ><label class="wide"
+            >Note to customer <span class="optional">Optional</span
+            ><textarea
+              name="notes"
+              [(ngModel)]="form.notes"
+              maxlength="1000"
+              rows="3"
+            ></textarea>
+          </label>
+        </div>
+      </section>
+    </div>
+    <aside class="panel summary-panel">
+      <p class="eyebrow">INVOICE TOTAL</p>
+      <h2>{{money(totals()?.totalMinor||0)}}</h2>
+      <span class="currency-label">{{form.currency}}</span>@if(totals();as
+      amount){
+      <dl>
+        <div>
+          <dt>Subtotal</dt>
+          <dd>{{money(amount.subtotalMinor)}}</dd>
+        </div>
+        @for(tax of amount.taxes;track tax.rateBps){
+        <div>
+          <dt>Tax {{tax.rateBps/100}}%</dt>
+          <dd>{{money(tax.taxMinor)}}</dd>
+        </div>
+        }
+        <div class="grand-total">
+          <dt>Total</dt>
+          <dd>{{money(amount.totalMinor)}}</dd>
+        </div>
+      </dl>
+      }@else{
+      <p class="error">Check the quantities, prices and tax rates.</p>
+      }
+      <p class="muted">
+        Save a draft first. The invoice number is assigned when you issue it.
+      </p>
+      <button
+        class="primary-button"
+        type="submit"
+        [disabled]="busy()||!totals()"
+      >
+        {{busy()?'Saving…':'Save draft'}}</button
+      ><button class="text-button" type="button" (click)="back()">
+        Cancel
+      </button>
+    </aside>
+  </form>
+  } @if(mode()==='settings' && settingsForm; as settings){
+  <form class="settings-layout panel" (submit)="saveSettings($event)">
+    <h2>Business details</h2>
+    <p class="muted">
+      These details appear on new invoices. Existing issued invoices retain
+      their original details.
+    </p>
+    <div class="form-grid">
+      <label
+        >Legal business name<input
+          name="sellerName"
+          [(ngModel)]="settings.seller.name"
+          required
+          minlength="2"
+          maxlength="150" /></label
+      ><label
+        >Billing email<input
+          name="sellerEmail"
+          type="email"
+          [(ngModel)]="settings.seller.email"
+          required
+          maxlength="200" /></label
+      ><label class="wide"
+        >Business address<textarea
+          name="sellerAddress"
+          [(ngModel)]="settings.seller.address"
+          required
+          minlength="5"
+          maxlength="500"
+          rows="3"
+        ></textarea></label
+      ><label
+        >Country code<input
+          name="sellerCountry"
+          [(ngModel)]="settings.seller.countryCode"
+          required
+          pattern="[A-Za-z]{2}"
+          maxlength="2" /></label
+      ><label
+        >VAT / tax registration number<input
+          name="sellerVat"
+          [(ngModel)]="settings.seller.vatNumber"
+          maxlength="50" /></label
+      ><label
+        >Business registration number<input
+          name="sellerRegistration"
+          [(ngModel)]="settings.seller.registrationNumber"
+          maxlength="100" /></label
+      ><label
+        >Default currency<select
+          name="defaultCurrency"
+          [(ngModel)]="settings.defaultCurrency"
+        >
+          @for(currency of currencies;track currency){
+          <option [value]="currency">{{currency}}</option>
+          }
+        </select></label
+      ><label class="wide"
+        >Default tax information<textarea
+          name="defaultTaxNote"
+          [(ngModel)]="settings.defaultTaxNote"
+          rows="2"
+          maxlength="500"
+        ></textarea></label
+      ><label class="wide"
+        >Payment instructions<textarea
+          name="paymentInstructions"
+          [(ngModel)]="settings.seller.paymentInstructions"
+          rows="3"
+          maxlength="1000"
+          placeholder="Payment method, account details and reference instructions."
+        ></textarea>
+      </label>
+    </div>
+    <button class="primary-button" type="submit" [disabled]="busy()">
+      {{busy()?'Saving…':'Save settings'}}
+    </button>
+  </form>
+  } @if(mode()==='detail'){@if(loading()){
+  <p role="status">Loading invoice…</p>
+  }@if(detail();as item){
+  <div class="detail-toolbar">
+    <span class="data-pill" [attr.data-status]="item.status"
+      >{{item.status}}</span
+    >
+    <div>
+      @if(item.status==='draft'){<button
+        class="secondary-button"
+        type="button"
+        [disabled]="busy()"
+        (click)="edit()"
+      >
+        Edit draft</button
+      ><button
+        class="primary-button"
+        type="button"
+        [disabled]="busy()"
+        (click)="issue()"
+      >
+        Issue invoice</button
+      >}<button
+        class="secondary-button"
+        type="button"
+        [disabled]="busy()"
+        (click)="download()"
+      >
+        Download PDF</button
+      ><button
+        class="primary-button"
+        type="button"
+        [disabled]="busy()||item.status==='draft'||item.status==='void'"
+        (click)="send()"
+      >
+        {{busy()?'Working…':emailLabel(item)==='Sent'?'Resend email':'Send
+        email'}}
+      </button>
+    </div>
+  </div>
+  <div class="detail-layout">
+    <article class="invoice-paper" aria-label="Invoice document">
+      <header>
+        <img src="/brand/sapiovian-lockup.png" alt="Sapiovian" />
+        <div>
+          <h2>
+            {{item.status==='draft'?'DRAFT INVOICE':item.status==='void'?'VOID
+            INVOICE':'INVOICE'}}
+          </h2>
+          <p>{{item.number||'Not issued'}}</p>
+        </div>
+      </header>
+      <div class="billing-parties">
+        <section>
+          <h3>FROM</h3>
+          <strong>{{item.seller.name}}</strong>
+          <p class="multiline">{{postalAddress(item.seller)}}</p>
+          <p>{{item.seller.email}}</p>
+          @if(item.seller.vatNumber){
+          <p>VAT: {{item.seller.vatNumber}}</p>
+          }@if(item.seller.registrationNumber){
+          <p>Registration: {{item.seller.registrationNumber}}</p>
+          }
+        </section>
+        <section>
+          <h3>BILL TO</h3>
+          <strong>{{item.customer.name}}</strong>
+          <p class="multiline">{{postalAddress(item.customer)}}</p>
+          <p>{{item.customer.email}}</p>
+          @if(item.customer.vatNumber){
+          <p>VAT: {{item.customer.vatNumber}}</p>
+          }
+        </section>
+      </div>
+      <dl class="invoice-dates">
+        <div>
+          <dt>Invoice date</dt>
+          <dd>{{item.invoiceDate}}</dd>
+        </div>
+        <div>
+          <dt>Due date</dt>
+          <dd>{{item.dueDate}}</dd>
+        </div>
+        <div>
+          <dt>Supply date</dt>
+          <dd>{{item.supplyDate}}</dd>
+        </div>
+      </dl>
+      @if(item.reference){
+      <p class="reference">Reference: {{item.reference}}</p>
+      }
+      <div class="data-table-wrap">
+        <table class="document-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th>Qty</th>
+              <th>Unit price</th>
+              <th>Tax</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for(line of item.lines;track $index;let i=$index){
+            <tr>
+              <td>{{line.description}}</td>
+              <td>{{line.quantityMilli/1000}}</td>
+              <td>{{money(line.unitPriceMinor,item.currency)}}</td>
+              <td>{{line.taxRateBps/100}}%</td>
+              <td>{{money(item.totals.lines[i]!.netMinor,item.currency)}}</td>
+            </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <dl class="document-totals">
+        <div>
+          <dt>Subtotal</dt>
+          <dd>{{money(item.totals.subtotalMinor,item.currency)}}</dd>
+        </div>
+        @for(tax of item.totals.taxes;track tax.rateBps){
+        <div>
+          <dt>Tax ({{tax.rateBps/100}}%)</dt>
+          <dd>{{money(tax.taxMinor,item.currency)}}</dd>
+        </div>
+        }
+        <div class="grand-total">
+          <dt>Total ({{item.currency}})</dt>
+          <dd>{{money(item.totals.totalMinor,item.currency)}}</dd>
+        </div>
+      </dl>
+      @if(item.taxNote){
+      <section class="paper-note">
+        <h3>TAX INFORMATION</h3>
+        <p>{{item.taxNote}}</p>
+      </section>
+      }@if(item.seller.paymentInstructions){
+      <section class="paper-note">
+        <h3>PAYMENT INFORMATION</h3>
+        <p class="multiline">{{item.seller.paymentInstructions}}</p>
+      </section>
+      }@if(item.notes){
+      <section class="paper-note">
+        <h3>NOTES</h3>
+        <p>{{item.notes}}</p>
+      </section>
+      }@if(item.voidReason){
+      <section class="paper-note">
+        <h3>VOID REASON</h3>
+        <p>{{item.voidReason}}</p>
+      </section>
+      }
+    </article>
+    <aside class="detail-sidebar">
+      <section class="panel">
+        <h2>Email delivery</h2>
+        <p class="recipient">{{item.customer.email}}</p>
+        <strong class="delivery-status">{{emailLabel(item)}}</strong
+        >@if(item.paymentEmail?.status==='pending'||item.paymentEmail?.status==='processing'){
+        <p class="muted">Automatic invoice email queued.</p>
+        }@if(item.paymentEmail?.status==='failed'){
+        <p class="error">
+          Automatic delivery needs attention. Check email settings and use Send
+          email to retry.
+        </p>
+        }
+        <p class="muted">The invoice PDF is attached to the email.</p>
+        @for(attempt of item.emailAttempts.slice(-5).reverse();track
+        attempt.requestId){
+        <div class="delivery-attempt">
+          <span>{{attempt.status}}</span
+          ><time>{{attempt.at|date:'medium'}}</time>
+        </div>
+        }
+      </section>
+      <section class="panel">
+        <h2>Payment</h2>
+        <strong
+          >{{item.status==='paid'?'Paid':item.status==='void'?'Void':'Not
+          recorded'}}</strong
+        >@if(item.paidAt){
+        <p class="muted">{{item.paidAt|date:'mediumDate':'UTC'}}</p>
+        <p>{{item.paymentReference}}</p>
+        }@if(item.status==='issued'){<button
+          class="secondary-button"
+          type="button"
+          (click)="action.set('payment')"
+        >
+          Record payment</button
+        >}@if(item.status==='issued'||item.status==='draft'){<button
+          class="text-button danger"
+          type="button"
+          (click)="action.set('void')"
+        >
+          Void invoice</button
+        >}
+      </section>
+      @if(action()==='payment'){
+      <form class="panel action-form" (submit)="recordPayment($event)">
+        <h2>Record payment</h2>
+        <p class="muted">
+          Record a payment received outside this portal. This does not collect
+          money.
+        </p>
+        <label
+          >Payment date<input
+            type="date"
+            name="paidDate"
+            [(ngModel)]="paymentDate"
+            [max]="today()"
+            required /></label
+        ><label
+          >Payment reference<input
+            name="paymentReference"
+            [(ngModel)]="paymentReference"
+            required
+            minlength="3"
+            maxlength="150" /></label
+        ><button class="primary-button" type="submit" [disabled]="busy()">
+          Save payment
+        </button>
+      </form>
+      }@if(action()==='void'){
+      <form class="panel action-form" (submit)="voidInvoice($event)">
+        <h2>Void invoice</h2>
+        <label
+          >Reason<textarea
+            name="voidReason"
+            [(ngModel)]="voidReason"
+            minlength="10"
+            maxlength="500"
+            required
+            rows="3"
+          ></textarea></label
+        ><button
+          class="secondary-button danger"
+          type="submit"
+          [disabled]="busy()"
+        >
+          Confirm void
+        </button>
+      </form>
+      }
+    </aside>
+  </div>
+  }}
+</div>

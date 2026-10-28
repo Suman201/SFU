@@ -1,0 +1,678 @@
+:host {
+  display: block;
+}
+.invoice-page {
+  display: grid;
+  gap: 22px;
+  max-width: 1450px;
+  margin: auto;
+  min-width: 0;
+}
+.page-heading,
+.heading-actions,
+.detail-toolbar,
+.detail-toolbar > div,
+.section-heading,
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+h1 {
+  font-size: 30px;
+  letter-spacing: -1px;
+  margin: 5px 0 9px;
+}
+h2 {
+  font-size: 17px;
+  letter-spacing: -0.3px;
+  margin: 0 0 20px;
+}
+.page-heading p {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+}
+.eyebrow {
+  font-size: 10px !important;
+  letter-spacing: 1.7px;
+}
+.primary-button,
+.secondary-button {
+  min-height: 40px;
+  padding: 10px 15px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  background: var(--panel);
+  color: var(--text);
+}
+.primary-button {
+  background: var(--product-green);
+  color: white;
+  border-color: transparent;
+  font-weight: 600;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.text-button {
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 8px 0;
+  cursor: pointer;
+}
+.text-button:hover {
+  text-decoration: underline;
+}
+.notice {
+  padding: 14px 17px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.error {
+  color: #b43b4e;
+  background: color-mix(in srgb, var(--product-rose) 7%, var(--panel));
+}
+.success {
+  background: color-mix(in srgb, var(--product-green) 8%, var(--panel));
+}
+.data-table-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+.data-table-filters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.data-table-filters input,
+.data-table-filters select {
+  padding: 10px 12px;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.data-table-filters input {
+  width: 285px;
+}
+.result-count,
+.table-footer {
+  font-size: 12px;
+  color: var(--muted);
+}
+.table-footer {
+  padding: 16px;
+  justify-content: flex-end;
+}
+.table-footer > span {
+  margin-right: auto;
+}
+.data-table td {
+  vertical-align: middle;
+}
+.data-table td small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 6px;
+}
+.data-table td strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+.invoice-link {
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+.amount {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.data-pill {
+  padding: 5px 9px;
+  background: var(--line-soft);
+  text-transform: capitalize;
+  border-radius: 5px;
+  font-size: 10px;
+  display: inline-flex;
+}
+.data-pill[data-status='issued'] {
+  background: color-mix(in srgb, var(--product-amber) 23%, var(--panel));
+  color: var(--text);
+}
+.data-pill[data-status='paid'] {
+  background: color-mix(in srgb, var(--product-green) 16%, var(--panel));
+  color: var(--text);
+}
+.email-state {
+  font-size: 11px;
+  color: var(--muted);
+}
+.email-failed,
+.danger {
+  color: #bb3a4b;
+}
+.empty-state {
+  padding: 50px 20px !important;
+  text-align: center;
+  color: var(--muted);
+}
+.empty-state p {
+  font-size: 12px;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 24px;
+  min-width: 0;
+}
+.editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 285px;
+  gap: 22px;
+  align-items: start;
+}
+.editor-main {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.form-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.wide {
+  grid-column: 1/-1;
+}
+.span-two {
+  grid-column: span 2;
+}
+label {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  align-items: center;
+}
+.optional {
+  color: var(--muted);
+  font-size: 10px;
+}
+input,
+select,
+textarea {
+  font: inherit;
+}
+label input,
+label select,
+label textarea {
+  display: block;
+  width: 100%;
+  min-height: 41px;
+  padding: 11px 12px;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 12px;
+  box-sizing: border-box;
+}
+textarea {
+  resize: vertical;
+  line-height: 1.65;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--product-green) 60%, transparent);
+  outline-offset: 3px;
+}
+.items-panel {
+  padding-bottom: 10px;
+}
+.section-heading {
+  margin-bottom: 10px;
+}
+.section-heading h2 {
+  margin-bottom: 0;
+}
+.section-heading > span {
+  font-size: 10px;
+  color: var(--muted);
+}
+.line-editor {
+  min-width: 650px;
+}
+.line-editor th:first-child {
+  width: 38%;
+}
+.line-editor input,
+.line-editor textarea {
+  width: 100%;
+  min-width: 65px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--text);
+  font-size: 12px;
+  box-sizing: border-box;
+}
+.line-editor textarea {
+  min-width: 180px;
+}
+.line-editor td {
+  padding: 12px 5px;
+}
+.line-editor th {
+  padding: 12px 5px;
+  font-size: 10px;
+}
+.line-editor td:first-child {
+  padding-left: 0;
+}
+.line-editor td:last-child {
+  padding-right: 0;
+}
+.line-editor .text-button {
+  font-size: 22px;
+  padding: 4px 8px;
+}
+.add-item {
+  color: var(--product-green);
+  padding-top: 14px;
+}
+.summary-panel {
+  position: sticky;
+  top: 20px;
+}
+.summary-panel h2 {
+  font-size: 28px;
+  margin: 12px 0 4px;
+}
+.currency-label {
+  font-size: 10px;
+  color: var(--muted);
+}
+dl {
+  margin: 0;
+}
+dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 17px;
+  font-size: 12px;
+}
+dt {
+  color: var(--muted);
+}
+dd {
+  margin: 0;
+}
+.summary-panel dl {
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+  margin-top: 25px;
+}
+.grand-total {
+  border-top: 1px solid var(--line);
+  padding-top: 19px;
+  font-weight: 650;
+}
+.grand-total dt {
+  color: inherit;
+}
+.muted {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+.summary-panel > .muted {
+  margin: 23px 0;
+}
+.summary-panel > .primary-button {
+  width: 100%;
+}
+.summary-panel > .text-button {
+  display: block;
+  margin: 9px auto 0;
+}
+.settings-layout {
+  max-width: 850px;
+}
+.settings-layout > h2 {
+  margin-bottom: 8px;
+}
+.settings-layout > .muted {
+  margin-bottom: 24px;
+}
+.settings-layout > .primary-button {
+  margin-top: 25px;
+}
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 24px;
+  align-items: start;
+}
+.invoice-paper {
+  background: white;
+  color: #21362d;
+  border: 1px solid #dbe4e0;
+  box-shadow: 0 6px 24px #17201d05;
+  padding: 40px;
+  border-radius: 3px;
+  min-width: 0;
+  font-size: 12px;
+}
+.invoice-paper > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  padding-bottom: 26px;
+  border-bottom: 1px solid #dde4dc;
+}
+.invoice-paper > header img {
+  width: 185px;
+  height: auto;
+}
+.invoice-paper > header > div {
+  text-align: right;
+}
+.invoice-paper > header h2 {
+  font-size: 22px;
+  margin: 0 0 8px;
+  letter-spacing: 1px;
+}
+.invoice-paper > header p {
+  font-size: 11px;
+  color: #65746b;
+  margin: 0;
+}
+.billing-parties {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 34px;
+  padding: 28px 0;
+}
+.invoice-paper h3 {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #65746b;
+  margin: 0 0 12px;
+}
+.billing-parties strong {
+  font-size: 12px;
+}
+.billing-parties p {
+  font-size: 11px;
+  color: #65746b;
+  line-height: 1.7;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.multiline {
+  white-space: pre-line;
+}
+.invoice-dates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 15px;
+  margin-bottom: 24px;
+}
+.invoice-dates > div {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  font-size: 11px;
+}
+.invoice-dates dt {
+  font-size: 10px;
+  color: #65746b;
+}
+.reference {
+  font-size: 11px;
+  color: #65746b;
+  margin: 0 0 20px;
+}
+.document-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 490px;
+  font-size: 11px;
+}
+.document-table th {
+  background: #eff3ed;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 12px 9px;
+}
+.document-table td {
+  padding: 15px 9px;
+  border-bottom: 1px solid #dde4dc;
+  vertical-align: top;
+}
+.document-table th:first-child,
+.document-table td:first-child {
+  text-align: left;
+  width: 45%;
+  overflow-wrap: anywhere;
+}
+.document-table th:not(:first-child),
+.document-table td:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
+}
+.document-totals {
+  max-width: 260px;
+  margin: 25px 0 30px auto;
+}
+.document-totals dt {
+  color: #65746b;
+}
+.document-totals > .grand-total {
+  font-size: 16px;
+}
+.paper-note {
+  margin-top: 22px;
+}
+.paper-note p {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #65746b;
+  overflow-wrap: anywhere;
+}
+.detail-sidebar {
+  display: grid;
+  gap: 18px;
+}
+.detail-sidebar .panel {
+  padding: 21px;
+}
+.detail-sidebar h2 {
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+.recipient {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+.delivery-status {
+  display: block;
+  font-size: 13px;
+  margin: 17px 0 8px;
+}
+.delivery-attempt {
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  text-transform: capitalize;
+}
+.delivery-attempt time {
+  font-size: 10px;
+  color: var(--muted);
+}
+.detail-sidebar .secondary-button {
+  display: block;
+  margin-top: 17px;
+}
+.detail-sidebar .danger {
+  margin-top: 12px;
+}
+.action-form label {
+  margin: 15px 0;
+}
+.action-form .primary-button {
+  margin-top: 8px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 1200px) {
+  .editor-layout,
+  .detail-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .summary-panel {
+    position: static;
+  }
+  .detail-sidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .invoice-paper {
+    padding: 30px;
+  }
+  .form-grid.three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .page-heading {
+    align-items: flex-start;
+  }
+  .page-heading h1 {
+    font-size: 25px;
+  }
+  .heading-actions {
+    width: 100%;
+  }
+  .panel {
+    padding: 18px;
+  }
+  .form-grid,
+  .form-grid.three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .span-two {
+    grid-column: auto;
+  }
+  .data-table-filters {
+    width: 100%;
+  }
+  .data-table-filters input {
+    width: 100%;
+  }
+  .detail-toolbar > div {
+    width: 100%;
+  }
+  .detail-toolbar button {
+    flex: 1;
+  }
+  .detail-sidebar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .invoice-paper {
+    padding: 20px 16px;
+  }
+  .invoice-paper > header img {
+    width: 130px;
+  }
+  .invoice-paper > header h2 {
+    font-size: 15px;
+  }
+  .invoice-paper > header p {
+    font-size: 9px;
+  }
+  .billing-parties {
+    gap: 18px;
+  }
+  .billing-parties strong {
+    font-size: 11px;
+  }
+  .billing-parties p {
+    font-size: 10px;
+  }
+  .invoice-dates {
+    gap: 10px;
+  }
+  .invoice-dates > div {
+    font-size: 10px;
+  }
+  .data-table {
+    min-width: 830px;
+  }
+  .line-editor {
+    min-width: 650px;
+  }
+  .table-footer {
+    gap: 8px;
+  }
+  .table-footer .secondary-button {
+    padding: 8px 12px;
+  }
+}
+
+.primary-button {
+  background: #326c57;
+}
+.add-item {
+  color: #326c57;
+}
+:host-context([data-theme='dark']) .add-item {
+  color: #9bcdb6;
+}
+:host-context([data-theme='dark']) .error,
+:host-context([data-theme='dark']) .danger,
+:host-context([data-theme='dark']) .email-failed {
+  color: #ff9baa;
+}

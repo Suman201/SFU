@@ -52,6 +52,7 @@ COPY packages/sfu-core/package.json packages/sfu-core/package.json
 COPY packages/nest-sfu/package.json packages/nest-sfu/package.json
 COPY --from=build /app/apps/backend/dist ./apps/backend/dist
 COPY apps/backend/package.json apps/backend/package.json
+COPY apps/backend/assets ./apps/backend/assets
 RUN mkdir -p /app/recordings /app/chat-attachments /app/class-materials /app/profile-media /app/tutor-intro-videos /app/tutor-verification \
   && chown -R node:node /app
 USER node

@@ -76,6 +76,7 @@ const schema = Joi.object({
   CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES: Joi.number().integer().min(1).max(10 * 1024 * 1024).default(2 * 1024 * 1024),
   CLASS_MATERIAL_LOCAL_PATH: Joi.string().default('/app/class-materials'),
   CLASS_MATERIAL_MAX_FILE_SIZE_BYTES: Joi.number().integer().min(1).max(50 * 1024 * 1024).default(10 * 1024 * 1024),
+  INVOICE_EMAIL_POLL_MS: Joi.number().integer().min(500).max(60000).default(30000),
   TUTOR_VERIFICATION_SWEEP_MS: Joi.number()
     .integer()
     .min(500)
