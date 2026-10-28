@@ -34,11 +34,36 @@ export interface ProfileBatchAssociation {
 }
 
 export type TeacherPublicContentItemType = 'gallery' | 'demo_class';
-export type TeacherPublicContentMediaType = 'image' | 'video' | 'pdf' | 'document' | 'slides' | 'link';
-export type TeacherPublicContentPublishStatus = 'draft' | 'published' | 'unpublished';
-export type TeacherPromotionStatus = 'requested' | 'scheduled' | 'active' | 'paused' | 'expired' | 'cancelled' | 'rejected';
-export type TeacherPromotionPlacement = 'marketplace_featured' | 'search_boost' | 'profile_badge';
-export type TeacherPromotionBillingStatus = 'not_required' | 'pending' | 'paid' | 'failed' | 'refunded' | 'manual';
+export type TeacherPublicContentMediaType =
+  | 'image'
+  | 'video'
+  | 'pdf'
+  | 'document'
+  | 'slides'
+  | 'link';
+export type TeacherPublicContentPublishStatus =
+  | 'draft'
+  | 'published'
+  | 'unpublished';
+export type TeacherPromotionStatus =
+  | 'requested'
+  | 'scheduled'
+  | 'active'
+  | 'paused'
+  | 'expired'
+  | 'cancelled'
+  | 'rejected';
+export type TeacherPromotionPlacement =
+  | 'marketplace_featured'
+  | 'search_boost'
+  | 'profile_badge';
+export type TeacherPromotionBillingStatus =
+  | 'not_required'
+  | 'pending'
+  | 'paid'
+  | 'failed'
+  | 'refunded'
+  | 'manual';
 
 export interface TeacherPublicContentItem {
   contentId: string;
@@ -64,6 +89,14 @@ export interface TeacherPublicContentListResponse {
 }
 
 export interface PublicTeacherListItem {
+  introVideoUploaded?: boolean;
+  introVideoDurationSeconds?: number;
+  introVideoUrl?: string;
+  teacherSubjectIds?: string[];
+  curriculumIds?: string[];
+  teachingCountries?: string[];
+  learnerAgeGroups?: string[];
+  teachingLevels?: string[];
   teacherId: string;
   displayName: string;
   headline?: string;
@@ -84,6 +117,8 @@ export interface PublicTeacherListItem {
 }
 
 export interface PublicTeacherListQuery {
+  subjectId?: string;
+  categoryId?: string;
   q?: string;
   skill?: string;
   topic?: string;
@@ -199,6 +234,17 @@ export interface ProfileSettings {
 }
 
 export interface ProfileUser {
+  introVideoUploaded?: boolean;
+  introVideoDurationSeconds?: number;
+  introVideoUrl?: string;
+  assessmentResponses?: import('./teaching-catalog.js').TutorAssessmentResponse[];
+
+  teacherSubjectIds?: string[];
+  curriculumIds?: string[];
+  teachingCountries?: string[];
+  learnerAgeGroups?: string[];
+  teachingLevels?: string[];
+
   id: string;
   email: string;
   phone?: string;
@@ -226,6 +272,16 @@ export interface ProfileUser {
 }
 
 export interface PublicTeacherProfile {
+  introVideoUploaded?: boolean;
+  introVideoDurationSeconds?: number;
+  introVideoUrl?: string;
+
+  teacherSubjectIds?: string[];
+  curriculumIds?: string[];
+  teachingCountries?: string[];
+  learnerAgeGroups?: string[];
+  teachingLevels?: string[];
+
   id: string;
   displayName: string;
   headline?: string;
@@ -247,6 +303,15 @@ export interface PublicTeacherProfile {
 }
 
 export interface UpdateMyProfileRequest {
+  introVideoUrl?: string;
+  assessmentResponses?: import('./teaching-catalog.js').TutorAssessmentResponse[];
+
+  teacherSubjectIds?: string[];
+  curriculumIds?: string[];
+  teachingCountries?: string[];
+  learnerAgeGroups?: string[];
+  teachingLevels?: string[];
+
   displayName?: string;
   phone?: string;
   headline?: string;

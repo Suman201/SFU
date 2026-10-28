@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { AuthRole } from '../../../core/services/auth.service';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
@@ -6,10 +7,10 @@ import { Header } from '../../../shared/header/header';
 @Component({
   selector: 'sfu-auth-layout',
   standalone: true,
-  imports: [Footer, Header],
+  imports: [Footer, Header, RouterLink],
   templateUrl: './auth-layout.html',
   styleUrl: './auth-layout.scss',
-  changeDetection: ChangeDetectionStrategy.Eager
+  changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class AuthLayout {
   @Input({ required: true }) role!: AuthRole;

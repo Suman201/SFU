@@ -11,3 +11,6 @@ coverage
 *.log
 *.tsbuildinfo
 .DS_Store
+
+# Admin build copies canonical frontend branding.
+/apps/admin-portal/public/brand/

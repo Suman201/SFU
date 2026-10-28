@@ -1,11 +1,12 @@
 <div class="admin-shell">
   <aside class="sidebar" aria-label="Admin navigation">
     <a routerLink="/dashboard" class="brand">
-      <span aria-hidden="true">NS</span>
-      <strong>Native SFU</strong>
+      <img class="sapiovian-logo" src="/brand/sapiovian-lockup.png" alt="Sapiovian — Your curiosity. Their calling." width="1736" height="468" />
     </a>
 
     <nav>
+      <a routerLink="/teaching-catalog" routerLinkActive="active"><span aria-hidden="true">●</span>Subjects &amp; categories</a>
+      <a routerLink="/tutor-applications" routerLinkActive="active"><span aria-hidden="true">●</span>Tutor applications</a>
       <a routerLink="/dashboard" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
         <span aria-hidden="true">●</span>
         Dashboard

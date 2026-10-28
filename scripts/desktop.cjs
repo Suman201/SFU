@@ -12,7 +12,7 @@ const options = {
   "--website-url": "SFU_DESKTOP_WEBSITE_URL",
   "--update-url": "SFU_DESKTOP_UPDATE_URL",
 };
-const help = `EDCONNECTION Classroom desktop
+const help = `Sapiovian Classroom desktop
 
 Commands:
   npm run desktop:dev          Build and run; uses your existing backend

@@ -1,23 +1,25 @@
 <sfu-header />
-
 <main class="auth-layout">
-  <section class="auth-hero" aria-label="Authentication overview">
-    <p class="eyebrow">{{ roleLabel }} portal</p>
-    <h1>{{ title }}</h1>
-    <p>{{ subtitle }}</p>
-
-    <div class="hero-card">
-      <span>{{ roleLabel.slice(0, 1) }}</span>
-      <div>
-        <strong>{{ dashboardLabel }}</strong>
-        <small>{{ role === 'teacher' ? 'Manage batches, students, and live sessions.' : 'Track classes, teachers, and upcoming sessions.' }}</small>
-      </div>
-    </div>
-  </section>
-
-  <section class="auth-card">
-    <ng-content />
-  </section>
+  <aside class="auth-hero" aria-label="About your account">
+    <p class="eyebrow">Sapiovian</p>
+    <h2>
+      {{ role === 'teacher' ? 'Your teaching workspace' : 'Your classes, in one
+      place' }}
+    </h2>
+    <p>
+      {{ role === 'teacher' ? 'Manage class groups, teach live and follow your
+      students’ progress.' : 'Join upcoming classes and find the resources your
+      teacher shares.' }}
+    </p>
+    <ul class="auth-points">
+      <li>Live classes and a shared whiteboard</li>
+      <li>Assignments and class materials</li>
+      <li>Published class recordings</li>
+    </ul>
+    <a routerLink="/teachers"
+      >Browse teachers <span aria-hidden="true">→</span></a
+    >
+  </aside>
+  <section class="auth-card"><ng-content /></section>
 </main>
-
 <sfu-footer />

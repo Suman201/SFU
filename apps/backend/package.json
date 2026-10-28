@@ -12,7 +12,8 @@
     "backfill:producer-node-id": "ts-node -r tsconfig-paths/register src/database/backfill-producer-node-id.ts",
     "seed:dummy-users": "ts-node -P tsconfig.scripts.json -r tsconfig-paths/register src/database/seed-dummy-users.ts",
     "test": "jest --watchman=false",
-    "test:e2e": "jest --watchman=false --config ./test/jest-e2e.json"
+    "test:e2e": "jest --watchman=false --config ./test/jest-e2e.json",
+    "seed:teaching-catalog": "ts-node -P tsconfig.scripts.json -r tsconfig-paths/register src/database/seed-teaching-catalog.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.850.0",

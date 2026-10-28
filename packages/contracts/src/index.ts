@@ -30,3 +30,5 @@ export * from './cluster.js';
 export * from './pipe.js';
 export * from './signaling.js';
 export * from './transport.js';
+
+export * from './teaching-catalog.js';

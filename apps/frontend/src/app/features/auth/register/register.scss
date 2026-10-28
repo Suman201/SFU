@@ -1,51 +1,71 @@
-.auth-shell {
-  min-height: calc(100vh - 128px);
-  display: grid;
-  align-content: start;
-  justify-items: center;
-  padding: 32px 18px;
-}
-
 .auth-panel {
-  width: min(100%, 420px);
-  background: var(--panel-elevated);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
-  padding: 20px;
   display: grid;
-  gap: 16px;
-  box-shadow: var(--shadow-md);
+  gap: 21px;
 }
-
 header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 6px;
 }
-
+header p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+header .eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
 h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: 29px;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+  font-weight: 650;
 }
-
-a {
-  color: var(--accent);
-  font-size: 14px;
-  font-weight: 700;
-  text-decoration: none;
-}
-
 label {
   display: grid;
-  gap: 6px;
-  color: var(--muted);
+  gap: 8px;
   font-size: 13px;
+  color: var(--muted);
+}
+input {
+  min-height: 46px;
+}
+small {
+  font-size: 11px;
+}
+.primary {
+  min-height: 46px;
+  font-weight: 650;
+}
+.error {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 0;
+  white-space: pre-line;
+}
+.account-link,
+.teacher-link {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+.teacher-link {
+  padding-top: 17px;
+  border-top: 1px solid var(--line);
 }
 
-.error {
-  margin: 0;
-  color: var(--danger);
-  font-weight: 600;
-  white-space: pre-line;
+.password-field {
+  display: grid;
+  gap: 6px;
 }

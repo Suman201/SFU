@@ -7,7 +7,7 @@ import { AppComponent } from './app/app.component';
 import { authInterceptor } from './app/core/services/auth.interceptor';
 import { authGuard } from './app/core/services/auth.guards';
 
-document.title = 'EDCONNECTION Classroom';
+document.title = 'Sapiovian Classroom';
 try { sessionStorage.setItem('native-sfu.desktop', '1'); } catch { /* Restricted storage. */ }
 const routes: Routes = [
   { path: 'desktop', loadChildren: () => import('./app/features/desktop/desktop.routes').then((module) => module.DESKTOP_CHILD_ROUTES) },

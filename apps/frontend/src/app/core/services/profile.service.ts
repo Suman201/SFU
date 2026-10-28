@@ -1,3 +1,4 @@
+import type { TeachingCatalogSnapshot, TutorApplication } from '@native-sfu/contracts';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import type {
@@ -32,6 +33,18 @@ interface ApiEnvelope<T> {
 export class ProfileService {
   constructor(private readonly http: HttpClient) {}
 
+  uploadIntroVideo(file:File){const data=new FormData();data.append('file',file);return this.http.post<{introVideoUploaded:boolean;introVideoDurationSeconds:number}|ApiEnvelope<{introVideoUploaded:boolean;introVideoDurationSeconds:number}>>(`${API_BASE_URL}/tutor-application/me/introduction-video`,data).pipe(map(r=>this.unwrapResponse(r)));}
+  previewIntroVideo(){return this.http.get(`${API_BASE_URL}/tutor-application/me/introduction-video`,{responseType:'blob'});}
+  removeIntroVideo(){return this.http.delete(`${API_BASE_URL}/tutor-application/me/introduction-video`);}
+  teachingCatalog(): Observable<TeachingCatalogSnapshot> {
+    return this.http.get<TeachingCatalogSnapshot | ApiEnvelope<TeachingCatalogSnapshot>>(`${API_BASE_URL}/teaching-catalog`).pipe(map(r => this.unwrapResponse(r)));
+  }
+  tutorApplication(): Observable<TutorApplication> {
+    return this.http.get<TutorApplication | ApiEnvelope<TutorApplication>>(`${API_BASE_URL}/tutor-application/me`).pipe(map(r => this.unwrapResponse(r)));
+  }
+  submitTutorApplication(body: {revision:number;adultTutorConfirmed:boolean;codeOfConductAccepted:boolean;safeguardingAccepted:boolean}): Observable<TutorApplication> {
+    return this.http.post<TutorApplication | ApiEnvelope<TutorApplication>>(`${API_BASE_URL}/tutor-application/submit`,body).pipe(map(r=>this.unwrapResponse(r)));
+  }
   getMyProfile(): Observable<ProfileUser> {
     return this.http
       .get<ProfileUser | ApiEnvelope<ProfileUser>>(`${API_BASE_URL}/profile/me`)

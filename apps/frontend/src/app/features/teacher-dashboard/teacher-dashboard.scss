@@ -34,7 +34,7 @@ p {
 .eyebrow {
   color: var(--accent);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 650;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -77,7 +77,7 @@ h3 {
   color: var(--accent);
   cursor: pointer;
   font: inherit;
-  font-weight: 850;
+  font-weight: 650;
   text-decoration: none;
   box-shadow: var(--shadow-sm);
 }
@@ -108,7 +108,7 @@ h3 {
 .metric-card span {
   color: var(--text);
   font-size: 30px;
-  font-weight: 950;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -174,7 +174,7 @@ label {
   border-radius: var(--radius);
   background: var(--panel-soft);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 650;
 }
 
 .session-timeline,
@@ -286,14 +286,14 @@ label {
   background: var(--panel-elevated);
   color: var(--muted);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
   white-space: nowrap;
 }
 
 .action-row > div > span:first-child {
   color: #ff9760;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -315,7 +315,7 @@ label {
 .signal-row span,
 .session-time span {
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 650;
 }
 
 .health-meta .warning {
@@ -367,7 +367,7 @@ label {
   background: var(--panel);
   color: var(--text);
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 650;
   text-decoration: none;
 }
 
@@ -523,7 +523,7 @@ label {
   padding: 0 6px;
   color: var(--text);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .schedule-preview {
@@ -552,7 +552,7 @@ label {
 .schedule-preview span {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .preview-grid {
@@ -680,3 +680,5 @@ label {
     padding: 16px;
   }
 }
+
+.teacher-dashboard-shell { max-width: 1360px; margin-inline: auto; padding: 35px 28px 55px; }.dashboard-hero { border: 0; background: transparent; box-shadow: none; padding: 0 0 6px; align-items: center; }.dashboard-hero h1 { font-size: 34px; font-weight: 650; letter-spacing: -.04em; }.dashboard-description { color: var(--muted); font-size: 14px; line-height: 1.6; margin-top: 10px; }.hero-actions { gap: 8px; }.hero-actions .button { box-shadow: none; font-size: 12px; font-weight: 550; }.hero-actions .primary { color: #301b20; font-weight: 650; }.metric-card { box-shadow: none; min-height: 96px; }.metric-card:is(.green,.rose,.coral,.amber) { background: var(--panel); border-color: var(--line); border-top: 3px solid var(--brand-green); }.metric-card.rose { border-top-color: var(--brand-rose); }.metric-card.coral { border-top-color: var(--brand-coral); }.metric-card.amber { border-top-color: var(--brand-amber); }.metric-card span { font-size: 26px; font-weight: 650; }.metric-card p { font-size: 12px; }.panel { box-shadow: none; }.panel h2 { font-size: 21px; font-weight: 650; letter-spacing: -.025em; }@media(max-width:760px) { .teacher-dashboard-shell { padding: 24px 18px 40px; }.dashboard-hero { align-items: start; flex-direction: column; }.hero-actions { justify-content: start; }.dashboard-hero h1 { font-size: 30px; } }

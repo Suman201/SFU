@@ -35,8 +35,8 @@ export class Login {
       : 'Sign in to discover teachers, track enrolled batches, and join live classes.';
   protected readonly alternateLoginPath = `/${this.alternateRole}/login`;
   protected readonly formModel = signal<LoginFormModel>({
-    email: 'host@example.com',
-    password: 'Password@12345'
+    email: '',
+    password: ''
   });
   protected readonly form = signalForm(this.formModel, (path) => {
     required(path.email);

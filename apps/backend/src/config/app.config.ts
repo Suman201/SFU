@@ -165,6 +165,7 @@ export const appConfig = () => ({
     maxFileSizeBytes: Number(process.env.CLASS_MATERIAL_MAX_FILE_SIZE_BYTES ?? 10 * 1024 * 1024)
   },
   profileMedia: {
+    introVideoPath: process.env.TUTOR_INTRO_VIDEO_LOCAL_PATH?.trim() || undefined,
     storageProvider: 'local',
     localPath: process.env.PROFILE_MEDIA_LOCAL_PATH ?? './profile-media',
     maxFileSizeBytes: Number(process.env.PROFILE_MEDIA_MAX_FILE_SIZE_BYTES ?? 2 * 1024 * 1024)

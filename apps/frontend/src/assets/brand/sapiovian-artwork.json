@@ -1,0 +1,26 @@
+{
+  "source": "sapiovian-logo.png",
+  "width": 1983,
+  "height": 793,
+  "mark": [
+    128,
+    160,
+    324,
+    432
+  ],
+  "wordmark": [
+    476,
+    240,
+    1384,
+    312
+  ],
+  "lockup": [
+    128,
+    160,
+    1736,
+    468
+  ],
+  "tileColor": "#123c32",
+  "name": "Sapiovian",
+  "tagline": "Your curiosity. Their calling."
+}

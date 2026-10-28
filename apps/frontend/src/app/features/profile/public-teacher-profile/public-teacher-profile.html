@@ -3,290 +3,308 @@
   <a class="back-link" routerLink="/teachers">Back to teachers</a>
 
   @if (loading()) {
-    <section class="empty-state not-found">
-      <h1>Loading teacher</h1>
-      <p>Fetching the published teacher profile.</p>
-    </section>
-  } @else if (teacher(); as teacher) {
-    <section class="teacher-cover">
-      <img [src]="coverImage(teacher)" [alt]="teacher.displayName + ' cover image'" />
-      <div class="cover-content">
-        <span>Public teacher profile</span>
-        <strong>{{ teacher.headline || 'Published teacher profile' }}</strong>
+  <section class="empty-state not-found">
+    <h1>Loading teacher</h1>
+    <p>Fetching the published teacher profile.</p>
+  </section>
+  } @else if (teacher(); as teacher) { @if (teacher.coverImageUrl) {
+  <section class="teacher-cover">
+    <img
+      [src]="coverImage(teacher)"
+      [alt]="teacher.displayName + ' cover image'"
+    />
+  </section>
+  }
+
+  <section class="teacher-overview">
+    <div class="teacher-story">
+      <section class="teacher-identity-panel">
+        <img
+          class="profile-image"
+          [src]="profileImage(teacher)"
+          [alt]="teacher.displayName+' profile image'"
+        />
+        <div class="identity-copy">
+          <p class="eyebrow">MEET YOUR TEACHER</p>
+          <h1>{{teacher.displayName}}</h1>
+          <p>{{teacher.location || 'Online lessons'}}</p>
+        </div>
+      </section>
+      <h2 class="teaching-headline">{{teacher.headline}}</h2>
+      <div class="pill-list">
+        @for(subject of subjectNames(teacher.teacherSubjectIds);track
+        subject){<span>{{subject}}</span>}
       </div>
-    </section>
-
-    <section class="teacher-identity-panel">
-      <img class="profile-image" [src]="profileImage(teacher)" [alt]="teacher.displayName + ' profile image'" />
-      <div class="identity-copy">
-        <p class="eyebrow">Teacher profile</p>
-        <h1>{{ teacher.displayName }}</h1>
-        <span>{{ teacher.headline || 'Class instructor' }}</span>
-        <p>{{ teacher.location || 'Location not shared' }}</p>
-      </div>
-      <div class="identity-actions">
-        <a class="primary-link" routerLink="/student/explore">Explore classes</a>
-        <a class="primary-link secondary" routerLink="/teachers">All teachers</a>
-      </div>
-    </section>
-
-    <section class="metric-grid" aria-label="Teacher public profile summary">
-      <article>
-        <span>{{ teacher.batches.length }}</span>
-        <p>Active batches</p>
+      <article class="about-panel">
+        <h2>A little about me</h2>
+        <p>{{teacher.bio}}</p>
       </article>
-      <article>
-        <span>{{ totalEnrolled() }}/{{ totalCapacity() }}</span>
-        <p>Current enrollment</p>
-      </article>
-      <article>
-        <span>{{ teacher.skills.length }}</span>
-        <p>Teaching topics</p>
-      </article>
-      <article>
-        <span>{{ teacher.languages.length }}</span>
-        <p>Languages</p>
-      </article>
-    </section>
-
-    <section class="profile-grid">
-      <article class="profile-panel about-panel">
-        <p class="eyebrow">About</p>
-        <h2>{{ teacher.headline || 'Teaching focus' }}</h2>
-        <p>{{ teacher.bio || 'This teacher has not added a public bio yet.' }}</p>
-      </article>
-
-      <article class="profile-panel">
-        <p class="eyebrow">Expertise</p>
-        <h2>Skills and languages</h2>
-        <div class="pill-list">
-          @for (skill of teacher.skills; track skill) {
-            <span>{{ skill }}</span>
-          } @empty {
-            <span>Teaching topics coming soon</span>
-          }
-        </div>
-        <div class="pill-list subtle">
-          @for (language of teacher.languages; track language) {
-            <span>{{ language }}</span>
-          } @empty {
-            <span>Languages not listed</span>
-          }
-        </div>
-      </article>
-
-      <article class="profile-panel experience-panel">
-        <p class="eyebrow">Experience</p>
-        <h2>Professional journey</h2>
-        <div class="timeline-list">
-          @for (experience of teacher.experience; track experience.role) {
-            <div>
-              <strong>{{ experience.role }}</strong>
-              <span>{{ experience.organization || 'Organization' }}{{ experience.period ? ' - ' + experience.period : '' }}</span>
-              @if (experience.summary) {
-                <p>{{ experience.summary }}</p>
-              }
-            </div>
-          } @empty {
-            <div>
-              <strong>No experience published</strong>
-              <span>This teacher has not published experience yet.</span>
-            </div>
-          }
-        </div>
-      </article>
-
-      <article class="profile-panel">
-        <p class="eyebrow">Availability</p>
-        <h2>Class availability</h2>
-        <div class="detail-list">
-          <span>Availability</span>
-          <strong>{{ teacher.availability || 'Not listed' }}</strong>
-          <span>Timezone</span>
-          <strong>{{ teacher.timezone || 'Not listed' }}</strong>
-          <span>Location</span>
-          <strong>{{ teacher.location || 'Not listed' }}</strong>
-        </div>
-      </article>
-    </section>
-
-    <section class="profile-panel tab-panel">
-      <header class="tab-panel-header">
+      <dl class="teaching-facts">
         <div>
-          <p class="eyebrow">Profile details</p>
-          <h2>Explore {{ teacher.displayName }}</h2>
+          <dt>I teach in</dt>
+          <dd>{{teacher.languages.join(', ')}}</dd>
         </div>
-        <nav class="profile-tabs" aria-label="Teacher profile sections">
-          @for (tab of tabs; track tab.id) {
-            <button type="button" [class.is-active]="activeTab() === tab.id" [attr.aria-selected]="activeTab() === tab.id" (click)="selectTab(tab.id)">
-              <span>{{ tab.label }}</span>
-              <strong>{{ tabCount(teacher, tab.id) }}</strong>
-            </button>
-          }
-        </nav>
-      </header>
-
-      <div class="tab-content">
-        @switch (activeTab()) {
-          @case ('gallery') {
-            @if (teacher.gallery.length) {
-              <div class="gallery-grid">
-                @for (item of teacher.gallery; track item.contentId) {
-                  <article class="gallery-card">
-                    <div class="gallery-visual">
-                      <span>{{ contentIcon(item) }}</span>
-                    </div>
-                    <strong>{{ item.title }}</strong>
-                    <p>{{ item.description || item.mediaType }}</p>
-                    <div class="pill-list subtle">
-                      @for (tag of item.tags; track tag) {
-                        <span>{{ tag }}</span>
-                      }
-                    </div>
-                    @if (publicContentUrl(item)) {
-                      <a class="content-link" [href]="publicContentUrl(item)" target="_blank" rel="noopener">Open</a>
-                    }
-                  </article>
-                }
-              </div>
-            } @else {
-              <div class="empty-state">
-                <h3>No gallery items</h3>
-                <p>This teacher has not published gallery items yet.</p>
-              </div>
-            }
-          }
-
-          @case ('demos') {
-            @if (teacher.demoClasses.length) {
-              <div class="review-grid">
-                @for (item of teacher.demoClasses; track item.contentId) {
-                  <article class="review-card">
-                    <header>
-                      <span>{{ item.mediaType }}</span>
-                      @if (publicContentUrl(item)) {
-                        <a class="content-link" [href]="publicContentUrl(item)" target="_blank" rel="noopener">Open demo</a>
-                      }
-                    </header>
-                    <strong>{{ item.title }}</strong>
-                    <p>{{ item.description || 'Published sample class' }}</p>
-                    <div class="pill-list subtle">
-                      @for (topic of item.topics; track topic) {
-                        <span>{{ topic }}</span>
-                      }
-                    </div>
-                  </article>
-                }
-              </div>
-            } @else {
-              <div class="empty-state">
-                <h3>No demo classes</h3>
-                <p>This teacher has not published sample classes yet.</p>
-              </div>
-            }
-          }
-
-          @case ('credentials') {
-            <div class="award-list">
-              @for (credential of teacher.credentials; track credential.title) {
-                <article>
-                  <span>{{ credential.year || 'Now' }}</span>
-                  <div>
-                    <strong>{{ credential.title }}</strong>
-                    <p>{{ credentialLabel(credential) }}</p>
-                  </div>
-                </article>
-              }
-              @for (education of teacher.education; track education.title) {
-                <article>
-                  <span>{{ education.year || 'Edu' }}</span>
-                  <div>
-                    <strong>{{ education.title }}</strong>
-                    <p>{{ credentialLabel(education) }}</p>
-                  </div>
-                </article>
-              }
-            </div>
-          }
-
-          @case ('experience') {
-            <div class="timeline-list">
-              @for (experience of teacher.experience; track experience.role) {
-                <div>
-                  <strong>{{ experience.role }}</strong>
-                  <span>{{ experience.organization || 'Organization' }}{{ experience.period ? ' - ' + experience.period : '' }}</span>
-                  @if (experience.summary) {
-                    <p>{{ experience.summary }}</p>
-                  }
-                </div>
-              } @empty {
-                <div>
-                  <strong>No experience published</strong>
-                  <span>This teacher has not published experience yet.</span>
-                </div>
-              }
-            </div>
-          }
-
-          @case ('links') {
-            <div class="batch-list">
-              @for (link of teacher.socialLinks; track link.url) {
-                <article class="batch-row link-row">
-                  <div>
-                    <strong>{{ link.label }}</strong>
-                    <span>{{ link.url }}</span>
-                  </div>
-                  <footer>
-                    <a [href]="link.url" target="_blank" rel="noopener">Open</a>
-                  </footer>
-                </article>
-              } @empty {
-                <div class="empty-state">
-                  <h3>No public links</h3>
-                  <p>This teacher has not published links yet.</p>
-                </div>
-              }
-            </div>
-          }
-
-          @case ('batches') {
-            @if (teacher.batches.length) {
-              <div class="batch-list">
-                @for (batch of teacher.batches; track batch.id) {
-                  <article class="batch-row">
-                    <div>
-                      <strong>{{ batch.title }}</strong>
-                      <span>{{ batch.subject || 'General course' }}</span>
-                    </div>
-                    <div class="batch-meta">
-                      <span>{{ batch.schedule || 'Schedule to be announced' }}</span>
-                      <span>{{ batch.durationMinutes || 60 }} min</span>
-                      <span>{{ feeLabel(batch.feeAmount) }}</span>
-                      <span>Starts {{ formatStart(batch.startsAt) }}</span>
-                      <span>{{ seatsLabel(batch) }}</span>
-                    </div>
-                    <footer>
-                      <a routerLink="/student/explore">View classes</a>
-                    </footer>
-                  </article>
-                }
-              </div>
-            } @else {
-              <div class="empty-state">
-                <h3>No public batches</h3>
-                <p>This teacher does not have active public batches listed right now.</p>
-              </div>
-            }
-          }
+        @if(teacher.learnerAgeGroups?.length){
+        <div>
+          <dt>Who I teach</dt>
+          <dd>{{teacher.learnerAgeGroups?.join(' and ')}}</dd>
+        </div>
+        }@if(teacher.teachingLevels?.length){
+        <div>
+          <dt>Levels</dt>
+          <dd>{{teacher.teachingLevels?.join(', ')}}</dd>
+        </div>
+        }@if(curriculumNames(teacher.curriculumIds).length){
+        <div>
+          <dt>Curricula</dt>
+          <dd>{{curriculumNames(teacher.curriculumIds).join(' · ')}}</dd>
+        </div>
+        }
+      </dl>
+      @if(teacher.skills.length){
+      <div class="pill-list subtle">
+        @for(skill of teacher.skills;track skill){<span>{{skill}}</span>}
+      </div>
+      }
+    </div>
+    <aside class="teacher-intro-card">
+      <div class="public-video-stage">
+        @if(teacher.introVideoUploaded){<video
+          [src]="introVideoUrl(teacher.id)"
+          controls
+          playsinline
+          preload="metadata"
+          aria-label="Tutor introduction video"
+        ></video
+        >}@else if(teacher.introVideoUrl){<a
+          [href]="teacher.introVideoUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="external-intro"
+          ><span aria-hidden="true">▷</span>Watch my introduction ↗</a
+        >}
+      </div>
+      <div class="intro-card-copy">
+        <span class="eyebrow">YOUR NEXT STEP</span>
+        <h2>Find your class.</h2>
+        <p>
+          Explore {{teacher.displayName}}'s upcoming classes and choose what
+          works for you.
+        </p>
+        <a
+          class="primary-link"
+          href="#profile-content"
+          (click)="selectTab('batches')"
+          >View classes <span aria-hidden="true">↗</span></a
+        >
+        <div class="availability-note">
+          <strong>Usual availability</strong>
+          <p>{{teacher.availability}}</p>
+          <span>{{teacher.timezone}}</span>
+        </div>
+      </div>
+    </aside>
+  </section>
+  @if(teacher.experience.length){
+  <section class="public-experience">
+    <p class="eyebrow">THE EXPERIENCE BEHIND THE LESSONS</p>
+    <h2>Teaching experience</h2>
+    <div class="timeline-list">
+      @for(experience of teacher.experience;track $index){
+      <div>
+        <strong>{{experience.role}}</strong
+        ><span
+          >{{experience.organization}}{{experience.period?' ·
+          '+experience.period:''}}</span
+        >@if(experience.summary){
+        <p>{{experience.summary}}</p>
         }
       </div>
-    </section>
+      }
+    </div>
+  </section>
+  }
+
+  <section class="profile-panel tab-panel" id="profile-content">
+    <header class="tab-panel-header">
+      <div>
+        <p class="eyebrow">Profile details</p>
+        <h2>Classes and background</h2>
+      </div>
+      <nav class="profile-tabs" aria-label="Teacher profile sections">
+        @for (tab of visibleTabs(); track tab.id) {
+        <button
+          type="button"
+          [class.is-active]="activeTab() === tab.id"
+          [attr.aria-pressed]="activeTab() === tab.id"
+          (click)="selectTab(tab.id)"
+        >
+          <span>{{ tab.label }}</span>
+          <strong>{{ tabCount(teacher, tab.id) }}</strong>
+        </button>
+        }
+      </nav>
+    </header>
+
+    <div class="tab-content">
+      @switch (activeTab()) { @case ('gallery') { @if (teacher.gallery.length) {
+      <div class="gallery-grid">
+        @for (item of teacher.gallery; track item.contentId) {
+        <article class="gallery-card">
+          <div class="gallery-visual">
+            <span>{{ contentIcon(item) }}</span>
+          </div>
+          <strong>{{ item.title }}</strong>
+          <p>{{ item.description || item.mediaType }}</p>
+          <div class="pill-list subtle">
+            @for (tag of item.tags; track tag) {
+            <span>{{ tag }}</span>
+            }
+          </div>
+          @if (publicContentUrl(item)) {
+          <a
+            class="content-link"
+            [href]="publicContentUrl(item)"
+            target="_blank"
+            rel="noopener"
+            >Open</a
+          >
+          }
+        </article>
+        }
+      </div>
+      } @else {
+      <div class="empty-state">
+        <h3>No gallery items</h3>
+        <p>This teacher has not published gallery items yet.</p>
+      </div>
+      } } @case ('demos') { @if (teacher.demoClasses.length) {
+      <div class="review-grid">
+        @for (item of teacher.demoClasses; track item.contentId) {
+        <article class="review-card">
+          <header>
+            <span>{{ item.mediaType }}</span>
+            @if (publicContentUrl(item)) {
+            <a
+              class="content-link"
+              [href]="publicContentUrl(item)"
+              target="_blank"
+              rel="noopener"
+              >Open demo</a
+            >
+            }
+          </header>
+          <strong>{{ item.title }}</strong>
+          <p>{{ item.description || 'Published sample class' }}</p>
+          <div class="pill-list subtle">
+            @for (topic of item.topics; track topic) {
+            <span>{{ topic }}</span>
+            }
+          </div>
+        </article>
+        }
+      </div>
+      } @else {
+      <div class="empty-state">
+        <h3>No demo classes</h3>
+        <p>This teacher has not published sample classes yet.</p>
+      </div>
+      } } @case ('credentials') {
+      <div class="award-list">
+        @for (credential of teacher.credentials; track credential.title) {
+        <article>
+          <span>{{ credential.year || 'Now' }}</span>
+          <div>
+            <strong>{{ credential.title }}</strong>
+            <p>{{ credentialLabel(credential) }}</p>
+          </div>
+        </article>
+        } @for (education of teacher.education; track education.title) {
+        <article>
+          <span>{{ education.year || 'Edu' }}</span>
+          <div>
+            <strong>{{ education.title }}</strong>
+            <p>{{ credentialLabel(education) }}</p>
+          </div>
+        </article>
+        }
+      </div>
+      } @case ('experience') {
+      <div class="timeline-list">
+        @for (experience of teacher.experience; track experience.role) {
+        <div>
+          <strong>{{ experience.role }}</strong>
+          <span
+            >{{ experience.organization || 'Organization' }}{{ experience.period
+            ? ' - ' + experience.period : '' }}</span
+          >
+          @if (experience.summary) {
+          <p>{{ experience.summary }}</p>
+          }
+        </div>
+        } @empty {
+        <div>
+          <strong>No experience published</strong>
+          <span>This teacher has not published experience yet.</span>
+        </div>
+        }
+      </div>
+      } @case ('links') {
+      <div class="batch-list">
+        @for (link of teacher.socialLinks; track link.url) {
+        <article class="batch-row link-row">
+          <div>
+            <strong>{{ link.label }}</strong>
+            <span>{{ link.url }}</span>
+          </div>
+          <footer>
+            <a [href]="link.url" target="_blank" rel="noopener">Open</a>
+          </footer>
+        </article>
+        } @empty {
+        <div class="empty-state">
+          <h3>No public links</h3>
+          <p>This teacher has not published links yet.</p>
+        </div>
+        }
+      </div>
+      } @case ('batches') { @if (teacher.batches.length) {
+      <div class="batch-list">
+        @for (batch of teacher.batches; track batch.id) {
+        <article class="batch-row">
+          <div>
+            <strong>{{ batch.title }}</strong>
+            <span>{{ batch.subject || 'General course' }}</span>
+          </div>
+          <div class="batch-meta">
+            <span>{{ batch.schedule || 'Schedule to be announced' }}</span>
+            <span>{{ batch.durationMinutes || 60 }} min</span>
+            <span>{{ feeLabel(batch.feeAmount) }}</span>
+            <span>Starts {{ formatStart(batch.startsAt) }}</span>
+            <span>{{ seatsLabel(batch) }}</span>
+          </div>
+          <footer>
+            <a routerLink="/student/explore">View classes</a>
+          </footer>
+        </article>
+        }
+      </div>
+      } @else {
+      <div class="empty-state">
+        <h3>No classes available</h3>
+        <p>This teacher has no classes open for enrollment right now.</p>
+      </div>
+      } } }
+    </div>
+  </section>
   } @else {
-    <section class="empty-state not-found">
-      <h1>Teacher not available</h1>
-      <p>{{ error() || 'This public teacher profile is not available.' }}</p>
-      <a class="primary-link" routerLink="/teachers">Back to teachers</a>
-    </section>
+  <section class="empty-state not-found">
+    <h1>Teacher not available</h1>
+    <p>{{ error() || 'This public teacher profile is not available.' }}</p>
+    <button class="primary-link" type="button" (click)="loadTeacher()">
+      Try again
+    </button>
+  </section>
   }
 </main>
 <sfu-footer />

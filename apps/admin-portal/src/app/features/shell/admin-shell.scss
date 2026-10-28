@@ -23,27 +23,11 @@
 }
 
 .brand {
-  display: inline-grid;
-  grid-template-columns: 40px 1fr;
+  display: block;
   align-items: center;
   gap: 12px;
   color: var(--text);
   text-decoration: none;
-}
-
-.brand span {
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  color: white;
-  font-weight: 900;
-  background: linear-gradient(135deg, var(--product-green), var(--product-rose));
-}
-
-.brand strong {
-  font-size: 15px;
 }
 
 nav {

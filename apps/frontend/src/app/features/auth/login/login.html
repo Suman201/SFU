@@ -2,10 +2,10 @@
   <form class="auth-panel" [formRoot]="form" (submit)="submit($event)">
     <header>
       <div>
-        <p class="eyebrow">{{ expectedRole }} portal</p>
+        <p class="eyebrow">Welcome back</p>
         <h1>{{ title }}</h1>
       </div>
-      <a [routerLink]="alternateLoginPath">Use {{ alternateRole }} login</a>
+      <a [routerLink]="alternateLoginPath">{{ alternateRole === 'teacher' ? 'I’m a teacher' : 'I’m a student' }}</a>
     </header>
 
     <label>
@@ -13,10 +13,11 @@
       <input [formField]="form.email" autocomplete="email">
     </label>
 
-    <label class="password-field">
-      Password
+    <div class="password-field">
+      <label for="login-password">Password</label>
       <div class="password-input-wrap">
         <input
+          id="login-password"
           [type]="showPassword() ? 'text' : 'password'"
           [formField]="form.password"
           autocomplete="current-password"
@@ -29,11 +30,11 @@
           [attr.aria-pressed]="showPassword()"
         >
           <span aria-hidden="true">
-            {{ showPassword() ? '🙈' : '👁' }}
+            {{ showPassword() ? 'Hide' : 'Show' }}
           </span>
         </button>
       </div>
-    </label>
+    </div>
 
     <div class="remember-row">
       <label class="checkbox-row">
@@ -43,11 +44,11 @@
     </div>
 
     <button class="primary" type="submit" [disabled]="form().invalid() || busy()">
-      {{ busy() ? 'Checking...' : 'Login' }}
+      {{ busy() ? 'Signing in…' : 'Log in' }}
     </button>
 
     @if (error() || auth.sessionNotice()) {
-      <p class="error">{{ error() || auth.sessionNotice() }}</p>
+      <p class="error" role="alert">{{ error() || auth.sessionNotice() }}</p>
     }
 
     <p class="secondary-link">

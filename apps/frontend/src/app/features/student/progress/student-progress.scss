@@ -65,7 +65,7 @@
   padding: 10px 14px;
   text-decoration: none;
   font: inherit;
-  font-weight: 850;
+  font-weight: 650;
   box-shadow: var(--shadow-sm);
 }
 
@@ -81,7 +81,7 @@
 .eyebrow {
   color: var(--accent);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -124,7 +124,7 @@
 .metric-card span {
   color: var(--text);
   font-size: 30px;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -172,7 +172,7 @@
   color: #2d6a56;
   padding: 8px 10px;
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 650;
 }
 
 .progress-bars {
@@ -188,7 +188,7 @@
 .progress-bars span {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .bar {
@@ -226,14 +226,14 @@
 .batch-stats dt {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .batch-stats dd {
   margin: 0;
   color: var(--text);
   font-size: 20px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .attendance-strip {
@@ -307,7 +307,7 @@
   color: #2d6a56;
   padding: 6px 8px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
   text-align: center;
   text-transform: capitalize;
 }
@@ -344,7 +344,7 @@
   color: #2d6a56;
   padding: 0 8px;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
 }
 
 .availability-list div {
@@ -360,7 +360,7 @@
   background: rgba(242, 96, 118, .1);
   color: #F26076;
   padding: 12px 14px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .progress-empty {

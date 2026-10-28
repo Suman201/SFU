@@ -24,7 +24,7 @@ describe('ProfilesService', () => {
       roles: ['TEACHER'],
       displayName: 'Ada Teacher',
       email: 'ada@example.test',
-      publicProfileEnabled: false
+      publicProfileEnabled: true, tutorReviewStatus: 'approved'
     });
     const { service } = createHarness({ findUser: teacher });
 
@@ -39,10 +39,10 @@ describe('ProfilesService', () => {
     expect(teacher.save).toHaveBeenCalled();
     expect(teacher.displayName).toBe('Ada Lovelace');
     expect(teacher.headline).toBe('Realtime systems mentor');
-    expect(teacher.publicProfileEnabled).toBe(true);
+    expect(teacher.publicProfileEnabled).toBe(false);
     expect(updated.displayName).toBe('Ada Lovelace');
     expect(updated.skills).toEqual(['WebRTC']);
-    expect(updated.publicProfileEnabled).toBe(true);
+    expect(updated.publicProfileEnabled).toBe(false);
   });
 
   it('rejects student attempts to update teacher-only fields', async () => {
@@ -292,7 +292,7 @@ describe('ProfilesService', () => {
       nextPublicBatchStartAt: '2026-06-24T00:00:00.000Z',
       galleryCount: 1,
       demoClassCount: 1,
-      promoted: false
+      promoted: false, teacherSubjectIds:[], curriculumIds:[], teachingCountries:[], learnerAgeGroups:[], teachingLevels:[], introVideoUploaded:false, introVideoUrl:undefined
     });
     expect((result.teachers[0] as unknown as { email?: string; phone?: string; settings?: unknown }).email).toBeUndefined();
     expect((result.teachers[0] as unknown as { email?: string; phone?: string; settings?: unknown }).phone).toBeUndefined();
@@ -638,6 +638,7 @@ describe('ProfilesService', () => {
         }
       },
       publicProfileEnabled: false,
+      tutorReviewStatus: 'approved',
       ...values,
       save: jest.fn(async () => undefined)
     };

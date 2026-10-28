@@ -1,18 +1,34 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import type { TeachingCatalogSnapshot } from '@native-sfu/contracts';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { finalize, Subscription } from 'rxjs';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import type {
   ProfileBatchAssociation,
   ProfileCredential,
   PublicTeacherProfile as PublicTeacherProfileData,
-  TeacherPublicContentItem
+  TeacherPublicContentItem,
 } from '@native-sfu/contracts';
 import { ProfileService } from '../../../core/services/profile.service';
 import { Footer } from '../../../shared/footer/footer';
 import { formatBatchFee } from '../../../shared/formatting/batch-fee';
 import { Header } from '../../../shared/header/header';
 
-type TeacherProfileTab = 'gallery' | 'demos' | 'credentials' | 'experience' | 'links' | 'batches';
+type TeacherProfileTab =
+  | 'gallery'
+  | 'demos'
+  | 'credentials'
+  | 'experience'
+  | 'links'
+  | 'batches';
 
 interface TeacherProfileTabItem {
   id: TeacherProfileTab;
@@ -20,12 +36,12 @@ interface TeacherProfileTabItem {
 }
 
 const PROFILE_TABS: TeacherProfileTabItem[] = [
+  { id: 'batches', label: 'Classes' },
   { id: 'gallery', label: 'Gallery' },
   { id: 'demos', label: 'Demo classes' },
   { id: 'credentials', label: 'Credentials' },
   { id: 'experience', label: 'Experience' },
   { id: 'links', label: 'Links' },
-  { id: 'batches', label: 'Batches' }
 ];
 
 @Component({
@@ -34,24 +50,78 @@ const PROFILE_TABS: TeacherProfileTabItem[] = [
   imports: [Footer, Header, RouterLink],
   templateUrl: './public-teacher-profile.html',
   styleUrl: './public-teacher-profile.scss',
-  changeDetection: ChangeDetectionStrategy.Eager
+  changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class PublicTeacherProfile implements OnInit {
+  private readonly destroyRef = inject(DestroyRef);
+  private profileRequest?: Subscription;
   private readonly route = inject(ActivatedRoute);
   private readonly profiles = inject(ProfileService);
-  private readonly paramMap = toSignal(this.route.paramMap, { initialValue: this.route.snapshot.paramMap });
+  private readonly paramMap = toSignal(this.route.paramMap, {
+    initialValue: this.route.snapshot.paramMap,
+  });
 
-  protected readonly teacherId = computed(() => this.paramMap().get('teacherId') ?? '');
+  protected readonly teacherId = computed(
+    () => this.paramMap().get('teacherId') ?? '',
+  );
   protected readonly teacher = signal<PublicTeacherProfileData | null>(null);
+  protected readonly catalog = signal<TeachingCatalogSnapshot>({
+    categories: [],
+    subjects: [],
+    curricula: [],
+  });
+  protected introVideoUrl(id: string) {
+    return this.profiles.resolveMediaUrl(
+      '/api/v1/teachers/' + encodeURIComponent(id) + '/introduction-video',
+    );
+  }
+  protected subjectNames(ids: string[] = []) {
+    return ids
+      .map((id) => this.catalog().subjects.find((s) => s.id === id)?.name)
+      .filter(Boolean);
+  }
+  protected curriculumNames(ids: string[] = []) {
+    return ids
+      .map((id) => this.catalog().curricula.find((s) => s.id === id)?.name)
+      .filter(Boolean);
+  }
   protected readonly loading = signal(false);
   protected readonly error = signal('');
-  protected readonly activeTab = signal<TeacherProfileTab>('gallery');
-  protected readonly tabs = PROFILE_TABS;
-  protected readonly totalCapacity = computed(() => this.teacher()?.batches.reduce((total, batch) => total + (batch.capacity ?? 0), 0) ?? 0);
-  protected readonly totalEnrolled = computed(() => this.teacher()?.batches.reduce((total, batch) => total + (batch.enrolledCount ?? 0), 0) ?? 0);
+  protected readonly activeTab = signal<TeacherProfileTab>('batches');
+  protected readonly visibleTabs = computed(() => {
+    const teacher = this.teacher();
+    return PROFILE_TABS.filter(
+      (tab) =>
+        tab.id === 'batches' || (teacher && this.tabCount(teacher, tab.id) > 0),
+    );
+  });
+  protected readonly totalCapacity = computed(
+    () =>
+      this.teacher()?.batches.reduce(
+        (total, batch) => total + (batch.capacity ?? 0),
+        0,
+      ) ?? 0,
+  );
+  protected readonly totalEnrolled = computed(
+    () =>
+      this.teacher()?.batches.reduce(
+        (total, batch) => total + (batch.enrolledCount ?? 0),
+        0,
+      ) ?? 0,
+  );
 
   ngOnInit(): void {
-    this.loadTeacher();
+    this.profiles
+      .teachingCatalog()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ next: (c) => this.catalog.set(c), error: () => undefined });
+    this.route.paramMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.activeTab.set('batches');
+        this.loadTeacher();
+      });
+    this.destroyRef.onDestroy(() => this.profileRequest?.unsubscribe());
   }
 
   protected loadTeacher(): void {
@@ -60,23 +130,29 @@ export class PublicTeacherProfile implements OnInit {
       this.error.set('Teacher profile is not available.');
       return;
     }
+    this.profileRequest?.unsubscribe();
     this.loading.set(true);
     this.error.set('');
-    this.profiles.getPublicTeacherProfile(teacherId).subscribe({
-      next: (profile) => this.teacher.set(profile),
-      error: (error) => {
-        this.teacher.set(null);
-        this.error.set(this.profiles.errorMessage(error));
-      },
-      complete: () => this.loading.set(false)
-    });
+    this.profileRequest = this.profiles
+      .getPublicTeacherProfile(teacherId)
+      .pipe(finalize(() => this.loading.set(false)))
+      .subscribe({
+        next: (profile) => this.teacher.set(profile),
+        error: (error) => {
+          this.teacher.set(null);
+          this.error.set(this.profiles.errorMessage(error));
+        },
+      });
   }
 
   protected selectTab(tab: TeacherProfileTab): void {
     this.activeTab.set(tab);
   }
 
-  protected tabCount(teacher: PublicTeacherProfileData, tab: TeacherProfileTab): number {
+  protected tabCount(
+    teacher: PublicTeacherProfileData,
+    tab: TeacherProfileTab,
+  ): number {
     switch (tab) {
       case 'credentials':
         return teacher.credentials.length + teacher.education.length;
@@ -104,9 +180,7 @@ export class PublicTeacherProfile implements OnInit {
     if (teacher.coverImageUrl) {
       return this.profiles.resolveMediaUrl(teacher.coverImageUrl);
     }
-    const title = teacher.headline || 'Native SFU teacher';
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="420" viewBox="0 0 1440 420" role="img" aria-label="${title} cover image"><defs><linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#458B73"/><stop offset=".55" stop-color="#F26076"/><stop offset="1" stop-color="#FF9760"/></linearGradient><pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0v48" fill="none" stroke="#ffffff" stroke-opacity=".12" stroke-width="1"/></pattern></defs><rect width="1440" height="420" fill="url(#bg)"/><rect width="1440" height="420" fill="url(#grid)"/><path d="M0 310 420 120l420 124 600-214v390H0z" fill="#fff" opacity=".14"/><text x="72" y="116" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="800" fill="#fff">${title}</text></svg>`;
-    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    return '';
   }
 
   protected formatStart(value: string | undefined): string {
@@ -118,7 +192,7 @@ export class PublicTeacherProfile implements OnInit {
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
-      minute: '2-digit'
+      minute: '2-digit',
     }).format(new Date(value));
   }
 
@@ -138,7 +212,9 @@ export class PublicTeacherProfile implements OnInit {
   }
 
   protected publicContentUrl(item: TeacherPublicContentItem): string {
-    return this.profiles.resolveMediaUrl(item.externalUrl || item.publicUrl || item.thumbnailUrl);
+    return this.profiles.resolveMediaUrl(
+      item.externalUrl || item.publicUrl || item.thumbnailUrl,
+    );
   }
 
   protected contentIcon(item: TeacherPublicContentItem): string {
@@ -159,8 +235,8 @@ export class PublicTeacherProfile implements OnInit {
   }
 
   private initialsImage(name: string, width: number, height: number): string {
-    const initials = this.initials(name);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${name} profile image"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#458B73"/><stop offset="1" stop-color="#F26076"/></linearGradient></defs><rect width="${width}" height="${height}" rx="88" fill="url(#g)"/><text x="${width / 2}" y="${height / 2 + 30}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="84" font-weight="800" fill="#fff">${initials}</text></svg>`;
+    const initials = this.initials(name).replace(/[&<>"']/g, '');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" rx="20" fill="#e5eee7"/><text x="${width / 2}" y="${height / 2 + 30}" text-anchor="middle" font-family="Arial, sans-serif" font-size="84" font-weight="600" fill="#326c57">${initials}</text></svg>`;
     return `data:image/svg+xml,${encodeURIComponent(svg)}`;
   }
 

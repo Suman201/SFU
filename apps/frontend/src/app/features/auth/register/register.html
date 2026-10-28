@@ -1,33 +1,46 @@
-<sfu-header />
-
-<main class="auth-shell">
+<sfu-auth-layout role="student" title="Create your account">
   <form class="auth-panel" [formRoot]="form" (submit)="submit($event)">
     <header>
-      <h1>Register</h1>
-      <a routerLink="/student/login">Use login</a>
+      <h1>Create your account</h1>
+      <p>Join classes and keep your learning materials in one place.</p>
     </header>
-
-    <label>
-      Display name
-      <input [formField]="form.displayName" autocomplete="name">
-    </label>
-
-    <label>
-      Email
-      <input [formField]="form.email" autocomplete="email">
-    </label>
-
-    <label>
-      Password
-      <input type="password" [formField]="form.password" autocomplete="new-password">
-    </label>
-
-    <button class="primary" type="submit" [disabled]="form().invalid() || busy()">{{ busy() ? 'Creating...' : 'Register' }}</button>
-
+    <label
+      >Your name<input
+        [formField]="form.displayName"
+        autocomplete="name"
+        placeholder="Your full name"
+    /></label>
+    <label
+      >Email address<input
+        [formField]="form.email"
+        autocomplete="email"
+        placeholder="you@example.com"
+    /></label>
+    <div class="password-field">
+      <label for="register-password">Password</label
+      ><input
+        id="register-password"
+        type="password"
+        [formField]="form.password"
+        autocomplete="new-password"
+        aria-describedby="password-help"
+      /><small id="password-help">Use at least 10 characters.</small>
+    </div>
+    <button
+      class="primary"
+      type="submit"
+      [disabled]="form().invalid() || busy()"
+    >
+      {{ busy() ? 'Creating your account…' : 'Create account' }}
+    </button>
     @if (error()) {
-      <p class="error">{{ error() }}</p>
+    <p class="error" role="alert">{{ error() }}</p>
     }
+    <p class="account-link">
+      Already have an account? <a routerLink="/student/login">Log in</a>
+    </p>
+    <p class="teacher-link">
+      Interested in teaching? <a routerLink="/contact-us">Talk to our team</a>
+    </p>
   </form>
-</main>
-
-<sfu-footer />
+</sfu-auth-layout>

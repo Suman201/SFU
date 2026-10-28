@@ -1,3 +1,4 @@
+import { StreamableFile } from '@nestjs/common';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { firstValueFrom, of } from 'rxjs';
 import { SuccessResponseInterceptor } from './success-response.interceptor';
@@ -11,6 +12,12 @@ describe('SuccessResponseInterceptor', () => {
     );
 
     expect(response).toBe('raw-bytes');
+  });
+
+  it('preserves streamed introduction video bytes', async () => {
+    const file = new StreamableFile(Buffer.from('video bytes'));
+    const result = await firstValueFrom(new SuccessResponseInterceptor().intercept(executionContext('/api/v1/tutor-application/me/introduction-video'), handler(file)));
+    expect(result).toBe(file);
   });
 
   it('wraps regular API responses', async () => {

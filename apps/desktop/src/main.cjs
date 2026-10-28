@@ -31,9 +31,13 @@ const {
   hasMacMediaConsent,
   requestMacMediaConsent,
 } = require("./permissions.cjs");
-app.setName("EDCONNECTION Classroom");
-if (!app.isPackaged && process.env.SFU_DESKTOP_USER_DATA)
-  app.setPath("userData", path.resolve(process.env.SFU_DESKTOP_USER_DATA));
+const { resolveUserDataPath } = require("./user-data.cjs");
+app.setName("Sapiovian Classroom");
+app.setPath("userData", resolveUserDataPath({
+  appData: app.getPath("appData"),
+  isPackaged: app.isPackaged,
+  override: process.env.SFU_DESKTOP_USER_DATA,
+}));
 const testMedia = !app.isPackaged && process.env.SFU_DESKTOP_TEST_MEDIA === "1";
 if (testMedia) {
   app.commandLine.appendSwitch("use-fake-ui-for-media-stream");
@@ -289,7 +293,7 @@ function createWindow() {
     height: 850,
     minWidth: 900,
     minHeight: 640,
-    title: "EDCONNECTION Classroom",
+    title: "Sapiovian Classroom",
     icon: path.join(__dirname, "../resources/icon.png"),
     backgroundColor: "#f5f7f6",
     show: false,

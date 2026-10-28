@@ -3,15 +3,15 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { normalizeDesktopDestination } from '../../core/services/desktop-bridge';
-import { BrandMark } from '../../shared/brand-mark/brand-mark';
+import { BrandLogo } from '../../shared/brand-mark/brand-logo';
 import { DesktopService } from './desktop.service';
 
 @Component({
-  selector: 'sfu-desktop-login', standalone: true, imports: [FormsModule, BrandMark], changeDetection: ChangeDetectionStrategy.OnPush,
+  selector: 'sfu-desktop-login', standalone: true, imports: [FormsModule, BrandLogo], changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrl: './desktop.scss',
   template: `
     <main class="login-page"><section class="login-card" aria-labelledby="login-title">
-      <span class="brand-mark" aria-hidden="true"><sfu-brand-mark /></span><p class="eyebrow">EDCONNECTION CLASSROOM</p><h1 id="login-title">Welcome back</h1>
+      <sfu-brand-logo class="login-brand" /><h1 id="login-title">Welcome back</h1>
       <p class="muted">Your next class and past lessons, in one place.</p>
       <form (ngSubmit)="login()">
         <label>Email<input name="email" type="email" autocomplete="username" required [(ngModel)]="email" /></label>

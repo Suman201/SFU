@@ -1,74 +1,37 @@
 <footer class="site-footer">
   <div class="footer-inner">
-    <section class="footer-brand" aria-label="EDCONNECTION">
-      <a class="footer-logo" routerLink="/" aria-label="EDCONNECTION home">
-        <span class="footer-mark" aria-hidden="true">
-          <svg viewBox="0 0 64 64" focusable="false">
-            <path class="cap" d="M8 18 32 6l24 12-24 13L8 18Z" />
-            <path class="book-left" d="M15 35c8 0 13 3 17 9V30c-4-5-10-8-17-8v13Z" />
-            <path class="book-right" d="M49 35c-8 0-13 3-17 9V30c4-5 10-8 17-8v13Z" />
-            <path class="stem" d="M32 30v18" />
-            <circle cx="32" cy="31" r="4" />
-          </svg>
-        </span>
-        <span>
-          <strong>EDCONNECTION</strong>
-          <small>Teach. Learn. Grow Together.</small>
-        </span>
-      </a>
-      <p>A unified platform connecting teachers and learners across India. Together, let's build a smarter, stronger nation.</p>
-      <div class="social-row" aria-label="Social links">
-        <a href="#" aria-label="Facebook">f</a>
-        <a href="#" aria-label="Twitter">x</a>
-        <a href="#" aria-label="YouTube">yt</a>
-        <a href="#" aria-label="LinkedIn">in</a>
-        <a href="#" aria-label="Instagram">ig</a>
-      </div>
+    <section class="footer-brand" aria-label="Sapiovian">
+      <a class="footer-logo" routerLink="/"><sfu-brand-logo /></a>
+      <p>
+        Online classes for students and teachers.<br />Learn and teach from
+        anywhere.
+      </p>
     </section>
-
-    <nav aria-label="Quick links">
-      <h2>Quick Links</h2>
-      <a routerLink="/">Home</a>
-      <a routerLink="/" fragment="teachers">For Teachers</a>
-      <a routerLink="/" fragment="learners">For Learners</a>
-      <a routerLink="/student/explore">Courses</a>
-      <a routerLink="/register">Pricing</a>
-      <a routerLink="/" fragment="how-it-works">How It Works</a>
+    <nav aria-label="Learn">
+      <h2>Learn</h2>
+      <a routerLink="/teachers">Find a teacher</a
+      ><a routerLink="/student/explore">Explore classes</a
+      ><a routerLink="/student/dashboard">My learning</a
+      ><a routerLink="/register">Create an account</a>
     </nav>
-
-    <nav aria-label="Resources">
-      <h2>Resources</h2>
-      <a routerLink="/">Blog</a>
-      <a routerLink="/help">Help Center</a>
-      <a routerLink="/faq">FAQs</a>
-      <a routerLink="/">Teacher Guide</a>
-      <a routerLink="/">Learner Guide</a>
-      <a routerLink="/privacy-policy">Privacy Policy</a>
-      <a routerLink="/terms">Terms &amp; Conditions</a>
-      <a routerLink="/refund-policy">Refund Policy</a>
+    <nav aria-label="Teach">
+      <h2>Teach</h2>
+      <a routerLink="/" fragment="for-teachers">Teaching on Sapiovian</a
+      ><a routerLink="/teacher/login">Teacher login</a
+      ><a routerLink="/contact-us">Talk to our team</a>
     </nav>
-
-    <section class="footer-support" aria-label="Support">
+    <nav aria-label="Support">
       <h2>Support</h2>
-      <p>support&#64;edconnection.in</p>
-      <p>+91 12345 67890</p>
-      <p>Live Chat</p>
-      <p>Mon - Sat: 9:00 AM - 8:00 PM</p>
-    </section>
-
-    <section class="newsletter" aria-label="Newsletter">
-      <h2>Newsletter</h2>
-      <p>Subscribe to get the latest updates and learning resources.</p>
-      <form>
-        <label class="sr-only" for="footer-email">Email address</label>
-        <input id="footer-email" type="email" placeholder="Enter your email" />
-        <button type="submit" aria-label="Subscribe">-></button>
-      </form>
-    </section>
+      <a routerLink="/about">About us</a><a routerLink="/help">Help center</a
+      ><a routerLink="/faq">Frequently asked questions</a
+      ><a routerLink="/contact-us">Contact us</a>
+    </nav>
   </div>
-
   <div class="footer-bottom">
-    <span>&copy; 2024 EDCONNECTION. All Rights Reserved.</span>
-    <span>Made with love in India</span>
+    <span>© {{ year }} Sapiovian. All rights reserved.</span>
+    <div>
+      <a routerLink="/privacy-policy">Privacy</a><a routerLink="/terms">Terms</a
+      ><a routerLink="/refund-policy">Refund policy</a>
+    </div>
   </div>
 </footer>

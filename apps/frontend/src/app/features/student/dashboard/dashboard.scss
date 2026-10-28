@@ -52,7 +52,7 @@
   color: var(--accent);
   padding: 11px 14px;
   text-decoration: none;
-  font-weight: 850;
+  font-weight: 650;
   box-shadow: var(--shadow-sm);
 }
 
@@ -86,14 +86,14 @@
 .summary-grid span {
   color: var(--text);
   font-size: 28px;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1;
 }
 
 .summary-link {
   color: var(--text);
   font-size: 28px;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1;
   text-decoration: none;
 }
@@ -105,7 +105,7 @@
 
 .summary-grid p {
   color: var(--muted);
-  font-weight: 750;
+  font-weight: 650;
 }
 
 .enrolled-panel {
@@ -120,7 +120,7 @@
   background: rgba(242, 96, 118, .1);
   color: #F26076;
   padding: 12px 14px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .enrolled-panel h2 {
@@ -138,13 +138,13 @@
   background: var(--panel-soft);
   color: var(--muted);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 650;
 }
 
 .eyebrow {
   color: var(--accent);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -213,7 +213,7 @@
   border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .batch-main div {
@@ -305,7 +305,7 @@
   margin: 0;
   color: #F26076;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .empty-state {
@@ -402,3 +402,5 @@
     width: 100%;
   }
 }
+
+.student-dashboard-shell { max-width: 1280px; margin-inline: auto; padding: 35px 28px 55px; }.dashboard-heading h1 { font-size: 34px; font-weight: 650; letter-spacing: -.04em; }.dashboard-description { margin-top: 10px !important; color: var(--muted); font-size: 14px; line-height: 1.6; }.heading-actions { gap: 8px; }.dashboard-heading a { font-size: 12px; font-weight: 550; box-shadow: none; padding: 9px 12px; }.summary-grid article { box-shadow: none; min-height: 96px; }.summary-grid span,.summary-link { font-size: 25px; font-weight: 650; }.summary-grid p { font-size: 12px; font-weight: 500; }.enrolled-panel { padding: 22px; box-shadow: none; }.enrolled-panel h2 { font-size: 22px; font-weight: 650; letter-spacing: -.025em; }.enrolled-row { box-shadow: none; }.panel-count { font-weight: 500; font-size: 12px; }@media(max-width:760px) { .student-dashboard-shell { padding: 24px 18px 40px; }.dashboard-heading { align-items: start; flex-direction: column; }.heading-actions { justify-content: start; }.enrolled-panel { padding: 16px; } }

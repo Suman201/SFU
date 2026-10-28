@@ -1,0 +1,291 @@
+<section class="catalog-page">
+  <header class="page-heading">
+    <div>
+      <p class="eyebrow">Tutor onboarding</p>
+      <h1>Tutor applications</h1>
+      <p>Review teaching profiles before they appear in the marketplace.</p>
+    </div>
+  </header>
+  @if(error()){
+  <p role="alert" class="notice error">{{error()}}</p>
+  }
+  <section class="data-table-shell">
+    <div class="data-table-filters">
+      <label
+        >Status
+        <select
+          [(ngModel)]="status"
+          (ngModelChange)="filter()"
+          [disabled]="loading()||saving()"
+        >
+          <option value="submitted">Awaiting review</option>
+          <option value="approved">Approved</option>
+          <option value="changes_requested">Changes requested</option>
+          <option value="rejected">Rejected</option>
+          <option value="draft">Draft</option>
+        </select></label
+      ><button
+        type="button"
+        class="secondary-button"
+        [disabled]="loading()"
+        (click)="load()"
+      >
+        Refresh
+      </button>
+    </div>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Tutor</th>
+            <th>Email</th>
+            <th>Submitted</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for(row of rows();track row.teacherId){
+          <tr>
+            <td>{{row.displayName}}</td>
+            <td>{{row.email}}</td>
+            <td>
+              {{row.submittedAt ? (row.submittedAt | date:'mediumDate'):'Not
+              submitted'}}
+            </td>
+            <td><span class="data-pill">{{row.status}}</span></td>
+            <td>
+              <button
+                type="button"
+                class="table-action"
+                [disabled]="loading()||saving()"
+                (click)="open(row.teacherId!)"
+              >
+                Review {{row.displayName}}
+              </button>
+            </td>
+          </tr>
+          }@empty{
+          <tr>
+            <td colspan="5">
+              {{loading()?'Loading applications…':'No applications in this
+              status.'}}
+            </td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <footer class="table-footer">
+      <span>{{total()}} applications · Page {{page()}}</span
+      ><button
+        type="button"
+        [disabled]="page()===1||loading()"
+        (click)="goPage(-1)"
+      >
+        Previous</button
+      ><button
+        type="button"
+        [disabled]="page()*20>=total()||loading()"
+        (click)="goPage(1)"
+      >
+        Next
+      </button>
+    </footer>
+  </section>
+  @if(detail();as item){
+  <section class="catalog-editor" aria-labelledby="review-heading">
+    <header class="page-heading">
+      <h2 id="review-heading">{{item.displayName}}</h2>
+      <button
+        type="button"
+        class="secondary-button"
+        [disabled]="saving()"
+        (click)="detail.set(null)"
+      >
+        Close review
+      </button>
+    </header>
+    @if(item.profile.avatarUrl){<img
+      [src]="item.profile.avatarUrl"
+      alt="Tutor profile photo"
+      width="80"
+      height="80"
+      style="object-fit: cover; border-radius: 12px"
+    />}
+    <h3>{{item.profile.headline}}</h3>
+    <p style="white-space: pre-line">{{item.profile.bio}}</p>
+    <dl>
+      <dt>Subjects</dt>
+      <dd>{{subjectNames(item.subjectIds)}}</dd>
+      <dt>Curricula</dt>
+      <dd>{{curriculumNames(item.curriculumIds)}}</dd>
+      <dt>Age groups and levels</dt>
+      <dd>
+        {{item.learnerAgeGroups.join(', ')}} · {{item.teachingLevels.join(',
+        ')}}
+      </dd>
+      <dt>Teaching markets</dt>
+      <dd>
+        @for(code of item.teachingCountries;track code){<span
+          >{{countryName(code)}} · </span
+        >}
+      </dd>
+      <dt>Languages</dt>
+      <dd>{{item.profile.languages.join(', ')}}</dd>
+      <dt>Availability</dt>
+      <dd>{{item.profile.availability}} · {{item.profile.timezone}}</dd>
+    </dl>
+    <h3>Introduction video</h3>
+    @if(item.introVideoUploaded){<button
+      type="button"
+      class="secondary-button"
+      (click)="previewVideo()"
+    >
+      Preview uploaded introduction</button
+    >}@if(videoPreview()){<video
+      [src]="videoPreview()"
+      controls
+      playsinline
+      preload="metadata"
+      aria-label="Tutor introduction video"
+      style="width: 100%; max-width: 640px"
+    ></video
+    >} @if(item.introVideoUrl){<a
+      [href]="item.introVideoUrl"
+      target="_blank"
+      rel="noopener noreferrer"
+      >Watch introduction video ↗</a
+    >}
+    <h3>Category assessments</h3>
+    @for(required of item.requiredAssessments;track required.categoryId;let
+    i=$index){
+    <fieldset class="record-editor">
+      <legend>{{required.categoryName}}</legend>
+      <p>{{required.subjects.join(', ')}}</p>
+      <p>{{required.instructions}}</p>
+      <p style="white-space: pre-line">
+        {{assessmentResponse(required.categoryId)?.response || 'No response
+        submitted'}}
+      </p>
+      @if(assessmentResponse(required.categoryId)?.evidenceUrl;as url){<a
+        [href]="url"
+        target="_blank"
+        rel="noopener noreferrer"
+        >Open supporting evidence ↗</a
+      >} @if(item.status==='submitted' && results[i]){<label
+        ><input type="checkbox" [(ngModel)]="results[i]!.passed" /> Subject and
+        teaching assessment passed</label
+      ><label
+        >Assessment findings<textarea
+          rows="3"
+          maxlength="1000"
+          [(ngModel)]="results[i]!.notes"
+          placeholder="Record what was assessed, the result, and any interview or demonstration reference."
+        ></textarea></label
+      >}
+    </fieldset>
+    }
+    <h3>Qualifications and experience</h3>
+    @for(qualification of item.profile.education;track $index){
+    <p>
+      <strong>{{qualification['title']}}</strong> · {{qualification['issuer'] ||
+      'Issuer not specified'}} · {{qualification['year'] || 'Year not
+      specified'}}
+    </p>
+    }@for(qualification of item.profile.credentials;track $index){
+    <p>
+      <strong>{{qualification['title']}}</strong> · {{qualification['issuer'] ||
+      'Issuer not specified'}} · {{qualification['year'] || 'Year not
+      specified'}}
+    </p>
+    }@for(experience of item.profile.experience;track $index){
+    <p>
+      <strong>{{experience['role']}}</strong> · {{experience['organization']}} ·
+      {{experience['period']}}<br />{{experience['summary']}}
+    </p>
+    } @if(item.missing.length){
+    <ul>
+      @for(message of item.missing;track message){
+      <li>{{message}}</li>
+      }
+    </ul>
+    } @if(item.status==='submitted'){
+    <p class="notice">
+      Confirm checks appropriate to the listed teaching markets. A checkbox
+      records your completed review; it does not perform an identity or
+      background check. Keep identity documents out of profile media and review
+      notes.
+    </p>
+    <div class="catalog-form">
+      <label
+        ><span
+          ><input
+            type="checkbox"
+            [(ngModel)]="videoReviewed"
+            style="width: auto"
+          />
+          Introduction video watched and suitable</span
+        ></label
+      ><label
+        ><span
+          ><input type="checkbox" [(ngModel)]="identity" style="width: auto" />
+          Identity and adult tutor eligibility checked</span
+        ></label
+      ><label
+        ><span
+          ><input type="checkbox" [(ngModel)]="teaching" style="width: auto" />
+          Subject expertise and teaching suitability checked</span
+        ></label
+      >@if(item.learnerAgeGroups.includes('children')){<label class="wide"
+        ><span
+          ><input
+            type="checkbox"
+            [(ngModel)]="safeguarding"
+            style="width: auto"
+          />
+          Required safeguarding checks completed for these markets and age
+          groups</span
+        ></label
+      >}
+      <label class="wide"
+        >Feedback to tutor<textarea
+          rows="4"
+          maxlength="2000"
+          [(ngModel)]="note"
+          placeholder="Explain the decision and any specific changes needed."
+        ></textarea>
+      </label>
+      <footer class="editor-actions">
+        <button
+          type="button"
+          class="primary-button"
+          [disabled]="saving()||note.trim().length<10||item.missing.length>0||!videoReviewed||!allAssessmentsPassed()||!identity||!teaching||(item.learnerAgeGroups.includes('children')&&!safeguarding)"
+          (click)="review('approved')"
+        >
+          Approve profile</button
+        ><button
+          type="button"
+          class="secondary-button"
+          [disabled]="saving()||note.trim().length<10"
+          (click)="review('changes_requested')"
+        >
+          Request changes</button
+        ><button
+          type="button"
+          class="secondary-button"
+          [disabled]="saving()||note.trim().length<10"
+          (click)="review('rejected')"
+        >
+          Reject application
+        </button>
+      </footer>
+    </div>
+    }@else{
+    <p class="notice">
+      {{item.status}} · {{item.reviewNote || 'No review feedback yet.'}}
+    </p>
+    }
+  </section>
+  }
+</section>

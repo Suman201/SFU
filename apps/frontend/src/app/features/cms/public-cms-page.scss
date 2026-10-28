@@ -1,8 +1,6 @@
 .cms-page {
   min-height: 60vh;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, #458b73 9%, transparent), transparent 360px),
-    var(--page-bg, #f8faf9);
+  background: var(--bg);
   color: var(--text, #17211f);
 }
 
@@ -22,7 +20,7 @@
   margin: 0;
   color: #458b73;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -57,7 +55,7 @@
   background: color-mix(in srgb, #458b73 10%, transparent);
   color: #458b73;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
   padding: 0 12px;
 }
 
@@ -138,7 +136,7 @@
   background: #f26076;
   color: white;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 700;
   text-decoration: none;
   padding: 0 16px;
 }
@@ -185,7 +183,7 @@
   gap: 7px;
   color: var(--muted, #64716d);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -218,7 +216,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 14px;
-  font-weight: 900;
+  font-weight: 700;
   padding: 0 22px;
 }
 
@@ -230,7 +228,7 @@
 .form-success,
 .form-error {
   border-radius: 10px;
-  font-weight: 800;
+  font-weight: 650;
   padding: 12px;
 }
 

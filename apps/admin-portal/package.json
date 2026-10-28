@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prestart": "npm run build --workspace @native-sfu/contracts",
+    "prestart": "npm run build --workspace @native-sfu/contracts && node scripts/prepare-brand.cjs",
     "start": "ng serve --host localhost --port 4300 --proxy-config proxy.conf.cjs",
-    "prestart:lan": "npm run build --workspace @native-sfu/contracts",
+    "prestart:lan": "npm run build --workspace @native-sfu/contracts && node scripts/prepare-brand.cjs",
     "start:lan": "ng serve --host 0.0.0.0 --port 4300 --proxy-config proxy.conf.cjs",
-    "prebuild": "npm run build --workspace @native-sfu/contracts",
+    "prebuild": "npm run build --workspace @native-sfu/contracts && node scripts/prepare-brand.cjs",
     "build": "ng build",
     "test": "ng test --watch=false --browsers=ChromeHeadless",
     "lint": "eslint \"src/**/*.ts\""

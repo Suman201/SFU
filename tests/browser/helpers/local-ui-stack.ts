@@ -75,7 +75,7 @@ export async function startLocalUiStack(options: LocalUiStackOptions): Promise<L
     const frontend = spawnManagedProcess({
       name: 'frontend-dev-server',
       command: nodeBin,
-      args: ['../../node_modules/@angular/cli/bin/ng.js', 'serve', '--host', '127.0.0.1', '--port', String(options.frontendPort)],
+      args: ['../../node_modules/@angular/cli/bin/ng.js', 'serve', '--host', '127.0.0.1', '--port', String(options.frontendPort), '--proxy-config', 'proxy.conf.cjs'],
       cwd: path.join(repoRoot, 'apps/frontend'),
       env: {
         ...process.env,

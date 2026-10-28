@@ -17,15 +17,15 @@ interface PublicCmsFallback {
 
 const FALLBACKS: Record<string, PublicCmsFallback> = {
   about: {
-    title: 'About EDCONNECTION',
-    summary: 'A live learning platform connecting teachers and learners across India.',
-    body: 'EDCONNECTION helps teachers run live classes, share learning artifacts, and support students through a single education platform.',
+    title: 'About Sapiovian',
+    summary: 'A live learning platform connecting teachers and learners wherever they learn.',
+    body: 'Sapiovian helps teachers run live classes, share learning resources, and support students through a single education platform.',
     pageType: 'page'
   },
   'contact-us': {
     title: 'Contact Us',
-    summary: 'Reach the EDCONNECTION team for support, partnerships, and platform questions.',
-    body: 'Email support@edconnection.in or contact your assigned teacher/admin for class-specific help.',
+    summary: 'Reach the Sapiovian team for support, partnerships, and platform questions.',
+    body: 'Use the contact form below for account and platform questions. For a question about a specific lesson, contact your teacher.',
     pageType: 'page'
   },
   faq: {
@@ -48,7 +48,7 @@ const FALLBACKS: Record<string, PublicCmsFallback> = {
   },
   'privacy-policy': {
     title: 'Privacy Policy',
-    summary: 'How EDCONNECTION handles account, class, and learning data.',
+    summary: 'How Sapiovian handles account, class, and learning data.',
     body: 'This page is a placeholder until the published CMS privacy policy is configured by an administrator.',
     pageType: 'legal'
   },
@@ -60,7 +60,7 @@ const FALLBACKS: Record<string, PublicCmsFallback> = {
   },
   'teacher-marketplace': {
     title: 'Teacher Marketplace',
-    summary: 'Discover verified public teacher profiles, demo classes, and open batches.',
+    summary: 'Explore teacher profiles, demo lessons, and classes open for enrollment.',
     body: 'Browse teachers by topic, language, availability, and published teaching proof before enrolling.',
     pageType: 'landing'
   }

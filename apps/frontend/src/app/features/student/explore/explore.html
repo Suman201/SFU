@@ -2,12 +2,13 @@
 <main class="student-page-shell">
   <section class="page-heading">
     <div>
-      <p class="eyebrow">Student explore</p>
-      <h1>Find a batch</h1>
+
+      <h1>Explore classes</h1>
+      <p class="page-description">Check schedules, fees and available places before enrolling.</p>
     </div>
     <div class="heading-actions">
       <a class="dashboard-link" routerLink="/teachers">Browse teachers</a>
-      <a class="dashboard-link" routerLink="/student/dashboard">Dashboard · {{ enrolledCount() }}</a>
+      <a class="dashboard-link" routerLink="/student/dashboard">My learning · {{ enrolledCount() }}</a>
     </div>
   </section>
 
@@ -21,8 +22,8 @@
 
     @if (enrollment.loadingAvailableBatches() && !enrollment.availableBatchesLoaded()) {
       <div class="empty-state">
-        <h3>Loading batches</h3>
-        <p>Fetching available batches from the server.</p>
+        <h3>Loading classes</h3>
+        <p>Finding classes open for enrollment.</p>
       </div>
     } @else if (batches().length) {
       @for (batch of batches(); track batch.id) {
@@ -71,14 +72,14 @@
       }
     } @else if (enrollment.availableBatchesError()) {
       <div class="empty-state">
-        <h3>Unable to load batches</h3>
-        <p>Available batches could not be loaded. Try again when the connection is stable.</p>
+        <h3>Unable to load classes</h3>
+        <p>Available classes could not be loaded. Try again when the connection is stable.</p>
         <button type="button" (click)="enrollment.loadAvailableBatches()">Try again</button>
       </div>
     } @else {
       <div class="empty-state">
-        <h3>No available batches</h3>
-        <p>There are no active batches open for enrollment right now.</p>
+        <h3>No classes available yet</h3>
+        <p>There are no classes open for enrollment right now.</p>
       </div>
     }
   </section>

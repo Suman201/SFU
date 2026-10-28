@@ -188,6 +188,24 @@ export class UserDocument {
   @Prop({ default: false, index: true })
   publicProfileEnabled!: boolean;
 
+  @Prop({ type: Object }) tutorIntroVideo?: {fileName:string;mimeType:string;size:number;durationSeconds:number};
+  @Prop({ type: String, maxlength: 2048 }) introVideoUrl?: string;
+  @Prop({ type: [Object], default: [] }) assessmentResponses!: import('@native-sfu/contracts').TutorAssessmentResponse[];
+  @Prop({ type: [Object], default: [] }) tutorAssessmentResults!: import('@native-sfu/contracts').TutorAssessmentResult[];
+  @Prop({ type: [String], default: [] }) teacherSubjectIds!: string[];
+  @Prop({ type: [String], default: [] }) curriculumIds!: string[];
+  @Prop({ type: [String], default: [] }) teachingCountries!: string[];
+  @Prop({ type: [String], default: [] }) learnerAgeGroups!: string[];
+  @Prop({ type: [String], default: [] }) teachingLevels!: string[];
+  @Prop({ type: String, default: 'draft', enum: ['draft','submitted','changes_requested','approved','rejected'], index: true }) tutorReviewStatus!: import('@native-sfu/contracts').TutorReviewStatus;
+  @Prop({ default: 0 }) tutorRevision!: number;
+  @Prop({ type: Date }) tutorSubmittedAt?: Date;
+  @Prop({ type: Date }) tutorReviewedAt?: Date;
+  @Prop({ type: String }) tutorReviewerId?: string;
+  @Prop({ type: String, maxlength: 2000 }) tutorReviewNote?: string;
+  @Prop({ type: Object }) tutorDeclarations?: Record<string,unknown>;
+  @Prop({ type: Object }) tutorReviewChecks?: Record<string,boolean>;
+
   @Prop({ type: [String], default: [] })
   learningGoals!: string[];
 

@@ -1,127 +1,220 @@
 <sfu-header />
-<main class="marketplace-shell">
+<main class="marketplace-shell" id="main-content">
   <section class="page-heading">
-    <div>
-      <p class="eyebrow">Teacher marketplace</p>
-      <h1>{{ marketplaceTitle() }}</h1>
-      <p>{{ marketplaceSummary() }}</p>
-    </div>
-    <a class="dashboard-link" routerLink="/student/explore">Browse batches</a>
+    <h1>{{ marketplaceTitle() }}</h1>
+    <p>{{ marketplaceSummary() }}</p>
   </section>
-
-  <section class="filter-panel" aria-label="Teacher filters">
-    <label>
-      <span>Search</span>
-      <input [value]="filters().q" (input)="updateFilter('q', inputValue($event))" placeholder="Name, headline, topic" />
-    </label>
-    <label>
-      <span>Skill or topic</span>
-      <input [value]="filters().skill" (input)="updateFilter('skill', inputValue($event))" placeholder="Math, WebRTC, English" />
-    </label>
-    <label>
-      <span>Subject</span>
-      <input [value]="filters().subject" (input)="updateFilter('subject', inputValue($event))" placeholder="Course or batch subject" />
-    </label>
-    <label>
-      <span>Language</span>
-      <input [value]="filters().language" (input)="updateFilter('language', inputValue($event))" placeholder="English, Hindi" />
-    </label>
-    <label>
-      <span>Availability</span>
-      <select [value]="filters().availability" (change)="updateFilter('availability', selectValue($event))">
-        <option value="">Any</option>
-        <option value="open">Has open batches</option>
+  <form
+    class="filter-panel"
+    (submit)="applyFilters($event)"
+    aria-label="Teacher filters"
+  >
+    <label class="search-field"
+      ><span>What would you like to learn?</span
+      ><input
+        type="search"
+        name="q"
+        maxlength="160"
+        [value]="filters().q"
+        (input)="updateFilter('q', inputValue($event))"
+        placeholder="Subject, skill or teacher’s name"
+    /></label>
+    <label
+      ><span>Language</span
+      ><input
+        name="language"
+        maxlength="160"
+        [value]="filters().language"
+        (input)="updateFilter('language', inputValue($event))"
+        placeholder="Any language"
+    /></label>
+    <label
+      ><span>Availability</span
+      ><select
+        name="availability"
+        [value]="filters().availability"
+        (change)="updateFilter('availability', selectValue($event))"
+      >
+        <option value="">Any availability</option>
+        <option value="open">Classes open for enrollment</option>
         <option value="morning">Morning</option>
         <option value="evening">Evening</option>
         <option value="weekend">Weekend</option>
-      </select>
-    </label>
-    <div class="filter-actions">
-      <button type="button" (click)="applyFilters()">Search</button>
-      <button type="button" class="ghost" (click)="resetFilters()">Reset</button>
-    </div>
-  </section>
-
-  @if (error()) {
-    <div class="form-alert">{{ error() }}</div>
-  }
-
-  <section class="marketplace-summary" aria-label="Marketplace result summary">
-    <span>{{ total() }} teachers</span>
-    <span>Public profiles only</span>
-    <span>Private class data hidden</span>
-  </section>
-
-  <section class="teacher-grid" aria-label="Public teachers">
-    @if (loading()) {
-      <div class="empty-state">
-        <h3>Loading teachers</h3>
-        <p>Fetching public teacher profiles from the server.</p>
-      </div>
-    } @else if (hasResults()) {
-      @for (teacher of teachers(); track teacher.teacherId) {
-        <article class="teacher-card" [class.promoted]="teacher.promoted">
-          <header>
-            <img [src]="profileImage(teacher)" [alt]="teacher.displayName + ' profile image'" />
-            <div>
-              <div class="teacher-card-labels">
-                <p class="eyebrow">{{ trustLabel(teacher) }}</p>
-                @if (teacher.promoted) {
-                  <span class="promotion-badge">{{ teacher.promotionLabel || 'Promoted' }}</span>
-                }
-              </div>
-              <h2>{{ teacher.displayName }}</h2>
-              <span>{{ teacher.headline || 'Published teacher profile' }}</span>
-            </div>
-          </header>
-
-          <div class="pill-list">
-            @for (skill of teacher.skills.slice(0, 4); track skill) {
-              <span>{{ skill }}</span>
-            } @empty {
-              <span>Topics coming soon</span>
+      </select></label
+    >
+    <button class="search-button" type="submit" [disabled]="loading()">
+      {{ loading() ? 'Searching…' : 'Find teachers' }}
+      <span aria-hidden="true">↗</span>
+    </button>
+    <details class="more-filters">
+      <summary>More filters</summary>
+      <div>
+        <label
+          ><span>Specific skill</span
+          ><input
+            name="skill"
+            maxlength="160"
+            [value]="filters().skill"
+            (input)="updateFilter('skill', inputValue($event))"
+            placeholder="e.g. conversational English" /></label
+        ><label
+          ><span>Category</span
+          ><select
+            name="categoryId"
+            [value]="filters().categoryId"
+            (change)="updateFilter('categoryId',selectValue($event))"
+          >
+            <option value="">All categories</option>
+            @for(category of catalog().categories;track category.id){
+            <option [value]="category.id">{{category.name}}</option>
             }
-          </div>
-
-          <div class="teacher-meta">
-            <span>{{ batchLabel(teacher) }}</span>
-            <span>Next {{ formatStart(teacher.nextPublicBatchStartAt) }}</span>
-            <span>{{ teacher.galleryCount }} gallery</span>
-            <span>{{ teacher.demoClassCount }} demos</span>
-          </div>
-
-          <div class="detail-list">
-            <span>Location</span>
-            <strong>{{ teacher.location || 'Not listed' }}</strong>
-            <span>Timezone</span>
-            <strong>{{ teacher.timezone || 'Not listed' }}</strong>
-            <span>Languages</span>
-            <strong>{{ teacher.languages.join(', ') || 'Not listed' }}</strong>
-            <span>Availability</span>
-            <strong>{{ teacher.availability || 'Not listed' }}</strong>
-          </div>
-
-          <footer>
-            <a [routerLink]="['/teachers', teacher.teacherId]">View profile</a>
-            <a class="secondary-link" routerLink="/student/explore">Open batches</a>
-          </footer>
-        </article>
-      }
-    } @else {
-      <div class="empty-state">
-        <h3>No public teachers found</h3>
-        <p>Try a different search, topic, language, or availability filter.</p>
-        <button type="button" (click)="resetFilters()">Clear filters</button>
+          </select></label
+        ><label
+          ><span>Subject</span
+          ><select
+            name="subjectId"
+            [value]="filters().subjectId"
+            (change)="updateFilter('subjectId',selectValue($event))"
+          >
+            <option value="">All subjects</option>
+            @for(subject of catalogueSubjects();track subject.id){
+            <option [value]="subject.id">{{subject.name}}</option>
+            }
+          </select></label
+        >
       </div>
+    </details>
+    @if (hasFilters()) {
+    <button class="clear-filters" type="button" (click)="resetFilters()">
+      Clear filters
+    </button>
+    }
+  </form>
+  <div class="results-heading" aria-live="polite">
+    <span
+      >{{ loading() ? 'Finding your next teacher…' : error() ? 'Search
+      temporarily unavailable' : total() + (total() === 1 ? ' teacher found' : '
+      teachers found') }}</span
+    ><small>Class times are shown in your local time.</small>
+  </div>
+  @if (error()) {
+  <div class="error-state" role="alert">
+    <div>
+      <strong>Unable to load teachers</strong>
+      <p>{{ error() }}</p>
+    </div>
+    <button type="button" (click)="retry()">Try again</button>
+  </div>
+  }
+  <section
+    class="teacher-grid"
+    aria-label="Teachers"
+    [attr.aria-busy]="loading()"
+  >
+    @if (loading()) { @for (item of [1,2,3,4]; track item) {
+    <div class="teacher-skeleton" aria-hidden="true">
+      <div></div>
+      <span></span><span></span><span></span>
+    </div>
+    } } @else if (hasResults() && !error()) { @for (teacher of teachers(); track
+    teacher.teacherId) {
+    <article class="teacher-card">
+      <div class="teacher-intro">
+        <img
+          [src]="profileImage(teacher)"
+          [alt]="teacher.displayName"
+          loading="lazy"
+          width="92"
+          height="106"
+          (error)="imageFailed(teacher.teacherId)"
+        />
+        <div>
+          <div class="teacher-card-labels">
+            @if (teacher.promoted) {
+            <span class="promotion-badge"
+              >{{ teacher.promotionLabel || 'Promoted' }}</span
+            >
+            }@if (teacher.location) {
+            <span class="location">{{ teacher.location }}</span> }
+          </div>
+          <h2>
+            <a [routerLink]="['/teachers', teacher.teacherId]"
+              >{{ teacher.displayName }}</a
+            >
+          </h2>
+          <p class="headline">
+            {{ teacher.headline || 'Explore this teacher’s background and
+            classes.' }}
+          </p>
+        </div>
+      </div>
+      @if (subjectNames(teacher).length || teacher.skills.length) {
+      <div class="pill-list">
+        @for (skill of (subjectNames(teacher).length ? subjectNames(teacher) : teacher.skills).slice(0, 3); track skill) {
+        <span>{{ skill }}</span> }
+      </div>
+      }
+      <dl class="teacher-details">
+        @if (teacher.languages.length) {
+        <div>
+          <dt>Teaches in</dt>
+          <dd>{{ teacher.languages.join(', ') }}</dd>
+        </div>
+        }@if (teacher.availability) {
+        <div>
+          <dt>Availability</dt>
+          <dd>{{ teacher.availability }}</dd>
+        </div>
+        }@if (teacher.highlightedCredential?.title) {
+        <div>
+          <dt>Background</dt>
+          <dd>{{ teacher.highlightedCredential?.title }}</dd>
+        </div>
+        }
+      </dl>
+      <footer>
+        <div>
+          <strong>{{ batchLabel(teacher) }}</strong>@if
+          (teacher.nextPublicBatchStartAt) {
+          <small>Next: {{ formatStart(teacher.nextPublicBatchStartAt) }}</small>
+          }@else if (teacher.demoClassCount) {
+          <small
+            >{{ teacher.demoClassCount }} demo {{ teacher.demoClassCount === 1 ?
+            'lesson' : 'lessons' }} to explore</small
+          >
+          }
+        </div>
+        <a [routerLink]="['/teachers', teacher.teacherId]"
+          >View profile <span aria-hidden="true">↗</span></a
+        >
+      </footer>
+    </article>
+    } } @else if (!error()) {
+    <div class="empty-state">
+      <span aria-hidden="true">⌕</span>
+      <h2>
+        {{ hasFilters() ? 'No teachers match this search' : 'No teachers
+        available yet' }}
+      </h2>
+      <p>
+        {{ hasFilters() ? 'Try a broader subject or remove a filter to discover
+        more teachers.' : 'Teacher profiles will appear here as they become
+        available. Check back soon.' }}
+      </p>
+      @if (hasFilters()) {
+      <button type="button" (click)="resetFilters()">
+        Explore all teachers
+      </button>
+      }
+    </div>
     }
   </section>
-
-  @if (hasMore()) {
-    <div class="load-more-row">
-      <button type="button" [disabled]="loadingMore()" (click)="loadMore()">
-        {{ loadingMore() ? 'Loading...' : 'Load more teachers' }}
-      </button>
-    </div>
+  @if (hasMore() && !loading() && !error()) {
+  <div class="load-more-row">
+    <button type="button" [disabled]="loadingMore()" (click)="loadMore()">
+      {{ loadingMore() ? 'Loading more teachers…' : 'Show more teachers' }}
+    </button>
+  </div>
   }
 </main>
 <sfu-footer />

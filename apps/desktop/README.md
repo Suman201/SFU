@@ -1,4 +1,4 @@
-# EDCONNECTION Classroom desktop
+# Sapiovian Classroom desktop
 
 Windows and macOS share the Angular classroom and existing NestJS/SFU backend. The desktop has two home tabs (Upcoming classes and Recordings), small settings, and the shared full classroom. Administration remains on the website.
 
@@ -34,7 +34,9 @@ Mac installers target Intel and Apple Silicon; Windows installers target x64 and
 
 Code signing and notarization use electron-builder's standard certificate environment variables. Development builds can be unsigned; distribute signed Windows installers and signed/notarized Mac builds. Certificates, Apple developer credentials, a Windows runner, and production distribution infrastructure are not included in this repository.
 
-The app icon is derived from the shared website logo at `apps/frontend/src/assets/brand/edconnection-mark.svg`. To regenerate its Windows and Mac resolutions after a deliberate brand change, run `npm run icons -w @native-sfu/desktop` (requires the Playwright Chromium browser).
+Desktop builds disable critical CSS inlining so the app’s Content Security Policy can load the complete stylesheet and switch themes without inline event handlers. Existing EDCONNECTION profile directories are reused on upgrade to preserve sign-in and device preferences.
+
+The app icon is derived from the shared website logo at `apps/frontend/src/assets/brand/sapiovian-logo.png`. To regenerate its Windows and Mac resolutions after a deliberate brand change, run `npm run icons -w @native-sfu/desktop` (requires the Playwright Chromium browser).
 
 ## Backend requirements
 

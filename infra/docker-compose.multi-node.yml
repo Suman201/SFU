@@ -70,6 +70,7 @@ services:
       NODE_PUBLIC_URL: http://127.0.0.1:3000
       HOST_CANDIDATE_PORT_RANGE: 40000-40020
       PIPE_ADVERTISE_IP: backend-a
+      TUTOR_INTRO_VIDEO_LOCAL_PATH: /app/tutor-intro-videos
       PIPE_PORT_RANGE: 41000-41020
     ports:
       - "3000:3000"
@@ -85,6 +86,7 @@ services:
       - chat-attachments-a:/app/chat-attachments
       - class-materials-a:/app/class-materials
       - profile-media-a:/app/profile-media
+      - tutor-intro-videos:/app/tutor-intro-videos
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -106,6 +108,7 @@ services:
       NODE_PUBLIC_URL: http://127.0.0.1:3002
       HOST_CANDIDATE_PORT_RANGE: 40021-40040
       PIPE_ADVERTISE_IP: backend-b
+      TUTOR_INTRO_VIDEO_LOCAL_PATH: /app/tutor-intro-videos
       PIPE_PORT_RANGE: 41021-41040
     ports:
       - "3002:3000"
@@ -121,6 +124,7 @@ services:
       - chat-attachments-b:/app/chat-attachments
       - class-materials-b:/app/class-materials
       - profile-media-b:/app/profile-media
+      - tutor-intro-videos:/app/tutor-intro-videos
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -139,3 +143,4 @@ volumes:
   class-materials-b:
   profile-media-a:
   profile-media-b:
+  tutor-intro-videos:

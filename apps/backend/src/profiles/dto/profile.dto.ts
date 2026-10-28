@@ -1,4 +1,5 @@
-import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsObject, IsOptional, IsString, IsUrl, MaxLength, ValidateNested } from 'class-validator';
+import { EUROPEAN_MARKETS, TEACHING_LEVELS } from '@native-sfu/contracts';
+import { ValidateIf, ArrayUnique, IsMongoId, ArrayMaxSize, IsArray, IsBoolean, IsIn, IsObject, IsOptional, IsString, IsUrl, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ProfileCredentialDto {
@@ -48,8 +49,22 @@ export class ProfileSocialLinkDto {
   url!: string;
 }
 
+export class TutorAssessmentResponseDto {
+  @IsMongoId() categoryId!: string;
+  @IsString() @MaxLength(4000) response!: string;
+  @IsOptional() @IsString() @MaxLength(2048) evidenceUrl?: string;
+}
 export class UpdateMyProfileDto {
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined) @IsString() @MaxLength(2048) introVideoUrl?: string;
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayMaxSize(8) @ValidateNested({each:true}) @Type(()=>TutorAssessmentResponseDto) assessmentResponses?: TutorAssessmentResponseDto[];
+
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayMaxSize(8) @ArrayUnique() @IsMongoId({each:true}) teacherSubjectIds?: string[];
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayMaxSize(12) @ArrayUnique() @IsMongoId({each:true}) curriculumIds?: string[];
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayMaxSize(60) @ArrayUnique() @IsIn(EUROPEAN_MARKETS,{each:true}) teachingCountries?: string[];
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayMaxSize(2) @ArrayUnique() @IsIn(['children','adults'],{each:true}) learnerAgeGroups?: string[];
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayMaxSize(6) @ArrayUnique() @IsIn(TEACHING_LEVELS,{each:true}) teachingLevels?: string[];
+
+  @ValidateIf((_, value) => value !== undefined)
   @IsString()
   @MaxLength(120)
   displayName?: string;

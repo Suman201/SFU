@@ -1,16 +1,16 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
-import { BrandMark } from '../../shared/brand-mark/brand-mark';
+import { BrandLogo } from '../../shared/brand-mark/brand-logo';
 import { DesktopService } from './desktop.service';
 
 @Component({
-  selector: 'sfu-desktop-shell', standalone: true, imports: [RouterLink, RouterLinkActive, RouterOutlet, BrandMark],
+  selector: 'sfu-desktop-shell', standalone: true, imports: [RouterLink, RouterLinkActive, RouterOutlet, BrandLogo],
   changeDetection: ChangeDetectionStrategy.OnPush, styleUrl: './desktop.scss',
   template: `
     <div class="desktop-shell">
       <header class="desktop-header">
-        <a class="brand" routerLink="/desktop/upcoming"><span class="brand-mark" aria-hidden="true"><sfu-brand-mark /></span><span>EDCONNECTION<small>Classroom</small></span></a>
+        <a class="brand" routerLink="/desktop/upcoming"><sfu-brand-logo [tagline]="false" /></a>
         <nav aria-label="Main navigation">
           <a routerLink="/desktop/upcoming" routerLinkActive="active">Upcoming classes</a>
           <a routerLink="/desktop/recordings" routerLinkActive="active">Recordings</a>

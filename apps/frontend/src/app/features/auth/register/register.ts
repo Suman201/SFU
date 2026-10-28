@@ -1,9 +1,21 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
-import { email, FormField, FormRoot, form as signalForm, maxLength, minLength, required } from '@angular/forms/signals';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  inject,
+  signal,
+} from '@angular/core';
+import {
+  email,
+  FormField,
+  FormRoot,
+  form as signalForm,
+  maxLength,
+  minLength,
+  required,
+} from '@angular/forms/signals';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../../core/services/auth.service';
-import { Footer } from '../../../shared/footer/footer';
-import { Header } from '../../../shared/header/header';
+import { AuthLayout } from '../auth-layout/auth-layout';
 
 interface RegisterFormModel {
   displayName: string;
@@ -14,10 +26,10 @@ interface RegisterFormModel {
 @Component({
   selector: 'sfu-register',
   standalone: true,
-  imports: [Footer, FormField, FormRoot, Header, RouterLink],
+  imports: [AuthLayout, FormField, FormRoot, RouterLink],
   templateUrl: './register.html',
   styleUrl: './register.scss',
-  changeDetection: ChangeDetectionStrategy.Eager
+  changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class Register {
   private readonly auth = inject(AuthService);
@@ -26,9 +38,9 @@ export class Register {
   protected readonly busy = signal(false);
   protected readonly error = signal('');
   protected readonly formModel = signal<RegisterFormModel>({
-    displayName: 'Host',
-    email: 'host@example.com',
-    password: 'Password@12345'
+    displayName: '',
+    email: '',
+    password: '',
   });
   protected readonly form = signalForm(this.formModel, (path) => {
     required(path.displayName);
@@ -50,13 +62,16 @@ export class Register {
     this.busy.set(true);
     this.error.set('');
     const value = this.formModel();
-    this.auth.register(value.displayName, value.email, value.password).subscribe({
-      next: ({ user }) => void this.router.navigate([this.auth.redirectPathFor(user.role)]),
-      error: (error: unknown) => {
-        this.error.set(this.auth.authErrorMessage(error));
-        this.busy.set(false);
-      },
-      complete: () => this.busy.set(false)
-    });
+    this.auth
+      .register(value.displayName, value.email, value.password)
+      .subscribe({
+        next: ({ user }) =>
+          void this.router.navigate([this.auth.redirectPathFor(user.role)]),
+        error: (error: unknown) => {
+          this.error.set(this.auth.authErrorMessage(error));
+          this.busy.set(false);
+        },
+        complete: () => this.busy.set(false),
+      });
   }
 }

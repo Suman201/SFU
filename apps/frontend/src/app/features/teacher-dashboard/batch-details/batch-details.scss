@@ -18,7 +18,7 @@
   background: var(--panel);
   color: var(--text);
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 650;
   text-decoration: none;
 }
 
@@ -57,7 +57,7 @@ p {
 .eyebrow {
   color: var(--accent);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 650;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -170,7 +170,7 @@ h3 {
   display: block;
   color: var(--accent);
   font-size: 30px;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -263,7 +263,7 @@ h3 {
   color: var(--muted);
   cursor: pointer;
   font: inherit;
-  font-weight: 850;
+  font-weight: 650;
 }
 
 .calendar-tabs button.active {
@@ -289,7 +289,7 @@ h3 {
 .calendar-toolbar span {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .calendar-legend span {
@@ -299,7 +299,7 @@ h3 {
   padding: 0 9px;
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
 }
 
 .calendar-month {
@@ -352,7 +352,7 @@ h3 {
 .day-number {
   color: var(--text);
   font-size: 12px;
-  font-weight: 950;
+  font-weight: 700;
 }
 
 .day-events,
@@ -394,7 +394,7 @@ h3 {
 .calendar-event span {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .calendar-event strong {
@@ -455,7 +455,7 @@ h3 {
 .empty-day {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .calendar-week {
@@ -535,7 +535,7 @@ h3 {
 .calendar-detail-grid span {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
   text-transform: uppercase;
 }
 
@@ -586,13 +586,13 @@ h3 {
   gap: 7px;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .settings-group label small {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .settings-group label small.override {
@@ -608,7 +608,7 @@ h3 {
   cursor: pointer;
   font: inherit;
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 700;
   padding: 4px 8px;
 }
 
@@ -779,7 +779,7 @@ h3 {
 
 .report-summary-grid span {
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
   text-transform: uppercase;
 }
 
@@ -833,13 +833,13 @@ h3 {
 
 .report-card dt {
   color: var(--muted);
-  font-weight: 750;
+  font-weight: 650;
 }
 
 .report-card dd {
   margin: 0;
   color: var(--text);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .post-class-workspace-grid {
@@ -931,7 +931,7 @@ h3 {
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
   padding: 6px 9px;
 }
 
@@ -1026,7 +1026,7 @@ h3 {
   background: #458b73;
   color: #fff;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .thread-copy {
@@ -1059,7 +1059,7 @@ h3 {
   color: #fff;
   font-size: 12px;
   font-style: normal;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .post-class-thread {
@@ -1141,7 +1141,7 @@ h3 {
   min-width: 0;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .class-timeline-panel {
@@ -1185,7 +1185,7 @@ h3 {
 .class-timeline-row time {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
 }
 
 .class-timeline-row div {
@@ -1207,7 +1207,7 @@ h3 {
 }
 
 .status-pill {
-  font-weight: 800;
+  font-weight: 650;
   white-space: nowrap;
 }
 
@@ -1367,7 +1367,7 @@ h3 {
 .submission-type-row span {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
 }
 
 .assignment-form input,
@@ -1472,7 +1472,7 @@ h3 {
 .submission-assets a {
   color: var(--accent);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 650;
   text-decoration: none;
 }
 

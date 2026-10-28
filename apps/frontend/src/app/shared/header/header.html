@@ -1,59 +1,86 @@
-<header class="site-header">
-  <a class="brand" routerLink="/" aria-label="EDCONNECTION home">
-    <span class="brand-mark" aria-hidden="true">
-      <sfu-brand-mark />
-    </span>
-    <span class="brand-copy">
-      <strong><span>ED</span>CONNECTION</strong>
-      <small>Teach. Learn. Grow Together.</small>
-    </span>
-  </a>
-
-  <nav class="primary-nav" aria-label="Primary">
-    <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Home</a>
-    @if (auth.role() === 'teacher') {
-      <a routerLink="/teacher/dashboard" routerLinkActive="active">Dashboard</a>
-      <a routerLink="/teacher/analytics" routerLinkActive="active">Analytics</a>
-      <a routerLink="/teacher/live-settings" routerLinkActive="active">Live Settings</a>
+<header class="site-header" (keydown.escape)="escapeMenu()">
+  <a
+    class="brand"
+    routerLink="/"
+    aria-label="Sapiovian home"
+    (click)="closeMenu()"
+    ><sfu-brand-logo
+  /></a>
+  <button
+    #menuButton
+    class="menu-toggle"
+    type="button"
+    aria-controls="site-navigation"
+    [attr.aria-expanded]="menuOpen()"
+    (click)="toggleMenu()"
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        [attr.d]="menuOpen() ? 'M6 6l12 12M18 6 6 18' : 'M4 7h16M4 12h16M4 17h16'"
+      />
+    </svg>
+    <span>{{ menuOpen() ? 'Close' : 'Menu' }}</span>
+  </button>
+  <div class="navigation" id="site-navigation" [class.open]="menuOpen()">
+    <nav class="primary-nav" aria-label="Primary" (click)="closeMenu()">
+      @if (auth.role() === 'teacher') {
+      <a routerLink="/teacher/dashboard" routerLinkActive="active"
+        >My teaching</a
+      >
+      <a routerLink="/class-library" routerLinkActive="active">Library</a>
+      <a routerLink="/teacher/analytics" routerLinkActive="active">Insights</a>
+      <a routerLink="/teacher/live-settings" routerLinkActive="active"
+        >Class settings</a
+      >
       <a routerLink="/teacher/profile" routerLinkActive="active">Profile</a>
-      <a routerLink="/sfu-forms" routerLinkActive="active">Class forms</a>
-    } @else if (auth.role() === 'student') {
-      <a routerLink="/student/explore" routerLinkActive="active">Explore</a>
-      <a routerLink="/teachers" routerLinkActive="active">Teachers</a>
-      <a routerLink="/student/dashboard" routerLinkActive="active">Dashboard</a>
+      } @else if (auth.role() === 'student') {
+      <a routerLink="/student/dashboard" routerLinkActive="active"
+        >My learning</a
+      >
+      <a routerLink="/teachers" routerLinkActive="active">Find a teacher</a>
+      <a routerLink="/student/explore" routerLinkActive="active"
+        >Explore classes</a
+      >
+      <a routerLink="/class-library" routerLinkActive="active">Library</a>
       <a routerLink="/student/profile" routerLinkActive="active">Profile</a>
-      <a routerLink="/sfu-forms" routerLinkActive="active">Class forms</a>
-    } @else {
-      <a routerLink="/" fragment="teachers">For Teachers</a>
-      <a routerLink="/" fragment="learners">For Learners</a>
-      <a routerLink="/teachers">Teachers</a>
-      <a routerLink="/student/explore">Courses</a>
-      <a routerLink="/" fragment="how-it-works">How It Works</a>
-      <a routerLink="/" fragment="pricing">Pricing</a>
-      <a routerLink="/" fragment="resources">Resources <span aria-hidden="true">v</span></a>
-    }
-  </nav>
-
-  <div class="header-actions">
-    <button
-      class="theme-toggle"
-      type="button"
-      [class.dark]="theme.isDark()"
-      [title]="theme.label()"
-      [attr.aria-label]="theme.label()"
-      [attr.aria-pressed]="theme.isDark()"
-      (click)="toggleTheme()"
-    >
-      <span class="theme-toggle-track" aria-hidden="true">
-        <span class="theme-toggle-thumb"></span>
-      </span>
-    </button>
-
-    @if (!auth.authenticated()) {
-      <a class="login-link" routerLink="/student/login" routerLinkActive="active">Log In</a>
-      <a class="signup-link" routerLink="/register" routerLinkActive="active">Sign Up</a>
-    } @else {
-      <button class="signout-button" type="button" (click)="logout()">Sign out</button>
-    }
+      } @else {
+      <a routerLink="/teachers" routerLinkActive="active">Find a teacher</a>
+      <a routerLink="/" fragment="how-it-works">How it works</a>
+      <a routerLink="/" fragment="for-teachers">For teachers</a>
+      }
+    </nav>
+    <div class="header-actions">
+      <button
+        class="theme-toggle"
+        type="button"
+        [title]="theme.label()"
+        [attr.aria-label]="theme.label()"
+        [attr.aria-pressed]="theme.isDark()"
+        (click)="toggleTheme()"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          @if (theme.isDark()) {
+          <path d="M20 14.5A8.4 8.4 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z" />
+          } @else {
+          <circle cx="12" cy="12" r="4" />
+          <path
+            d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"
+          />
+          }
+        </svg>
+      </button>
+      @if (!auth.authenticated()) {
+      <a class="login-link" routerLink="/student/login" (click)="closeMenu()"
+        >Log in</a
+      >
+      <a class="signup-link" routerLink="/register" (click)="closeMenu()"
+        >Get started <span aria-hidden="true">↗</span></a
+      >
+      } @else {
+      <button class="signout-button" type="button" (click)="logout()">
+        Sign out
+      </button>
+      }
+    </div>
   </div>
 </header>

@@ -64,7 +64,8 @@
     "desktop:dev": "node scripts/desktop.cjs dev",
     "desktop:build": "node scripts/desktop.cjs build",
     "desktop:package:mac": "node scripts/desktop.cjs package:mac",
-    "desktop:package:win": "node scripts/desktop.cjs package:win"
+    "desktop:package:win": "node scripts/desktop.cjs package:win",
+    "seed:teaching-catalog": "npm run build --workspace @native-sfu/contracts && npm run seed:teaching-catalog -w @native-sfu/backend"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0"

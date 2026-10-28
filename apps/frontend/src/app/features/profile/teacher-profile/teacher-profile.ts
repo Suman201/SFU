@@ -1,4 +1,20 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { DestroyRef } from '@angular/core';
+import {
+  EUROPEAN_MARKETS,
+  TEACHING_LEVELS,
+  type TeachingCatalogSnapshot,
+  type TutorApplication,
+} from '@native-sfu/contracts';
+import { FormsModule } from '@angular/forms';
+import { finalize } from 'rxjs';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { RouterLink } from '@angular/router';
 import type {
   AnalyticsVisibility,
@@ -21,7 +37,7 @@ import type {
   TeacherPublicContentMediaType,
   UpdateMyProfileRequest,
   UpdateTeacherPublicContentRequest,
-  UpdateMySettingsRequest
+  UpdateMySettingsRequest,
 } from '@native-sfu/contracts';
 import { ProfileService } from '../../../core/services/profile.service';
 import { ThemeService } from '../../../core/services/theme.service';
@@ -42,6 +58,8 @@ interface ProfileTab {
 }
 
 interface TeacherProfileForm {
+  introVideoUrl: string;
+  assessmentResponses: import('@native-sfu/contracts').TutorAssessmentResponse[];
   displayName: string;
   phone: string;
   headline: string;
@@ -51,10 +69,15 @@ interface TeacherProfileForm {
   availability: string;
   languagesText: string;
   skillsText: string;
-  credentialsText: string;
-  educationText: string;
-  experienceText: string;
-  socialLinksText: string;
+  credentials: ProfileCredential[];
+  education: ProfileCredential[];
+  experience: ProfileExperience[];
+  socialLinks: ProfileSocialLink[];
+  teacherSubjectIds: string[];
+  curriculumIds: string[];
+  teachingCountries: string[];
+  learnerAgeGroups: string[];
+  teachingLevels: string[];
   publicProfileEnabled: boolean;
 }
 
@@ -176,10 +199,12 @@ const PROFILE_TABS: ProfileTab[] = [
   { id: 'credentials', label: 'Credentials' },
   { id: 'experience', label: 'Experience' },
   { id: 'links', label: 'Links' },
-  { id: 'batches', label: 'Batches' }
+  { id: 'batches', label: 'Batches' },
 ];
 
 const EMPTY_FORM: TeacherProfileForm = {
+  introVideoUrl: '',
+  assessmentResponses: [],
   displayName: '',
   phone: '',
   headline: '',
@@ -189,11 +214,16 @@ const EMPTY_FORM: TeacherProfileForm = {
   availability: '',
   languagesText: '',
   skillsText: '',
-  credentialsText: '',
-  educationText: '',
-  experienceText: '',
-  socialLinksText: '',
-  publicProfileEnabled: false
+  credentials: [],
+  education: [],
+  experience: [],
+  socialLinks: [],
+  teacherSubjectIds: [],
+  curriculumIds: [],
+  teachingCountries: [],
+  learnerAgeGroups: [],
+  teachingLevels: [],
+  publicProfileEnabled: false,
 };
 
 const EMPTY_SETTINGS_FORM: ProfileSettingsForm = {
@@ -205,7 +235,7 @@ const EMPTY_SETTINGS_FORM: ProfileSettingsForm = {
   notificationAnnouncements: true,
   notificationRecordingReady: true,
   privacyShowEmail: false,
-  privacyAllowTeacherMessages: true
+  privacyAllowTeacherMessages: true,
 };
 
 const EMPTY_LIVE_SETTINGS_FORM: LiveSettingsForm = {
@@ -288,7 +318,7 @@ const EMPTY_LIVE_SETTINGS_FORM: LiveSettingsForm = {
   includePrivateChatInExports: false,
   anonymizeStudentExports: false,
   exportRetentionDays: 365,
-  requireExportAuditLog: true
+  requireExportAuditLog: true,
 };
 
 const EMPTY_PUBLIC_CONTENT_FORM: PublicContentForm = {
@@ -299,7 +329,7 @@ const EMPTY_PUBLIC_CONTENT_FORM: PublicContentForm = {
   externalUrl: '',
   tagsText: '',
   topicsText: '',
-  sortOrder: 0
+  sortOrder: 0,
 };
 
 const EMPTY_PROMOTION_FORM: PromotionForm = {
@@ -307,27 +337,352 @@ const EMPTY_PROMOTION_FORM: PromotionForm = {
   startsAt: dateTimeInputValue(new Date()),
   endsAt: dateTimeInputValue(addDays(new Date(), 14)),
   reason: '',
-  paymentReference: ''
+  paymentReference: '',
 };
 
 @Component({
   selector: 'sfu-teacher-profile',
   standalone: true,
-  imports: [Footer, Header, RouterLink],
+  imports: [Footer, Header, RouterLink, FormsModule],
   templateUrl: './teacher-profile.html',
-  styleUrl: './teacher-profile.scss',
-  changeDetection: ChangeDetectionStrategy.Eager
+  styleUrls: ['./teacher-profile.scss', './teacher-onboarding.scss'],
+  changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class TeacherProfile implements OnInit {
   private readonly profiles = inject(ProfileService);
   private readonly theme = inject(ThemeService);
 
+  private readonly destroyRef = inject(DestroyRef);
+  protected readonly videoBusy = signal(false);
+  protected readonly videoPreview = signal('');
+  private clearVideoPreview() {
+    if (this.videoPreview()) URL.revokeObjectURL(this.videoPreview());
+    this.videoPreview.set('');
+  }
+  protected previewVideo() {
+    if (this.videoBusy()) return;
+    this.videoBusy.set(true);
+    this.profiles
+      .previewIntroVideo()
+      .pipe(finalize(() => this.videoBusy.set(false)))
+      .subscribe({
+        next: (blob) => {
+          this.clearVideoPreview();
+          this.videoPreview.set(URL.createObjectURL(blob));
+        },
+        error: (e) => this.applicationError.set(this.profiles.errorMessage(e)),
+      });
+  }
+  protected uploadIntroVideo(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || this.videoBusy()) return;
+    if (
+      file.size > 50 * 1024 * 1024 ||
+      !['video/mp4', 'video/webm'].includes(file.type)
+    ) {
+      this.applicationError.set('Choose an MP4 or WebM video up to 50 MB.');
+      return;
+    }
+    this.videoBusy.set(true);
+    this.applicationError.set('');
+    this.profiles
+      .uploadIntroVideo(file)
+      .pipe(finalize(() => this.videoBusy.set(false)))
+      .subscribe({
+        next: (result) => {
+          this.clearVideoPreview();
+          this.form.update((f) => ({ ...f, introVideoUrl: '' }));
+          this.profile.update((p) =>
+            p
+              ? {
+                  ...p,
+                  ...result,
+                  introVideoUrl: '',
+                  publicProfileEnabled: false,
+                }
+              : p,
+          );
+          this.loadApplication();
+          this.notice.set(
+            'Introduction video uploaded. Save other profile changes before submitting.',
+          );
+        },
+        error: (e) => this.applicationError.set(this.profiles.errorMessage(e)),
+      });
+  }
+  protected removeVideo() {
+    if (this.videoBusy()) return;
+    this.videoBusy.set(true);
+    this.profiles
+      .removeIntroVideo()
+      .pipe(finalize(() => this.videoBusy.set(false)))
+      .subscribe({
+        next: () => {
+          this.clearVideoPreview();
+          this.form.update((f) => ({ ...f, introVideoUrl: '' }));
+          this.profile.update((p) =>
+            p
+              ? {
+                  ...p,
+                  introVideoUploaded: false,
+                  introVideoUrl: '',
+                  publicProfileEnabled: false,
+                }
+              : p,
+          );
+          this.loadApplication();
+        },
+        error: (e) => this.applicationError.set(this.profiles.errorMessage(e)),
+      });
+  }
+  protected readonly section = signal('profile');
+  protected readonly sections = [
+    { id: 'profile', label: 'Teaching profile' },
+    { id: 'media', label: 'Public media' },
+    { id: 'settings', label: 'Preferences' },
+    { id: 'classroom', label: 'Classroom defaults' },
+    { id: 'promotions', label: 'Promotions' },
+  ];
+  protected readonly catalog = signal<TeachingCatalogSnapshot>({
+    categories: [],
+    subjects: [],
+    curricula: [],
+  });
+  protected readonly catalogError = signal('');
+  protected readonly application = signal<TutorApplication | null>(null);
+  protected readonly applicationError = signal('');
+  protected readonly submitting = signal(false);
+  protected readonly markets = [...EUROPEAN_MARKETS].sort((a, b) =>
+    this.countryName(a).localeCompare(this.countryName(b)),
+  );
+  protected readonly levels = TEACHING_LEVELS;
+  protected readonly timezones = [
+    ...new Set(['UTC', ...Intl.supportedValuesOf('timeZone')]),
+  ];
+  protected readonly editorStep = signal('about');
+  protected readonly videoMethod = signal<'upload' | 'link'>('upload');
+  protected readonly editorSteps = [
+    { id: 'about', label: 'About you' },
+    { id: 'subjects', label: 'Subjects & learners' },
+    { id: 'video', label: 'Introduction video' },
+    { id: 'experience', label: 'Experience' },
+    { id: 'assessment', label: 'Teaching assessment' },
+    { id: 'review', label: 'Review & submit' },
+  ];
+  protected subjectCategory = '';
+  protected curriculumSearch = '';
+  protected selectedSubjectName(id: string) {
+    return (
+      this.catalog().subjects.find((s) => s.id === id)?.name ||
+      'Archived subject'
+    );
+  }
+  protected selectedCurriculumName(id: string) {
+    return (
+      this.catalog().curricula.find((c) => c.id === id)?.name ||
+      'Archived curriculum'
+    );
+  }
+  protected filteredCurricula() {
+    const q = this.curriculumSearch.trim().toLowerCase();
+    return this.catalog().curricula.filter(
+      (c) => !q || c.name.toLowerCase().includes(q),
+    );
+  }
+  protected subjectSearch = '';
+  protected readonly requiredCategoryAssessments = computed(() =>
+    this.catalog().categories.filter((c) =>
+      this.catalog().subjects.some(
+        (s) =>
+          s.parentId === c.id && this.form().teacherSubjectIds.includes(s.id),
+      ),
+    ),
+  );
+  protected assessmentAnswer(id: string) {
+    return (
+      this.form().assessmentResponses.find((x) => x.categoryId === id)
+        ?.response ?? ''
+    );
+  }
+  protected assessmentEvidence(id: string) {
+    return (
+      this.form().assessmentResponses.find((x) => x.categoryId === id)
+        ?.evidenceUrl ?? ''
+    );
+  }
+  protected updateAssessment(
+    id: string,
+    field: 'response' | 'evidenceUrl',
+    value: string,
+  ) {
+    this.form.update((f) => {
+      const rows = [...f.assessmentResponses];
+      const index = rows.findIndex((x) => x.categoryId === id);
+      if (index >= 0) rows[index] = { ...rows[index]!, [field]: value };
+      else rows.push({ categoryId: id, response: '', [field]: value });
+      return { ...f, assessmentResponses: rows };
+    });
+  }
+  protected adultTutorConfirmed = false;
+  protected codeOfConductAccepted = false;
+  protected safeguardingAccepted = false;
+  protected countryName(code: string): string {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(code) || code;
+  }
+  protected categorySubjects(id: string) {
+    const q = this.subjectSearch.trim().toLowerCase();
+    return this.catalog().subjects.filter(
+      (x) =>
+        x.parentId === id &&
+        (!this.subjectCategory || this.subjectCategory === id) &&
+        (!q || [x.name, ...x.aliases].some((s) => s.toLowerCase().includes(q))),
+    );
+  }
+  protected toggleSelection(
+    field:
+      | 'teacherSubjectIds'
+      | 'curriculumIds'
+      | 'teachingCountries'
+      | 'learnerAgeGroups'
+      | 'teachingLevels',
+    value: string,
+  ) {
+    const current = this.form()[field];
+    const limit =
+      field === 'teacherSubjectIds' ? 8 : field === 'curriculumIds' ? 12 : 60;
+    if (!current.includes(value) && current.length >= limit) {
+      this.error.set(`Choose no more than ${limit} entries.`);
+      return;
+    }
+    this.form.update((f) => ({
+      ...f,
+      [field]: current.includes(value)
+        ? current.filter((x) => x !== value)
+        : [...current, value],
+    }));
+  }
+  protected loadCatalogue() {
+    this.catalogError.set('');
+    this.profiles.teachingCatalog().subscribe({
+      next: (c) => this.catalog.set(c),
+      error: () =>
+        this.catalogError.set(
+          'The teaching catalogue could not load. Retry before choosing subjects.',
+        ),
+    });
+  }
+  protected loadApplication() {
+    this.applicationError.set('');
+    this.profiles.tutorApplication().subscribe({
+      next: (a) => this.application.set(a),
+      error: (e) => this.applicationError.set(this.profiles.errorMessage(e)),
+    });
+  }
+  protected submitApplication() {
+    const a = this.application();
+    if (!a || this.submitting()) return;
+    this.submitting.set(true);
+    this.applicationError.set('');
+    this.profiles
+      .submitTutorApplication({
+        revision: a.revision,
+        adultTutorConfirmed: this.adultTutorConfirmed,
+        codeOfConductAccepted: this.codeOfConductAccepted,
+        safeguardingAccepted: this.safeguardingAccepted,
+      })
+      .pipe(finalize(() => this.submitting.set(false)))
+      .subscribe({
+        next: (a) => {
+          this.application.set(a);
+          this.notice.set(
+            'Your profile was submitted for review. You can return here to see feedback.',
+          );
+        },
+        error: (e) => this.applicationError.set(this.profiles.errorMessage(e)),
+      });
+  }
+  protected addCredential(key: 'credentials' | 'education') {
+    if (this.form()[key].length >= (key === 'credentials' ? 12 : 8)) return;
+    this.form.update((f) => ({
+      ...f,
+      [key]: [...f[key], { title: '', issuer: '', year: '' }],
+    }));
+  }
+  protected updateCredential(
+    key: 'credentials' | 'education',
+    index: number,
+    field: keyof ProfileCredential,
+    value: string,
+  ) {
+    this.form.update((f) => ({
+      ...f,
+      [key]: f[key].map((item, i) =>
+        i === index ? { ...item, [field]: value } : item,
+      ),
+    }));
+  }
+  protected removeEntry(
+    key: 'credentials' | 'education' | 'experience' | 'socialLinks',
+    index: number,
+  ) {
+    this.form.update((f) => ({
+      ...f,
+      [key]: f[key].filter((_, i) => i !== index),
+    }));
+  }
+  protected addExperience() {
+    if (this.form().experience.length >= 8) return;
+    this.form.update((f) => ({
+      ...f,
+      experience: [
+        ...f.experience,
+        { role: '', organization: '', period: '', summary: '' },
+      ],
+    }));
+  }
+  protected updateExperience(
+    index: number,
+    field: keyof ProfileExperience,
+    value: string,
+  ) {
+    this.form.update((f) => ({
+      ...f,
+      experience: f.experience.map((item, i) =>
+        i === index ? { ...item, [field]: value } : item,
+      ),
+    }));
+  }
+  protected addLink() {
+    if (this.form().socialLinks.length >= 8) return;
+    this.form.update((f) => ({
+      ...f,
+      socialLinks: [...f.socialLinks, { label: '', url: '' }],
+    }));
+  }
+  protected updateLink(
+    index: number,
+    field: keyof ProfileSocialLink,
+    value: string,
+  ) {
+    this.form.update((f) => ({
+      ...f,
+      socialLinks: f.socialLinks.map((item, i) =>
+        i === index ? { ...item, [field]: value } : item,
+      ),
+    }));
+  }
   protected readonly tabs = PROFILE_TABS;
   protected readonly activeTab = signal<TeacherProfileTab>('batches');
   protected readonly profile = signal<ProfileUser | null>(null);
   protected readonly form = signal<TeacherProfileForm>({ ...EMPTY_FORM });
-  protected readonly settingsForm = signal<ProfileSettingsForm>({ ...EMPTY_SETTINGS_FORM });
-  protected readonly liveSettingsForm = signal<LiveSettingsForm>({ ...EMPTY_LIVE_SETTINGS_FORM });
+  protected readonly settingsForm = signal<ProfileSettingsForm>({
+    ...EMPTY_SETTINGS_FORM,
+  });
+  protected readonly liveSettingsForm = signal<LiveSettingsForm>({
+    ...EMPTY_LIVE_SETTINGS_FORM,
+  });
   protected readonly loading = signal(false);
   protected readonly saving = signal(false);
   protected readonly savingSettings = signal(false);
@@ -340,29 +695,48 @@ export class TeacherProfile implements OnInit {
   protected readonly publicContentBusyId = signal<string | null>(null);
   protected readonly error = signal('');
   protected readonly notice = signal('');
-  protected readonly editing = signal(false);
+  protected readonly editing = signal(true);
   protected readonly publicContent = signal<TeacherPublicContentItem[]>([]);
-  protected readonly publicContentForm = signal<PublicContentForm>({ ...EMPTY_PUBLIC_CONTENT_FORM });
+  protected readonly publicContentForm = signal<PublicContentForm>({
+    ...EMPTY_PUBLIC_CONTENT_FORM,
+  });
   protected readonly editingPublicContentId = signal<string | null>(null);
   protected readonly promotions = signal<TeacherPromotion[]>([]);
-  protected readonly promotionForm = signal<PromotionForm>({ ...EMPTY_PROMOTION_FORM });
+  protected readonly promotionForm = signal<PromotionForm>({
+    ...EMPTY_PROMOTION_FORM,
+  });
 
   protected readonly batches = computed(() => this.profile()?.batches ?? []);
-  protected readonly galleryContent = computed(() => this.publicContent().filter((item) => item.itemType === 'gallery'));
-  protected readonly demoContent = computed(() => this.publicContent().filter((item) => item.itemType === 'demo_class'));
-  protected readonly totalStudents = computed(() => this.batches().reduce((total, batch) => total + (batch.enrolledCount ?? 0), 0));
+  protected readonly galleryContent = computed(() =>
+    this.publicContent().filter((item) => item.itemType === 'gallery'),
+  );
+  protected readonly demoContent = computed(() =>
+    this.publicContent().filter((item) => item.itemType === 'demo_class'),
+  );
+  protected readonly totalStudents = computed(() =>
+    this.batches().reduce(
+      (total, batch) => total + (batch.enrolledCount ?? 0),
+      0,
+    ),
+  );
   protected readonly metrics = computed<ProfileMetric[]>(() => {
     const profile = this.profile();
     return [
       { label: 'Batches', value: `${this.batches().length}` },
       { label: 'Active students', value: `${this.totalStudents()}` },
       { label: 'Skills', value: `${profile?.skills.length ?? 0}` },
-      { label: 'Public assets', value: `${this.publicContent().filter((item) => item.publishStatus === 'published').length}` }
+      {
+        label: 'Public assets',
+        value: `${this.publicContent().filter((item) => item.publishStatus === 'published').length}`,
+      },
     ];
   });
 
   ngOnInit(): void {
+    this.destroyRef.onDestroy(() => this.clearVideoPreview());
     this.loadProfile();
+    this.loadCatalogue();
+    this.loadApplication();
     this.loadLiveSettings();
     this.loadPublicContent();
     this.loadPromotions();
@@ -375,18 +749,34 @@ export class TeacherProfile implements OnInit {
       next: (profile) => {
         this.profile.set(profile);
         this.form.set(this.formFromProfile(profile));
+        this.videoMethod.set(profile.introVideoUrl ? 'link' : 'upload');
         this.settingsForm.set(this.settingsFormFromProfile(profile.settings));
         this.theme.setPreference(profile.settings.theme);
       },
       error: (error) => {
         this.error.set(this.profiles.errorMessage(error));
+        this.loading.set(false);
       },
-      complete: () => this.loading.set(false)
+      complete: () => this.loading.set(false),
     });
   }
 
   protected saveProfile(): void {
     if (this.saving()) {
+      return;
+    }
+    if (
+      !this.form().displayName.trim() ||
+      this.form().credentials.some((x) => !x.title.trim()) ||
+      this.form().education.some((x) => !x.title.trim()) ||
+      this.form().experience.some((x) => !x.role.trim()) ||
+      this.form().socialLinks.some(
+        (x) => !x.label.trim() || !/^https?:\/\//i.test(x.url),
+      )
+    ) {
+      this.error.set(
+        'Complete the name, qualification titles, experience roles and valid links, or remove empty rows.',
+      );
       return;
     }
     this.saving.set(true);
@@ -396,11 +786,14 @@ export class TeacherProfile implements OnInit {
       next: (profile) => {
         this.profile.set(profile);
         this.form.set(this.formFromProfile(profile));
-        this.editing.set(false);
+        this.loadApplication();
         this.notice.set('Profile updated.');
       },
-      error: (error) => this.error.set(this.profiles.errorMessage(error)),
-      complete: () => this.saving.set(false)
+      error: (error) => {
+        this.error.set(this.profiles.errorMessage(error));
+        this.saving.set(false);
+      },
+      complete: () => this.saving.set(false),
     });
   }
 
@@ -413,13 +806,18 @@ export class TeacherProfile implements OnInit {
     this.notice.set('');
     this.profiles.updateMySettings(this.settingsRequest()).subscribe({
       next: (settings) => {
-        this.profile.update((profile) => (profile ? { ...profile, settings } : profile));
+        this.profile.update((profile) =>
+          profile ? { ...profile, settings } : profile,
+        );
         this.settingsForm.set(this.settingsFormFromProfile(settings));
         this.theme.setPreference(settings.theme);
         this.notice.set('Settings updated.');
       },
-      error: (error) => this.error.set(this.profiles.errorMessage(error)),
-      complete: () => this.savingSettings.set(false)
+      error: (error) => {
+        this.error.set(this.profiles.errorMessage(error));
+        this.savingSettings.set(false);
+      },
+      complete: () => this.savingSettings.set(false),
     });
   }
 
@@ -430,20 +828,27 @@ export class TeacherProfile implements OnInit {
     this.savingLiveSettings.set(true);
     this.error.set('');
     this.notice.set('');
-    this.profiles.updateTeacherLiveSettings(this.liveSettingsRequest()).subscribe({
-      next: (response) => {
-        this.liveSettingsForm.set(this.liveSettingsFormFromSettings(response.settings));
-        this.notice.set('Live class defaults updated.');
-      },
-      error: (error) => this.error.set(this.profiles.errorMessage(error)),
-      complete: () => this.savingLiveSettings.set(false)
-    });
+    this.profiles
+      .updateTeacherLiveSettings(this.liveSettingsRequest())
+      .subscribe({
+        next: (response) => {
+          this.liveSettingsForm.set(
+            this.liveSettingsFormFromSettings(response.settings),
+          );
+          this.notice.set('Live class defaults updated.');
+        },
+        error: (error) => {
+          this.error.set(this.profiles.errorMessage(error));
+          this.savingLiveSettings.set(false);
+        },
+        complete: () => this.savingLiveSettings.set(false),
+      });
   }
 
   protected loadPublicContent(): void {
     this.profiles.listMyPublicContent().subscribe({
       next: (response) => this.publicContent.set(response.items),
-      error: (error) => this.error.set(this.profiles.errorMessage(error))
+      error: (error) => this.error.set(this.profiles.errorMessage(error)),
     });
   }
 
@@ -451,8 +856,11 @@ export class TeacherProfile implements OnInit {
     this.loadingPromotions.set(true);
     this.profiles.listMyPromotions().subscribe({
       next: (response) => this.promotions.set(response.items),
-      error: (error) => this.error.set(this.profiles.errorMessage(error)),
-      complete: () => this.loadingPromotions.set(false)
+      error: (error) => {
+        this.error.set(this.profiles.errorMessage(error));
+        this.loadingPromotions.set(false);
+      },
+      complete: () => this.loadingPromotions.set(false),
     });
   }
 
@@ -469,12 +877,21 @@ export class TeacherProfile implements OnInit {
     this.notice.set('');
     this.profiles.requestMyPromotion(request).subscribe({
       next: (promotion) => {
-        this.promotions.update((items) => [promotion, ...items.filter((item) => item.promotionId !== promotion.promotionId)]);
-        this.promotionForm.set({ ...EMPTY_PROMOTION_FORM, placement: this.promotionForm().placement });
+        this.promotions.update((items) => [
+          promotion,
+          ...items.filter((item) => item.promotionId !== promotion.promotionId),
+        ]);
+        this.promotionForm.set({
+          ...EMPTY_PROMOTION_FORM,
+          placement: this.promotionForm().placement,
+        });
         this.notice.set('Promotion request submitted for admin review.');
       },
-      error: (error) => this.error.set(this.profiles.errorMessage(error)),
-      complete: () => this.requestingPromotion.set(false)
+      error: (error) => {
+        this.error.set(this.profiles.errorMessage(error));
+        this.requestingPromotion.set(false);
+      },
+      complete: () => this.requestingPromotion.set(false),
     });
   }
 
@@ -488,16 +905,26 @@ export class TeacherProfile implements OnInit {
     const contentId = this.editingPublicContentId();
     const request = this.publicContentRequest();
     const action = contentId
-      ? this.profiles.updateMyPublicContent(contentId, request as UpdateTeacherPublicContentRequest)
+      ? this.profiles.updateMyPublicContent(
+          contentId,
+          request as UpdateTeacherPublicContentRequest,
+        )
       : this.profiles.createMyPublicContent(request);
     action.subscribe({
       next: (item) => {
         this.upsertPublicContent(item);
         this.resetPublicContentForm();
-        this.notice.set(contentId ? 'Public content updated.' : 'Public content draft created.');
+        this.notice.set(
+          contentId
+            ? 'Public content updated.'
+            : 'Public content draft created.',
+        );
       },
-      error: (error) => this.error.set(this.profiles.errorMessage(error)),
-      complete: () => this.savingPublicContent.set(false)
+      error: (error) => {
+        this.error.set(this.profiles.errorMessage(error));
+        this.savingPublicContent.set(false);
+      },
+      complete: () => this.savingPublicContent.set(false),
     });
   }
 
@@ -511,7 +938,7 @@ export class TeacherProfile implements OnInit {
       externalUrl: item.externalUrl ?? '',
       tagsText: item.tags.join(', '),
       topicsText: item.topics.join(', '),
-      sortOrder: item.sortOrder
+      sortOrder: item.sortOrder,
     });
   }
 
@@ -521,11 +948,19 @@ export class TeacherProfile implements OnInit {
   }
 
   protected publishPublicContent(item: TeacherPublicContentItem): void {
-    this.runPublicContentAction(item.contentId, this.profiles.publishMyPublicContent(item.contentId), 'Public content published.');
+    this.runPublicContentAction(
+      item.contentId,
+      this.profiles.publishMyPublicContent(item.contentId),
+      'Public content published.',
+    );
   }
 
   protected unpublishPublicContent(item: TeacherPublicContentItem): void {
-    this.runPublicContentAction(item.contentId, this.profiles.unpublishMyPublicContent(item.contentId), 'Public content unpublished.');
+    this.runPublicContentAction(
+      item.contentId,
+      this.profiles.unpublishMyPublicContent(item.contentId),
+      'Public content unpublished.',
+    );
   }
 
   protected deletePublicContent(item: TeacherPublicContentItem): void {
@@ -534,19 +969,28 @@ export class TeacherProfile implements OnInit {
     this.notice.set('');
     this.profiles.deleteMyPublicContent(item.contentId).subscribe({
       next: () => {
-        this.publicContent.update((items) => items.filter((candidate) => candidate.contentId !== item.contentId));
+        this.publicContent.update((items) =>
+          items.filter((candidate) => candidate.contentId !== item.contentId),
+        );
         if (this.editingPublicContentId() === item.contentId) {
           this.resetPublicContentForm();
         }
         this.notice.set('Public content archived.');
       },
-      error: (error) => this.error.set(this.profiles.errorMessage(error)),
-      complete: () => this.publicContentBusyId.set(null)
+      error: (error) => {
+        this.error.set(this.profiles.errorMessage(error));
+        this.publicContentBusyId.set(null);
+      },
+      complete: () => this.publicContentBusyId.set(null),
     });
   }
 
-  protected uploadPublicContentFile(event: Event, item: TeacherPublicContentItem): void {
-    const input = event.target instanceof HTMLInputElement ? event.target : null;
+  protected uploadPublicContentFile(
+    event: Event,
+    item: TeacherPublicContentItem,
+  ): void {
+    const input =
+      event.target instanceof HTMLInputElement ? event.target : null;
     const file = input?.files?.[0];
     if (!file) {
       return;
@@ -565,7 +1009,7 @@ export class TeacherProfile implements OnInit {
         if (input) {
           input.value = '';
         }
-      }
+      },
     });
   }
 
@@ -585,7 +1029,9 @@ export class TeacherProfile implements OnInit {
     const profile = this.profile();
     switch (tab) {
       case 'credentials':
-        return (profile?.credentials.length ?? 0) + (profile?.education.length ?? 0);
+        return (
+          (profile?.credentials.length ?? 0) + (profile?.education.length ?? 0)
+        );
       case 'experience':
         return profile?.experience.length ?? 0;
       case 'links':
@@ -595,28 +1041,46 @@ export class TeacherProfile implements OnInit {
     }
   }
 
-  protected updateForm<K extends keyof TeacherProfileForm>(key: K, value: TeacherProfileForm[K]): void {
+  protected updateForm<K extends keyof TeacherProfileForm>(
+    key: K,
+    value: TeacherProfileForm[K],
+  ): void {
     this.form.update((form) => ({ ...form, [key]: value }));
   }
 
-  protected updateSettingsForm<K extends keyof ProfileSettingsForm>(key: K, value: ProfileSettingsForm[K]): void {
+  protected updateSettingsForm<K extends keyof ProfileSettingsForm>(
+    key: K,
+    value: ProfileSettingsForm[K],
+  ): void {
     this.settingsForm.update((form) => ({ ...form, [key]: value }));
   }
 
-  protected updateLiveSettingsForm<K extends keyof LiveSettingsForm>(key: K, value: LiveSettingsForm[K]): void {
+  protected updateLiveSettingsForm<K extends keyof LiveSettingsForm>(
+    key: K,
+    value: LiveSettingsForm[K],
+  ): void {
     this.liveSettingsForm.update((form) => ({ ...form, [key]: value }));
   }
 
-  protected updatePublicContentForm<K extends keyof PublicContentForm>(key: K, value: PublicContentForm[K]): void {
+  protected updatePublicContentForm<K extends keyof PublicContentForm>(
+    key: K,
+    value: PublicContentForm[K],
+  ): void {
     this.publicContentForm.update((form) => ({ ...form, [key]: value }));
   }
 
-  protected updatePromotionForm<K extends keyof PromotionForm>(key: K, value: PromotionForm[K]): void {
+  protected updatePromotionForm<K extends keyof PromotionForm>(
+    key: K,
+    value: PromotionForm[K],
+  ): void {
     this.promotionForm.update((form) => ({ ...form, [key]: value }));
   }
 
   protected inputValue(event: Event): string {
-    return event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement ? event.target.value : '';
+    return event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLTextAreaElement
+      ? event.target.value
+      : '';
   }
 
   protected selectValue(event: Event): string {
@@ -625,21 +1089,32 @@ export class TeacherProfile implements OnInit {
 
   protected themeValue(event: Event): ProfileThemePreference {
     const value = this.selectValue(event);
-    return value === 'light' || value === 'dark' || value === 'system' ? value : 'system';
+    return value === 'light' || value === 'dark' || value === 'system'
+      ? value
+      : 'system';
   }
 
   protected checkedValue(event: Event): boolean {
-    return event.target instanceof HTMLInputElement ? event.target.checked : false;
+    return event.target instanceof HTMLInputElement
+      ? event.target.checked
+      : false;
   }
 
   protected numberValue(event: Event, fallback = 0): number {
-    const value = event.target instanceof HTMLInputElement ? Number(event.target.value) : Number.NaN;
+    const value =
+      event.target instanceof HTMLInputElement
+        ? Number(event.target.value)
+        : Number.NaN;
     return Number.isFinite(value) ? value : fallback;
   }
 
   protected recordingVisibilityValue(event: Event): RecordingVisibility {
     const value = this.selectValue(event);
-    if (value === 'teacher_only' || value === 'enrolled_students' || value === 'hidden_until_published') {
+    if (
+      value === 'teacher_only' ||
+      value === 'enrolled_students' ||
+      value === 'hidden_until_published'
+    ) {
       return value;
     }
     return 'enrolled_students';
@@ -647,27 +1122,48 @@ export class TeacherProfile implements OnInit {
 
   protected analyticsVisibilityValue(event: Event): AnalyticsVisibility {
     const value = this.selectValue(event);
-    return value === 'teacher_only' || value === 'admin_and_teacher' || value === 'admin_only' ? value : 'admin_and_teacher';
+    return value === 'teacher_only' ||
+      value === 'admin_and_teacher' ||
+      value === 'admin_only'
+      ? value
+      : 'admin_and_teacher';
   }
 
   protected studentVideoQualityValue(event: Event): StudentVideoQualityLimit {
     const value = this.selectValue(event);
-    return value === 'auto' || value === 'low' || value === 'medium' || value === 'high' ? value : 'auto';
+    return value === 'auto' ||
+      value === 'low' ||
+      value === 'medium' ||
+      value === 'high'
+      ? value
+      : 'auto';
   }
 
   protected screenShareQualityValue(event: Event): ScreenShareQualityLimit {
     const value = this.selectValue(event);
-    return value === 'auto' || value === 'medium' || value === 'high' ? value : 'auto';
+    return value === 'auto' || value === 'medium' || value === 'high'
+      ? value
+      : 'auto';
   }
 
-  protected publicContentItemTypeValue(event: Event): TeacherPublicContentItemType {
+  protected publicContentItemTypeValue(
+    event: Event,
+  ): TeacherPublicContentItemType {
     const value = this.selectValue(event);
     return value === 'demo_class' ? 'demo_class' : 'gallery';
   }
 
-  protected publicContentMediaTypeValue(event: Event): TeacherPublicContentMediaType {
+  protected publicContentMediaTypeValue(
+    event: Event,
+  ): TeacherPublicContentMediaType {
     const value = this.selectValue(event);
-    return value === 'video' || value === 'pdf' || value === 'document' || value === 'slides' || value === 'link' ? value : 'image';
+    return value === 'video' ||
+      value === 'pdf' ||
+      value === 'document' ||
+      value === 'slides' ||
+      value === 'link'
+      ? value
+      : 'image';
   }
 
   protected promotionPlacementValue(event: Event): TeacherPromotionPlacement {
@@ -691,7 +1187,7 @@ export class TeacherProfile implements OnInit {
     if (profile?.coverImageUrl) {
       return this.profiles.resolveMediaUrl(profile.coverImageUrl);
     }
-    const title = profile?.headline || 'Native SFU teacher profile';
+    const title = profile?.headline || 'Sapiovian teacher profile';
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="420" viewBox="0 0 1440 420" role="img" aria-label="${title} cover image"><defs><linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#458B73"/><stop offset=".55" stop-color="#F26076"/><stop offset="1" stop-color="#FF9760"/></linearGradient><pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0v48" fill="none" stroke="#ffffff" stroke-opacity=".12" stroke-width="1"/></pattern></defs><rect width="1440" height="420" fill="url(#bg)"/><rect width="1440" height="420" fill="url(#grid)"/><path d="M0 310 420 120l420 124 600-214v390H0z" fill="#fff" opacity=".14"/><text x="72" y="116" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="800" fill="#fff">${title}</text></svg>`;
     return `data:image/svg+xml,${encodeURIComponent(svg)}`;
   }
@@ -715,7 +1211,7 @@ export class TeacherProfile implements OnInit {
     return new Intl.DateTimeFormat(undefined, {
       weekday: 'short',
       month: 'short',
-      day: 'numeric'
+      day: 'numeric',
     }).format(new Date(value));
   }
 
@@ -724,7 +1220,9 @@ export class TeacherProfile implements OnInit {
   }
 
   protected publicContentUrl(item: TeacherPublicContentItem): string {
-    return this.profiles.resolveMediaUrl(item.externalUrl || item.publicUrl || item.thumbnailUrl);
+    return this.profiles.resolveMediaUrl(
+      item.externalUrl || item.publicUrl || item.thumbnailUrl,
+    );
   }
 
   protected publicContentStatusLabel(item: TeacherPublicContentItem): string {
@@ -734,7 +1232,9 @@ export class TeacherProfile implements OnInit {
     return item.publishStatus === 'unpublished' ? 'Unpublished' : 'Draft';
   }
 
-  protected promotionPlacementLabel(placement: TeacherPromotionPlacement): string {
+  protected promotionPlacementLabel(
+    placement: TeacherPromotionPlacement,
+  ): string {
     switch (placement) {
       case 'marketplace_featured':
         return 'Marketplace featured';
@@ -750,24 +1250,32 @@ export class TeacherProfile implements OnInit {
   }
 
   protected canRequestPromotion(profile: ProfileUser): boolean {
-    return Boolean(profile.publicProfileEnabled && profile.headline && profile.bio);
+    return Boolean(
+      profile.publicProfileEnabled && profile.headline && profile.bio,
+    );
   }
 
   protected isPublicContentBusy(item: TeacherPublicContentItem): boolean {
-    return this.publicContentBusyId() === item.contentId || this.uploadingPublicContentId() === item.contentId;
+    return (
+      this.publicContentBusyId() === item.contentId ||
+      this.uploadingPublicContentId() === item.contentId
+    );
   }
 
   private loadLiveSettings(): void {
     this.profiles.getTeacherLiveSettings().subscribe({
       next: (response) => {
-        this.liveSettingsForm.set(this.liveSettingsFormFromSettings(response.settings));
+        this.liveSettingsForm.set(
+          this.liveSettingsFormFromSettings(response.settings),
+        );
       },
-      error: (error) => this.error.set(this.profiles.errorMessage(error))
+      error: (error) => this.error.set(this.profiles.errorMessage(error)),
     });
   }
 
   private uploadMedia(event: Event, kind: 'avatar' | 'cover'): void {
-    const input = event.target instanceof HTMLInputElement ? event.target : null;
+    const input =
+      event.target instanceof HTMLInputElement ? event.target : null;
     const file = input?.files?.[0];
     if (!file) {
       return;
@@ -775,23 +1283,46 @@ export class TeacherProfile implements OnInit {
     this.uploadingField.set(kind);
     this.error.set('');
     this.notice.set('');
-    const request = kind === 'avatar' ? this.profiles.uploadProfileAvatar(file) : this.profiles.uploadProfileCover(file);
-    request.subscribe({
-      next: (response) => {
-        this.profile.update((profile) => (profile ? { ...profile, [response.field]: response.url } : profile));
-        this.notice.set(kind === 'avatar' ? 'Avatar updated.' : 'Cover image updated.');
-      },
-      error: (error) => this.error.set(this.profiles.errorMessage(error)),
-      complete: () => {
-        this.uploadingField.set(null);
-        if (input) {
-          input.value = '';
-        }
-      }
-    });
+    const request =
+      kind === 'avatar'
+        ? this.profiles.uploadProfileAvatar(file)
+        : this.profiles.uploadProfileCover(file);
+    request
+      .pipe(
+        finalize(() => {
+          this.uploadingField.set(null);
+          if (input) input.value = '';
+        }),
+      )
+      .subscribe({
+        next: (response) => {
+          this.profile.update((profile) =>
+            profile ? { ...profile, [response.field]: response.url } : profile,
+          );
+          this.loadApplication();
+          this.form.update((f) => ({ ...f, publicProfileEnabled: false }));
+          this.profile.update((p) =>
+            p ? { ...p, publicProfileEnabled: false } : p,
+          );
+          this.notice.set(
+            kind === 'avatar' ? 'Avatar updated.' : 'Cover image updated.',
+          );
+        },
+        error: (error) => this.error.set(this.profiles.errorMessage(error)),
+        complete: () => {
+          this.uploadingField.set(null);
+          if (input) {
+            input.value = '';
+          }
+        },
+      });
   }
 
-  private runPublicContentAction(contentId: string, request: ReturnType<ProfileService['publishMyPublicContent']>, message: string): void {
+  private runPublicContentAction(
+    contentId: string,
+    request: ReturnType<ProfileService['publishMyPublicContent']>,
+    message: string,
+  ): void {
     this.publicContentBusyId.set(contentId);
     this.error.set('');
     this.notice.set('');
@@ -800,16 +1331,24 @@ export class TeacherProfile implements OnInit {
         this.upsertPublicContent(item);
         this.notice.set(message);
       },
-      error: (error) => this.error.set(this.profiles.errorMessage(error)),
-      complete: () => this.publicContentBusyId.set(null)
+      error: (error) => {
+        this.error.set(this.profiles.errorMessage(error));
+        this.publicContentBusyId.set(null);
+      },
+      complete: () => this.publicContentBusyId.set(null),
     });
   }
 
   private upsertPublicContent(item: TeacherPublicContentItem): void {
     this.publicContent.update((items) => {
-      const next = items.filter((candidate) => candidate.contentId !== item.contentId);
+      const next = items.filter(
+        (candidate) => candidate.contentId !== item.contentId,
+      );
       next.push(item);
-      return next.sort((a, b) => a.sortOrder - b.sortOrder || b.createdAt.localeCompare(a.createdAt));
+      return next.sort(
+        (a, b) =>
+          a.sortOrder - b.sortOrder || b.createdAt.localeCompare(a.createdAt),
+      );
     });
   }
 
@@ -823,7 +1362,7 @@ export class TeacherProfile implements OnInit {
       externalUrl: form.externalUrl,
       tags: this.parseList(form.tagsText),
       topics: this.parseList(form.topicsText),
-      sortOrder: form.sortOrder
+      sortOrder: form.sortOrder,
     };
   }
 
@@ -844,13 +1383,19 @@ export class TeacherProfile implements OnInit {
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       ...(form.reason.trim() ? { reason: form.reason.trim() } : {}),
-      ...(form.paymentReference.trim() ? { paymentReference: form.paymentReference.trim() } : {})
+      ...(form.paymentReference.trim()
+        ? { paymentReference: form.paymentReference.trim() }
+        : {}),
     };
   }
 
   private updateRequest(): UpdateMyProfileRequest {
     const form = this.form();
     return {
+      introVideoUrl: form.introVideoUrl,
+      assessmentResponses: form.assessmentResponses.filter((r) =>
+        this.requiredCategoryAssessments().some((c) => c.id === r.categoryId),
+      ),
       displayName: form.displayName,
       phone: form.phone,
       headline: form.headline,
@@ -860,11 +1405,17 @@ export class TeacherProfile implements OnInit {
       availability: form.availability,
       languages: this.parseList(form.languagesText),
       skills: this.parseList(form.skillsText),
-      credentials: this.parseCredentials(form.credentialsText),
-      education: this.parseCredentials(form.educationText),
-      experience: this.parseExperience(form.experienceText),
-      socialLinks: this.parseSocialLinks(form.socialLinksText),
-      publicProfileEnabled: form.publicProfileEnabled
+      credentials: form.credentials,
+      education: form.education,
+      experience: form.experience,
+      socialLinks: form.socialLinks,
+      teacherSubjectIds: form.teacherSubjectIds,
+      curriculumIds: form.curriculumIds,
+      teachingCountries: form.teachingCountries,
+      learnerAgeGroups: form.learnerAgeGroups,
+      teachingLevels: form.teachingLevels,
+      publicProfileEnabled:
+        this.application()?.status === 'approved' && form.publicProfileEnabled,
     };
   }
 
@@ -878,12 +1429,12 @@ export class TeacherProfile implements OnInit {
         classReminders: form.notificationClassReminders,
         chatMessages: form.notificationChatMessages,
         announcements: form.notificationAnnouncements,
-        recordingReady: form.notificationRecordingReady
+        recordingReady: form.notificationRecordingReady,
       },
       privacy: {
         showEmailOnPublicProfile: form.privacyShowEmail,
-        allowTeacherMessages: form.privacyAllowTeacherMessages
-      }
+        allowTeacherMessages: form.privacyAllowTeacherMessages,
+      },
     };
   }
 
@@ -895,40 +1446,43 @@ export class TeacherProfile implements OnInit {
         studentsJoinCameraOff: form.studentsJoinCameraOff,
         requirePrejoinDeviceCheck: form.requirePrejoinDeviceCheck,
         allowStudentsToUnmuteSelf: form.allowStudentsToUnmuteSelf,
-        allowStudentsToStartCameraSelf: form.allowStudentsToStartCameraSelf
+        allowStudentsToStartCameraSelf: form.allowStudentsToStartCameraSelf,
       },
       chat: {
         privateTeacherStudentChatEnabled: form.privateTeacherStudentChatEnabled,
         teacherBroadcastEnabled: form.teacherBroadcastEnabled,
         chatAttachmentsEnabled: form.chatAttachmentsEnabled,
-        messageLengthLimit: form.messageLengthLimit
+        messageLengthLimit: form.messageLengthLimit,
       },
       whiteboard: {
         whiteboardSharingEnabled: form.whiteboardSharingEnabled,
         studentWhiteboardControlEnabled: form.studentWhiteboardControlEnabled,
-        maxActiveWhiteboardControllers: form.maxActiveWhiteboardControllers
+        maxActiveWhiteboardControllers: form.maxActiveWhiteboardControllers,
       },
       speaking: {
         handRaiseEnabled: form.handRaiseEnabled,
-        maxActiveSpeakers: form.maxActiveSpeakers
+        maxActiveSpeakers: form.maxActiveSpeakers,
       },
       recording: {
         recordingEnabled: form.recordingEnabled,
         autoRecordOnStart: form.autoRecordOnStart,
-        teacherManualRecordingControlEnabled: form.teacherManualRecordingControlEnabled,
-        visibility: form.recordingVisibility
+        teacherManualRecordingControlEnabled:
+          form.teacherManualRecordingControlEnabled,
+        visibility: form.recordingVisibility,
       },
       attendance: {
         presentThresholdMinutes: form.presentThresholdMinutes,
         presentThresholdPercentage: form.presentThresholdPercentage,
         lateJoinThresholdMinutes: form.lateJoinThresholdMinutes,
-        teacherAttendanceExportEnabled: form.teacherAttendanceExportEnabled
+        teacherAttendanceExportEnabled: form.teacherAttendanceExportEnabled,
       },
       access: {
         waitingRoomEnabled: form.waitingRoomEnabled,
         lockClassAfterTeacherStarts: form.lockClassAfterTeacherStarts,
-        allowEnrolledStudentReconnectAfterLock: form.allowEnrolledStudentReconnectAfterLock,
-        teacherReconnectGraceMessagingEnabled: form.teacherReconnectGraceMessagingEnabled
+        allowEnrolledStudentReconnectAfterLock:
+          form.allowEnrolledStudentReconnectAfterLock,
+        teacherReconnectGraceMessagingEnabled:
+          form.teacherReconnectGraceMessagingEnabled,
       },
       materials: {
         materialsEnabled: form.materialsEnabled,
@@ -936,8 +1490,10 @@ export class TeacherProfile implements OnInit {
         studentsCanDownloadMaterials: form.studentsCanDownloadMaterials,
         publishMaterialsBeforeClass: form.publishMaterialsBeforeClass,
         publishMaterialsAfterClass: form.publishMaterialsAfterClass,
-        allowedMaterialTypes: this.materialTypesFromText(form.allowedMaterialTypesText),
-        maxMaterialFileSizeMb: form.maxMaterialFileSizeMb
+        allowedMaterialTypes: this.materialTypesFromText(
+          form.allowedMaterialTypesText,
+        ),
+        maxMaterialFileSizeMb: form.maxMaterialFileSizeMb,
       },
       notifications: {
         classReminderEnabled: form.classReminderEnabled,
@@ -945,25 +1501,25 @@ export class TeacherProfile implements OnInit {
         notifyWhenTeacherStarts: form.notifyWhenTeacherStarts,
         notifyRecordingAvailable: form.notifyRecordingAvailable,
         notifyNewMaterialUploaded: form.notifyNewMaterialUploaded,
-        notifyMissedClass: form.notifyMissedClass
+        notifyMissedClass: form.notifyMissedClass,
       },
       questionQueue: {
         questionQueueEnabled: form.questionQueueEnabled,
         allowAnonymousQuestions: form.allowAnonymousQuestions,
         allowStudentUpvotes: form.allowStudentUpvotes,
         teacherCanMarkAnswered: form.teacherCanMarkAnswered,
-        maxOpenQuestionsPerStudent: form.maxOpenQuestionsPerStudent
+        maxOpenQuestionsPerStudent: form.maxOpenQuestionsPerStudent,
       },
       recordingRetention: {
         recordingRetentionDays: form.recordingRetentionDays,
         allowTeacherPublishRecording: form.allowTeacherPublishRecording,
         allowStudentsDownloadRecording: form.allowStudentsDownloadRecording,
-        autoArchiveExpiredRecordings: form.autoArchiveExpiredRecordings
+        autoArchiveExpiredRecordings: form.autoArchiveExpiredRecordings,
       },
       studentScreenShare: {
         studentScreenShareEnabled: form.studentScreenShareEnabled,
         studentScreenShareRequiresApproval: true,
-        maxActiveStudentShares: form.maxActiveStudentShares
+        maxActiveStudentShares: form.maxActiveStudentShares,
       },
       advancedAnalytics: {
         analyticsEnabled: form.analyticsEnabled,
@@ -972,7 +1528,7 @@ export class TeacherProfile implements OnInit {
         trackChatParticipation: form.trackChatParticipation,
         trackWhiteboardParticipation: form.trackWhiteboardParticipation,
         trackQuestionParticipation: form.trackQuestionParticipation,
-        analyticsVisibility: form.analyticsVisibility
+        analyticsVisibility: form.analyticsVisibility,
       },
       inactiveDetection: {
         inactiveDetectionEnabled: form.inactiveDetectionEnabled,
@@ -980,7 +1536,7 @@ export class TeacherProfile implements OnInit {
         countBackgroundTabAsInactive: form.countBackgroundTabAsInactive,
         countMutedNoCameraAsInactive: form.countMutedNoCameraAsInactive,
         notifyTeacherOnInactiveStudents: form.notifyTeacherOnInactiveStudents,
-        includeInactiveTimeInAttendance: form.includeInactiveTimeInAttendance
+        includeInactiveTimeInAttendance: form.includeInactiveTimeInAttendance,
       },
       bandwidthPolicy: {
         adaptiveQualityEnabled: form.adaptiveQualityEnabled,
@@ -989,7 +1545,7 @@ export class TeacherProfile implements OnInit {
         maxScreenShareQuality: form.maxScreenShareQuality,
         disableStudentVideoOnPoorNetwork: form.disableStudentVideoOnPoorNetwork,
         preferAudioOnPoorNetwork: form.preferAudioOnPoorNetwork,
-        showNetworkWarnings: form.showNetworkWarnings
+        showNetworkWarnings: form.showNetworkWarnings,
       },
       exportControls: {
         exportControlsEnabled: form.exportControlsEnabled,
@@ -1000,13 +1556,17 @@ export class TeacherProfile implements OnInit {
         includePrivateChatInExports: form.includePrivateChatInExports,
         anonymizeStudentExports: form.anonymizeStudentExports,
         exportRetentionDays: form.exportRetentionDays,
-        requireExportAuditLog: form.requireExportAuditLog
-      }
+        requireExportAuditLog: form.requireExportAuditLog,
+      },
     };
   }
 
   private formFromProfile(profile: ProfileUser): TeacherProfileForm {
     return {
+      introVideoUrl: profile.introVideoUrl ?? '',
+      assessmentResponses: (profile.assessmentResponses ?? []).map((x) => ({
+        ...x,
+      })),
       displayName: profile.displayName,
       phone: profile.phone ?? '',
       headline: profile.headline ?? '',
@@ -1016,15 +1576,22 @@ export class TeacherProfile implements OnInit {
       availability: profile.availability ?? '',
       languagesText: profile.languages.join(', '),
       skillsText: profile.skills.join(', '),
-      credentialsText: this.serializeCredentials(profile.credentials),
-      educationText: this.serializeCredentials(profile.education),
-      experienceText: this.serializeExperience(profile.experience),
-      socialLinksText: this.serializeSocialLinks(profile.socialLinks),
-      publicProfileEnabled: Boolean(profile.publicProfileEnabled)
+      credentials: profile.credentials.map((item) => ({ ...item })),
+      education: profile.education.map((item) => ({ ...item })),
+      experience: profile.experience.map((item) => ({ ...item })),
+      socialLinks: profile.socialLinks.map((item) => ({ ...item })),
+      teacherSubjectIds: [...(profile.teacherSubjectIds ?? [])],
+      curriculumIds: [...(profile.curriculumIds ?? [])],
+      teachingCountries: [...(profile.teachingCountries ?? [])],
+      learnerAgeGroups: [...(profile.learnerAgeGroups ?? [])],
+      teachingLevels: [...(profile.teachingLevels ?? [])],
+      publicProfileEnabled: Boolean(profile.publicProfileEnabled),
     };
   }
 
-  private settingsFormFromProfile(settings: ProfileSettings): ProfileSettingsForm {
+  private settingsFormFromProfile(
+    settings: ProfileSettings,
+  ): ProfileSettingsForm {
     return {
       theme: settings.theme,
       locale: settings.locale,
@@ -1034,92 +1601,125 @@ export class TeacherProfile implements OnInit {
       notificationAnnouncements: settings.notifications.announcements,
       notificationRecordingReady: settings.notifications.recordingReady,
       privacyShowEmail: settings.privacy.showEmailOnPublicProfile,
-      privacyAllowTeacherMessages: settings.privacy.allowTeacherMessages
+      privacyAllowTeacherMessages: settings.privacy.allowTeacherMessages,
     };
   }
 
-  private liveSettingsFormFromSettings(settings: LiveClassSettings): LiveSettingsForm {
+  private liveSettingsFormFromSettings(
+    settings: LiveClassSettings,
+  ): LiveSettingsForm {
     return {
       studentsJoinMuted: settings.media.studentsJoinMuted,
       studentsJoinCameraOff: settings.media.studentsJoinCameraOff,
       requirePrejoinDeviceCheck: settings.media.requirePrejoinDeviceCheck,
       allowStudentsToUnmuteSelf: settings.media.allowStudentsToUnmuteSelf,
-      allowStudentsToStartCameraSelf: settings.media.allowStudentsToStartCameraSelf,
-      privateTeacherStudentChatEnabled: settings.chat.privateTeacherStudentChatEnabled,
+      allowStudentsToStartCameraSelf:
+        settings.media.allowStudentsToStartCameraSelf,
+      privateTeacherStudentChatEnabled:
+        settings.chat.privateTeacherStudentChatEnabled,
       teacherBroadcastEnabled: settings.chat.teacherBroadcastEnabled,
       chatAttachmentsEnabled: settings.chat.chatAttachmentsEnabled,
       messageLengthLimit: settings.chat.messageLengthLimit,
       whiteboardSharingEnabled: settings.whiteboard.whiteboardSharingEnabled,
-      studentWhiteboardControlEnabled: settings.whiteboard.studentWhiteboardControlEnabled,
-      maxActiveWhiteboardControllers: settings.whiteboard.maxActiveWhiteboardControllers,
+      studentWhiteboardControlEnabled:
+        settings.whiteboard.studentWhiteboardControlEnabled,
+      maxActiveWhiteboardControllers:
+        settings.whiteboard.maxActiveWhiteboardControllers,
       handRaiseEnabled: settings.speaking.handRaiseEnabled,
       maxActiveSpeakers: settings.speaking.maxActiveSpeakers,
       recordingEnabled: settings.recording.recordingEnabled,
       autoRecordOnStart: settings.recording.autoRecordOnStart,
-      teacherManualRecordingControlEnabled: settings.recording.teacherManualRecordingControlEnabled,
+      teacherManualRecordingControlEnabled:
+        settings.recording.teacherManualRecordingControlEnabled,
       recordingVisibility: settings.recording.visibility,
       presentThresholdMinutes: settings.attendance.presentThresholdMinutes,
-      presentThresholdPercentage: settings.attendance.presentThresholdPercentage,
+      presentThresholdPercentage:
+        settings.attendance.presentThresholdPercentage,
       lateJoinThresholdMinutes: settings.attendance.lateJoinThresholdMinutes,
-      teacherAttendanceExportEnabled: settings.attendance.teacherAttendanceExportEnabled,
+      teacherAttendanceExportEnabled:
+        settings.attendance.teacherAttendanceExportEnabled,
       waitingRoomEnabled: settings.access.waitingRoomEnabled,
       lockClassAfterTeacherStarts: settings.access.lockClassAfterTeacherStarts,
-      allowEnrolledStudentReconnectAfterLock: settings.access.allowEnrolledStudentReconnectAfterLock,
-      teacherReconnectGraceMessagingEnabled: settings.access.teacherReconnectGraceMessagingEnabled,
+      allowEnrolledStudentReconnectAfterLock:
+        settings.access.allowEnrolledStudentReconnectAfterLock,
+      teacherReconnectGraceMessagingEnabled:
+        settings.access.teacherReconnectGraceMessagingEnabled,
       materialsEnabled: settings.materials.materialsEnabled,
       teacherCanUploadMaterials: settings.materials.teacherCanUploadMaterials,
-      studentsCanDownloadMaterials: settings.materials.studentsCanDownloadMaterials,
-      publishMaterialsBeforeClass: settings.materials.publishMaterialsBeforeClass,
+      studentsCanDownloadMaterials:
+        settings.materials.studentsCanDownloadMaterials,
+      publishMaterialsBeforeClass:
+        settings.materials.publishMaterialsBeforeClass,
       publishMaterialsAfterClass: settings.materials.publishMaterialsAfterClass,
-      allowedMaterialTypesText: settings.materials.allowedMaterialTypes.join(', '),
+      allowedMaterialTypesText:
+        settings.materials.allowedMaterialTypes.join(', '),
       maxMaterialFileSizeMb: settings.materials.maxMaterialFileSizeMb,
       classReminderEnabled: settings.notifications.classReminderEnabled,
-      classReminderMinutesBefore: settings.notifications.classReminderMinutesBefore,
+      classReminderMinutesBefore:
+        settings.notifications.classReminderMinutesBefore,
       notifyWhenTeacherStarts: settings.notifications.notifyWhenTeacherStarts,
       notifyRecordingAvailable: settings.notifications.notifyRecordingAvailable,
-      notifyNewMaterialUploaded: settings.notifications.notifyNewMaterialUploaded,
+      notifyNewMaterialUploaded:
+        settings.notifications.notifyNewMaterialUploaded,
       notifyMissedClass: settings.notifications.notifyMissedClass,
       questionQueueEnabled: settings.questionQueue.questionQueueEnabled,
       allowAnonymousQuestions: settings.questionQueue.allowAnonymousQuestions,
       allowStudentUpvotes: settings.questionQueue.allowStudentUpvotes,
       teacherCanMarkAnswered: settings.questionQueue.teacherCanMarkAnswered,
-      maxOpenQuestionsPerStudent: settings.questionQueue.maxOpenQuestionsPerStudent,
-      recordingRetentionDays: settings.recordingRetention.recordingRetentionDays,
-      allowTeacherPublishRecording: settings.recordingRetention.allowTeacherPublishRecording,
-      allowStudentsDownloadRecording: settings.recordingRetention.allowStudentsDownloadRecording,
-      autoArchiveExpiredRecordings: settings.recordingRetention.autoArchiveExpiredRecordings,
-      studentScreenShareEnabled: settings.studentScreenShare.studentScreenShareEnabled,
+      maxOpenQuestionsPerStudent:
+        settings.questionQueue.maxOpenQuestionsPerStudent,
+      recordingRetentionDays:
+        settings.recordingRetention.recordingRetentionDays,
+      allowTeacherPublishRecording:
+        settings.recordingRetention.allowTeacherPublishRecording,
+      allowStudentsDownloadRecording:
+        settings.recordingRetention.allowStudentsDownloadRecording,
+      autoArchiveExpiredRecordings:
+        settings.recordingRetention.autoArchiveExpiredRecordings,
+      studentScreenShareEnabled:
+        settings.studentScreenShare.studentScreenShareEnabled,
       studentScreenShareRequiresApproval: true,
-      maxActiveStudentShares: settings.studentScreenShare.maxActiveStudentShares,
+      maxActiveStudentShares:
+        settings.studentScreenShare.maxActiveStudentShares,
       analyticsEnabled: settings.advancedAnalytics.analyticsEnabled,
       trackEngagementEvents: settings.advancedAnalytics.trackEngagementEvents,
       trackMediaQuality: settings.advancedAnalytics.trackMediaQuality,
       trackChatParticipation: settings.advancedAnalytics.trackChatParticipation,
-      trackWhiteboardParticipation: settings.advancedAnalytics.trackWhiteboardParticipation,
-      trackQuestionParticipation: settings.advancedAnalytics.trackQuestionParticipation,
+      trackWhiteboardParticipation:
+        settings.advancedAnalytics.trackWhiteboardParticipation,
+      trackQuestionParticipation:
+        settings.advancedAnalytics.trackQuestionParticipation,
       analyticsVisibility: settings.advancedAnalytics.analyticsVisibility,
-      inactiveDetectionEnabled: settings.inactiveDetection.inactiveDetectionEnabled,
+      inactiveDetectionEnabled:
+        settings.inactiveDetection.inactiveDetectionEnabled,
       inactiveAfterMinutes: settings.inactiveDetection.inactiveAfterMinutes,
-      countBackgroundTabAsInactive: settings.inactiveDetection.countBackgroundTabAsInactive,
-      countMutedNoCameraAsInactive: settings.inactiveDetection.countMutedNoCameraAsInactive,
-      notifyTeacherOnInactiveStudents: settings.inactiveDetection.notifyTeacherOnInactiveStudents,
-      includeInactiveTimeInAttendance: settings.inactiveDetection.includeInactiveTimeInAttendance,
+      countBackgroundTabAsInactive:
+        settings.inactiveDetection.countBackgroundTabAsInactive,
+      countMutedNoCameraAsInactive:
+        settings.inactiveDetection.countMutedNoCameraAsInactive,
+      notifyTeacherOnInactiveStudents:
+        settings.inactiveDetection.notifyTeacherOnInactiveStudents,
+      includeInactiveTimeInAttendance:
+        settings.inactiveDetection.includeInactiveTimeInAttendance,
       adaptiveQualityEnabled: settings.bandwidthPolicy.adaptiveQualityEnabled,
       lowBandwidthModeEnabled: settings.bandwidthPolicy.lowBandwidthModeEnabled,
       maxStudentVideoQuality: settings.bandwidthPolicy.maxStudentVideoQuality,
       maxScreenShareQuality: settings.bandwidthPolicy.maxScreenShareQuality,
-      disableStudentVideoOnPoorNetwork: settings.bandwidthPolicy.disableStudentVideoOnPoorNetwork,
-      preferAudioOnPoorNetwork: settings.bandwidthPolicy.preferAudioOnPoorNetwork,
+      disableStudentVideoOnPoorNetwork:
+        settings.bandwidthPolicy.disableStudentVideoOnPoorNetwork,
+      preferAudioOnPoorNetwork:
+        settings.bandwidthPolicy.preferAudioOnPoorNetwork,
       showNetworkWarnings: settings.bandwidthPolicy.showNetworkWarnings,
       exportControlsEnabled: settings.exportControls.exportControlsEnabled,
       allowAttendanceExport: settings.exportControls.allowAttendanceExport,
       allowChatExport: settings.exportControls.allowChatExport,
       allowQuestionExport: settings.exportControls.allowQuestionExport,
       allowRecordingDownload: settings.exportControls.allowRecordingDownload,
-      includePrivateChatInExports: settings.exportControls.includePrivateChatInExports,
+      includePrivateChatInExports:
+        settings.exportControls.includePrivateChatInExports,
       anonymizeStudentExports: settings.exportControls.anonymizeStudentExports,
       exportRetentionDays: settings.exportControls.exportRetentionDays,
-      requireExportAuditLog: settings.exportControls.requireExportAuditLog
+      requireExportAuditLog: settings.exportControls.requireExportAuditLog,
     };
   }
 
@@ -1143,8 +1743,14 @@ export class TeacherProfile implements OnInit {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const [title = '', issuer = '', year = ''] = line.split('|').map((item) => item.trim());
-        return { title, ...(issuer ? { issuer } : {}), ...(year ? { year } : {}) };
+        const [title = '', issuer = '', year = ''] = line
+          .split('|')
+          .map((item) => item.trim());
+        return {
+          title,
+          ...(issuer ? { issuer } : {}),
+          ...(year ? { year } : {}),
+        };
       })
       .filter((item) => Boolean(item.title));
   }
@@ -1155,8 +1761,15 @@ export class TeacherProfile implements OnInit {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const [role = '', organization = '', period = '', summary = ''] = line.split('|').map((item) => item.trim());
-        return { role, ...(organization ? { organization } : {}), ...(period ? { period } : {}), ...(summary ? { summary } : {}) };
+        const [role = '', organization = '', period = '', summary = ''] = line
+          .split('|')
+          .map((item) => item.trim());
+        return {
+          role,
+          ...(organization ? { organization } : {}),
+          ...(period ? { period } : {}),
+          ...(summary ? { summary } : {}),
+        };
       })
       .filter((item) => Boolean(item.role));
   }
@@ -1167,22 +1780,36 @@ export class TeacherProfile implements OnInit {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const [label = '', url = ''] = line.split('|').map((item) => item.trim());
+        const [label = '', url = ''] = line
+          .split('|')
+          .map((item) => item.trim());
         return { label, url };
       })
       .filter((item) => Boolean(item.label && item.url));
   }
 
   private serializeCredentials(values: readonly ProfileCredential[]): string {
-    return values.map((item) => [item.title, item.issuer, item.year].filter(Boolean).join(' | ')).join('\n');
+    return values
+      .map((item) =>
+        [item.title, item.issuer, item.year].filter(Boolean).join(' | '),
+      )
+      .join('\n');
   }
 
   private serializeExperience(values: readonly ProfileExperience[]): string {
-    return values.map((item) => [item.role, item.organization, item.period, item.summary].filter(Boolean).join(' | ')).join('\n');
+    return values
+      .map((item) =>
+        [item.role, item.organization, item.period, item.summary]
+          .filter(Boolean)
+          .join(' | '),
+      )
+      .join('\n');
   }
 
   private serializeSocialLinks(values: readonly ProfileSocialLink[]): string {
-    return values.map((item) => [item.label, item.url].filter(Boolean).join(' | ')).join('\n');
+    return values
+      .map((item) => [item.label, item.url].filter(Boolean).join(' | '))
+      .join('\n');
   }
 
   private initialsImage(name: string, width: number, height: number): string {

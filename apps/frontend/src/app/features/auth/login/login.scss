@@ -1,6 +1,6 @@
 .auth-panel {
   display: grid;
-  gap: 16px;
+  gap: 22px;
 }
 
 header {
@@ -12,7 +12,9 @@ header {
 
 h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: 29px;
+  font-weight: 650;
+  letter-spacing: -.035em;
 }
 
 .eyebrow {
@@ -60,7 +62,8 @@ label {
   border: none;
   background: transparent;
   color: var(--muted);
-  font-size: 18px;
+  font-size: 11px;
+  font-weight: 600;
   line-height: 1;
   padding: 4px;
   cursor: pointer;
@@ -112,3 +115,8 @@ label {
   color: var(--muted);
   font-size: 13px;
 }
+
+.auth-panel > .primary { min-height: 46px; font-weight: 650; }
+.auth-panel input:not([type="checkbox"]) { min-height: 46px; }
+.password-toggle:not(:disabled):hover { transform: translateY(-50%); box-shadow: none; }
+header > a { font-size: 12px; text-align: right; }

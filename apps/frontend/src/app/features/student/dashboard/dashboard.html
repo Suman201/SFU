@@ -3,21 +3,22 @@
   <section class="dashboard-heading">
     <div>
       <p class="eyebrow">Student workspace</p>
-      <h1>Dashboard</h1>
+      <h1>My learning</h1>
+      <p class="dashboard-description">Join your next class, check assignments and find your learning materials.</p>
     </div>
     <div class="heading-actions">
       <a routerLink="/student/progress">Progress</a>
       <a routerLink="/student/classes/completed">Class history</a>
       <a routerLink="/class-library">Library</a>
       <a routerLink="/student/support">Get help</a>
-      <a routerLink="/student/explore">Explore batches</a>
+      <a routerLink="/student/explore">Explore classes</a>
     </div>
   </section>
 
   <section class="summary-grid" aria-label="Student dashboard summary">
     <article>
       <span>{{ enrolledBatches().length }}</span>
-      <p>Enrolled batches</p>
+      <p>Class groups</p>
     </article>
     <article>
       <span>{{ totalWeeks() }}</span>
@@ -37,51 +38,15 @@
     </article>
   </section>
 
-  <section class="enrolled-panel assignment-panel">
-    <header>
-      <div>
-        <p class="eyebrow">Homework</p>
-        <h2>Assignments due</h2>
-      </div>
-      <span class="panel-count">{{ dueAssignments().length }} active</span>
-    </header>
 
-    @if (assignmentsError()) {
-      <div class="form-alert">{{ assignmentsError() }}</div>
-    }
-    @if (assignmentsLoading()) {
-      <div class="empty-state compact">
-        <h3>Loading assignments</h3>
-        <p>Checking your active homework.</p>
-      </div>
-    } @else if (dueAssignments().length) {
-      <div class="assignment-list">
-        @for (assignment of dueAssignments().slice(0, 5); track assignment.assignmentId) {
-          <article class="assignment-row">
-            <div>
-              <strong>{{ assignment.title }}</strong>
-              <small>{{ assignmentBatchLabel(assignment) }} · Due {{ assignmentDueLabel(assignment) }}</small>
-            </div>
-            <span class="session-pill">{{ assignmentStatus(assignment) }}</span>
-            <a class="button" [routerLink]="['/student/assignments', assignment.assignmentId]">Open</a>
-          </article>
-        }
-      </div>
-    } @else {
-      <div class="empty-state compact">
-        <h3>No active homework</h3>
-        <p>New assignments from your teachers will appear here.</p>
-      </div>
-    }
-  </section>
 
   <section class="enrolled-panel">
     <header>
       <div>
         <p class="eyebrow">Upcoming sessions</p>
-        <h2>Next class by batch</h2>
+        <h2>Your upcoming classes</h2>
       </div>
-      <span class="panel-count">{{ activeEnrolledBatches().length }} batches</span>
+      <span class="panel-count">{{ activeEnrolledBatches().length }} class groups</span>
     </header>
 
     @if (classOpenError()) {
@@ -96,8 +61,8 @@
 
     @if (enrollment.loadingEnrolledBatches() && !enrollment.enrolledBatchesLoaded()) {
       <div class="empty-state">
-        <h3>Loading enrolled batches</h3>
-        <p>Fetching your current enrollments from the server.</p>
+        <h3>Loading your classes</h3>
+        <p>Getting your class groups ready.</p>
       </div>
     } @else if (activeEnrolledBatches().length) {
       <div class="enrolled-list">
@@ -158,9 +123,47 @@
       </div>
     } @else {
       <div class="empty-state">
-        <h3>No enrolled batches</h3>
-        <p>Explore batches and enroll to see them here.</p>
-        <a routerLink="/student/explore">Browse batches</a>
+        <h3>No classes yet</h3>
+        <p>Explore classes and enroll to see them here.</p>
+        <a routerLink="/student/explore">Browse classes</a>
+      </div>
+    }
+  </section>
+
+  <section class="enrolled-panel assignment-panel">
+    <header>
+      <div>
+        <p class="eyebrow">Homework</p>
+        <h2>Assignments due</h2>
+      </div>
+      <span class="panel-count">{{ dueAssignments().length }} active</span>
+    </header>
+
+    @if (assignmentsError()) {
+      <div class="form-alert">{{ assignmentsError() }}</div>
+    }
+    @if (assignmentsLoading()) {
+      <div class="empty-state compact">
+        <h3>Loading assignments</h3>
+        <p>Checking your active homework.</p>
+      </div>
+    } @else if (dueAssignments().length) {
+      <div class="assignment-list">
+        @for (assignment of dueAssignments().slice(0, 5); track assignment.assignmentId) {
+          <article class="assignment-row">
+            <div>
+              <strong>{{ assignment.title }}</strong>
+              <small>{{ assignmentBatchLabel(assignment) }} · Due {{ assignmentDueLabel(assignment) }}</small>
+            </div>
+            <span class="session-pill">{{ assignmentStatus(assignment) }}</span>
+            <a class="button" [routerLink]="['/student/assignments', assignment.assignmentId]">Open</a>
+          </article>
+        }
+      </div>
+    } @else {
+      <div class="empty-state compact">
+        <h3>No active homework</h3>
+        <p>New assignments from your teachers will appear here.</p>
       </div>
     }
   </section>

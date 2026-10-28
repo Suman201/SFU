@@ -19,7 +19,7 @@
   color: var(--accent);
   cursor: pointer;
   font: inherit;
-  font-weight: 850;
+  font-weight: 650;
   text-decoration: none;
   box-shadow: var(--shadow-sm);
 }
@@ -75,7 +75,7 @@ p {
 .eyebrow {
   color: var(--accent);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -127,7 +127,7 @@ h2 {
 .settings-summary span {
   color: var(--text);
   font-size: 28px;
-  font-weight: 950;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -205,7 +205,7 @@ h2 {
   background: rgb(69 139 115 / 0.12);
   color: #2d6a56;
   font-size: 11px;
-  font-weight: 850;
+  font-weight: 650;
   white-space: nowrap;
 }
 
@@ -229,7 +229,7 @@ h2 {
   gap: 6px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 650;
   white-space: nowrap;
 }
 
@@ -320,7 +320,7 @@ select {
 .form-alert {
   padding: 12px 14px;
   color: var(--text);
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .form-alert.error {

@@ -33,7 +33,7 @@ p {
 .eyebrow {
   color: var(--accent);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -85,7 +85,7 @@ h3 {
   color: var(--accent);
   cursor: pointer;
   font: inherit;
-  font-weight: 850;
+  font-weight: 650;
   text-decoration: none;
   box-shadow: var(--shadow-sm);
 }
@@ -109,7 +109,7 @@ h3 {
   gap: 6px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .analytics-filter-grid input {
@@ -142,7 +142,7 @@ h3 {
 .metric-card span {
   color: var(--text);
   font-size: 30px;
-  font-weight: 950;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -200,7 +200,7 @@ h3 {
   border-radius: var(--radius);
   background: var(--panel-soft);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 650;
 }
 
 .risk-list,
@@ -258,7 +258,7 @@ h3 {
   color: #458b73;
   padding: 0 8px;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 650;
 }
 
 .risk-card {

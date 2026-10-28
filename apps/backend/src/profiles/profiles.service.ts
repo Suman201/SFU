@@ -1,3 +1,7 @@
+import { normalizeIntroVideoUrl } from '../teaching-catalog/intro-video-url';
+import { IntroVideoService } from '../teaching-catalog/intro-video.service';
+import { TeachingCatalogService } from '../teaching-catalog/catalog.service';
+import { invalidateTutorReview, saveTutorProfile } from '../teaching-catalog/applications.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -257,7 +261,9 @@ export class ProfilesService {
     @InjectModel(BatchScheduleDocument.name) private readonly schedules: Model<BatchScheduleMongoDocument>,
     @InjectModel(StudentEnrollmentDocument.name) private readonly enrollments: Model<StudentEnrollmentMongoDocument>,
     private readonly config: ConfigService,
-    @Optional() private readonly auditLogs?: AuditLogsService
+    @Optional() private readonly auditLogs?: AuditLogsService,
+    @Optional() private readonly catalog?: TeachingCatalogService,
+    @Optional() private readonly introVideos?: IntroVideoService
   ) {}
 
   async getMyProfile(user: AuthenticatedUser): Promise<ProfileUser> {
@@ -273,11 +279,22 @@ export class ProfilesService {
       this.assertStudentUpdateOnly(request);
     }
 
+    if (isTeacher && (request.teacherSubjectIds !== undefined || request.curriculumIds !== undefined)) {
+      if (!this.catalog) throw new BadRequestException('Teaching catalogue is unavailable.');
+      await this.catalog.validateSelections(request.teacherSubjectIds ?? doc.teacherSubjectIds ?? [], request.curriculumIds ?? doc.curriculumIds ?? [], doc.teacherSubjectIds ?? [], doc.curriculumIds ?? []);
+    }
+    if (request.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: request.timezone }); } catch { throw new BadRequestException('Choose a valid IANA time zone.'); } }
+    if (isTeacher && request.publicProfileEnabled && doc.tutorReviewStatus !== 'approved') throw new ForbiddenException('Submit your profile for admin review before publishing.');
+    const previousIntroVideo = doc.tutorIntroVideo;
     const update = this.profileUpdate(request, isTeacher);
     if (Object.keys(update).length) {
+      const changed = isTeacher && Object.entries(update).some(([key,value]) => key !== 'publicProfileEnabled' && JSON.stringify(doc.get ? doc.get(key) : (doc as any)[key]) !== JSON.stringify(value));
       Object.assign(doc, update);
-      await doc.save();
+      if (request.introVideoUrl?.trim()) doc.tutorIntroVideo = undefined;
+      if (changed) invalidateTutorReview(doc);
+      await saveTutorProfile(doc);
     }
+    if (request.introVideoUrl?.trim()) await this.introVideos?.cleanup(doc.id, previousIntroVideo);
     return this.toProfileUser(doc);
   }
 
@@ -375,7 +392,8 @@ export class ProfilesService {
         disabled: false,
         status: { $in: ['active', 'scheduled'] },
         roles: 'TEACHER',
-        publicProfileEnabled: true
+        publicProfileEnabled: true,
+      tutorReviewStatus: 'approved'
       })
       .exec();
     if (!teacher) {
@@ -391,6 +409,13 @@ export class ProfilesService {
       ...(teacher.coverImageUrl ? { coverImageUrl: teacher.coverImageUrl } : {}),
       ...(teacher.location ? { location: teacher.location } : {}),
       ...(teacher.timezone ? { timezone: teacher.timezone } : {}),
+      introVideoUploaded: Boolean(teacher.tutorIntroVideo), introVideoDurationSeconds: teacher.tutorIntroVideo?.durationSeconds,
+      introVideoUrl: teacher.introVideoUrl,
+      teacherSubjectIds: this.stringArray(teacher.teacherSubjectIds),
+      curriculumIds: this.stringArray(teacher.curriculumIds),
+      teachingCountries: this.stringArray(teacher.teachingCountries),
+      learnerAgeGroups: this.stringArray(teacher.learnerAgeGroups),
+      teachingLevels: this.stringArray(teacher.teachingLevels),
       languages: this.stringArray(teacher.languages),
       skills: this.stringArray(teacher.skills),
       credentials: this.credentials(teacher.credentials),
@@ -412,10 +437,17 @@ export class ProfilesService {
       disabled: false,
       status: 'active',
       roles: 'TEACHER',
-      publicProfileEnabled: true
+      publicProfileEnabled: true,
+      tutorReviewStatus: 'approved'
     };
     const andFilters: Record<string, unknown>[] = [];
 
+    if (query.subjectId || query.categoryId) {
+      if (!this.catalog) throw new BadRequestException('Teaching catalogue is unavailable.');
+      const snapshot = await this.catalog.snapshot();
+      const matching = snapshot.subjects.filter(item => (!query.subjectId || item.id === query.subjectId) && (!query.categoryId || item.parentId === query.categoryId));
+      filter.teacherSubjectIds = { $in: matching.map(item => item.id) };
+    }
     const teacherIdFilters: string[][] = [];
     const subject = this.optionalTrim(query.subject);
     if (subject) {
@@ -454,8 +486,10 @@ export class ProfilesService {
     const search = this.optionalTrim(query.q);
     if (search) {
       const searchRegex = this.searchRegex(search);
+      const catalogSearchIds = this.catalog ? (await this.catalog.snapshot()).subjects.filter(s=>[s.name,...s.aliases].some(name=>name.toLowerCase().includes(search.toLowerCase()))).map(s=>s.id) : [];
       andFilters.push({
         $or: [
+          { teacherSubjectIds: { $in: catalogSearchIds } },
           { displayName: searchRegex },
           { name: searchRegex },
           { headline: searchRegex },
@@ -814,7 +848,8 @@ export class ProfilesService {
     await writeFile(join(directory, fileName), file.buffer);
     const url = this.profileMediaUrl(doc.id, fileName);
     doc[field] = url;
-    await doc.save();
+    if (this.isTeacherRole(this.normalizedRoles(doc.roles))) invalidateTutorReview(doc);
+    await saveTutorProfile(doc);
     return { field, url };
   }
 
@@ -857,6 +892,13 @@ export class ProfilesService {
       ...(user.coverImageUrl ? { coverImageUrl: user.coverImageUrl } : {}),
       ...(user.location ? { location: user.location } : {}),
       ...(user.timezone ? { timezone: user.timezone } : {}),
+      introVideoUploaded: Boolean(user.tutorIntroVideo), introVideoDurationSeconds: user.tutorIntroVideo?.durationSeconds,
+      introVideoUrl: user.introVideoUrl, assessmentResponses: user.assessmentResponses ?? [],
+      teacherSubjectIds: this.stringArray(user.teacherSubjectIds),
+      curriculumIds: this.stringArray(user.curriculumIds),
+      teachingCountries: this.stringArray(user.teachingCountries),
+      learnerAgeGroups: this.stringArray(user.learnerAgeGroups),
+      teachingLevels: this.stringArray(user.teachingLevels),
       languages: this.stringArray(user.languages),
       skills: primaryRole === 'teacher' ? this.stringArray(user.skills) : [],
       credentials: primaryRole === 'teacher' ? this.credentials(user.credentials) : [],
@@ -888,6 +930,13 @@ export class ProfilesService {
     if (request.languages !== undefined) update.languages = this.normalizeStringArray(request.languages, 12, 60);
 
     if (isTeacher) {
+      if (request.introVideoUrl !== undefined) update.introVideoUrl = normalizeIntroVideoUrl(request.introVideoUrl);
+      if (request.assessmentResponses !== undefined) {
+        if (new Set(request.assessmentResponses.map(x=>x.categoryId)).size !== request.assessmentResponses.length) throw new BadRequestException('Provide one assessment response per category.');
+        for (const item of request.assessmentResponses) if(item.evidenceUrl?.trim()) {let link:URL;try{link=new URL(item.evidenceUrl);}catch{throw new BadRequestException('Assessment evidence needs a valid HTTPS link.');}if(link.protocol!=='https:' || link.username || link.password)throw new BadRequestException('Assessment evidence needs a valid HTTPS link.');}
+        update.assessmentResponses=request.assessmentResponses;
+      }
+      for (const key of ['teacherSubjectIds','curriculumIds','teachingCountries','learnerAgeGroups','teachingLevels'] as const) if (request[key] !== undefined) update[key] = request[key];
       if (request.headline !== undefined) update.headline = this.optionalTrim(request.headline);
       if (request.bio !== undefined) update.bio = this.optionalTrim(request.bio);
       if (request.coverImageUrl !== undefined) update.coverImageUrl = this.normalizeMediaUrl(request.coverImageUrl, 'Cover image URL');
@@ -1855,6 +1904,13 @@ export class ProfilesService {
     const highlightedCredential = this.credentials(teacher.credentials)[0];
     const promotion = activePromotionMap.get(teacher.id);
     return {
+      teacherSubjectIds: this.stringArray(teacher.teacherSubjectIds),
+      curriculumIds: this.stringArray(teacher.curriculumIds),
+      teachingCountries: this.stringArray(teacher.teachingCountries),
+      learnerAgeGroups: this.stringArray(teacher.learnerAgeGroups),
+      teachingLevels: this.stringArray(teacher.teachingLevels),
+      introVideoUploaded: Boolean(teacher.tutorIntroVideo),
+      introVideoUrl: teacher.introVideoUrl,
       teacherId: teacher.id,
       displayName: teacher.displayName || teacher.name || 'Teacher',
       ...(teacher.headline ? { headline: teacher.headline } : {}),
@@ -1904,7 +1960,7 @@ export class ProfilesService {
     if (!this.normalizedRoles(teacher.roles).includes('TEACHER')) {
       throw new ForbiddenException('Only teacher profiles can be promoted.');
     }
-    if (teacher.disabled || teacher.status !== 'active' || !teacher.publicProfileEnabled || teacher.deletedAt) {
+    if (teacher.disabled || teacher.status !== 'active' || !teacher.publicProfileEnabled || teacher.tutorReviewStatus !== 'approved' || teacher.deletedAt) {
       throw new ForbiddenException('Only active public teacher profiles can be promoted.');
     }
   }

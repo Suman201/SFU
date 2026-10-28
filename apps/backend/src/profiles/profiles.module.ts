@@ -1,3 +1,4 @@
+import { TeachingCatalogModule } from '../teaching-catalog/teaching-catalog.module';
 import { Module } from '@nestjs/common';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { AuthModule } from '../auth/auth.module';
@@ -12,7 +13,7 @@ import {
 import { ProfilesService } from './profiles.service';
 
 @Module({
-  imports: [AuthModule, DatabaseModule, AuditLogsModule],
+  imports: [TeachingCatalogModule, AuthModule, DatabaseModule, AuditLogsModule],
   controllers: [
     ProfilesController,
     PublicTeacherProfilesController,

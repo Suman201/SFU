@@ -1,0 +1,261 @@
+:host {
+  display: block;
+}
+.catalog-page {
+  display: grid;
+  gap: 20px;
+  max-width: 1400px;
+  margin: auto;
+}
+.page-heading,
+.data-table-toolbar,
+.table-footer,
+.editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.page-heading h1 {
+  margin: 5px 0 10px;
+}
+.page-heading p {
+  color: var(--muted);
+}
+.catalog-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.catalog-tabs button {
+  padding: 10px 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+.catalog-tabs button.active {
+  border-color: var(--product-green);
+  background: color-mix(in srgb, var(--product-green) 15%, var(--panel));
+}
+.catalog-editor {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.catalog-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.catalog-form label {
+  display: grid;
+  gap: 7px;
+}
+.catalog-form input,
+.catalog-form textarea,
+.catalog-form select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--panel);
+}
+.wide,
+.editor-actions {
+  grid-column: 1/-1;
+}
+.editor-actions {
+  justify-content: flex-start;
+}
+.notice {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.error {
+  color: var(--danger, #b42339);
+}
+td small {
+  display: block;
+  color: var(--muted);
+  margin-top: 5px;
+}
+.table-footer {
+  padding: 16px;
+  justify-content: flex-end;
+}
+.table-footer span {
+  margin-right: auto;
+}
+.data-table-filters {
+  padding: 16px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.data-table-toolbar {
+  padding: 16px;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.primary-button,
+.secondary-button {
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+.primary-button {
+  background: var(--product-green);
+  color: white;
+}
+small {
+  color: var(--muted);
+}
+@media (max-width: 700px) {
+  .catalog-form {
+    grid-template-columns: 1fr;
+  }
+  .page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .catalog-editor {
+    padding: 16px;
+  }
+}
+
+.record-editor {
+  min-width: 0;
+  padding: 20px;
+  margin: 20px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.record-editor legend {
+  font-size: 15px;
+  font-weight: 600;
+  padding: 0 6px;
+}
+.record-editor p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.record-editor label {
+  display: block;
+  margin-top: 16px;
+  font-size: 13px;
+}
+.record-editor textarea {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  background: var(--panel);
+  color: var(--text);
+}
+.catalog-editor dl {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.catalog-editor dd {
+  margin: 0;
+}
+.catalog-editor dt {
+  color: var(--muted);
+}
+.catalog-editor > video {
+  display: block;
+  margin: 16px 0;
+  border-radius: 10px;
+}
+.catalog-editor a {
+  color: var(--product-green);
+}
+.catalog-editor h3 {
+  margin-top: 26px;
+}
+.catalog-editor > p {
+  line-height: 1.7;
+}
+@media (max-width: 700px) {
+  .catalog-editor dl {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+  .catalog-editor dd {
+    margin-bottom: 12px;
+  }
+  .editor-actions {
+    flex-wrap: wrap;
+  }
+}
+
+.data-table-toolbar {
+  padding: 8px 4px;
+}
+.data-table-toolbar h2 {
+  margin: 0;
+}
+.data-table-filters {
+  padding: 8px 4px;
+  justify-content: flex-start;
+  margin: 0;
+}
+.data-table-filters input,
+.data-table-filters select {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 10px 12px;
+}
+.data-table-filters input {
+  flex: 1;
+  min-width: 180px;
+}
+.table-action {
+  margin-right: 6px;
+}
+.data-pill {
+  padding: 5px 9px;
+  background: color-mix(in srgb, var(--product-green) 9%, var(--panel));
+  border-radius: 20px;
+  font-size: 10px;
+}
+.table-footer button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 7px 10px;
+}
+.page-heading h1 {
+  font-size: 30px;
+  letter-spacing: -1px;
+}
+.page-heading p {
+  font-size: 13px;
+}
+.catalog-tabs {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+}

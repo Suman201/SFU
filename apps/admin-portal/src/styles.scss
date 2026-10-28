@@ -280,3 +280,7 @@ button:disabled {
     flex: 1 1 160px;
   }
 }
+
+/* Shared approved brand export; prepared from the canonical frontend assets. */
+.sapiovian-logo { display: block; width: 209px; max-width: 100%; height: auto; }
+[data-theme="dark"] .sapiovian-logo { filter: brightness(0) invert(1); }
