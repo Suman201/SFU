@@ -13,3 +13,13 @@
 - Prefer the `data-table-shell`, `data-table-toolbar`, `data-table-filters`, `data-table-wrap`, `data-table`, `data-pill`, `table-action`, and `table-avatar` classes instead of page-specific table styling.
 - Tables should match the clean workspace style: compact toolbar with view/actions, filter chips above the grid, light row and column dividers, small status pills, compact action buttons, checkbox selection column when useful, and footer row counts for longer lists.
 - For rows with several secondary actions, prefer a compact three-dot row menu using `table-menu-button`, `row-menu-cell`, and `table-row-menu`.
+
+## Cost-aware Classroom Development
+
+- Follow [Cost-aware development rules](docs/cost-aware-development.md) for classroom media, recording, STUN/TURN, infrastructure and cost estimates.
+- Prefer shared web/desktop components, simple classroom modes, adaptive quality and delivery of only the video feeds needed by each participant.
+- Preserve audio clarity, readable teaching content, existing permissions, enrollment checks, reconnect behavior and recording recovery.
+- Keep authenticated TURN fallback available. Include Coturn resource use and actual relay paths in cost and capacity estimates.
+- Prefer one combined recording with explicit retention and on-demand playback; never silently delete existing content to meet a cost target.
+- Treat hosting budgets and theoretical savings as estimates. Verify materially affected flows against the real backend and measure media/resource use before making capacity claims.
+- Run UI verification headlessly and provide actual screenshots. Do not open the development app or a visible browser unless the user explicitly requests it.
