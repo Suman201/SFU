@@ -1,3 +1,4 @@
+import { approveFixtureContent } from './tutor-launch-acceptance';
 import { expect, type Page } from '@playwright/test';
 import path from 'node:path';
 type Api = (
@@ -65,12 +66,17 @@ export async function exerciseLevelAssessments(
   await adminPage
     .getByRole('button', { name: 'Edit ' + category.name, exact: true })
     .click();
-  const taskCases = [[primary,primaryTask],[university,universityTask]];
-  for (const [index, [level,text]] of taskCases.entries()) {
+  const taskCases = [
+    [primary, primaryTask],
+    [university, universityTask],
+  ];
+  for (const [index, [level, text]] of taskCases.entries()) {
     await adminPage
       .getByRole('button', { name: 'Add level-specific task' })
       .click();
-    await expect(adminPage.getByLabel('Task academic level',{exact:true})).toHaveCount(index+1);
+    await expect(
+      adminPage.getByLabel('Task academic level', { exact: true }),
+    ).toHaveCount(index + 1);
     await adminPage
       .getByLabel('Task academic level', { exact: true })
       .nth(index)
@@ -80,11 +86,9 @@ export async function exerciseLevelAssessments(
       .nth(index)
       .fill(text);
   }
-  await adminPage
-    .locator('.catalog-editor')
-    .screenshot({
-      path: path.join(screens, 'admin-level-assessment-tasks.png'),
-    });
+  await adminPage.locator('.catalog-editor').screenshot({
+    path: path.join(screens, 'admin-level-assessment-tasks.png'),
+  });
   await adminPage
     .getByRole('button', { name: 'Save category', exact: true })
     .click();
@@ -109,6 +113,49 @@ export async function exerciseLevelAssessments(
       expected,
     );
   await submit(application, 400);
+  expect(
+    application.requiredAssessments.every((task: any) => !task.contentApproved),
+  ).toBe(true);
+  await adminPage
+    .getByRole('button', {
+      name: 'Review assessment content ' + category.name,
+      exact: true,
+    })
+    .click();
+  const review = adminPage.getByRole('region', {
+    name: 'Expert assessment content review',
+  });
+  await review
+    .getByLabel('Reviewer expertise', { exact: true })
+    .fill(
+      'Synthetic acceptance fixture: mathematics teacher and curriculum reviewer.',
+    );
+  await review
+    .getByLabel('Content review findings', { exact: true })
+    .fill(
+      'Synthetic task instructions, academic stages and rubric reviewed for this test.',
+    );
+  await review.getByRole('checkbox').check();
+  await review.screenshot({
+    path: path.join(screens, 'admin-expert-content-review.png'),
+  });
+  await review
+    .getByRole('button', { name: 'Record expert approval', exact: true })
+    .click();
+  await expect(review).toHaveCount(0);
+  const publicCatalog = await api('GET', '/teaching-catalog', undefined);
+  const publicEntry = publicCatalog.categories.find(
+    (entry: any) => entry.id === category.id,
+  );
+  expect(publicEntry.assessmentApprovedVersion).toBe(publicEntry.version);
+  expect(publicEntry.assessmentApproval).toBeUndefined();
+  await adminPage
+    .getByRole('button', { name: 'Check onboarding readiness', exact: true })
+    .click();
+  await expect(
+    adminPage.getByRole('region', { name: 'Onboarding readiness report' }),
+  ).toContainText('Encrypted verification storage: Passed');
+  await approveFixtureContent(api, adminToken);
   await page.reload();
   await page.getByRole('button', { name: '5 Teaching assessment' }).click();
   await expect(page.getByText(primaryTask, { exact: true })).toBeVisible();
@@ -122,12 +169,10 @@ export async function exerciseLevelAssessments(
       .getByLabel('Your teaching response', { exact: true })
       .fill(example + ' My example is appropriate for ' + t.levelName + '.');
   }
-  await page
-    .locator('.edit-panel')
-    .screenshot({
-      path: path.join(screens, 'teacher-level-assessments.png'),
-      style: 'sfu-header{visibility:hidden!important}',
-    });
+  await page.locator('.edit-panel').screenshot({
+    path: path.join(screens, 'teacher-level-assessments.png'),
+    style: 'sfu-header{visibility:hidden!important}',
+  });
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await expect(
     page.getByRole('status').filter({ hasText: 'Profile updated.' }),

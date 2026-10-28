@@ -71,6 +71,8 @@ archive_directory recordings "${RECORDING_LOCAL_PATH:-./recordings}"
 archive_directory chat-attachments "${CHAT_ATTACHMENT_LOCAL_PATH:-./chat-attachments}"
 archive_directory class-materials "${CLASS_MATERIAL_LOCAL_PATH:-./class-materials}"
 archive_directory profile-media "${PROFILE_MEDIA_LOCAL_PATH:-./profile-media}"
+archive_directory tutor-intro-videos "${TUTOR_INTRO_VIDEO_LOCAL_PATH:-${PROFILE_MEDIA_LOCAL_PATH:-./profile-media}/tutor-introductions}"
+archive_directory tutor-verification "${TUTOR_VERIFICATION_LOCAL_PATH:-${PROFILE_MEDIA_LOCAL_PATH:-./profile-media}/tutor-verification}"
 
 cat > "${WORK_DIR}/MANIFEST.txt" <<EOF
 backup_id=${BACKUP_ID}

@@ -3,7 +3,7 @@ import { normalizeTeachingAreas } from '../teaching-catalog/teaching-areas';
 import { normalizeIntroVideoUrl } from '../teaching-catalog/intro-video-url';
 import { IntroVideoService } from '../teaching-catalog/intro-video.service';
 import { TeachingCatalogService } from '../teaching-catalog/catalog.service';
-import { invalidateTutorReview, saveTutorProfile } from '../teaching-catalog/applications.service';
+import { invalidateTutorReview, saveTutorProfile } from '../teaching-catalog/tutor-profile-state';
 import {
   BadRequestException,
   ForbiddenException,

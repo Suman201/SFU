@@ -58,6 +58,7 @@ services:
       JWT_REFRESH_SECRET_FILE: /run/secrets/jwt_refresh_secret
       OPERATIONS_TOKEN_FILE: /run/secrets/operations_token
       TURN_SECRET_FILE: /run/secrets/turn_secret
+      TUTOR_VERIFICATION_ENCRYPTION_KEY_FILE: /run/secrets/tutor_verification_encryption_key
       WEBHOOK_SECRET_ENCRYPTION_KEY_FILE: /run/secrets/webhook_encryption_key
       PIPE_CLUSTER_SECRET_FILE: /run/secrets/pipe_cluster_secret
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
@@ -69,6 +70,7 @@ services:
       - jwt_refresh_secret
       - operations_token
       - turn_secret
+      - tutor_verification_encryption_key
       - webhook_encryption_key
       - pipe_cluster_secret
     ports:
@@ -208,6 +210,8 @@ secrets:
     file: ${TURN_TLS_CERTIFICATE_FILE:?TURN_TLS_CERTIFICATE_FILE is required}
   turn_tls_private_key:
     file: ${TURN_TLS_PRIVATE_KEY_FILE:?TURN_TLS_PRIVATE_KEY_FILE is required}
+  tutor_verification_encryption_key:
+    file: ${TUTOR_VERIFICATION_ENCRYPTION_KEY_FILE:?TUTOR_VERIFICATION_ENCRYPTION_KEY_FILE is required}
   webhook_encryption_key:
     file: ${WEBHOOK_SECRET_ENCRYPTION_KEY_FILE:?WEBHOOK_SECRET_ENCRYPTION_KEY_FILE is required}
   pipe_cluster_secret:

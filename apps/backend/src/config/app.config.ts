@@ -164,6 +164,14 @@ export const appConfig = () => ({
     localPath: process.env.CLASS_MATERIAL_LOCAL_PATH ?? './class-materials',
     maxFileSizeBytes: Number(process.env.CLASS_MATERIAL_MAX_FILE_SIZE_BYTES ?? 10 * 1024 * 1024)
   },
+  tutorVerification: {
+    sweepMs: Number(process.env.TUTOR_VERIFICATION_SWEEP_MS ?? 60000),
+    pdfinfoPath: process.env.TUTOR_PDFINFO_PATH?.trim() || 'pdfinfo',
+    notificationPollMs: Number(process.env.TUTOR_NOTIFICATION_POLL_MS ?? 30000),
+    localPath: process.env.TUTOR_VERIFICATION_LOCAL_PATH?.trim() || undefined,
+    encryptionKey: envOrSecretFile('TUTOR_VERIFICATION_ENCRYPTION_KEY'),
+    retentionDays: Number(process.env.TUTOR_VERIFICATION_RETENTION_DAYS ?? 30),
+  },
   profileMedia: {
     introVideoPath: process.env.TUTOR_INTRO_VIDEO_LOCAL_PATH?.trim() || undefined,
     storageProvider: 'local',

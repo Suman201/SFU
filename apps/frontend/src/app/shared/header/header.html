@@ -50,6 +50,7 @@
       }
     </nav>
     <div class="header-actions">
+      @if(auth.role()==='teacher'){<sfu-tutor-notices />}
       <button
         class="theme-toggle"
         type="button"

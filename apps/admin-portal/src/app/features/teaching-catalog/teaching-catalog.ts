@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
 import {
   EUROPEAN_MARKETS,
+  DEFAULT_ASSESSMENT_RUBRIC,
   teachingCategoryPath,
   type TeachingCatalogKind,
   type AcademicAssessmentTask,
@@ -48,6 +49,7 @@ export class TeachingCatalogAdmin implements OnInit {
     assessmentType:
       'knowledge_review' as import('@native-sfu/contracts').CategoryAssessmentType,
     assessmentInstructions: '',
+    assessmentRubric: DEFAULT_ASSESSMENT_RUBRIC,
     assessmentTasks: [] as AcademicAssessmentTask[],
     name: '',
     description: '',
@@ -115,6 +117,7 @@ export class TeachingCatalogAdmin implements OnInit {
   protected edit(row: TeachingCatalogEntry | null) {
     this.selected = row;
     this.form = {
+      assessmentRubric: row?.assessmentRubric || DEFAULT_ASSESSMENT_RUBRIC,
       assessmentTasks: (row?.assessmentTasks ?? []).map((t) => ({ ...t })),
       assessmentType: row?.assessmentType ?? 'knowledge_review',
       assessmentInstructions:
@@ -130,6 +133,74 @@ export class TeachingCatalogAdmin implements OnInit {
     };
     this.editor.set(true);
     this.error.set('');
+  }
+  protected readonly readiness = signal<any | null>(null);
+  protected readonly checkingReadiness = signal(false);
+  protected readonly readinessChecks = [
+    { key: 'catalogue', label: 'Teaching catalogue' },
+    {
+      key: 'expertContentApproved',
+      label: 'Qualified assessment content approval',
+    },
+    { key: 'privateVideoStorage', label: 'Private video storage' },
+    {
+      key: 'encryptedVerificationStorage',
+      label: 'Encrypted verification storage',
+    },
+    { key: 'videoValidator', label: 'Video validation' },
+    { key: 'documentValidator', label: 'Document validation' },
+    { key: 'smtpTransport', label: 'Email transport' },
+  ];
+  protected runReadiness() {
+    this.checkingReadiness.set(true);
+    this.api
+      .readiness()
+      .pipe(finalize(() => this.checkingReadiness.set(false)))
+      .subscribe({
+        next: (r) => this.readiness.set(r),
+        error: (e) => this.error.set(this.api.error(e)),
+      });
+  }
+  protected readonly contentReview = signal<TeachingCatalogEntry | null>(null);
+  protected expertise = '';
+  protected contentFindings = '';
+  protected qualified = false;
+  protected contentApproved(row: TeachingCatalogEntry) {
+    return row.assessmentApproval?.version === row.version;
+  }
+  protected contentLevelLabel(id: string) {
+    return (
+      this.levels().find((l) => l.id === id)?.name || 'Archived academic level'
+    );
+  }
+  protected openContentReview(row: TeachingCatalogEntry) {
+    this.contentReview.set(row);
+    this.expertise = '';
+    this.contentFindings = '';
+    this.qualified = false;
+    this.error.set('');
+  }
+  protected approveContent() {
+    const row = this.contentReview();
+    if (!row || this.saving()) return;
+    this.saving.set(true);
+    this.api
+      .approveContent(row.kind, row.id, {
+        version: row.version,
+        expertise: this.expertise,
+        notes: this.contentFindings,
+        qualifiedReviewerConfirmed: this.qualified,
+      })
+      .pipe(finalize(() => this.saving.set(false)))
+      .subscribe({
+        next: () => {
+          this.contentReview.set(null);
+          this.notice.set('Expert content approval recorded.');
+          this.reload();
+          this.loadCategories();
+        },
+        error: (e) => this.error.set(this.api.error(e)),
+      });
   }
   protected addTask() {
     const level = this.levels().find(
@@ -159,8 +230,16 @@ export class TeachingCatalogAdmin implements OnInit {
         ? {
             assessmentType: this.form.assessmentType,
             assessmentInstructions: this.form.assessmentInstructions,
+            assessmentRubric: this.form.assessmentRubric,
             ...(this.kind() === 'category'
-              ? { assessmentTasks: this.form.assessmentTasks }
+              ? {
+                  assessmentTasks: this.form.assessmentTasks.map((t) => ({
+                    ...t,
+                    ...(t.rubric?.trim()
+                      ? { rubric: t.rubric.trim() }
+                      : { rubric: undefined }),
+                  })),
+                }
               : {}),
           }
         : {}),

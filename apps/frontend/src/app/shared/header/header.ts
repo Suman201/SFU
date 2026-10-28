@@ -1,3 +1,4 @@
+import { TutorNotices } from '../tutor-notices/tutor-notices';
 import { BrandLogo } from '../brand-mark/brand-logo';
 import {
   ChangeDetectionStrategy,
@@ -14,7 +15,7 @@ import { ThemeService } from '../../core/services/theme.service';
 @Component({
   selector: 'sfu-header',
   standalone: true,
-  imports: [BrandLogo, RouterLink, RouterLinkActive],
+  imports: [BrandLogo, RouterLink, RouterLinkActive, TutorNotices],
   templateUrl: './header.html',
   styleUrl: './header.scss',
   changeDetection: ChangeDetectionStrategy.Eager,

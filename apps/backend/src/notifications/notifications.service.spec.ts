@@ -79,6 +79,9 @@ describe('EmailNotificationService', () => {
       host: 'smtp.example.test',
       port: 587,
       secure: false,
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
       auth: { user: 'smtp-user', pass: 'smtp-password' }
     });
     expect(sendMail.mock.calls[0]?.[0]).toEqual({

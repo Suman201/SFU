@@ -913,6 +913,12 @@
             </aside>
           </div>
         </section>
+        <div class="wide" [hidden]="editorStep() !== 'experience'">
+          <sfu-tutor-verification
+            [documents]="application()?.verificationDocuments||[]"
+            (changed)="verificationChanged()"
+          />
+        </div>
         <fieldset
           class="wide record-editor"
           [hidden]="editorStep() !== 'assessment'"
@@ -942,7 +948,17 @@
             [attr.data-assessment-key]="task.categoryId+':'+task.levelId"
           >
             <legend>{{task.categoryName}} · {{task.levelName}}</legend>
+            @if(!task.contentApproved){
+            <p>
+              This assessment is being prepared. You can save your profile and
+              return when the task is ready.
+            </p>
+            }@else{
             <p style="white-space: pre-line">{{task.instructions}}</p>
+            <details>
+              <summary>What your reviewer will assess</summary>
+              <p>{{task.rubric}}</p>
+            </details>
             @if(assessmentIsStale(task)){
             <p role="alert">
               This task has changed. Review and update your response before
@@ -965,6 +981,7 @@
                 (input)="updateAssessment(task,'evidenceUrl',inputValue($event))"
                 placeholder="https://"
             /></label>
+            }
           </fieldset>
           }
           <p class="help-text">

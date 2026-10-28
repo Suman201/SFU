@@ -98,5 +98,11 @@ restore_directory recordings "${RECORDING_LOCAL_PATH:-./recordings}"
 restore_directory chat-attachments "${CHAT_ATTACHMENT_LOCAL_PATH:-./chat-attachments}"
 restore_directory class-materials "${CLASS_MATERIAL_LOCAL_PATH:-./class-materials}"
 restore_directory profile-media "${PROFILE_MEDIA_LOCAL_PATH:-./profile-media}"
+if [[ -f "${WORK_DIR}/assets/tutor-intro-videos.tar.gz" ]]; then
+  restore_directory tutor-intro-videos "${TUTOR_INTRO_VIDEO_LOCAL_PATH:-${PROFILE_MEDIA_LOCAL_PATH:-./profile-media}/tutor-introductions}"
+fi
+if [[ -f "${WORK_DIR}/assets/tutor-verification.tar.gz" ]]; then
+  restore_directory tutor-verification "${TUTOR_VERIFICATION_LOCAL_PATH:-${PROFILE_MEDIA_LOCAL_PATH:-./profile-media}/tutor-verification}"
+fi
 
 echo "Restore complete. Start Redis clean, then start backend nodes and verify health before admitting traffic."

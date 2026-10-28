@@ -1,3 +1,4 @@
+import { TutorVerification } from '../../../shared/tutor-verification/tutor-verification';
 import { TeachingAreasEditor } from '../../../shared/teaching-areas/teaching-areas-editor';
 import { DestroyRef } from '@angular/core';
 import {
@@ -351,7 +352,14 @@ const EMPTY_PROMOTION_FORM: PromotionForm = {
 @Component({
   selector: 'sfu-teacher-profile',
   standalone: true,
-  imports: [Footer, Header, RouterLink, FormsModule, TeachingAreasEditor],
+  imports: [
+    Footer,
+    Header,
+    RouterLink,
+    FormsModule,
+    TeachingAreasEditor,
+    TutorVerification,
+  ],
   templateUrl: './teacher-profile.html',
   styleUrls: ['./teacher-profile.scss', './teacher-onboarding.scss'],
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -500,6 +508,11 @@ export class TeacherProfile implements OnInit {
   protected readonly requiredAssessments = computed(() =>
     resolveTeachingAssessments(this.catalog(), this.form().teachingAreas),
   );
+  protected verificationChanged() {
+    this.loadApplication();
+    this.form.update((f) => ({ ...f, publicProfileEnabled: false }));
+    this.profile.update((p) => (p ? { ...p, publicProfileEnabled: false } : p));
+  }
   protected updateTeachingAreas(areas: TeacherTeachingArea[]) {
     this.form.update((f) => ({
       ...f,

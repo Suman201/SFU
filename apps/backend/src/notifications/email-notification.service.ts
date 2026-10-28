@@ -84,6 +84,9 @@ export class EmailNotificationService {
       host: this.config.getOrThrow<string>('notifications.email.host'),
       port: this.config.get<number>('notifications.email.port', 587),
       secure: this.config.get<boolean>('notifications.email.secure', false),
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
       ...(user && pass ? { auth: { user, pass } } : {})
     });
     return this.transporter;

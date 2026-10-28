@@ -67,6 +67,47 @@ export class TutorApplicationsAdmin implements OnInit {
       error: (e) => this.error.set(this.api.error(e)),
     });
   }
+  protected documentNotes: Record<string, string> = {};
+  protected documentRead = signal<string[]>([]);
+  protected downloadDocument(
+    doc: import('@native-sfu/contracts').TutorVerificationDocument,
+  ) {
+    const current = this.detail();
+    if (!current) return;
+    this.api.verificationDocument(current.teacherId, doc.id).subscribe({
+      next: (blob) => {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `${doc.kind}.${doc.mimeType === 'application/pdf' ? 'pdf' : doc.mimeType === 'image/png' ? 'png' : 'jpg'}`;
+        anchor.click();
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+        this.documentRead.update((ids) => [...ids, doc.id]);
+      },
+      error: (e) => this.error.set(this.api.error(e)),
+    });
+  }
+  protected reviewDocument(
+    doc: import('@native-sfu/contracts').TutorVerificationDocument,
+    decision: 'verified' | 'rejected',
+  ) {
+    const current = this.detail();
+    if (!current || this.saving()) return;
+    this.saving.set(true);
+    this.error.set('');
+    this.api
+      .reviewVerificationDocument(
+        current.teacherId,
+        doc.id,
+        decision,
+        this.documentNotes[doc.id] || '',
+      )
+      .pipe(finalize(() => this.saving.set(false)))
+      .subscribe({
+        next: () => this.open(current.teacherId),
+        error: (e) => this.error.set(this.api.error(e)),
+      });
+  }
   protected countryName(code: string) {
     return new Intl.DisplayNames(['en'], { type: 'region' }).of(code) || code;
   }
@@ -131,6 +172,7 @@ export class TutorApplicationsAdmin implements OnInit {
   }
   protected open(id: string) {
     this.clearPreview();
+    this.documentRead.set([]);
     this.error.set('');
     this.note = '';
     this.identity = false;

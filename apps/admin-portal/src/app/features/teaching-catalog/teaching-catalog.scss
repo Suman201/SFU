@@ -259,3 +259,29 @@ small {
   border-bottom: 1px solid var(--line);
   padding-bottom: 16px;
 }
+
+.content-review-form {
+  margin-top: 24px;
+}
+.catalog-form .check-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.catalog-form .check-line input {
+  width: auto;
+  margin-top: 4px;
+  accent-color: var(--product-green);
+}
+.catalog-form input,
+.catalog-form textarea,
+.catalog-form select {
+  box-sizing: border-box;
+  font: inherit;
+}
+.content-review-form textarea {
+  resize: vertical;
+  min-height: 96px;
+}

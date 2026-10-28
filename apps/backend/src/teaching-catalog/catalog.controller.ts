@@ -1,3 +1,5 @@
+import { OnboardingReadinessService } from './onboarding-readiness.service';
+import { TutorNoticesService } from './tutor-notices.service';
 import {
   Body,
   Controller,
@@ -17,12 +19,33 @@ import {
 } from '../common/decorators/current-user.decorator';
 import { TeachingCatalogService } from './catalog.service';
 import { TutorApplicationsService } from './applications.service';
-import { CatalogWriteDto, ReviewTutorDto, SubmitTutorDto } from './catalog.dto';
+import {
+  CatalogWriteDto,
+  ReviewTutorDto,
+  SubmitTutorDto,
+  ApproveAssessmentContentDto,
+} from './catalog.dto';
 @Controller('teaching-catalog')
 export class TeachingCatalogController {
   constructor(private readonly catalog: TeachingCatalogService) {}
-  @Get() list() {
-    return this.catalog.snapshot();
+  @Get() async list() {
+    const snapshot = await this.catalog.snapshot();
+    const redact = (
+      entry: import('@native-sfu/contracts').TeachingCatalogEntry,
+    ) => {
+      const { assessmentApproval, ...safe } = entry;
+      return {
+        ...safe,
+        ...(assessmentApproval
+          ? { assessmentApprovedVersion: assessmentApproval.version }
+          : {}),
+      };
+    };
+    return {
+      ...snapshot,
+      categories: snapshot.categories.map(redact),
+      levels: snapshot.levels?.map(redact),
+    };
   }
 }
 @Controller('admin/teaching-catalog')
@@ -35,6 +58,14 @@ export class AdminTeachingCatalogController {
   }
   @Post('starter') starter(@CurrentUser() actor: AuthenticatedUser) {
     return this.catalog.starter(actor);
+  }
+  @Post(':kind/:id/assessment-approval') approveContent(
+    @Param('kind') kind: string,
+    @Param('id') id: string,
+    @Body() input: ApproveAssessmentContentDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.catalog.approveAssessmentContent(kind, id, input, actor);
   }
   @Post(':kind') create(
     @Param('kind') kind: string,
@@ -56,7 +87,19 @@ export class AdminTeachingCatalogController {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('TEACHER')
 export class TutorApplicationController {
-  constructor(private readonly applications: TutorApplicationsService) {}
+  constructor(
+    private readonly applications: TutorApplicationsService,
+    private readonly notices: TutorNoticesService,
+  ) {}
+  @Get('notices') noticesList(@CurrentUser() actor: AuthenticatedUser) {
+    return this.notices.list(actor.sub);
+  }
+  @Post('notices/:noticeId/read') noticeRead(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('noticeId') id: string,
+  ) {
+    return this.notices.read(actor.sub, id);
+  }
   @Get('me') mine(@CurrentUser() actor: AuthenticatedUser) {
     return this.applications.mine(actor);
   }
@@ -84,5 +127,15 @@ export class AdminTutorApplicationsController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.applications.review(id, input, actor);
+  }
+}
+
+@Controller('admin/tutor-onboarding')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN', 'SUPER_ADMIN')
+export class TutorOnboardingReadinessController {
+  constructor(private readonly readiness: OnboardingReadinessService) {}
+  @Get('readiness') check() {
+    return this.readiness.check();
   }
 }

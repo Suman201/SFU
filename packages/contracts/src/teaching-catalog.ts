@@ -10,12 +10,49 @@ export type CategoryAssessmentType =
   | 'spoken_sample'
   | 'portfolio_review'
   | 'practical_demonstration';
+export interface AssessmentContentApproval {
+  version: number;
+  reviewerId: string;
+  expertise: string;
+  notes: string;
+  reviewedAt: string;
+}
+export type TutorVerificationKind =
+  | 'identity'
+  | 'qualification'
+  | 'safeguarding';
+export interface TutorVerificationDocument {
+  id: string;
+  kind: TutorVerificationKind;
+  name: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+  expiresAt: string;
+  status: 'pending' | 'verified' | 'rejected';
+  purgedAt?: string;
+  fileAvailable?: boolean;
+  reviewNote?: string;
+  reviewedAt?: string;
+  reviewerId?: string;
+}
+export interface TutorOnboardingNotice {
+  id: string;
+  status: TutorReviewStatus;
+  title: string;
+  body: string;
+  createdAt: string;
+  readAt?: string;
+}
 export interface AcademicAssessmentTask {
   levelId: string;
   type: CategoryAssessmentType;
   instructions: string;
+  rubric?: string;
 }
 export interface CategoryAssessment {
+  rubric: string;
+  contentApproved: boolean;
   levelId: string;
   levelName: string;
   taskVersion: string;
@@ -42,9 +79,12 @@ export interface TutorAssessmentResult {
   notes: string;
 }
 export interface TeachingCatalogEntry {
+  assessmentApproval?: AssessmentContentApproval;
+  assessmentApprovedVersion?: number;
   assessmentTasks?: AcademicAssessmentTask[];
   assessmentType?: CategoryAssessmentType;
   assessmentInstructions?: string;
+  assessmentRubric?: string;
   id: string;
   kind: TeachingCatalogKind;
   name: string;
@@ -60,6 +100,7 @@ export interface TeachingCatalogWrite {
   assessmentTasks?: AcademicAssessmentTask[];
   assessmentType?: CategoryAssessmentType;
   assessmentInstructions?: string;
+  assessmentRubric?: string;
   name: string;
   description?: string;
   parentId?: string;
@@ -229,6 +270,7 @@ export interface TutorApplication {
   reviewedAt?: string;
   reviewNote?: string;
   requiredAssessments: CategoryAssessment[];
+  verificationDocuments?: TutorVerificationDocument[];
   assessmentResponses: TutorAssessmentResponse[];
   introVideoUploaded?: boolean;
   introVideoDurationSeconds?: number;

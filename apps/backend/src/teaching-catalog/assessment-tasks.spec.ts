@@ -133,4 +133,65 @@ describe('Academic-level teaching assessments', () => {
     expect(tasks.length).toBe(1);
     expect(tasks[0]!.levelId).toBe('primary');
   });
+  it('requires current category and academic-level content approval', () => {
+    const { catalog, areas, category, primary, university } = fixture();
+    expect(
+      resolveTeachingAssessments(catalog, areas).every(
+        (task) => !task.contentApproved,
+      ),
+    ).toBe(true);
+    const approval = (version: number) => ({
+      version,
+      reviewerId: 'expert',
+      expertise: 'Subject and curriculum specialist',
+      notes: 'Instructions and rubric inspected',
+      reviewedAt: new Date().toISOString(),
+    });
+    (category as TeachingCatalogEntry).assessmentApproval = approval(
+      category.version,
+    );
+    (primary as TeachingCatalogEntry).assessmentApproval = approval(
+      primary.version,
+    );
+    (university as TeachingCatalogEntry).assessmentApprovedVersion =
+      university.version;
+    expect(
+      resolveTeachingAssessments(catalog, areas).every(
+        (task) => task.contentApproved,
+      ),
+    ).toBe(true);
+    primary.version++;
+    expect(
+      resolveTeachingAssessments(catalog, areas).map(
+        (task) => task.contentApproved,
+      ),
+    ).toEqual([false, true]);
+    category.version++;
+    expect(
+      resolveTeachingAssessments(catalog, areas).every(
+        (task) => !task.contentApproved,
+      ),
+    ).toBe(true);
+  });
+  it('uses the inherited override rubric and its source approval', () => {
+    const { catalog, areas, parent } = fixture();
+    parent.assessmentTasks = [
+      {
+        levelId: 'primary',
+        type: 'practical_demonstration',
+        instructions: 'Explain fractions with objects.',
+        rubric:
+          'Check accurate equal shares and independent learner understanding.',
+      },
+    ];
+    (parent as TeachingCatalogEntry).assessmentApprovedVersion = parent.version;
+    const [primary, university] = resolveTeachingAssessments(catalog, areas);
+    expect(primary!.contentApproved).toBe(true);
+    expect(primary!.rubric).toContain('equal shares');
+    expect(university!.contentApproved).toBe(false);
+    parent.version++;
+    expect(resolveTeachingAssessments(catalog, areas)[0]!.contentApproved).toBe(
+      false,
+    );
+  });
 });

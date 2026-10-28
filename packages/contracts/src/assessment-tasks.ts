@@ -38,6 +38,21 @@ export function resolveTeachingAssessments(
           level.version,
         ].join(':'),
         type: task?.type ?? category.assessmentType ?? 'knowledge_review',
+        contentApproved: task
+          ? (source?.assessmentApproval?.version ??
+              source?.assessmentApprovedVersion) === source?.version
+          : (category.assessmentApproval?.version ??
+              category.assessmentApprovedVersion) === category.version &&
+            (level.assessmentApproval?.version ??
+              level.assessmentApprovedVersion) === level.version,
+        rubric: task
+          ? task.rubric || source?.assessmentRubric || DEFAULT_ASSESSMENT_RUBRIC
+          : [
+              category.assessmentRubric || DEFAULT_ASSESSMENT_RUBRIC,
+              level.assessmentRubric,
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
         instructions:
           task?.instructions ??
           [
@@ -55,3 +70,6 @@ export function resolveTeachingAssessments(
   }
   return result;
 }
+
+export const DEFAULT_ASSESSMENT_RUBRIC =
+  'Review subject accuracy and evidence, suitability for the selected academic stage, clarity of explanation, response to misconceptions, and whether the proposed learner task checks independent understanding. Record reasons and request a demonstration when the evidence is insufficient.';

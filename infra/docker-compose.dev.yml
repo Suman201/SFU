@@ -36,6 +36,9 @@ services:
     environment:
       MONGODB_URI: mongodb://mongo:27017/native_sfu
       REDIS_URL: redis://redis:6379
+      TUTOR_VERIFICATION_ENCRYPTION_KEY_FILE: /run/secrets/tutor_verification_encryption_key
+      TUTOR_PDFINFO_PATH: pdfinfo
+      PROFILE_MEDIA_LOCAL_PATH: /app/profile-media
     ports:
       - "3000:3000"
       - "40000-40999:40000-40999/udp"
@@ -46,6 +49,9 @@ services:
         condition: service_healthy
     volumes:
       - recordings:/app/recordings
+      - profile-media:/app/profile-media
+    secrets:
+      - tutor_verification_encryption_key
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -80,7 +86,12 @@ services:
       - prometheus
 
 volumes:
+  profile-media:
   mongo-data:
   redis-data:
   recordings:
   grafana-data:
+
+secrets:
+  tutor_verification_encryption_key:
+    file: ${TUTOR_VERIFICATION_ENCRYPTION_KEY_FILE:-../.local-secrets/tutor-verification.key}

@@ -17,6 +17,44 @@
       Add starter catalogue
     </button>
   </header>
+  <button
+    type="button"
+    class="secondary-button"
+    [disabled]="checkingReadiness()"
+    (click)="runReadiness()"
+  >
+    {{checkingReadiness()?'Checking…':'Check onboarding readiness'}}
+  </button>
+  @if(readiness();as report){
+  <section class="catalog-editor" aria-label="Onboarding readiness report">
+    <h2>
+      {{report.technicalReady?'Technical checks passed':'Onboarding setup needs
+      attention'}}
+    </h2>
+    <p>
+      Checked {{report.checkedAt}}. This report covers configured services;
+      production rollout and the teacher pilot require recorded operational
+      checks.
+    </p>
+    <ul>
+      @for(check of readinessChecks;track check.key){
+      <li>
+        {{check.label}}: {{report.checks[check.key]?'Passed':'Action needed'}}
+      </li>
+      }
+    </ul>
+    <p>
+      {{report.unapprovedContentCount}} catalogue entries need qualified content
+      approval. {{report.notificationDeliveryFailures}} accounts have exhausted
+      email retries.
+    </p>
+    <ul>
+      @for(item of report.manualLaunchChecks;track item){
+      <li>{{item}}</li>
+      }
+    </ul>
+  </section>
+  }
   <nav class="catalog-tabs" aria-label="Catalogue sections">
     @for(tab of tabs;track tab.id){<button
       type="button"
@@ -171,6 +209,15 @@
               placeholder="Describe the task appropriate for this category and academic level."
             ></textarea>
           </label>
+          <label
+            >Task review criteria (optional)<textarea
+              [name]="'taskRubric'+i"
+              rows="3"
+              maxlength="3000"
+              [(ngModel)]="task.rubric"
+              placeholder="Leave empty to use this category’s review criteria."
+            ></textarea>
+          </label>
           <button
             type="button"
             class="secondary-button"
@@ -189,7 +236,16 @@
           Add level-specific task
         </button>
       </section>
-      }
+      } @if(kind()==='category'||kind()==='level'){<label class="wide"
+        >Review criteria<textarea
+          name="assessmentRubric"
+          rows="4"
+          minlength="40"
+          maxlength="3000"
+          [(ngModel)]="form.assessmentRubric"
+          required
+        ></textarea></label
+      >}
       <footer class="editor-actions">
         <button
           type="submit"
@@ -207,6 +263,59 @@
         </button>
       </footer>
     </form>
+  </section>
+  } @if(contentReview();as row){
+  <section class="catalog-editor" aria-label="Expert assessment content review">
+    <h2>Review {{row.name}} assessment content</h2>
+    <p>
+      Approve only after a qualified subject reviewer has checked the
+      instructions, academic suitability, review criteria, and any
+      level-specific overrides. Saving changed content requires a new approval.
+    </p>
+    <h3>Instructions</h3>
+    <p>{{row.assessmentInstructions}}</p>
+    <h3>Review criteria</h3>
+    <p>{{row.assessmentRubric}}</p>
+    @for(task of row.assessmentTasks||[];track task.levelId){
+    <h4>{{contentLevelLabel(task.levelId)}}</h4>
+    <p>{{task.instructions}}</p>
+    <p>{{task.rubric||row.assessmentRubric}}</p>
+    }
+    <div class="catalog-form content-review-form">
+      <label
+        >Reviewer expertise<textarea
+          rows="3"
+          [(ngModel)]="expertise"
+          maxlength="1000"
+          placeholder="Relevant subject qualifications and teaching experience."
+        ></textarea></label
+      ><label
+        >Content review findings<textarea
+          rows="3"
+          [(ngModel)]="contentFindings"
+          maxlength="1000"
+        ></textarea></label
+      ><label class="wide check-line"
+        ><input type="checkbox" [(ngModel)]="qualified" /> I am qualified to
+        review this content and have checked the tasks and criteria.</label
+      >
+      <div class="editor-actions">
+        <button
+          type="button"
+          class="primary-button"
+          [disabled]="saving()||!qualified||expertise.trim().length<20||contentFindings.trim().length<20"
+          (click)="approveContent()"
+        >
+          Record expert approval</button
+        ><button
+          type="button"
+          class="secondary-button"
+          (click)="contentReview.set(null)"
+        >
+          Cancel review
+        </button>
+      </div>
+    </div>
   </section>
   }
   <section class="data-table-shell">
@@ -292,8 +401,18 @@
                 [disabled]="saving()"
                 (click)="archive(row)"
               >
-                {{row.status==='active'?'Archive':'Restore'}}
-              </button>
+                {{row.status==='active'?'Archive':'Restore'}}</button
+              >@if(row.kind==='category'||row.kind==='level'){<small
+                >{{contentApproved(row)?'Content approved':'Expert review
+                needed'}}</small
+              ><button
+                type="button"
+                class="table-action"
+                [attr.aria-label]="'Review assessment content '+row.name"
+                (click)="openContentReview(row)"
+              >
+                Review content</button
+              >}
             </td>
           </tr>
           }@empty{

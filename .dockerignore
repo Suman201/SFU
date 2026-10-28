@@ -4,3 +4,12 @@ node_modules
 **/*.tsbuildinfo
 test-results
 coverage
+
+# Private onboarding assets and local secrets never enter build contexts.
+**/.env
+**/.env.*
+!**/.env.example
+**/.local-secrets
+**/profile-media
+**/tutor-verification
+**/tutor-intro-videos

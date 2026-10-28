@@ -39,7 +39,7 @@ FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates ffmpeg tini \
+  && apt-get install -y --no-install-recommends ca-certificates ffmpeg poppler-utils tini \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/packages/contracts/dist ./packages/contracts/dist
@@ -52,7 +52,7 @@ COPY packages/sfu-core/package.json packages/sfu-core/package.json
 COPY packages/nest-sfu/package.json packages/nest-sfu/package.json
 COPY --from=build /app/apps/backend/dist ./apps/backend/dist
 COPY apps/backend/package.json apps/backend/package.json
-RUN mkdir -p /app/recordings /app/chat-attachments /app/class-materials /app/profile-media /app/tutor-intro-videos \
+RUN mkdir -p /app/recordings /app/chat-attachments /app/class-materials /app/profile-media /app/tutor-intro-videos /app/tutor-verification \
   && chown -R node:node /app
 USER node
 EXPOSE 3000 40000-40999/udp

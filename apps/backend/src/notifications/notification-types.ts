@@ -4,6 +4,7 @@ export type NotificationPurpose =
   | 'announcement'
   | 'recording_ready'
   | 'enrollment_update'
+  | 'tutor_application_update'
   | 'security_notice';
 
 export type NotificationChannel = 'email' | 'push';

@@ -18,6 +18,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
 import {
   EUROPEAN_MARKETS,
+  DEFAULT_ASSESSMENT_RUBRIC,
   teachingCategoryPath,
   type TeachingCatalogEntry,
   type TeachingCatalogKind,
@@ -27,7 +28,7 @@ import {
   TeachingCatalogDocument,
   TeachingCatalogMongo,
 } from './catalog.schema';
-import { CatalogWriteDto } from './catalog.dto';
+import { CatalogWriteDto, ApproveAssessmentContentDto } from './catalog.dto';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 @Injectable()
@@ -65,6 +66,8 @@ export class TeachingCatalogService {
             assessmentType:
               doc.assessmentType as TeachingCatalogEntry['assessmentType'],
             assessmentInstructions: doc.assessmentInstructions,
+            assessmentRubric: doc.assessmentRubric || DEFAULT_ASSESSMENT_RUBRIC,
+            assessmentApproval: doc.assessmentApproval,
             ...(doc.kind === 'category'
               ? { assessmentTasks: doc.assessmentTasks ?? [] }
               : {}),
@@ -281,6 +284,10 @@ export class TeachingCatalogService {
         'Assessment instructions need at least 20 characters.',
       );
     const update = {
+      assessmentRubric:
+        input.assessmentRubric?.trim() ??
+        current?.assessmentRubric ??
+        DEFAULT_ASSESSMENT_RUBRIC,
       assessmentTasks:
         input.assessmentTasks?.map((t) => ({
           ...t,
@@ -354,6 +361,55 @@ export class TeachingCatalogService {
       },
     });
     return this.map(saved);
+  }
+  async approveAssessmentContent(
+    kindInput: string,
+    id: string,
+    input: ApproveAssessmentContentDto,
+    actor: AuthenticatedUser,
+  ) {
+    const kind = this.kind(kindInput);
+    if (!['category', 'level'].includes(kind) || !isValidObjectId(id))
+      throw new BadRequestException('Choose a category or academic level.');
+    if (
+      !input.qualifiedReviewerConfirmed ||
+      input.expertise.trim().length < 20 ||
+      input.notes.trim().length < 20
+    )
+      throw new BadRequestException(
+        'Record qualified subject expertise and assessment review findings.',
+      );
+    return this.withCatalogLock(async () => {
+      const entry = await this.entries
+        .findOneAndUpdate(
+          { _id: id, kind, status: 'active', __v: input.version },
+          {
+            $set: {
+              assessmentApproval: {
+                version: input.version,
+                reviewerId: actor.sub,
+                expertise: input.expertise.trim(),
+                notes: input.notes.trim(),
+                reviewedAt: new Date().toISOString(),
+              },
+            },
+          },
+          { new: true },
+        )
+        .exec();
+      if (!entry)
+        throw new ConflictException(
+          'The content changed or was archived. Reload before recording approval.',
+        );
+      await this.audit.record({
+        actor,
+        action: 'teaching_catalog.assessment_content_approved',
+        resourceType: 'teaching_catalog',
+        resourceId: id,
+        metadata: { version: input.version },
+      });
+      return this.map(entry);
+    });
   }
   async starter(actor: AuthenticatedUser) {
     return this.withCatalogLock(() => this.seedStarter(actor));

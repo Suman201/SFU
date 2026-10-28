@@ -1,3 +1,4 @@
+import { approveFixtureContent } from './tutor-launch-acceptance';
 import { resolveTeachingAssessments } from '@native-sfu/contracts';
 import { expect, type Page } from '@playwright/test';
 
@@ -54,6 +55,7 @@ export async function exerciseFlexibleTeachingCatalog(
     { name: root.name, version: root.version, status: 'archived' },
     409,
   );
+  await approveFixtureContent(api, adminToken);
   const catalog = await api('GET', '/teaching-catalog', undefined);
   const english = catalog.languages.find((l: any) => l.name === 'English');
   const french = catalog.languages.find((l: any) => l.name === 'French');

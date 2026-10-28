@@ -14,10 +14,7 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { UserDocument, UserMongoDocument } from '../database/schemas';
-import {
-  invalidateTutorReview,
-  saveTutorProfile,
-} from './applications.service';
+import { invalidateTutorReview, saveTutorProfile } from './tutor-profile-state';
 export const INTRO_VIDEO_MAX_BYTES = 50 * 1024 * 1024;
 type VideoFile = { buffer: Buffer; mimetype: string; size: number };
 @Injectable()

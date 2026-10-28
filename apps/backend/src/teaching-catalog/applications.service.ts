@@ -1,3 +1,8 @@
+import { verificationDocumentSummary } from './verification-documents.service';
+import {
+  TutorNoticesService,
+  tutorStatusNotice,
+} from './tutor-notices.service';
 import { resolveTeachingAssessments } from '@native-sfu/contracts';
 import { normalizeTeachingAreas } from './teaching-areas';
 import {
@@ -18,30 +23,6 @@ import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { TeachingCatalogService } from './catalog.service';
 import { ReviewTutorDto, SubmitTutorDto } from './catalog.dto';
-export function invalidateTutorReview(doc: UserMongoDocument): void {
-  // A review may only approve the exact profile revision it inspected.
-  const revision = doc.tutorRevision ?? 0;
-  doc.$where =
-    revision === 0
-      ? { $or: [{ tutorRevision: 0 }, { tutorRevision: { $exists: false } }] }
-      : { tutorRevision: revision };
-  doc.tutorRevision = revision + 1;
-  doc.tutorReviewStatus = 'draft';
-  doc.publicProfileEnabled = false;
-}
-export async function saveTutorProfile(doc: UserMongoDocument): Promise<void> {
-  try {
-    await doc.save();
-  } catch (error) {
-    if (
-      ['DocumentNotFoundError', 'VersionError'].includes((error as Error).name)
-    )
-      throw new ConflictException(
-        'Your profile changed in another session. Reload and try again.',
-      );
-    throw error;
-  }
-}
 @Injectable()
 export class TutorApplicationsService {
   constructor(
@@ -49,6 +30,7 @@ export class TutorApplicationsService {
     private readonly users: Model<UserMongoDocument>,
     private readonly catalog: TeachingCatalogService,
     private readonly audit: AuditLogsService,
+    private readonly notices: TutorNoticesService,
   ) {}
   private async teacher(id: string) {
     if (!isValidObjectId(id)) throw new NotFoundException('Teacher not found.');
@@ -77,10 +59,40 @@ export class TutorApplicationsService {
       snapshot,
       areas ?? [],
     );
+    const verificationDocuments = (doc.tutorVerificationDocuments ?? []).map(
+      verificationDocumentSummary,
+    );
+    const usable = (kind: string) =>
+      verificationDocuments.some(
+        (d) =>
+          d.kind === kind &&
+          d.status !== 'rejected' &&
+          (d.status === 'verified' || d.fileAvailable),
+      );
+    if (!usable('identity'))
+      missing.push(
+        'Upload a private identity document for reviewer verification.',
+      );
+    if (
+      (doc.credentials?.length || doc.education?.length) &&
+      !usable('qualification')
+    )
+      missing.push(
+        'Upload private evidence for your stated qualifications or education.',
+      );
     if (!doc.introVideoUrl && !doc.tutorIntroVideo)
       missing.push(
         'Upload a short introduction video or add a YouTube/Vimeo link.',
       );
+    for (const task of requiredAssessments)
+      if (!task.contentApproved)
+        missing.push(
+          'Assessment content awaits qualified review for ' +
+            task.categoryName +
+            ' — ' +
+            task.levelName +
+            '.',
+        );
     for (const required of requiredAssessments)
       if (
         !(doc.assessmentResponses ?? []).some(
@@ -164,6 +176,7 @@ export class TutorApplicationsService {
     }
     return {
       teachingAreas: areas,
+      verificationDocuments,
       requiredAssessments,
       assessmentResponses: doc.assessmentResponses ?? [],
       introVideoUploaded: Boolean(doc.tutorIntroVideo),
@@ -197,9 +210,14 @@ export class TutorApplicationsService {
     };
   }
   async submit(actor: AuthenticatedUser, input: SubmitTutorDto) {
-    return this.catalog.withStablePolicy(() => this.submitApplication(actor,input));
+    return this.catalog.withStablePolicy(() =>
+      this.submitApplication(actor, input),
+    );
   }
-  private async submitApplication(actor: AuthenticatedUser, input: SubmitTutorDto) {
+  private async submitApplication(
+    actor: AuthenticatedUser,
+    input: SubmitTutorDto,
+  ) {
     const application = await this.mine(actor);
     if (input.revision !== application.revision)
       throw new ConflictException(
@@ -239,6 +257,12 @@ export class TutorApplicationsService {
             },
             publicProfileEnabled: false,
           },
+          $push: {
+            tutorOnboardingNotices: {
+              $each: [tutorStatusNotice('submitted')],
+              $slice: -50,
+            },
+          },
         },
         { new: true },
       )
@@ -254,6 +278,7 @@ export class TutorApplicationsService {
       resourceId: actor.sub,
       metadata: { revision: input.revision },
     });
+    this.notices.kick();
     return this.summary(saved);
   }
   async list(status: string = 'submitted', page = 1) {
@@ -308,9 +333,15 @@ export class TutorApplicationsService {
     return this.summary(await this.teacher(id));
   }
   async review(id: string, input: ReviewTutorDto, actor: AuthenticatedUser) {
-    return this.catalog.withStablePolicy(() => this.reviewApplication(id,input,actor));
+    return this.catalog.withStablePolicy(() =>
+      this.reviewApplication(id, input, actor),
+    );
   }
-  private async reviewApplication(id: string, input: ReviewTutorDto, actor: AuthenticatedUser) {
+  private async reviewApplication(
+    id: string,
+    input: ReviewTutorDto,
+    actor: AuthenticatedUser,
+  ) {
     if (actor.sub === id)
       throw new ForbiddenException('You cannot review your own application.');
     const doc = await this.teacher(id);
@@ -347,6 +378,18 @@ export class TutorApplicationsService {
           'Record a passed assessment with notes for each selected category and academic level. Reload if the category requirements changed.',
         );
 
+      if (
+        !application.verificationDocuments?.some(
+          (d) => d.kind === 'identity' && d.status === 'verified',
+        ) ||
+        ((doc.credentials?.length || doc.education?.length) &&
+          !application.verificationDocuments?.some(
+            (d) => d.kind === 'qualification' && d.status === 'verified',
+          ))
+      )
+        throw new BadRequestException(
+          'Verify the identity and relevant qualification documents before approving this tutor.',
+        );
       if (application.missing.length)
         throw new BadRequestException(
           'This profile is incomplete: ' + application.missing.join(' '),
@@ -385,6 +428,12 @@ export class TutorApplicationsService {
             },
             publicProfileEnabled: input.decision === 'approved',
           },
+          $push: {
+            tutorOnboardingNotices: {
+              $each: [tutorStatusNotice(input.decision)],
+              $slice: -50,
+            },
+          },
         },
         { new: true },
       )
@@ -401,6 +450,7 @@ export class TutorApplicationsService {
       targetUserId: id,
       metadata: { revision: input.revision, decision: input.decision },
     });
+    this.notices.kick();
     return this.summary(saved);
   }
 }

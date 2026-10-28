@@ -11,26 +11,78 @@ const teacherEmail = 'teacher.one@example.com';
 const studentEmail = 'student.one@example.com';
 
 /** Real backend, database, socket and Angular fixture. No service or HTTP mocks. */
-export async function startAcceptanceStack(options: { frontendPort?: number; backendPort?: number } = {}) {
+export async function startAcceptanceStack(
+  options: {
+    frontendPort?: number;
+    backendPort?: number;
+    secondBackendPort?: number;
+    localSmtpPort?: number;
+  } = {},
+) {
   const uri = new URL(process.env.MONGODB_URI ?? 'mongodb://invalid/missing');
-  if (!['127.0.0.1', 'localhost'].includes(uri.hostname) || uri.pathname !== '/whiteboard_acceptance') {
-    throw new Error('Use local isolated MongoDB database whiteboard_acceptance.');
+  if (
+    !['127.0.0.1', 'localhost'].includes(uri.hostname) ||
+    uri.pathname !== '/whiteboard_acceptance'
+  ) {
+    throw new Error(
+      'Use local isolated MongoDB database whiteboard_acceptance.',
+    );
   }
-  const materialDirectory = await mkdtemp(path.join(os.tmpdir(), 'sfu-whiteboard-materials-'));
-  const overrides = { MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER: '50', SMTP_ENABLED: 'false', CLASS_MATERIAL_LOCAL_PATH: materialDirectory };
-  const previous = Object.fromEntries(Object.keys(overrides).map((key) => [key, process.env[key]]));
+  const materialDirectory = await mkdtemp(
+    path.join(os.tmpdir(), 'sfu-whiteboard-materials-'),
+  );
+  const overrides: Record<string, string> = {
+    MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER: '50',
+    SMTP_ENABLED: options.localSmtpPort ? 'true' : 'false',
+    CLASS_MATERIAL_LOCAL_PATH: materialDirectory,
+    ...(options.localSmtpPort
+      ? {
+          SMTP_HOST: '127.0.0.1',
+          SMTP_PORT: String(options.localSmtpPort),
+          SMTP_SECURE: 'false',
+          SMTP_USER: '',
+          SMTP_PASSWORD: '',
+          SMTP_PASSWORD_FILE: '',
+          SMTP_FROM_EMAIL: 'tutor-test@example.com',
+          SMTP_FROM_NAME: 'Sapiovian',
+          TUTOR_NOTIFICATION_POLL_MS: '500',
+        }
+      : {}),
+  };
+  const previous = Object.fromEntries(
+    Object.keys(overrides).map((key) => [key, process.env[key]]),
+  );
   let stack: LocalUiStack;
   try {
     Object.assign(process.env, overrides);
-    stack = await startLocalUiStack({ frontendPort: options.frontendPort ?? 4440, nodePorts: [options.backendPort ?? 3340], workerMode: 'in-process', operationsToken: 'whiteboard-acceptance-operations-test-token' });
+    stack = await startLocalUiStack({
+      frontendPort: options.frontendPort ?? 4440,
+      nodePorts: options.secondBackendPort
+        ? [options.backendPort ?? 3340, options.secondBackendPort]
+        : [options.backendPort ?? 3340],
+      workerMode: 'in-process',
+      operationsToken: 'whiteboard-acceptance-operations-test-token',
+    });
   } catch (error) {
     await rm(materialDirectory, { recursive: true, force: true });
     throw error;
   } finally {
-    for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
-  return { ...stack, materialDirectory, stop: async () => { try { await stack.stop(); } finally { await rm(materialDirectory, { recursive: true, force: true }); } } };
-
+  return {
+    ...stack,
+    materialDirectory,
+    stop: async () => {
+      try {
+        await stack.stop();
+      } finally {
+        await rm(materialDirectory, { recursive: true, force: true });
+      }
+    },
+  };
 }
 
 export async function createClassroomHarness(options: { stack?: LocalUiStack; frontendPort?: number; backendPort?: number; enrollStudent?: boolean } = {}) {

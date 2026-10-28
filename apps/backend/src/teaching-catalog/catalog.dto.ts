@@ -29,6 +29,11 @@ export class AcademicAssessmentTaskDto {
 }
 export class CatalogWriteDto {
   @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MinLength(40)
+  @MaxLength(3000)
+  assessmentRubric?: string;
+  @ValidateIf((_, value) => value !== undefined)
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AcademicAssessmentTaskDto)
@@ -121,4 +126,15 @@ export class ReviewTutorDto {
   @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   safeguardingChecked?: boolean;
+}
+
+export class ApproveAssessmentContentDto {
+  @IsInt() @Min(0) version!: number;
+  @IsString() @MinLength(20) @MaxLength(1000) expertise!: string;
+  @IsString() @MinLength(20) @MaxLength(1000) notes!: string;
+  @IsBoolean() qualifiedReviewerConfirmed!: boolean;
+}
+export class ReviewVerificationDocumentDto {
+  @IsIn(['verified', 'rejected']) decision!: 'verified' | 'rejected';
+  @IsString() @MinLength(20) @MaxLength(1000) note!: string;
 }

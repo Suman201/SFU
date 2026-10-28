@@ -19,6 +19,43 @@ export class TeachingCatalogApi {
       ? response.data
       : (response as T);
   }
+  readiness() {
+    return this.http
+      .get<any>(`${API_BASE_URL}/admin/tutor-onboarding/readiness`)
+      .pipe(map((r) => this.unwrap(r)));
+  }
+  approveContent(
+    kind: TeachingCatalogKind,
+    id: string,
+    body: {
+      version: number;
+      expertise: string;
+      notes: string;
+      qualifiedReviewerConfirmed: boolean;
+    },
+  ) {
+    return this.http.post(
+      `${API_BASE_URL}/admin/teaching-catalog/${kind}/${id}/assessment-approval`,
+      body,
+    );
+  }
+  verificationDocument(teacherId: string, id: string) {
+    return this.http.get(
+      `${API_BASE_URL}/admin/tutor-applications/${teacherId}/verification-documents/${id}`,
+      { responseType: 'blob' },
+    );
+  }
+  reviewVerificationDocument(
+    teacherId: string,
+    id: string,
+    decision: 'verified' | 'rejected',
+    note: string,
+  ) {
+    return this.http.post(
+      `${API_BASE_URL}/admin/tutor-applications/${teacherId}/verification-documents/${id}/review`,
+      { decision, note },
+    );
+  }
   introVideo(id: string) {
     return this.http.get(
       `${API_BASE_URL}/admin/tutor-applications/${id}/introduction-video`,

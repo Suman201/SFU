@@ -188,6 +188,20 @@ export class UserDocument {
   @Prop({ default: false, index: true })
   publicProfileEnabled!: boolean;
 
+  @Prop({ type: [Object], default: [] }) tutorOnboardingNotices!: Array<
+    import('@native-sfu/contracts').TutorOnboardingNotice & {
+      emailStatus: string;
+      attempts: number;
+      nextAttemptAt: Date;
+      leaseUntil?: Date;
+    }
+  >;
+  @Prop({ type: [Object], default: [] }) tutorVerificationDocuments!: Array<
+    import('@native-sfu/contracts').TutorVerificationDocument & {
+      fileName: string;
+      viewedBy?: string[];
+    }
+  >;
   @Prop({ type: Object }) tutorIntroVideo?: {fileName:string;mimeType:string;size:number;durationSeconds:number};
   @Prop({ type: String, maxlength: 2048 }) introVideoUrl?: string;
   @Prop({ type: [Object], default: [] }) assessmentResponses!: import('@native-sfu/contracts').TutorAssessmentResponse[];
@@ -250,6 +264,8 @@ export class UserDocument {
 export const UserSchema = SchemaFactory.createForClass(UserDocument);
 UserSchema.index({ disabled: 1 });
 UserSchema.index({ status: 1, deletedAt: 1 });
+UserSchema.index({ 'tutorOnboardingNotices.emailStatus': 1, 'tutorOnboardingNotices.nextAttemptAt': 1 });
+UserSchema.index({ 'tutorVerificationDocuments.expiresAt': 1 });
 
 export const TEACHER_PUBLIC_CONTENT_ITEM_TYPES = ['gallery', 'demo_class'] as const satisfies readonly TeacherPublicContentItemType[];
 export const TEACHER_PUBLIC_CONTENT_MEDIA_TYPES = ['image', 'video', 'pdf', 'document', 'slides', 'link'] as const satisfies readonly TeacherPublicContentMediaType[];

@@ -1,3 +1,11 @@
+import { OnboardingReadinessService } from './onboarding-readiness.service';
+import { VerificationDocumentsService } from './verification-documents.service';
+import {
+  TutorVerificationDocumentsController,
+  AdminTutorVerificationDocumentsController,
+} from './verification-documents.controller';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { TutorNoticesService } from './tutor-notices.service';
 import { IntroVideoService } from './intro-video.service';
 import {
   TutorIntroVideoController,
@@ -16,6 +24,7 @@ import {
 import { TeachingCatalogService } from './catalog.service';
 import { TutorApplicationsService } from './applications.service';
 import {
+  TutorOnboardingReadinessController,
   AdminTeachingCatalogController,
   AdminTutorApplicationsController,
   TeachingCatalogController,
@@ -24,6 +33,7 @@ import {
 @Module({
   imports: [
     AuthModule,
+    NotificationsModule,
     DatabaseModule,
     AuditLogsModule,
     MongooseModule.forFeature([
@@ -31,10 +41,13 @@ import {
     ]),
   ],
   controllers: [
+    TutorVerificationDocumentsController,
+    AdminTutorVerificationDocumentsController,
     TutorIntroVideoController,
     AdminTutorIntroVideoController,
     PublicTutorIntroVideoController,
     TeachingCatalogController,
+    TutorOnboardingReadinessController,
     AdminTeachingCatalogController,
     TutorApplicationController,
     AdminTutorApplicationsController,
@@ -43,6 +56,9 @@ import {
     TeachingCatalogService,
     TutorApplicationsService,
     IntroVideoService,
+    TutorNoticesService,
+    VerificationDocumentsService,
+    OnboardingReadinessService,
   ],
   exports: [TeachingCatalogService, IntroVideoService],
 })

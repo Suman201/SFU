@@ -76,6 +76,27 @@ const schema = Joi.object({
   CHAT_ATTACHMENT_MAX_FILE_SIZE_BYTES: Joi.number().integer().min(1).max(10 * 1024 * 1024).default(2 * 1024 * 1024),
   CLASS_MATERIAL_LOCAL_PATH: Joi.string().default('/app/class-materials'),
   CLASS_MATERIAL_MAX_FILE_SIZE_BYTES: Joi.number().integer().min(1).max(50 * 1024 * 1024).default(10 * 1024 * 1024),
+  TUTOR_VERIFICATION_SWEEP_MS: Joi.number()
+    .integer()
+    .min(500)
+    .max(86400000)
+    .default(60000),
+  TUTOR_PDFINFO_PATH: Joi.string().allow('').optional(),
+  TUTOR_NOTIFICATION_POLL_MS: Joi.number()
+    .integer()
+    .min(500)
+    .max(60000)
+    .default(30000),
+  TUTOR_VERIFICATION_LOCAL_PATH: Joi.string().allow('').optional(),
+  TUTOR_VERIFICATION_ENCRYPTION_KEY: Joi.string()
+    .allow('')
+    .pattern(/^[A-Za-z0-9+/]{43}=$/)
+    .default(''),
+  TUTOR_VERIFICATION_RETENTION_DAYS: Joi.number()
+    .integer()
+    .min(1)
+    .max(365)
+    .default(30),
   TUTOR_INTRO_VIDEO_LOCAL_PATH: Joi.string().allow('').optional(),
   PROFILE_MEDIA_LOCAL_PATH: Joi.string().default('/app/profile-media'),
   PROFILE_MEDIA_MAX_FILE_SIZE_BYTES: Joi.number().integer().min(1).max(10 * 1024 * 1024).default(2 * 1024 * 1024),

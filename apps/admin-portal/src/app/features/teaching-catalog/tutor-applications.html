@@ -157,6 +157,55 @@
       }
     </section>
     }}
+    <h3>Private verification</h3>
+    <p>
+      Inspect the evidence and complete the appropriate identity, qualification
+      and safeguarding checks before recording a result. These files and notes
+      stay private.
+    </p>
+    @for(doc of item.verificationDocuments||[];track doc.id){
+    <section class="record-editor" [attr.data-verification-id]="doc.id">
+      <h4>{{doc.kind}} · {{doc.name}}</h4>
+      <p>Status: {{doc.status}}</p>
+      @if(doc.reviewNote){
+      <p>{{doc.reviewNote}}</p>
+      } @if(doc.fileAvailable){<button
+        type="button"
+        class="secondary-button"
+        (click)="downloadDocument(doc)"
+      >
+        Download for review</button
+      ><label
+        >Verification findings<textarea
+          rows="3"
+          maxlength="1000"
+          [(ngModel)]="documentNotes[doc.id]"
+          placeholder="Record the method, source and findings. Do not copy identity numbers into notes."
+        ></textarea></label
+      ><button
+        type="button"
+        class="primary-button"
+        [disabled]="saving()||!documentRead().includes(doc.id)||(documentNotes[doc.id]||'').trim().length<20"
+        (click)="reviewDocument(doc,'verified')"
+      >
+        Mark verified</button
+      ><button
+        type="button"
+        class="secondary-button"
+        [disabled]="saving()||!documentRead().includes(doc.id)||(documentNotes[doc.id]||'').trim().length<20"
+        (click)="reviewDocument(doc,'rejected')"
+      >
+        Reject document</button
+      >}@else{
+      <p>
+        File removed under the retention policy. The recorded verification
+        result is retained.
+      </p>
+      }
+    </section>
+    }@empty{
+    <p>No verification evidence has been submitted.</p>
+    }
     <h3>Introduction video</h3>
     @if(item.introVideoUploaded){<button
       type="button"
@@ -185,6 +234,13 @@
       <legend>{{required.categoryName}} · {{required.levelName}}</legend>
       <p>{{required.subjects.join(', ')}}</p>
       <p>{{required.instructions}}</p>
+      <h4>Review criteria</h4>
+      <p>{{required.rubric}}</p>
+      @if(!required.contentApproved){
+      <p role="alert">
+        This assessment content requires qualified review before tutor approval.
+      </p>
+      }
       <p style="white-space: pre-line">
         {{assessmentResponse(required)?.response || 'No response submitted'}}
       </p>

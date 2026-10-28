@@ -1,3 +1,11 @@
+import {
+  verifyReviewDecisionsAndWithdrawal,
+  startLocalSmtpSink,
+  approveFixtureContent,
+  uploadPrivateEvidence,
+  reviewPrivateEvidence,
+  verifyNoticesAndReadiness,
+} from './helpers/tutor-launch-acceptance';
 import { exerciseLevelAssessments } from './helpers/level-assessment-acceptance';
 import { resolveTeachingAssessments } from '@native-sfu/contracts';
 import { runStudentEnrollmentJourney } from './helpers/student-enrollment-journey';
@@ -17,9 +25,15 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
   request,
 }, info) => {
   test.setTimeout(240_000);
+  const smtp = await startLocalSmtpSink();
   const stack = await startAcceptanceStack({
+    localSmtpPort: smtp.port,
+    secondBackendPort: 3366,
     frontendPort: 4464,
     backendPort: 3364,
+  }).catch(async (error) => {
+    await smtp.close();
+    throw error;
   });
   let adminServer: ReturnType<typeof createServer> | undefined;
   const contexts: any[] = [];
@@ -48,6 +62,8 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
             displayName: 'Catalogue Reviewer',
             roles: ['ADMIN'],
             permissions: ['*'],
+            tutorVerificationDocuments: [],
+            tutorOnboardingNotices: [],
           },
         },
         { upsert: true },
@@ -58,6 +74,8 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
         {
           $set: {
             tutorReviewStatus: 'draft',
+            tutorVerificationDocuments: [],
+            tutorOnboardingNotices: [],
             tutorRevision: 0,
             publicProfileEnabled: false,
             teacherSubjectIds: [],
@@ -125,6 +143,7 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
       {},
       201,
     );
+    await approveFixtureContent(api, admin.accessToken);
     const catalog = await api('GET', '/teaching-catalog', undefined);
     expect(catalog.categories.length).toBeGreaterThan(18);
     expect(catalog.subjects).toHaveLength(270);
@@ -257,6 +276,18 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
     await expect(
       page.getByRole('heading', { name: 'Your teaching profile', exact: true }),
     ).toBeVisible();
+    await uploadPrivateEvidence(
+      page,
+      api,
+      request,
+      stack.nodeAUrl,
+      stack.nodeBUrl!,
+      teacherId,
+      teacher.accessToken,
+      admin.accessToken,
+      student.accessToken,
+      screenshotDir,
+    );
     await page.getByRole('button', { name: '3 Introduction video' }).click();
     await page.locator('.edit-panel').scrollIntoViewIfNeeded();
     await page.screenshot({
@@ -270,24 +301,20 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
     await page.locator('.edit-panel').screenshot({
       path: path.join(screenshotDir, 'teacher-subjects-panel.png'),
     });
-    await page
-      .locator('sfu-teaching-areas-editor')
-      .screenshot({
-        path: path.join(screenshotDir, 'teaching-areas.png'),
-        style: 'sfu-header{visibility:hidden!important}',
-      });
+    await page.locator('sfu-teaching-areas-editor').screenshot({
+      path: path.join(screenshotDir, 'teaching-areas.png'),
+      style: 'sfu-header{visibility:hidden!important}',
+    });
     await page.setViewportSize({ width: 390, height: 844 });
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    await page
-      .locator('sfu-teaching-areas-editor')
-      .screenshot({
-        path: path.join(screenshotDir, 'teaching-areas-mobile.png'),
-        style: 'sfu-header{visibility:hidden!important}',
-      });
+    await page.locator('sfu-teaching-areas-editor').screenshot({
+      path: path.join(screenshotDir, 'teaching-areas-mobile.png'),
+      style: 'sfu-header{visibility:hidden!important}',
+    });
     await page.setViewportSize({ width: 1440, height: 1100 });
     await page.getByRole('button', { name: '1 About you' }).click();
     await page.locator('.edit-panel').screenshot({
@@ -553,6 +580,14 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
     });
     await adminPage.goto('http://127.0.0.1:4465/tutor-applications');
     await adminPage.getByRole('button', { name: 'Review Alex Morgan' }).click();
+    await reviewPrivateEvidence(
+      api,
+      adminPage,
+      teacherId,
+      teacher.accessToken,
+      admin.accessToken,
+      screenshotDir,
+    );
     await adminPage
       .getByRole('button', { name: 'Preview uploaded introduction' })
       .click();
@@ -682,6 +717,23 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
       teacher.accessToken,
       admin.accessToken,
       screenshotDir,
+    );
+    await verifyNoticesAndReadiness(
+      api,
+      page,
+      request,
+      stack.nodeAUrl,
+      teacher.accessToken,
+      admin.accessToken,
+      student.accessToken,
+      smtp,
+      screenshotDir,
+    );
+    await verifyReviewDecisionsAndWithdrawal(
+      api,
+      teacherId,
+      teacher.accessToken,
+      admin.accessToken,
     );
     await api('PATCH', '/profile/me', teacher.accessToken, {
       introVideoUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
@@ -833,5 +885,6 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
     if (adminServer)
       await new Promise<void>((resolve) => adminServer!.close(() => resolve()));
     await stack.stop();
+    await smtp.close();
   }
 });

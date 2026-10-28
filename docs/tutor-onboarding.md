@@ -1,6 +1,6 @@
 # Tutor profiles and teaching catalogue
 
-The teacher profile editor uses the existing account/backend. It separates About you, Subjects & learners, Introduction video, Experience, Teaching assessment, and Review & submit. `/teacher/profile` is the teacher entry point. Admin routes are `/teaching-catalog` and `/tutor-applications`.
+The teacher profile editor uses the existing account/backend. It separates About you, Subjects & learners, Introduction video, Experience (including private verification), Teaching assessment, and Review & submit. `/teacher/profile` is the teacher entry point. Admin routes are `/teaching-catalog` and `/tutor-applications`.
 
 ## Catalogue
 
@@ -34,15 +34,25 @@ Teachers submit a separate response and optional supporting sample for each cate
 
 Draft → submitted → approved / changes requested / rejected. Teacher profile or media changes increment the revision, hide the public profile, and require a new review. Admins cannot review their own profile. Stale profile/review submissions are rejected. **Existing teachers require review before their public listing is shown**; there is no silent grandfathered approval. Teaching/classroom access is unchanged by listing approval.
 
+## Private evidence, content approval and updates
+
+Experience includes private identity evidence and, when qualifications or education are claimed, supporting qualification evidence. PDF, PNG and JPEG uploads are validated and encrypted using a configured key. Owners and admin reviewers can download them through authenticated endpoints. Reviewers must download and inspect each document before recording its outcome; identity and applicable qualification evidence must be verified before approval. File retention removes source files while preserving the review outcome. Removing required evidence withdraws the listing and requires a new review.
+
+Assessment content and review criteria start unapproved. Qualified reviewers sign off category and academic-level versions in the catalogue; edits invalidate that sign-off. Public catalogue responses expose only the approved version, keeping reviewer findings private. Applicable content approval is required before tutor submission and approval; Other subjects continue through manual review.
+
+Submission and review decisions create in-app Updates and a queued status email. Delivery failures are retried across backend processes without exposing private evidence or reviewer findings in messages. See [setup and operations](tutor-onboarding-operations.md) for key configuration, retention, SMTP, readiness checks and backups, and [the pilot worksheet](tutor-onboarding-pilot.md) for the real-participant work still to perform. No production environment or real pilot is represented by the local tests.
+
 ## Deployment
 
-ffprobe is supplied by FFmpeg in the backend image. The default private storage path is `PROFILE_MEDIA_LOCAL_PATH/tutor-introductions`. Set `TUTOR_INTRO_VIDEO_LOCAL_PATH` to a private shared directory when using multiple API replicas. The multi-node Docker Compose configuration mounts one shared video volume on both nodes. The single-node production and Kubernetes paths use the existing profile media volume. Do not expose this directory as static files. Ensure the reverse proxy accepts multipart uploads above 50 MiB and persistent storage is backed up. No installer rebuild is needed for backend/admin changes; desktop packaging remains a separate operation.
+FFmpeg supplies ffprobe; Poppler supplies pdfinfo for private document validation in the backend image. The default private storage path is `PROFILE_MEDIA_LOCAL_PATH/tutor-introductions`. Set `TUTOR_INTRO_VIDEO_LOCAL_PATH` to a private shared directory when using multiple API replicas. The multi-node Docker Compose configuration mounts one shared video volume on both nodes. The single-node production and Kubernetes paths use the existing profile media volume. Do not expose this directory as static files. Ensure the reverse proxy accepts multipart uploads above 50 MiB and persistent storage is backed up. No installer rebuild is needed for backend/admin changes; desktop packaging remains a separate operation.
 
 Country-specific onboarding, safeguarding procedures, minors' guardian consent, retention, and other launch obligations need operational/legal implementation appropriate to each market. These UI review controls do not establish Europe-wide legal compliance.
 
 ## Verification
 
-`tests/browser/tutor-onboarding-acceptance.spec.ts` runs headlessly against the real Nest backend, isolated MongoDB `whiteboard_acceptance`, Redis, and Angular UI. It covers catalogue counts/permissions/CRUD/stale versions/reseeding, rejected invalid inputs, upload/preview, draft privacy, teacher submission, review prerequisites, admin video playback and approval, public range playback, marketplace subject filtering, edit invalidation, link replacement, and mobile width. The extended flow also covers primary and university tasks in the same subject, admin overrides, inherited/default tasks, stale answers and review results, large subject/category selections, nested category cycles, wrong-category subjects, academic levels and teaching languages, matching within one teaching area, Other-only submission/review/public search, and admin level/language management. It uses a synthetic video fixture; no live account or real applicant is approved. Backend unit tests cover link validation and streaming. Teacher editor tests cover failed upload/preview recovery.
+`tests/browser/tutor-onboarding-acceptance.spec.ts` runs headlessly against the real Nest backend, isolated MongoDB `whiteboard_acceptance`, Redis, and Angular UI. It covers catalogue counts/permissions/CRUD/stale versions/reseeding, rejected invalid inputs, upload/preview, draft privacy, teacher submission, review prerequisites, admin video playback and approval, public range playback, marketplace subject filtering, edit invalidation, link replacement, and mobile width. The extended flow also covers primary and university tasks in the same subject, admin overrides, inherited/default tasks, stale answers and review results, large subject/category selections, nested category cycles, wrong-category subjects, academic levels and teaching languages, matching within one teaching area, Other-only submission/review/public search, and admin level/language management. The extended checks also exercise private evidence uploads/downloads, ownership restrictions, ciphertext tamper detection, retention expiry, two API processes, expert content approvals, in-app status notices, email retries through a local SMTP server, and the readiness CLI. It uses synthetic evidence and video fixtures; no live account or real applicant is approved. Backend unit tests cover link validation and streaming. Teacher editor tests cover failed upload/preview recovery.
+
+See [the local validation record](tutor-onboarding-validation.md) for the latest results and the distinction between synthetic acceptance and human launch checks.
 
 ## Student journey
 

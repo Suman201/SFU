@@ -14,3 +14,11 @@ coverage
 
 # Admin build copies canonical frontend branding.
 /apps/admin-portal/public/brand/
+
+# Local private verification encryption key
+/.local-secrets/
+
+# Private server media must never be committed.
+/profile-media/
+/apps/backend/profile-media/
+/tutor-verification/
