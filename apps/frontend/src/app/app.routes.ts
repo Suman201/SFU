@@ -98,6 +98,14 @@ export const routes: Routes = [
     loadComponent: () => import('./features/profile/teacher-marketplace/teacher-marketplace').then((route) => route.TeacherMarketplace)
   },
   {
+    path: 'booking',
+    loadComponent: () => import('./features/booking/booking-preview').then((route) => route.BookingPreview)
+  },
+  {
+    path: 'teachers/:teacherId/book',
+    loadComponent: () => import('./features/booking/booking-preview').then((route) => route.BookingPreview)
+  },
+  {
     path: 'teachers/:teacherId',
     loadComponent: () =>
       import('./features/profile/public-teacher-profile/public-teacher-profile').then((route) => route.PublicTeacherProfile)

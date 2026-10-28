@@ -92,8 +92,10 @@
           Explore {{teacher.displayName}}'s upcoming classes and choose what
           works for you.
         </p>
+        <a class="primary-link" [routerLink]="['/teachers', teacher.id, 'book']">Preview booking <span aria-hidden="true">→</span></a>
+        <small class="booking-preview-note">Try lesson selection and payment with sample availability and prices.</small>
         <a
-          class="primary-link"
+          class="content-link"
           href="#profile-content"
           (click)="selectTab('batches')"
           >View classes <span aria-hidden="true">↗</span></a

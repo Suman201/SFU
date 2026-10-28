@@ -1,0 +1,407 @@
+<header class="checkout-header">
+  <a routerLink="/" aria-label="Sapiovian home"><sfu-brand-logo /></a>
+  <div class="header-tools">
+    <span class="preview-badge">Booking preview</span
+    ><button
+      type="button"
+      class="theme-button"
+      [attr.aria-label]="theme.label()"
+      (click)="theme.toggle()"
+    >
+      {{theme.isDark()?'Light mode':'Dark mode'}}
+    </button>
+  </div>
+</header>
+<main class="booking-shell" id="main-content">
+  <a class="back-link" [routerLink]="backLink()"
+    ><span aria-hidden="true">←</span> {{teacherId()?'Back to teacher':'Find a
+    teacher'}}</a
+  >
+  <div class="preview-notice">
+    <span class="preview-dot" aria-hidden="true"></span>
+    <p>
+      <strong>A preview of booking on Sapiovian.</strong> Times, lesson options
+      and prices are examples. No payment or reservation is made.
+    </p>
+  </div>
+  @if(loading()) {
+  <section class="state-panel" role="status">Loading teacher…</section>
+  } @else if(loadError()) {
+  <section class="state-panel">
+    <h1>Teacher unavailable</h1>
+    <p role="alert">{{loadError()}}</p>
+    <button class="primary-button" type="button" (click)="loadTeacher()">
+      Try again
+    </button>
+  </section>
+  } @else { @if(!complete()) {
+  <nav class="step-nav" aria-label="Booking steps">
+    <ol>
+      @for(label of ['Lesson','Date & time','Payment'];track label;let
+      i=$index){
+      <li [class.current]="step()===i+1" [class.done]="step()>i+1">
+        <button
+          type="button"
+          [disabled]="i+1>visited()||processing()||(i===2&&!selectedSlot())"
+          [attr.aria-current]="step()===i+1?'step':null"
+          (click)="goTo(i+1)"
+        >
+          <span>{{step()>i+1?'✓':i+1}}</span>{{label}}
+        </button>
+      </li>
+      }
+    </ol>
+  </nav>
+  }
+  <div class="booking-layout">
+    <section class="booking-main">
+      @if(complete()) {
+      <div class="completion-mark" aria-hidden="true">✓</div>
+      <p class="eyebrow">PREVIEW COMPLETE</p>
+      <h1 id="booking-heading" tabindex="-1">Your lesson, all planned out.</h1>
+      <p class="intro">
+        You’ve reached the end of the sample booking flow. No money was charged
+        and this lesson has not been reserved.
+      </p>
+      <div class="completion-details">
+        <div><span>Teacher</span><strong>{{teacher().name}}</strong></div>
+        <div>
+          <span>Lesson</span
+          ><strong>{{lesson().title}} · {{lesson().duration}} minutes</strong>
+        </div>
+        <div>
+          <span>Date & time</span
+          ><strong
+            >{{dateLabel()}}<br />{{timeLabel()}} · {{timezone()}}</strong
+          >
+        </div>
+        <div>
+          <span>Payment preview</span><strong>Sample payment successful</strong>
+        </div>
+      </div>
+      <div class="completion-actions">
+        <button
+          type="button"
+          class="primary-button"
+          (click)="downloadSummary()"
+        >
+          Download preview summary <span aria-hidden="true">↓</span></button
+        ><button type="button" class="text-button" (click)="reset()">
+          Start another preview
+        </button>
+      </div>
+      } @else if(step()===1) {
+      <p class="eyebrow">BOOK A LESSON</p>
+      <h1 id="booking-heading" tabindex="-1">Start with the right lesson.</h1>
+      <p class="intro">
+        Choose how much time you’d like with {{teacher().name}}.
+      </p>
+      <fieldset class="lesson-options">
+        <legend class="sr-only">Choose your lesson</legend>
+        @for(option of lessons;track option.id){<label
+          class="lesson-option"
+          [class.selected]="lessonId()===option.id"
+          ><input
+            type="radio"
+            name="lesson"
+            [value]="option.id"
+            [checked]="lessonId()===option.id"
+            (change)="lessonId.set(option.id)"
+          /><span class="option-copy"
+            ><span class="option-title"
+              >{{option.title}} @if(option.id==='intro'){<small
+                >Meet your teacher</small
+              >}</span
+            ><span class="option-description">{{option.description}}</span
+            ><span class="duration"
+              >{{option.duration}} minutes · One-to-one · Online</span
+            ></span
+          ><strong class="option-price">{{money(option.price)}}</strong></label
+        >}
+      </fieldset>
+      <label class="field goal-field"
+        >Learning goal <span class="optional">Optional</span
+        ><textarea
+          rows="3"
+          maxlength="400"
+          [(ngModel)]="goal"
+          placeholder="What would you like to focus on in your lesson?"
+        ></textarea>
+      </label>
+      <div class="step-actions">
+        <button class="primary-button" type="button" (click)="next()">
+          Choose a time <span aria-hidden="true">→</span>
+        </button>
+      </div>
+      } @else if(step()===2) {
+      <p class="eyebrow">DATE & TIME</p>
+      <h1 id="booking-heading" tabindex="-1">Find a time that suits you.</h1>
+      <p class="intro">Pick from the sample availability below.</p>
+      <label class="field timezone-field"
+        >Your timezone<select
+          aria-label="Your timezone"
+          [ngModel]="timezone()"
+          (ngModelChange)="changeTimezone($event)"
+        >
+          @for(zone of timezones;track zone){
+          <option [value]="zone">{{zone.replaceAll('_',' ')}}</option>
+          }
+        </select></label
+      >
+      <div class="calendar">
+        <div class="calendar-heading">
+          <h2>{{monthLabel()}}</h2>
+          <div>
+            <button
+              class="week-button"
+              type="button"
+              aria-label="Previous week"
+              [disabled]="weekStart()===0"
+              (click)="changeWeek(-1)"
+            >
+              ←</button
+            ><button
+              class="week-button"
+              type="button"
+              aria-label="Next week"
+              [disabled]="weekStart()+7>=days().length"
+              (click)="changeWeek(1)"
+            >
+              →
+            </button>
+          </div>
+        </div>
+        <div class="day-grid" role="group" aria-label="Choose a date">
+          @for(day of visibleDays();track day.key){<button
+            type="button"
+            [class.selected]="selectedDay()===day.key"
+            [attr.aria-pressed]="selectedDay()===day.key"
+            [attr.aria-label]="format(day.instant,{weekday:'long',day:'numeric',month:'long'})"
+            (click)="chooseDay(day.key)"
+          >
+            <span>{{format(day.instant,{weekday:'short'})}}</span
+            ><strong>{{format(day.instant,{day:'numeric'})}}</strong
+            ><i aria-hidden="true"></i></button
+          >}
+        </div>
+        <h3>Available times</h3>
+        <div class="slot-grid" role="group" aria-label="Available times">
+          @for(instant of daySlots();track instant){<button
+            type="button"
+            [class.selected]="selectedSlot()===instant"
+            [attr.aria-pressed]="selectedSlot()===instant"
+            (click)="selectedSlot.set(instant)"
+          >
+            {{format(instant,{hour:'2-digit',minute:'2-digit',hour12:false})}}</button
+          >}
+        </div>
+        <p class="calendar-note">
+          All times are shown in {{timezone().replaceAll('_',' ')}}. Changing
+          timezone keeps the same selected appointment.
+        </p>
+      </div>
+      <div class="step-actions">
+        <button type="button" class="text-button" (click)="goTo(1)">
+          ← Lesson</button
+        ><button
+          class="primary-button"
+          type="button"
+          [disabled]="!selectedSlot()"
+          (click)="next()"
+        >
+          Continue to payment <span aria-hidden="true">→</span>
+        </button>
+      </div>
+      } @else {
+      <p class="eyebrow">PAYMENT</p>
+      <h1 id="booking-heading" tabindex="-1">One last look.</h1>
+      <p class="intro">
+        Review your lesson and try the sample payment experience.
+      </p>
+      <form (submit)="pay($event)" [attr.aria-busy]="processing()">
+        <fieldset class="payment-fields" [disabled]="processing()">
+          <legend>
+            Payment details <span class="sample-label">Sample card only</span>
+          </legend>
+          <label class="field"
+            >Choose a sample card<select
+              [ngModel]="card()"
+              (ngModelChange)="changeCard($event)"
+              name="sampleCard"
+            >
+              <option value="success">
+                Card ending 4242 · Successful payment
+              </option>
+              <option value="declined">
+                Card ending 0002 · Declined payment
+              </option>
+            </select></label
+          ><label class="field"
+            >Card number
+            <div class="card-number">
+              <input
+                aria-label="Card number"
+                [value]="card()==='success'?'4242 4242 4242 4242':'4000 0000 0000 0002'"
+                readonly
+                autocomplete="off"
+              /><span aria-hidden="true">CARD</span>
+            </div></label
+          >
+          <div class="field-row">
+            <label class="field"
+              >Expiry date<input
+                value="12 / 29"
+                readonly
+                autocomplete="off" /></label
+            ><label class="field"
+              >Security code<input value="123" readonly autocomplete="off"
+            /></label>
+          </div>
+          <p class="field-note">
+            These are sample details. Don’t enter a real payment card.
+          </p>
+        </fieldset>
+        <fieldset class="billing-fields" [disabled]="processing()">
+          <legend>Billing details</legend>
+          <label class="field"
+            >Name<input
+              name="billingName"
+              [(ngModel)]="billingName"
+              required
+              pattern=".*\S.*"
+              maxlength="100"
+              autocomplete="off" /></label
+          ><label class="field"
+            >Email<input
+              name="billingEmail"
+              type="email"
+              [(ngModel)]="billingEmail"
+              required
+              maxlength="200"
+              autocomplete="off" /></label
+          ><label class="field"
+            >Country<select name="billingCountry" [(ngModel)]="billingCountry">
+              <option value="DE">Germany</option>
+              <option value="FR">France</option>
+              <option value="GB">United Kingdom</option>
+              <option value="ES">Spain</option>
+              <option value="IT">Italy</option>
+              <option value="NL">Netherlands</option>
+              <option value="OTHER">Another country</option>
+            </select></label
+          >
+        </fieldset>
+        @if(paymentError()){
+        <p class="payment-error" role="alert">{{paymentError()}}</p>
+        }
+        <div class="payment-total">
+          <span>Sample total <small>EUR · One lesson</small></span
+          ><strong>{{money(lesson().price)}}</strong>
+        </div>
+        <button
+          type="submit"
+          class="primary-button pay-button"
+          [disabled]="processing()"
+        >
+          {{processing()?'Processing preview…':'Preview payment ·
+          '+money(lesson().price)}} <span aria-hidden="true">→</span>
+        </button>
+        <p class="payment-footnote">
+          Nothing will be charged. This preview doesn’t save or send your
+          billing details.
+        </p>
+        <button
+          type="button"
+          class="text-button"
+          [disabled]="processing()"
+          (click)="goTo(2)"
+        >
+          ← Change date & time
+        </button>
+      </form>
+      }
+    </section>
+    <aside class="order-summary" aria-label="Lesson summary">
+      <div class="summary-teacher">
+        @if(teacher().image){<img
+          [src]="teacher().image"
+          alt=""
+          (error)="imageFailed()"
+        />}@else{<span class="teacher-initials" aria-hidden="true"
+          >{{initials()}}</span
+        >}
+        <div>
+          <span>{{teacherId()?'Your teacher':'Sample teacher'}}</span>
+          <h2>{{teacher().name}}</h2>
+          <p>{{teacher().headline}}</p>
+        </div>
+      </div>
+      <div class="summary-section">
+        <div class="summary-heading">
+          <h3>Your lesson</h3>
+          @if(step()>1&&!complete()){<button
+            type="button"
+            class="text-button"
+            [disabled]="processing()"
+            (click)="goTo(1)"
+          >
+            Change</button
+          >}
+        </div>
+        <strong>{{lesson().title}}</strong>
+        <p>{{lesson().duration}} minutes · One-to-one · Online</p>
+      </div>
+      <div class="summary-section">
+        <div class="summary-heading">
+          <h3>Date & time</h3>
+          @if(selectedSlot()&&!complete()){<button
+            type="button"
+            class="text-button"
+            [disabled]="processing()"
+            (click)="goTo(2)"
+          >
+            Change</button
+          >}
+        </div>
+        <strong>{{dateLabel()}}</strong>@if(selectedSlot()){
+        <p>{{timeLabel()}}<br />{{timezone().replaceAll('_',' ')}}</p>
+        }@else{
+        <p>Choose a slot in the next step.</p>
+        }
+      </div>
+      @if(goal.trim()){
+      <div class="summary-section">
+        <h3>Your learning goal</h3>
+        <p class="goal-preview">{{goal}}</p>
+      </div>
+      }
+      <dl class="price-breakdown">
+        <div>
+          <dt>Lesson</dt>
+          <dd>{{money(lesson().price)}}</dd>
+        </div>
+        <div>
+          <dt>Booking fee</dt>
+          <dd>{{money(0)}}</dd>
+        </div>
+        <div class="summary-total">
+          <dt>Sample total <small>EUR</small></dt>
+          <dd>{{money(lesson().price)}}</dd>
+        </div>
+      </dl>
+      <div class="summary-footer">
+        <span aria-hidden="true">◷</span>
+        <p>
+          {{complete()?'Actual amount charged: €0.00. This lesson is not
+          reserved.':'Your selected time is a sample. It isn’t held or
+          reserved.'}}
+        </p>
+      </div>
+    </aside>
+  </div>
+  }
+  <footer class="checkout-footer">
+    <span>Learning starts with a conversation.</span
+    ><a routerLink="/help">Need help?</a>
+  </footer>
+</main>
