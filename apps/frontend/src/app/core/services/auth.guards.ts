@@ -1,3 +1,4 @@
+import { safeAuthReturnPath } from './auth-return-path';
 import { HttpClient } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
@@ -15,7 +16,7 @@ export const authGuard: CanActivateFn = (_route, state) => {
       if (user) {
         return true;
       }
-      return router.createUrlTree([isDesktopSession() ? '/desktop/login' : '/student/login'], { queryParams: { returnUrl: state.url } });
+      return router.createUrlTree([isDesktopSession() ? '/desktop/login' : state.url.startsWith('/class-session/teacher') ? '/teacher/login' : '/student/login'], { queryParams: { returnUrl: state.url } });
     })
   );
 };
@@ -42,7 +43,7 @@ export const roleGuard: CanActivateFn = (route, state) => {
   }));
 };
 
-export const guestGuard: CanActivateFn = () => {
+export const guestGuard: CanActivateFn = (route) => {
   const auth = inject(AuthService);
   const router = inject(Router);
 
@@ -51,7 +52,8 @@ export const guestGuard: CanActivateFn = () => {
       if (!user) {
         return true;
       }
-      return router.createUrlTree([auth.redirectPathFor(user.role)]);
+      const destination=safeAuthReturnPath(route.queryParamMap.get('returnUrl'),user.role);
+      return destination?router.parseUrl(destination):router.createUrlTree([auth.redirectPathFor(user.role)]);
     })
   );
 };

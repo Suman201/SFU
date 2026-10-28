@@ -51,3 +51,5 @@ Enable the Calendar API and configure the consent screen. Requested scopes are `
 `tests/browser/calendar-acceptance.spec.ts` uses real NestJS processes on two nodes, isolated MongoDB/Redis, real authentication and a local SMTP sink. It covers batch enrollment and capacity races, scoped calendar data, teacher/student permissions, timezone changes, rescheduling, cancellations, retry delivery, stale reminders, joining and leaving classes, and headless web/desktop routes. No backend HTTP responses are mocked.
 
 The Google-specific tests are provider contract/security tests with simulated Google responses. Live Google consent, token refresh and actual account writes have not been verified without operator credentials and a consenting test account. Headless screenshots are captured from the actual Angular screens. No Electron or visible development app is launched.
+
+Email and Google classroom links retain the intended teacher/student classroom after a fresh login. Redirect checks reject external URLs, protocol-relative destinations, traversal and wrong-role paths.

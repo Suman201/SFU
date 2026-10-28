@@ -1,3 +1,4 @@
+import { safeAuthReturnPath } from '../../../core/services/auth-return-path';
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { email, FormField, FormRoot, form as signalForm, minLength, required } from '@angular/forms/signals';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -33,6 +34,7 @@ export class Login {
     this.expectedRole === 'teacher'
       ? 'Sign in to manage batches, students, schedules, and live class controls.'
       : 'Sign in to discover teachers, track enrolled batches, and join live classes.';
+  protected readonly loginReturnUrl=this.route.snapshot.queryParamMap.get('returnUrl')??undefined;
   protected readonly alternateLoginPath = `/${this.alternateRole}/login`;
   protected readonly formModel = signal<LoginFormModel>({
     email: '',
@@ -78,17 +80,7 @@ export class Login {
   }
 
   private safeReturnUrl(role: AuthRole): string | null {
-    const returnUrl = this.route.snapshot.queryParamMap.get('returnUrl');
-    if (!returnUrl?.startsWith('/')) {
-      return null;
-    }
-    if (role === 'teacher' && returnUrl.startsWith('/teacher/')) {
-      return returnUrl;
-    }
-    if (role === 'student' && returnUrl.startsWith('/student/')) {
-      return returnUrl;
-    }
-    return null;
+    return safeAuthReturnPath(this.route.snapshot.queryParamMap.get('returnUrl'),role);
   }
 
   private roleLabel(role: AuthRole): string {

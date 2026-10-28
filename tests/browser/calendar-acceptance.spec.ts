@@ -561,6 +561,34 @@ test('real calendar: batch enrollment, local times, changes, durable mail and cl
       { batchId: batch.id },
       400,
     );
+    // Email/Google links preserve the intended classroom through a fresh login.
+    for (const role of ['teacher', 'student']) {
+      const fresh = await browser.newContext();
+      contexts.push(fresh);
+      const linked = await fresh.newPage();
+      await linked.goto(
+        runtimeUrl(
+          stack.frontendBaseUrl,
+          stack.nodeAUrl,
+          `/class-session/${role}?sessionId=${item.id}&batchId=${batch.id}`,
+        ),
+      );
+      await expect(linked).toHaveURL(new RegExp(`/${role}/login`));
+      await linked
+        .getByLabel('Email', { exact: true })
+        .fill(
+          role === 'teacher'
+            ? 'teacher.one@example.com'
+            : 'student.one@example.com',
+        );
+      await linked
+        .getByLabel('Password', { exact: true })
+        .fill('Password@12345');
+      await linked.getByRole('button', { name: 'Log in', exact: true }).click();
+      await expect.poll(()=>new URL(linked.url()).pathname).toBe(`/class-session/${role}`);
+      expect(new URL(linked.url()).searchParams.get('sessionId')).toBe(item.id);
+      await linked.close();
+    }
     // Simultaneous requests to two backend nodes cannot overbook the last place.
     const raceBatch = await api(
       'POST',

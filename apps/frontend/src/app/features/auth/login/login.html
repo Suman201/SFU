@@ -5,7 +5,7 @@
         <p class="eyebrow">Welcome back</p>
         <h1>{{ title }}</h1>
       </div>
-      <a [routerLink]="alternateLoginPath">{{ alternateRole === 'teacher' ? 'I’m a teacher' : 'I’m a student' }}</a>
+      <a [routerLink]="alternateLoginPath" [queryParams]="{returnUrl:loginReturnUrl}">{{ alternateRole === 'teacher' ? 'I’m a teacher' : 'I’m a student' }}</a>
     </header>
 
     <label>
