@@ -383,3 +383,174 @@ export const STARTER_CURRICULA = [
   { name: 'Trinity music qualifications', countryCodes: [] },
   { name: 'ABRSM music qualifications', countryCodes: [] },
 ];
+
+// Initial branches remain editable; seeding preserves administrator moves and names.
+export const STARTER_BRANCHES: { path: string[]; subjects: string[] }[] = [
+  { path: ['Sciences', 'Physics'], subjects: ['Physics', 'Astronomy'] },
+  {
+    path: ['Sciences', 'Physics', 'Quantum physics'],
+    subjects: ['Quantum mechanics', 'Quantum computing foundations'],
+  },
+  {
+    path: ['Sciences', 'Biology'],
+    subjects: [
+      'Biology',
+      'Microbiology',
+      'Genetics',
+      'Ecology',
+      'Anatomy and physiology',
+    ],
+  },
+  {
+    path: ['Sciences', 'Chemistry'],
+    subjects: [
+      'Chemistry',
+      'Organic chemistry',
+      'Physical chemistry',
+      'Biochemistry',
+    ],
+  },
+  {
+    path: ['Sciences', 'Earth and environmental sciences'],
+    subjects: ['Environmental science', 'Earth science'],
+  },
+  {
+    path: ['Mathematics', 'Algebra and geometry'],
+    subjects: ['Algebra', 'Geometry', 'Trigonometry', 'Linear algebra'],
+  },
+  {
+    path: ['Mathematics', 'Statistics and probability'],
+    subjects: ['Statistics', 'Probability'],
+  },
+  {
+    path: ['Computing and digital skills', 'Programming'],
+    subjects: [
+      'Programming',
+      'Python',
+      'Java',
+      'JavaScript',
+      'C and C++',
+      'C sharp',
+      'Algorithms',
+    ],
+  },
+  {
+    path: ['Computing and digital skills', 'Web development'],
+    subjects: ['Web development', 'HTML and CSS'],
+  },
+  {
+    path: ['Computing and digital skills', 'Data and artificial intelligence'],
+    subjects: [
+      'Data science',
+      'Data analysis',
+      'Artificial intelligence',
+      'Machine learning',
+      'Database systems',
+      'SQL',
+    ],
+  },
+  {
+    path: ['Computing and digital skills', 'Digital literacy'],
+    subjects: ['Digital literacy', 'Spreadsheets', 'Office software'],
+  },
+  {
+    path: ['Business and economics', 'Economics'],
+    subjects: ['Economics', 'Microeconomics', 'Macroeconomics'],
+  },
+  {
+    path: ['Business and economics', 'Finance and accounting'],
+    subjects: ['Finance', 'Accounting'],
+  },
+  {
+    path: ['Business and economics', 'Business management'],
+    subjects: [
+      'Business studies',
+      'Management',
+      'Human resources',
+      'Operations management',
+      'Project management',
+    ],
+  },
+  { path: ['Music', 'Piano and keyboards'], subjects: ['Piano', 'Keyboard'] },
+  {
+    path: ['Music', 'Guitar and strings'],
+    subjects: [
+      'Guitar',
+      'Classical guitar',
+      'Bass guitar',
+      'Violin',
+      'Viola',
+      'Cello',
+      'Double bass',
+    ],
+  },
+  {
+    path: ['Art and design', 'Visual arts'],
+    subjects: [
+      'Drawing',
+      'Painting',
+      'Illustration',
+      'Printmaking',
+      'Sculpture',
+      'Ceramics',
+    ],
+  },
+  {
+    path: ['Art and design', 'Digital design'],
+    subjects: [
+      'Graphic design',
+      'Animation',
+      'Digital art',
+      '3D modelling',
+      'UX and UI design',
+    ],
+  },
+];
+export const STARTER_ACADEMIC_LEVELS = [
+  'Early years',
+  'Primary school',
+  'Lower secondary',
+  'Upper secondary',
+  'University – undergraduate',
+  'University – postgraduate',
+  'Adult and professional learning',
+];
+export const STARTER_TEACHING_LANGUAGES = [
+  ...STARTER_SUBJECTS['Languages']!.filter(
+    (name) => !['Latin', 'Ancient Greek', 'Sign languages'].includes(name),
+  ),
+  'British Sign Language',
+  'French Sign Language',
+  'German Sign Language',
+  'Spanish Sign Language',
+  'Italian Sign Language',
+  'Portuguese Sign Language',
+  'Polish Sign Language',
+  'International Sign',
+  'Persian',
+  'Tamil',
+  'Telugu',
+  'Punjabi',
+  'Vietnamese',
+  'Thai',
+  'Indonesian',
+  'Swahili',
+  'Romanian Sign Language',
+];
+
+export const STARTER_LEVEL_TASKS: Record<string, string> = {
+  'Early years':
+    'Describe a short, play-based activity appropriate for an early-years learner. Explain the concrete materials or visuals you use, how you adapt the language and pace, and how you observe understanding without a formal written test.',
+  'Primary school':
+    'Teach one foundational concept using a concrete example or visual suitable for a primary-school learner. Show a correct age-appropriate worked example, explain a common misconception, and give a short activity to check understanding.',
+  'Lower secondary':
+    'Teach a lower-secondary topic with the required prior knowledge, a correct worked example and an independent practice question. Explain a likely misconception and how you adapt the explanation when a learner struggles.',
+  'Upper secondary':
+    'Demonstrate an upper-secondary or school-leaving examination topic. Provide a correct multi-step worked solution, explain the underlying reasoning, identify typical errors, and describe how you check independent exam readiness.',
+  'University – undergraduate':
+    'Demonstrate an undergraduate topic with explicit prerequisites, precise definitions, and a rigorous worked example, derivation or evidence-based analysis. Explain the limits of the method and set a problem that checks conceptual understanding.',
+  'University – postgraduate':
+    'Present a postgraduate topic with advanced prerequisites and a rigorous technical or critical analysis. Discuss assumptions, limitations and relevant research, then propose a task that assesses independent reasoning or research judgement.',
+  'Adult and professional learning':
+    'Describe a realistic adult-learning or professional task. Explain how you assess prior knowledge and learner goals, demonstrate a correct practical example, and define observable criteria for applying the skill independently.',
+};

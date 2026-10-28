@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { formatBatchFee } from '../../../shared/formatting/batch-fee';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
@@ -15,7 +16,12 @@ import { StudentEnrollmentStore, type StudentBatch } from '../student-enrollment
 })
 export class StudentExplore implements OnInit {
   protected readonly enrollment = inject(StudentEnrollmentStore);
-  protected readonly batches = this.enrollment.batches;
+  private readonly route = inject(ActivatedRoute);
+  private readonly params = toSignal(this.route.queryParamMap,{initialValue:this.route.snapshot.queryParamMap});
+  protected readonly scoped = computed(()=>Boolean(this.params().get('teacherId') || this.params().get('batchId')));
+  protected readonly batches = computed(()=>this.enrollment.batches().filter(batch =>
+    (!this.params().get('teacherId') || batch.teacherId === this.params().get('teacherId')) &&
+    (!this.params().get('batchId') || batch.id === this.params().get('batchId'))));
   protected readonly enrolledCount = computed(() => this.enrollment.enrolledBatches().length);
 
   ngOnInit(): void {

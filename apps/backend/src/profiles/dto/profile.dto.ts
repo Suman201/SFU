@@ -50,15 +50,25 @@ export class ProfileSocialLinkDto {
 }
 
 export class TutorAssessmentResponseDto {
+  @ValidateIf((_, value) => value !== undefined) @IsMongoId() levelId?: string;
+  @ValidateIf((_, value) => value !== undefined) @IsString() @MaxLength(160) taskVersion?: string;
   @IsMongoId() categoryId!: string;
   @IsString() @MaxLength(4000) response!: string;
   @IsOptional() @IsString() @MaxLength(2048) evidenceUrl?: string;
 }
+export class TeacherTeachingAreaDto {
+  @ValidateIf((_, value) => value !== undefined) @IsMongoId() categoryId?: string;
+  @IsArray() @ArrayUnique() @IsMongoId({each:true}) subjectIds!: string[];
+  @IsArray() @IsString({each:true}) @MaxLength(100, {each:true}) otherSubjects!: string[];
+  @IsArray() @ArrayUnique() @IsMongoId({each:true}) levelIds!: string[];
+  @IsArray() @ArrayUnique() @IsMongoId({each:true}) languageIds!: string[];
+}
 export class UpdateMyProfileDto {
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ValidateNested({each:true}) @Type(()=>TeacherTeachingAreaDto) teachingAreas?: TeacherTeachingAreaDto[];
   @ValidateIf((_, value) => value !== undefined) @IsString() @MaxLength(2048) introVideoUrl?: string;
-  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayMaxSize(8) @ValidateNested({each:true}) @Type(()=>TutorAssessmentResponseDto) assessmentResponses?: TutorAssessmentResponseDto[];
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ValidateNested({each:true}) @Type(()=>TutorAssessmentResponseDto) assessmentResponses?: TutorAssessmentResponseDto[];
 
-  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayMaxSize(8) @ArrayUnique() @IsMongoId({each:true}) teacherSubjectIds?: string[];
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayUnique() @IsMongoId({each:true}) teacherSubjectIds?: string[];
   @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayMaxSize(12) @ArrayUnique() @IsMongoId({each:true}) curriculumIds?: string[];
   @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayMaxSize(60) @ArrayUnique() @IsIn(EUROPEAN_MARKETS,{each:true}) teachingCountries?: string[];
   @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayMaxSize(2) @ArrayUnique() @IsIn(['children','adults'],{each:true}) learnerAgeGroups?: string[];

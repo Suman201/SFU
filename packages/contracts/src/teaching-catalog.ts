@@ -1,11 +1,24 @@
-export type TeachingCatalogKind = 'category' | 'subject' | 'curriculum';
+export type TeachingCatalogKind =
+  | 'category'
+  | 'subject'
+  | 'curriculum'
+  | 'level'
+  | 'language';
 export type TeachingCatalogStatus = 'active' | 'archived';
 export type CategoryAssessmentType =
   | 'knowledge_review'
   | 'spoken_sample'
   | 'portfolio_review'
   | 'practical_demonstration';
+export interface AcademicAssessmentTask {
+  levelId: string;
+  type: CategoryAssessmentType;
+  instructions: string;
+}
 export interface CategoryAssessment {
+  levelId: string;
+  levelName: string;
+  taskVersion: string;
   categoryId: string;
   categoryName: string;
   version: number;
@@ -14,17 +27,22 @@ export interface CategoryAssessment {
   subjects: string[];
 }
 export interface TutorAssessmentResponse {
+  levelId?: string;
+  taskVersion?: string;
   categoryId: string;
   response: string;
   evidenceUrl?: string;
 }
 export interface TutorAssessmentResult {
+  levelId?: string;
+  taskVersion?: string;
   categoryId: string;
   version: number;
   passed: boolean;
   notes: string;
 }
 export interface TeachingCatalogEntry {
+  assessmentTasks?: AcademicAssessmentTask[];
   assessmentType?: CategoryAssessmentType;
   assessmentInstructions?: string;
   id: string;
@@ -39,6 +57,7 @@ export interface TeachingCatalogEntry {
   version: number;
 }
 export interface TeachingCatalogWrite {
+  assessmentTasks?: AcademicAssessmentTask[];
   assessmentType?: CategoryAssessmentType;
   assessmentInstructions?: string;
   name: string;
@@ -54,6 +73,78 @@ export interface TeachingCatalogSnapshot {
   categories: TeachingCatalogEntry[];
   subjects: TeachingCatalogEntry[];
   curricula: TeachingCatalogEntry[];
+  levels?: TeachingCatalogEntry[];
+  languages?: TeachingCatalogEntry[];
+}
+/** One teaching area keeps its subjects, academic level and teaching languages together. */
+export interface TeacherTeachingArea {
+  categoryId?: string;
+  subjectIds: string[];
+  otherSubjects: string[];
+  levelIds: string[];
+  languageIds: string[];
+}
+
+/** Paths and descendant lookups are cycle-safe for older catalogue data. */
+export function teachingCategoryPath(
+  categories: TeachingCatalogEntry[],
+  id: string,
+): TeachingCatalogEntry[] {
+  const byId = new Map(categories.map((c) => [c.id, c]));
+  const seen = new Set<string>();
+  const path: TeachingCatalogEntry[] = [];
+  let current = byId.get(id);
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    path.unshift(current);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  return path;
+}
+export function teachingCategoryIds(
+  categories: TeachingCatalogEntry[],
+  id: string,
+): string[] {
+  return categories
+    .filter((c) =>
+      teachingCategoryPath(categories, c.id).some((p) => p.id === id),
+    )
+    .map((c) => c.id);
+}
+export function legacyTeachingAreas(
+  profile: {
+    teachingAreas?: TeacherTeachingArea[];
+    teacherSubjectIds?: string[];
+    languages?: string[];
+  },
+  catalog: TeachingCatalogSnapshot,
+): TeacherTeachingArea[] {
+  if (profile.teachingAreas !== undefined)
+    return profile.teachingAreas.map((a) => ({
+      ...a,
+      subjectIds: [...a.subjectIds],
+      otherSubjects: [...a.otherSubjects],
+      levelIds: [...a.levelIds],
+      languageIds: [...a.languageIds],
+    }));
+  const groups = new Map<string, string[]>();
+  for (const id of profile.teacherSubjectIds ?? []) {
+    const parent = catalog.subjects.find((s) => s.id === id)?.parentId;
+    if (parent) groups.set(parent, [...(groups.get(parent) ?? []), id]);
+  }
+  const names = new Set((profile.languages ?? []).map((n) => n.toLowerCase()));
+  const languageIds = (catalog.languages ?? [])
+    .filter((l) =>
+      [l.name, ...l.aliases].some((n) => names.has(n.toLowerCase())),
+    )
+    .map((l) => l.id);
+  return [...groups].map(([categoryId, subjectIds]) => ({
+    categoryId,
+    subjectIds,
+    otherSubjects: [],
+    levelIds: [],
+    languageIds: [...languageIds],
+  }));
 }
 export interface TeachingCatalogPage {
   items: TeachingCatalogEntry[];
@@ -144,6 +235,7 @@ export interface TutorApplication {
   introVideoUrl?: string;
   missing: string[];
   subjectIds: string[];
+  teachingAreas?: TeacherTeachingArea[];
   curriculumIds: string[];
   teachingCountries: string[];
   learnerAgeGroups: string[];

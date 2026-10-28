@@ -7,6 +7,7 @@
       <p class="page-description">Check schedules, fees and available places before enrolling.</p>
     </div>
     <div class="heading-actions">
+      @if(scoped()){<a class="dashboard-link" routerLink="/student/explore">Show all classes</a>}
       <a class="dashboard-link" routerLink="/teachers">Browse teachers</a>
       <a class="dashboard-link" routerLink="/student/dashboard">My learning · {{ enrolledCount() }}</a>
     </div>
@@ -30,7 +31,7 @@
         <article class="batch-card" [class.enrolled]="isEnrolled(batch)">
           <header>
             <div>
-              <p class="level">{{ batch.level }}</p>
+              @if(batch.level){<p class="level">{{ batch.level }}</p>}
               <h2>{{ batch.title }}</h2>
             </div>
             <span class="capacity">{{ enrollment.enrollmentCount(batch) }}/{{ batch.capacity }}</span>
@@ -79,7 +80,7 @@
     } @else {
       <div class="empty-state">
         <h3>No classes available yet</h3>
-        <p>There are no classes open for enrollment right now.</p>
+        <p>{{scoped()?'This selected class or teacher has no classes open for enrollment right now.':'There are no classes open for enrollment right now.'}}</p>
       </div>
     }
   </section>

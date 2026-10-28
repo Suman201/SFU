@@ -192,6 +192,7 @@ export class UserDocument {
   @Prop({ type: String, maxlength: 2048 }) introVideoUrl?: string;
   @Prop({ type: [Object], default: [] }) assessmentResponses!: import('@native-sfu/contracts').TutorAssessmentResponse[];
   @Prop({ type: [Object], default: [] }) tutorAssessmentResults!: import('@native-sfu/contracts').TutorAssessmentResult[];
+  @Prop({ type: [Object], default: undefined }) teachingAreas?: import('@native-sfu/contracts').TeacherTeachingArea[];
   @Prop({ type: [String], default: [] }) teacherSubjectIds!: string[];
   @Prop({ type: [String], default: [] }) curriculumIds!: string[];
   @Prop({ type: [String], default: [] }) teachingCountries!: string[];

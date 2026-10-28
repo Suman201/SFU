@@ -3,7 +3,7 @@ import { HydratedDocument } from 'mongoose';
 @Schema({ collection: 'teaching_catalog', timestamps: true })
 export class TeachingCatalogDocument {
   @Prop({ unique: true, sparse: true }) seedKey?: string;
-  @Prop({ required: true, enum: ['category', 'subject', 'curriculum'] })
+  @Prop({ required: true, enum: ['category', 'subject', 'curriculum', 'level', 'language'] })
   kind!: string;
   @Prop({ required: true, trim: true, maxlength: 100 }) name!: string;
   @Prop({ required: true }) normalizedName!: string;
@@ -13,6 +13,7 @@ export class TeachingCatalogDocument {
   @Prop({ type: [String], default: [] }) aliases!: string[];
   @Prop({ default: 'active', enum: ['active', 'archived'] }) status!: string;
   @Prop({ default: 0 }) sortOrder!: number;
+  @Prop({ type: [Object], default: [] }) assessmentTasks!: import('@native-sfu/contracts').AcademicAssessmentTask[];
   @Prop({ default: 'knowledge_review' }) assessmentType!: string;
   @Prop({
     default:

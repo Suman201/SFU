@@ -16,7 +16,23 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+export class AcademicAssessmentTaskDto {
+  @IsMongoId() levelId!: string;
+  @IsIn([
+    'knowledge_review',
+    'spoken_sample',
+    'portfolio_review',
+    'practical_demonstration',
+  ])
+  type!: import('@native-sfu/contracts').CategoryAssessmentType;
+  @IsString() @MinLength(20) @MaxLength(1000) instructions!: string;
+}
 export class CatalogWriteDto {
+  @ValidateIf((_, value) => value !== undefined)
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AcademicAssessmentTaskDto)
+  assessmentTasks?: AcademicAssessmentTaskDto[];
   @ValidateIf((_, value) => value !== undefined)
   @IsIn([
     'knowledge_review',
@@ -34,7 +50,10 @@ export class CatalogWriteDto {
   @IsString()
   @MaxLength(500)
   description?: string;
-  @ValidateIf((_, value) => value !== undefined) @IsMongoId() parentId?: string;
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MaxLength(24)
+  parentId?: string;
   @ValidateIf((_, value) => value !== undefined)
   @IsArray()
   @ArrayMaxSize(60)
@@ -67,6 +86,11 @@ export class SubmitTutorDto {
   @IsBoolean() safeguardingAccepted!: boolean;
 }
 export class AssessmentResultDto {
+  @ValidateIf((_, value) => value !== undefined) @IsMongoId() levelId?: string;
+  @ValidateIf((_, value) => value !== undefined)
+  @IsString()
+  @MaxLength(160)
+  taskVersion?: string;
   @IsMongoId() categoryId!: string;
   @IsInt() @Min(0) version!: number;
   @IsBoolean() passed!: boolean;
@@ -78,7 +102,6 @@ export class ReviewTutorDto {
   introVideoReviewed?: boolean;
   @ValidateIf((_, value) => value !== undefined)
   @IsArray()
-  @ArrayMaxSize(8)
   @ValidateNested({ each: true })
   @Type(() => AssessmentResultDto)
   assessmentResults?: AssessmentResultDto[];

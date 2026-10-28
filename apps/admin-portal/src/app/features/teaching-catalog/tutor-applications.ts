@@ -1,3 +1,7 @@
+import {
+  teachingCategoryPath,
+  type TeacherTeachingArea,
+} from '@native-sfu/contracts';
 import { DestroyRef } from '@angular/core';
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -66,6 +70,22 @@ export class TutorApplicationsAdmin implements OnInit {
   protected countryName(code: string) {
     return new Intl.DisplayNames(['en'], { type: 'region' }).of(code) || code;
   }
+  protected areaName(area: TeacherTeachingArea) {
+    return area.categoryId
+      ? teachingCategoryPath(this.catalog().categories, area.categoryId)
+          .map((c) => c.name)
+          .join(' › ') || 'Archived category'
+      : 'Other / subject not listed';
+  }
+  protected selectionNames(ids: string[], kind: 'levels' | 'languages') {
+    return ids
+      .map(
+        (id) =>
+          (this.catalog()[kind] ?? []).find((e) => e.id === id)?.name ??
+          'Archived selection',
+      )
+      .join(', ');
+  }
   protected subjectNames(ids: string[]) {
     return ids
       .map(
@@ -126,6 +146,8 @@ export class TutorApplicationsAdmin implements OnInit {
           this.videoReviewed = false;
           this.results = d.requiredAssessments.map((c) => ({
             categoryId: c.categoryId,
+            levelId: c.levelId,
+            taskVersion: c.taskVersion,
             version: c.version,
             passed: false,
             notes: '',
@@ -140,8 +162,12 @@ export class TutorApplicationsAdmin implements OnInit {
       this.results.every((r) => r.passed && r.notes.trim().length >= 10)
     );
   }
-  protected assessmentResponse(id: string) {
-    return this.detail()?.assessmentResponses.find((r) => r.categoryId === id);
+  protected assessmentResponse(
+    task: import('@native-sfu/contracts').CategoryAssessment,
+  ) {
+    return this.detail()?.assessmentResponses.find(
+      (r) => r.categoryId === task.categoryId && r.levelId === task.levelId,
+    );
   }
   protected review(decision: TutorReviewRequest['decision']) {
     const current = this.detail();

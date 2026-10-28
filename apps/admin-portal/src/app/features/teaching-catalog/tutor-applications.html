@@ -136,6 +136,27 @@
       <dt>Availability</dt>
       <dd>{{item.profile.availability}} · {{item.profile.timezone}}</dd>
     </dl>
+    @if(item.teachingAreas?.length){
+    <h3>Teaching areas</h3>
+    @for(area of item.teachingAreas;track area.categoryId||'other'){
+    <section class="record-editor">
+      <h4>{{areaName(area)}}</h4>
+      <p>
+        {{area.categoryId?subjectNames(area.subjectIds)||'General teaching in
+        this category':area.otherSubjects.join(', ')}}
+      </p>
+      <p>Academic level: {{selectionNames(area.levelIds,'levels')}}</p>
+      <p>
+        Teaching languages: {{selectionNames(area.languageIds,'languages')}}
+      </p>
+      @if(!area.categoryId){
+      <p>
+        No preset assessment applies. Review the tutor’s experience and
+        suitability for these named subjects.
+      </p>
+      }
+    </section>
+    }}
     <h3>Introduction video</h3>
     @if(item.introVideoUploaded){<button
       type="button"
@@ -158,17 +179,16 @@
       >Watch introduction video ↗</a
     >}
     <h3>Category assessments</h3>
-    @for(required of item.requiredAssessments;track required.categoryId;let
-    i=$index){
+    @for(required of item.requiredAssessments;track
+    required.categoryId+':'+required.levelId;let i=$index){
     <fieldset class="record-editor">
-      <legend>{{required.categoryName}}</legend>
+      <legend>{{required.categoryName}} · {{required.levelName}}</legend>
       <p>{{required.subjects.join(', ')}}</p>
       <p>{{required.instructions}}</p>
       <p style="white-space: pre-line">
-        {{assessmentResponse(required.categoryId)?.response || 'No response
-        submitted'}}
+        {{assessmentResponse(required)?.response || 'No response submitted'}}
       </p>
-      @if(assessmentResponse(required.categoryId)?.evidenceUrl;as url){<a
+      @if(assessmentResponse(required)?.evidenceUrl;as url){<a
         [href]="url"
         target="_blank"
         rel="noopener noreferrer"

@@ -1,3 +1,4 @@
+import { teachingCategoryIds, teachingCategoryPath } from '@native-sfu/contracts';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -22,7 +23,7 @@ import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
 
 interface MarketplaceFilters {
-  categoryId: string; subjectId: string;
+  categoryId: string; subjectId: string; levelId: string; languageId: string;
   q: string;
   skill: string;
   subject: string;
@@ -31,7 +32,7 @@ interface MarketplaceFilters {
 }
 
 const EMPTY_FILTERS: MarketplaceFilters = {
-  categoryId: '', subjectId: '',
+  categoryId: '', subjectId: '', levelId: '', languageId: '',
   q: '',
   skill: '',
   subject: '',
@@ -65,8 +66,13 @@ export class TeacherMarketplace implements OnInit {
   private readonly cms = inject(CmsService);
 
   protected readonly catalog = signal<TeachingCatalogSnapshot>({categories:[],subjects:[],curricula:[]});
-  protected readonly catalogueSubjects = computed(()=>this.catalog().subjects.filter(s=>!this.filters().categoryId || s.parentId===this.filters().categoryId));
-  protected subjectNames(teacher:PublicTeacherListItem){return (teacher.teacherSubjectIds??[]).map(id=>this.catalog().subjects.find(s=>s.id===id)?.name).filter((name):name is string=>Boolean(name));}
+  protected readonly catalogueSubjects = computed(()=>this.catalog().subjects.filter(s=>!this.filters().categoryId || teachingCategoryIds(this.catalog().categories,this.filters().categoryId).includes(s.parentId!)));
+  protected categoryName(id: string) { return teachingCategoryPath(this.catalog().categories,id).map(c=>c.name).join(' › '); }
+  protected subjectNames(teacher:PublicTeacherListItem) {
+    const subjects = (teacher.teacherSubjectIds??[]).map(id=>this.catalog().subjects.find(s=>s.id===id)?.name).filter((name):name is string=>Boolean(name));
+    const areaNames = (teacher.teachingAreas??[]).flatMap(a=>a.categoryId && !a.subjectIds.length ? [this.categoryName(a.categoryId)] : a.otherSubjects);
+    return [...new Set([...subjects, ...areaNames])];
+  }
   protected readonly filters = signal<MarketplaceFilters>({ ...EMPTY_FILTERS });
   protected readonly cmsIntro = signal<CmsPage | null>(null);
   protected readonly teachers = signal<PublicTeacherListItem[]>([]);
@@ -251,6 +257,10 @@ export class TeacherMarketplace implements OnInit {
   private query(page: number): PublicTeacherListQuery {
     const filters = this.appliedFilters;
     return {
+      categoryId: filters.categoryId || undefined,
+      subjectId: filters.subjectId || undefined,
+      levelId: filters.levelId || undefined,
+      languageId: filters.languageId || undefined,
       q: filters.q.trim() || undefined,
       skill: filters.skill.trim() || undefined,
       subject: filters.subject.trim() || undefined,

@@ -68,4 +68,26 @@ describe('Teacher profile upload recovery', () => {
     expect(api.uploadIntroVideo).not.toHaveBeenCalled();
     expect(component.videoBusy()).toBeFalse();
   });
+  it('keeps responses for two academic levels in the same category independent', () => {
+    const base={categoryId:'math',categoryName:'Mathematics',version:0,type:'knowledge_review',instructions:'Explain a concept.',subjects:[]};
+    const primary={...base,levelId:'primary',levelName:'Primary',taskVersion:'primary-v1'};
+    const university={...base,levelId:'university',levelName:'University',taskVersion:'university-v1'};
+    component.updateAssessment(primary,'response','Primary worked example');
+    component.updateAssessment(university,'response','University derivation');
+    component.updateAssessment(primary,'evidenceUrl','https://example.com/sample');
+    expect(component.form().assessmentResponses.length).toBe(2);
+    expect(component.assessmentAnswer(primary)).toBe('Primary worked example');
+    expect(component.assessmentAnswer(university)).toBe('University derivation');
+    expect(component.assessmentEvidence(university)).toBe('');
+  });
+  it('retains a stale draft for correction and records the current task version when edited',()=>{
+    const task={categoryId:'math',levelId:'primary',taskVersion:'v1'};
+    component.updateAssessment(task,'response','Existing draft');
+    const updated={...task,taskVersion:'v2'};
+    expect(component.assessmentIsStale(updated)).toBeTrue();
+    expect(component.assessmentAnswer(updated)).toBe('Existing draft');
+    component.updateAssessment(updated,'response','Updated draft');
+    expect(component.assessmentIsStale(updated)).toBeFalse();
+  });
+
 });

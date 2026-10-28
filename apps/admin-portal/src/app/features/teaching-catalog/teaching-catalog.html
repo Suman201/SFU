@@ -4,8 +4,8 @@
       <p class="eyebrow">Teaching catalogue</p>
       <h1>Subjects and categories</h1>
       <p>
-        Manage what tutors can teach. Keep curricula and exam systems separate
-        from subjects.
+        Organise categories and subcategories, subjects, academic levels and
+        teaching languages. Curricula and school stages stay separate.
       </p>
     </div>
     <button
@@ -35,7 +35,7 @@
   } @if(editor()){
   <section class="catalog-editor" aria-labelledby="editor-title">
     <h2 id="editor-title">{{selected?'Edit':'Add'}} {{kind()}}</h2>
-    <form (ngSubmit)="save()" class="catalog-form">
+    <form #catalogForm="ngForm" (ngSubmit)="save()" class="catalog-form">
       <label
         >Name<input
           name="name"
@@ -43,11 +43,18 @@
           required
           maxlength="100"
       /></label>
-      @if(kind()==='subject'){<label
-        >Category<select name="parentId" [(ngModel)]="form.parentId" required>
-          <option value="">Choose a category</option>
-          @for(item of categories();track item.id){
-          <option [value]="item.id">{{item.name}}</option>
+      @if(kind()==='subject'||kind()==='category'){<label
+        >Parent category<select
+          aria-label="Parent category"
+          name="parentId"
+          [(ngModel)]="form.parentId"
+          [required]="kind()==='subject'"
+        >
+          <option value="">
+            {{kind()==='category'?'Top level':'Choose a category'}}
+          </option>
+          @for(item of parentChoices();track item.id){
+          <option [value]="item.id">{{categoryName(item.id)}}</option>
           }
         </select></label
       >}
@@ -92,7 +99,7 @@
           >Leave empty for international curricula. Country labels do not
           restrict tutor nationality.</small
         ></label
-      >} @if(kind()==='category'){<label
+      >} @if(kind()==='category'||kind()==='level'){<label
         >Assessment method<select
           name="assessmentType"
           [(ngModel)]="form.assessmentType"
@@ -115,12 +122,79 @@
           maxlength="1000"
           [(ngModel)]="form.assessmentInstructions"
         ></textarea></label
-      >}
+      >} @if(kind()==='category'){
+      <section class="wide" aria-label="Tasks for academic levels">
+        <h3>Tasks for academic levels</h3>
+        <p>
+          Use the default category guidance and academic-level task, or add a
+          specific task below. Overrides also apply to subcategories until they
+          define their own.
+        </p>
+        @for(task of form.assessmentTasks;track $index;let i=$index){
+        <fieldset class="record-editor">
+          <label
+            >Academic level<select
+              [name]="'taskLevel'+i"
+              [(ngModel)]="task.levelId"
+              aria-label="Task academic level"
+              required
+            >
+              @for(level of levels();track level.id){
+              <option [value]="level.id" [disabled]="taskLevelUsed(level.id,i)">
+                {{level.name}}
+              </option>
+              }
+            </select></label
+          >
+          <label
+            >Task method<select [name]="'taskType'+i" [(ngModel)]="task.type">
+              <option value="knowledge_review">
+                Subject knowledge and teaching review
+              </option>
+              <option value="spoken_sample">Spoken language sample</option>
+              <option value="portfolio_review">
+                Portfolio and teaching review
+              </option>
+              <option value="practical_demonstration">
+                Practical demonstration
+              </option>
+            </select></label
+          >
+          <label
+            >Task instructions<textarea
+              [name]="'taskInstructions'+i"
+              [(ngModel)]="task.instructions"
+              rows="4"
+              minlength="20"
+              maxlength="1000"
+              required
+              placeholder="Describe the task appropriate for this category and academic level."
+            ></textarea>
+          </label>
+          <button
+            type="button"
+            class="secondary-button"
+            (click)="removeTask(i)"
+          >
+            Remove override
+          </button>
+        </fieldset>
+        }
+        <button
+          type="button"
+          class="secondary-button"
+          (click)="addTask()"
+          [disabled]="form.assessmentTasks.length>=levels().length"
+        >
+          Add level-specific task
+        </button>
+      </section>
+      }
       <footer class="editor-actions">
         <button
           type="submit"
           class="primary-button"
-          [disabled]="saving() || !form.name.trim() || (kind()==='subject'&&!form.parentId)"
+          [disabled]="saving() || catalogForm.invalid || !form.name.trim() || (kind()==='subject'&&!form.parentId)"
         >
           {{saving()?'Saving…':'Save '+kind()}}</button
         ><button
@@ -159,14 +233,14 @@
         <option value="all">All statuses</option>
         <option value="active">Active</option>
         <option value="archived">Archived</option></select
-      >@if(kind()==='subject'){<select
+      >@if(kind()==='subject'||kind()==='category'){<select
         aria-label="Category filter"
         name="category"
         [(ngModel)]="category"
       >
         <option value="">All categories</option>
         @for(item of categories();track item.id){
-        <option [value]="item.id">{{item.name}}</option>
+        <option [value]="item.id">{{categoryName(item.id)}}</option>
         }</select
       >}<button type="submit" class="secondary-button" [disabled]="loading()">
         Search
@@ -177,7 +251,10 @@
         <thead>
           <tr>
             <th>Name</th>
-            <th>{{kind()==='subject'?'Category':'Description'}}</th>
+            <th>
+              {{kind()==='subject'||kind()==='category'?'Parent
+              category':'Description'}}
+            </th>
             <th>Status</th>
             <th>Order</th>
             <th>Actions</th>
@@ -196,7 +273,7 @@
               >}
             </td>
             <td>
-              {{kind()==='subject'?categoryName(row.parentId):row.description||'—'}}
+              {{kind()==='subject'||kind()==='category'?categoryName(row.parentId):row.description||'—'}}
             </td>
             <td><span class="data-pill">{{row.status}}</span></td>
             <td>{{row.sortOrder}}</td>
@@ -205,7 +282,8 @@
                 type="button"
                 class="table-action"
                 [disabled]="saving()"
-                (click)="edit(row)" [attr.aria-label]="'Edit '+row.name"
+                (click)="edit(row)"
+                [attr.aria-label]="'Edit '+row.name"
               >
                 Edit</button
               ><button

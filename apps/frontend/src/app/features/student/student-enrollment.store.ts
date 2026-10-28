@@ -18,7 +18,7 @@ export interface StudentBatch {
   capacity: number;
   feeAmount: number;
   startsAt: string;
-  level: 'Beginner' | 'Intermediate' | 'Advanced';
+  level?: string;
   enrollmentStatus?: StudentEnrollmentStatus;
 }
 

@@ -67,7 +67,7 @@
     } @else if (activeEnrolledBatches().length) {
       <div class="enrolled-list">
         @for (batch of activeEnrolledBatches(); track batch.id) {
-          <article class="enrolled-row">
+          <article class="enrolled-row" [attr.data-batch-id]="batch.id">
             <div class="batch-main">
               <span>{{ batch.teacherName[0] }}</span>
               <div>

@@ -606,14 +606,6 @@
             ></textarea>
           </label>
           <label>
-            <span>Languages</span>
-            <textarea
-              rows="3"
-              [value]="form().languagesText"
-              (input)="updateForm('languagesText', inputValue($event))"
-            ></textarea>
-          </label>
-          <label>
             <span>Additional expertise (optional)</span>
             <textarea
               rows="3"
@@ -632,61 +624,11 @@
           <button type="button" (click)="loadCatalogue()">
             Retry catalogue</button
           >}
-          <div class="subject-filters">
-            <label
-              >Category<select [(ngModel)]="subjectCategory">
-                <option value="">All categories</option>
-                @for(category of catalog().categories;track category.id){
-                <option [value]="category.id">{{category.name}}</option>
-                }
-              </select></label
-            ><label
-              >Find a subject<input
-                type="search"
-                [(ngModel)]="subjectSearch"
-                placeholder="Search subjects and alternative names"
-            /></label>
-          </div>
-          <div class="selected-subjects">
-            @for(id of form().teacherSubjectIds;track id){<button
-              type="button"
-              (click)="toggleSelection('teacherSubjectIds',id)"
-              [attr.aria-label]="'Remove '+selectedSubjectName(id)"
-            >
-              {{selectedSubjectName(id)}}
-              <span aria-hidden="true">×</span></button
-            >}
-          </div>
-          <p class="help-text">
-            Choose up to 8 subjects you can teach confidently. Subjects are
-            managed by Sapiovian.
-          </p>
-          <div
-            class="subject-groups"
-            role="group"
-            aria-label="Available subjects"
-          >
-            @for(category of catalog().categories;track
-            category.id){@if(categorySubjects(category.id).length){
-            <fieldset>
-              <legend>{{category.name}}</legend>
-              @for(subject of categorySubjects(category.id);track
-              subject.id){<label class="choice"
-                ><input
-                  type="checkbox"
-                  [checked]="form().teacherSubjectIds.includes(subject.id)"
-                  (change)="toggleSelection('teacherSubjectIds',subject.id)"
-                />{{subject.name}}</label
-              >}
-            </fieldset>
-            }}
-          </div>
-          @if(!catalog().subjects.length && !catalogError()){
-          <p>
-            No subjects are available yet. An administrator needs to configure
-            the teaching catalogue.
-          </p>
-          }
+          <sfu-teaching-areas-editor
+            [catalog]="catalog()"
+            [areas]="form().teachingAreas"
+            (areasChange)="updateTeachingAreas($event)"
+          />
           <fieldset>
             <legend>Learners</legend>
             <div class="choice-row">
@@ -700,18 +642,7 @@
               >}
             </div>
           </fieldset>
-          <fieldset>
-            <legend>Teaching levels</legend>
-            <div class="choice-row">
-              @for(level of levels;track level){<label class="choice"
-                ><input
-                  type="checkbox"
-                  [checked]="form().teachingLevels.includes(level)"
-                  (change)="toggleSelection('teachingLevels',level)"
-                />{{level}}</label
-              >}
-            </div>
-          </fieldset>
+
           <label
             >European markets<select
               multiple
@@ -990,30 +921,48 @@
           <div class="step-intro">
             <h3>Show how you help learners understand</h3>
             <p>
-              Each subject category has a short teaching task. Your reviewer may
-              request a live demonstration or follow-up test.
+              Each selected category and academic level has a teaching task.
+              Other subjects skip preset tasks. Your reviewer may request a live
+              demonstration or follow-up test.
             </p>
           </div>
-          @if(!requiredCategoryAssessments().length){
-          <p>Choose your subjects first to see the relevant teaching tasks.</p>
-          } @for(category of requiredCategoryAssessments();track category.id){
-          <fieldset>
-            <legend>{{category.name}} assessment</legend>
-            <p>{{category.assessmentInstructions}}</p>
+          @if(!requiredAssessments().length){ @if(onlyOtherAreas()){
+          <p>
+            No preset assessment is required for your Other subjects. Continue
+            to Review &amp; submit; an administrator will review your experience
+            and teaching suitability.
+          </p>
+          }@else{
+          <p>
+            Add your teaching areas first to see the relevant teaching tasks.
+          </p>
+          } } @for(task of requiredAssessments();track
+          task.categoryId+':'+task.levelId){
+          <fieldset
+            [attr.data-assessment-key]="task.categoryId+':'+task.levelId"
+          >
+            <legend>{{task.categoryName}} · {{task.levelName}}</legend>
+            <p style="white-space: pre-line">{{task.instructions}}</p>
+            @if(assessmentIsStale(task)){
+            <p role="alert">
+              This task has changed. Review and update your response before
+              submitting.
+            </p>
+            }
             <label
               >Your teaching response<textarea
                 rows="5"
                 maxlength="4000"
-                [value]="assessmentAnswer(category.id)"
-                (input)="updateAssessment(category.id,'response',inputValue($event))"
+                [value]="assessmentAnswer(task)"
+                (input)="updateAssessment(task,'response',inputValue($event))"
                 placeholder="Give a specific example covering your chosen subjects. At least 100 characters."
               ></textarea></label
             ><label
               >Supporting sample or portfolio URL (optional)<input
                 type="url"
                 maxlength="2048"
-                [value]="assessmentEvidence(category.id)"
-                (input)="updateAssessment(category.id,'evidenceUrl',inputValue($event))"
+                [value]="assessmentEvidence(task)"
+                (input)="updateAssessment(task,'evidenceUrl',inputValue($event))"
                 placeholder="https://"
             /></label>
           </fieldset>

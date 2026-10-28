@@ -3,7 +3,9 @@ import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
 import {
   EUROPEAN_MARKETS,
+  teachingCategoryPath,
   type TeachingCatalogKind,
+  type AcademicAssessmentTask,
   type TeachingCatalogEntry,
 } from '@native-sfu/contracts';
 import { TeachingCatalogApi } from '../../core/services/teaching-catalog-api.service';
@@ -20,12 +22,15 @@ export class TeachingCatalogAdmin implements OnInit {
   protected readonly tabs = [
     { id: 'category' as const, label: 'Categories' },
     { id: 'subject' as const, label: 'Subjects' },
+    { id: 'level' as const, label: 'Academic levels' },
+    { id: 'language' as const, label: 'Teaching languages' },
     { id: 'curriculum' as const, label: 'Curricula' },
   ];
   protected readonly title = computed(
     () => this.tabs.find((tab) => tab.id === this.kind())!.label,
   );
   protected readonly rows = signal<TeachingCatalogEntry[]>([]);
+  protected readonly levels = signal<TeachingCatalogEntry[]>([]);
   protected readonly categories = signal<TeachingCatalogEntry[]>([]);
   protected readonly loading = signal(false);
   protected readonly saving = signal(false);
@@ -43,6 +48,7 @@ export class TeachingCatalogAdmin implements OnInit {
     assessmentType:
       'knowledge_review' as import('@native-sfu/contracts').CategoryAssessmentType,
     assessmentInstructions: '',
+    assessmentTasks: [] as AcademicAssessmentTask[],
     name: '',
     description: '',
     parentId: '',
@@ -60,7 +66,10 @@ export class TeachingCatalogAdmin implements OnInit {
   }
   protected loadCategories() {
     this.api.snapshot().subscribe({
-      next: (r) => this.categories.set(r.categories),
+      next: (r) => {
+        this.categories.set(r.categories);
+        this.levels.set(r.levels ?? []);
+      },
       error: (e) => this.error.set(this.api.error(e)),
     });
   }
@@ -106,6 +115,7 @@ export class TeachingCatalogAdmin implements OnInit {
   protected edit(row: TeachingCatalogEntry | null) {
     this.selected = row;
     this.form = {
+      assessmentTasks: (row?.assessmentTasks ?? []).map((t) => ({ ...t })),
       assessmentType: row?.assessmentType ?? 'knowledge_review',
       assessmentInstructions:
         row?.assessmentInstructions ??
@@ -121,15 +131,37 @@ export class TeachingCatalogAdmin implements OnInit {
     this.editor.set(true);
     this.error.set('');
   }
+  protected addTask() {
+    const level = this.levels().find(
+      (l) => !this.form.assessmentTasks.some((t) => t.levelId === l.id),
+    );
+    if (level)
+      this.form.assessmentTasks.push({
+        levelId: level.id,
+        type: this.form.assessmentType,
+        instructions: '',
+      });
+  }
+  protected removeTask(index: number) {
+    this.form.assessmentTasks.splice(index, 1);
+  }
+  protected taskLevelUsed(id: string, index: number) {
+    return this.form.assessmentTasks.some(
+      (t, i) => i !== index && t.levelId === id,
+    );
+  }
   protected save() {
     if (this.saving() || !this.form.name.trim()) return;
     this.saving.set(true);
     this.error.set('');
     const body = {
-      ...(this.kind() === 'category'
+      ...(['category', 'level'].includes(this.kind())
         ? {
             assessmentType: this.form.assessmentType,
             assessmentInstructions: this.form.assessmentInstructions,
+            ...(this.kind() === 'category'
+              ? { assessmentTasks: this.form.assessmentTasks }
+              : {}),
           }
         : {}),
       name: this.form.name,
@@ -140,7 +172,9 @@ export class TeachingCatalogAdmin implements OnInit {
         .filter(Boolean),
       sortOrder: this.form.sortOrder,
       status: this.form.status,
-      ...(this.kind() === 'subject' ? { parentId: this.form.parentId } : {}),
+      ...(['subject', 'category'].includes(this.kind())
+        ? { parentId: this.form.parentId }
+        : {}),
       countryCodes: this.kind() === 'curriculum' ? this.form.countryCodes : [],
       ...(this.selected ? { version: this.selected.version } : {}),
     };
@@ -201,7 +235,19 @@ export class TeachingCatalogAdmin implements OnInit {
         error: (e) => this.error.set(this.api.error(e)),
       });
   }
+  protected parentChoices() {
+    return this.categories().filter(
+      (c) =>
+        !this.selected ||
+        !teachingCategoryPath(this.categories(), c.id).some(
+          (p) => p.id === this.selected!.id,
+        ),
+    );
+  }
   protected categoryName(id?: string) {
+    if (!id) return 'Top-level category';
+    const path = teachingCategoryPath(this.categories(), id);
+    if (path.length) return path.map((c) => c.name).join(' › ');
     return (
       this.categories().find((x) => x.id === id)?.name ?? 'Archived category'
     );

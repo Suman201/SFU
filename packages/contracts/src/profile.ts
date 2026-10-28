@@ -92,6 +92,7 @@ export interface PublicTeacherListItem {
   introVideoUploaded?: boolean;
   introVideoDurationSeconds?: number;
   introVideoUrl?: string;
+  teachingAreas?: import('./teaching-catalog.js').TeacherTeachingArea[];
   teacherSubjectIds?: string[];
   curriculumIds?: string[];
   teachingCountries?: string[];
@@ -119,6 +120,8 @@ export interface PublicTeacherListItem {
 export interface PublicTeacherListQuery {
   subjectId?: string;
   categoryId?: string;
+  levelId?: string;
+  languageId?: string;
   q?: string;
   skill?: string;
   topic?: string;
@@ -239,6 +242,7 @@ export interface ProfileUser {
   introVideoUrl?: string;
   assessmentResponses?: import('./teaching-catalog.js').TutorAssessmentResponse[];
 
+  teachingAreas?: import('./teaching-catalog.js').TeacherTeachingArea[];
   teacherSubjectIds?: string[];
   curriculumIds?: string[];
   teachingCountries?: string[];
@@ -276,6 +280,7 @@ export interface PublicTeacherProfile {
   introVideoDurationSeconds?: number;
   introVideoUrl?: string;
 
+  teachingAreas?: import('./teaching-catalog.js').TeacherTeachingArea[];
   teacherSubjectIds?: string[];
   curriculumIds?: string[];
   teachingCountries?: string[];
@@ -306,6 +311,7 @@ export interface UpdateMyProfileRequest {
   introVideoUrl?: string;
   assessmentResponses?: import('./teaching-catalog.js').TutorAssessmentResponse[];
 
+  teachingAreas?: import('./teaching-catalog.js').TeacherTeachingArea[];
   teacherSubjectIds?: string[];
   curriculumIds?: string[];
   teachingCountries?: string[];

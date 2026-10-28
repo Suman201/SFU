@@ -1,3 +1,4 @@
+import { TeachingAreasSummary } from '../../../shared/teaching-areas/teaching-areas-summary';
 import type { TeachingCatalogSnapshot } from '@native-sfu/contracts';
 import {
   ChangeDetectionStrategy,
@@ -47,7 +48,7 @@ const PROFILE_TABS: TeacherProfileTabItem[] = [
 @Component({
   selector: 'sfu-public-teacher-profile',
   standalone: true,
-  imports: [Footer, Header, RouterLink],
+  imports: [Footer, Header, RouterLink, TeachingAreasSummary],
   templateUrl: './public-teacher-profile.html',
   styleUrl: './public-teacher-profile.scss',
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -1,3 +1,5 @@
+import { resolveTeachingAssessments } from '@native-sfu/contracts';
+import { normalizeTeachingAreas } from './teaching-areas';
 import {
   BadRequestException,
   ConflictException,
@@ -70,21 +72,11 @@ export class TutorApplicationsService {
   async summary(doc: UserMongoDocument): Promise<TutorApplication> {
     const missing: string[] = [];
     const snapshot = await this.catalog.snapshot();
-    const selectedSubjects = snapshot.subjects.filter((s) =>
-      (doc.teacherSubjectIds ?? []).includes(s.id),
+    const areas = doc.teachingAreas;
+    const requiredAssessments = resolveTeachingAssessments(
+      snapshot,
+      areas ?? [],
     );
-    const requiredAssessments = snapshot.categories
-      .filter((c) => selectedSubjects.some((s) => s.parentId === c.id))
-      .map((c) => ({
-        categoryId: c.id,
-        categoryName: c.name,
-        version: c.version,
-        type: c.assessmentType ?? ('knowledge_review' as const),
-        instructions: c.assessmentInstructions ?? '',
-        subjects: selectedSubjects
-          .filter((s) => s.parentId === c.id)
-          .map((s) => s.name),
-      }));
     if (!doc.introVideoUrl && !doc.tutorIntroVideo)
       missing.push(
         'Upload a short introduction video or add a YouTube/Vimeo link.',
@@ -94,12 +86,16 @@ export class TutorApplicationsService {
         !(doc.assessmentResponses ?? []).some(
           (answer) =>
             answer.categoryId === required.categoryId &&
+            answer.levelId === required.levelId &&
+            answer.taskVersion === required.taskVersion &&
             answer.response.trim().length >= 100,
         )
       )
         missing.push(
           'Complete the ' +
             required.categoryName +
+            ' — ' +
+            required.levelName +
             ' teaching assessment (at least 100 characters).',
         );
 
@@ -124,14 +120,32 @@ export class TutorApplicationsService {
     }
     if (!doc.availability || doc.availability.trim().length < 10)
       missing.push('Describe your weekly availability.');
-    if (!doc.teacherSubjectIds?.length)
-      missing.push('Choose at least one teaching subject.');
+    if (!areas?.length)
+      missing.push(
+        'Add at least one teaching area, including its academic levels and teaching languages.',
+      );
+    for (const area of areas ?? []) {
+      const label =
+        snapshot.categories.find((c) => c.id === area.categoryId)?.name ??
+        'Other subjects';
+      if (!area.categoryId && !area.otherSubjects.length)
+        missing.push('Name the subjects you teach under Other.');
+      if (!area.levelIds.length)
+        missing.push('Choose academic levels for ' + label + '.');
+      if (!area.languageIds.length)
+        missing.push('Choose teaching languages for ' + label + '.');
+    }
+    try {
+      if (areas) normalizeTeachingAreas(areas, snapshot);
+    } catch {
+      missing.push(
+        'Update teaching areas with categories, subjects, academic levels and languages that are still active.',
+      );
+    }
     if (!doc.teachingCountries?.length)
       missing.push('Choose the European markets you teach in.');
     if (!doc.learnerAgeGroups?.length)
       missing.push('Choose children, adults, or both.');
-    if (!doc.teachingLevels?.length)
-      missing.push('Choose the levels you teach.');
     if (
       !doc.credentials?.length &&
       !doc.education?.length &&
@@ -149,6 +163,7 @@ export class TutorApplicationsService {
       missing.push('Replace subjects or curricula that are no longer active.');
     }
     return {
+      teachingAreas: areas,
       requiredAssessments,
       assessmentResponses: doc.assessmentResponses ?? [],
       introVideoUploaded: Boolean(doc.tutorIntroVideo),
@@ -182,6 +197,9 @@ export class TutorApplicationsService {
     };
   }
   async submit(actor: AuthenticatedUser, input: SubmitTutorDto) {
+    return this.catalog.withStablePolicy(() => this.submitApplication(actor,input));
+  }
+  private async submitApplication(actor: AuthenticatedUser, input: SubmitTutorDto) {
     const application = await this.mine(actor);
     if (input.revision !== application.revision)
       throw new ConflictException(
@@ -290,6 +308,9 @@ export class TutorApplicationsService {
     return this.summary(await this.teacher(id));
   }
   async review(id: string, input: ReviewTutorDto, actor: AuthenticatedUser) {
+    return this.catalog.withStablePolicy(() => this.reviewApplication(id,input,actor));
+  }
+  private async reviewApplication(id: string, input: ReviewTutorDto, actor: AuthenticatedUser) {
     if (actor.sub === id)
       throw new ForbiddenException('You cannot review your own application.');
     const doc = await this.teacher(id);
@@ -307,12 +328,15 @@ export class TutorApplicationsService {
         );
       const results = input.assessmentResults ?? [];
       if (
-        new Set(results.map((r) => r.categoryId)).size !== results.length ||
+        new Set(results.map((r) => r.categoryId + ':' + (r.levelId ?? '')))
+          .size !== results.length ||
         application.requiredAssessments.some(
           (required) =>
             !results.some(
               (result) =>
                 result.categoryId === required.categoryId &&
+                result.levelId === required.levelId &&
+                result.taskVersion === required.taskVersion &&
                 result.version === required.version &&
                 result.passed &&
                 result.notes.trim().length >= 10,
@@ -320,7 +344,7 @@ export class TutorApplicationsService {
         )
       )
         throw new BadRequestException(
-          'Record a passed assessment with notes for each selected category. Reload if the category requirements changed.',
+          'Record a passed assessment with notes for each selected category and academic level. Reload if the category requirements changed.',
         );
 
       if (application.missing.length)

@@ -32,3 +32,5 @@ export * from './signaling.js';
 export * from './transport.js';
 
 export * from './teaching-catalog.js';
+
+export * from './assessment-tasks.js';

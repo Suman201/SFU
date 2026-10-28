@@ -1,3 +1,5 @@
+import { teachingCategoryIds } from '@native-sfu/contracts';
+import { normalizeTeachingAreas } from '../teaching-catalog/teaching-areas';
 import { normalizeIntroVideoUrl } from '../teaching-catalog/intro-video-url';
 import { IntroVideoService } from '../teaching-catalog/intro-video.service';
 import { TeachingCatalogService } from '../teaching-catalog/catalog.service';
@@ -279,14 +281,27 @@ export class ProfilesService {
       this.assertStudentUpdateOnly(request);
     }
 
-    if (isTeacher && (request.teacherSubjectIds !== undefined || request.curriculumIds !== undefined)) {
+    if (isTeacher && (request.curriculumIds !== undefined || (request.teachingAreas === undefined && request.teacherSubjectIds !== undefined))) {
       if (!this.catalog) throw new BadRequestException('Teaching catalogue is unavailable.');
-      await this.catalog.validateSelections(request.teacherSubjectIds ?? doc.teacherSubjectIds ?? [], request.curriculumIds ?? doc.curriculumIds ?? [], doc.teacherSubjectIds ?? [], doc.curriculumIds ?? []);
+      await this.catalog.validateSelections((request.teachingAreas === undefined ? request.teacherSubjectIds : undefined) ?? doc.teacherSubjectIds ?? [], request.curriculumIds ?? doc.curriculumIds ?? [], doc.teacherSubjectIds ?? [], doc.curriculumIds ?? []);
     }
     if (request.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: request.timezone }); } catch { throw new BadRequestException('Choose a valid IANA time zone.'); } }
     if (isTeacher && request.publicProfileEnabled && doc.tutorReviewStatus !== 'approved') throw new ForbiddenException('Submit your profile for admin review before publishing.');
     const previousIntroVideo = doc.tutorIntroVideo;
     const update = this.profileUpdate(request, isTeacher);
+    if (isTeacher && request.teachingAreas !== undefined) {
+      if (!this.catalog) throw new BadRequestException('Teaching catalogue is unavailable.');
+      const catalog = await this.catalog.snapshot();
+      const areas = normalizeTeachingAreas(request.teachingAreas, catalog, doc.teachingAreas ?? []);
+      update.teachingAreas = areas;
+      update.teacherSubjectIds = [...new Set(areas.flatMap(a => a.subjectIds))];
+      const levelIds = new Set(areas.flatMap(a => a.levelIds));
+      update.teachingLevels = (catalog.levels ?? []).filter(l => levelIds.has(l.id)).map(l => l.name);
+      const ids = new Set(areas.flatMap(a => a.languageIds));
+      update.languages = (catalog.languages ?? []).filter(l => ids.has(l.id)).map(l => l.name);
+    } else if (isTeacher && doc.teachingAreas !== undefined && request.teacherSubjectIds !== undefined && JSON.stringify(request.teacherSubjectIds) !== JSON.stringify(doc.teacherSubjectIds)) {
+      throw new BadRequestException('Update subjects through your teaching areas to keep levels and languages together.');
+    }
     if (Object.keys(update).length) {
       const changed = isTeacher && Object.entries(update).some(([key,value]) => key !== 'publicProfileEnabled' && JSON.stringify(doc.get ? doc.get(key) : (doc as any)[key]) !== JSON.stringify(value));
       Object.assign(doc, update);
@@ -411,6 +426,7 @@ export class ProfilesService {
       ...(teacher.timezone ? { timezone: teacher.timezone } : {}),
       introVideoUploaded: Boolean(teacher.tutorIntroVideo), introVideoDurationSeconds: teacher.tutorIntroVideo?.durationSeconds,
       introVideoUrl: teacher.introVideoUrl,
+      teachingAreas: teacher.teachingAreas,
       teacherSubjectIds: this.stringArray(teacher.teacherSubjectIds),
       curriculumIds: this.stringArray(teacher.curriculumIds),
       teachingCountries: this.stringArray(teacher.teachingCountries),
@@ -442,11 +458,26 @@ export class ProfilesService {
     };
     const andFilters: Record<string, unknown>[] = [];
 
-    if (query.subjectId || query.categoryId) {
+    for (const value of [query.subjectId, query.categoryId, query.levelId, query.languageId]) {
+      if (value !== undefined && (typeof value !== 'string' || !/^[a-fA-F0-9]{24}$/.test(value)))
+        throw new BadRequestException('Choose a valid catalogue filter.');
+    }
+    if (query.subjectId || query.categoryId || query.levelId || query.languageId) {
       if (!this.catalog) throw new BadRequestException('Teaching catalogue is unavailable.');
       const snapshot = await this.catalog.snapshot();
-      const matching = snapshot.subjects.filter(item => (!query.subjectId || item.id === query.subjectId) && (!query.categoryId || item.parentId === query.categoryId));
-      filter.teacherSubjectIds = { $in: matching.map(item => item.id) };
+      const categoryIds = query.categoryId ? teachingCategoryIds(snapshot.categories, query.categoryId) : [];
+      const areaFilter: Record<string, unknown> = {};
+      if (query.categoryId) areaFilter.categoryId = { $in: categoryIds };
+      if (query.subjectId) areaFilter.subjectIds = query.subjectId;
+      if (query.levelId) areaFilter.levelIds = query.levelId;
+      if (query.languageId) areaFilter.languageIds = query.languageId;
+      else if (query.language) areaFilter.languageIds = { $in: (snapshot.languages??[]).filter(l => [l.name,...l.aliases].some(n=>this.searchRegex(query.language!).test(n))).map(l=>l.id) };
+      const alternatives: Record<string, unknown>[] = [{ teachingAreas: { $elemMatch: areaFilter } }];
+      if (!query.levelId && !query.languageId) {
+        const subjectIds = snapshot.subjects.filter(s => (!query.subjectId || s.id === query.subjectId) && (!query.categoryId || categoryIds.includes(s.parentId!))).map(s => s.id);
+        alternatives.push({ teachingAreas: { $exists: false }, teacherSubjectIds: { $in: subjectIds } });
+      }
+      andFilters.push({ $or: alternatives });
     }
     const teacherIdFilters: string[][] = [];
     const subject = this.optionalTrim(query.subject);
@@ -490,6 +521,7 @@ export class ProfilesService {
       andFilters.push({
         $or: [
           { teacherSubjectIds: { $in: catalogSearchIds } },
+          { 'teachingAreas.otherSubjects': searchRegex },
           { displayName: searchRegex },
           { name: searchRegex },
           { headline: searchRegex },
@@ -894,6 +926,7 @@ export class ProfilesService {
       ...(user.timezone ? { timezone: user.timezone } : {}),
       introVideoUploaded: Boolean(user.tutorIntroVideo), introVideoDurationSeconds: user.tutorIntroVideo?.durationSeconds,
       introVideoUrl: user.introVideoUrl, assessmentResponses: user.assessmentResponses ?? [],
+      teachingAreas: user.teachingAreas,
       teacherSubjectIds: this.stringArray(user.teacherSubjectIds),
       curriculumIds: this.stringArray(user.curriculumIds),
       teachingCountries: this.stringArray(user.teachingCountries),
@@ -932,7 +965,7 @@ export class ProfilesService {
     if (isTeacher) {
       if (request.introVideoUrl !== undefined) update.introVideoUrl = normalizeIntroVideoUrl(request.introVideoUrl);
       if (request.assessmentResponses !== undefined) {
-        if (new Set(request.assessmentResponses.map(x=>x.categoryId)).size !== request.assessmentResponses.length) throw new BadRequestException('Provide one assessment response per category.');
+        if (new Set(request.assessmentResponses.map(x=>x.categoryId+':'+(x.levelId??''))).size !== request.assessmentResponses.length) throw new BadRequestException('Provide one assessment response per category and academic level.');
         for (const item of request.assessmentResponses) if(item.evidenceUrl?.trim()) {let link:URL;try{link=new URL(item.evidenceUrl);}catch{throw new BadRequestException('Assessment evidence needs a valid HTTPS link.');}if(link.protocol!=='https:' || link.username || link.password)throw new BadRequestException('Assessment evidence needs a valid HTTPS link.');}
         update.assessmentResponses=request.assessmentResponses;
       }
@@ -1904,6 +1937,7 @@ export class ProfilesService {
     const highlightedCredential = this.credentials(teacher.credentials)[0];
     const promotion = activePromotionMap.get(teacher.id);
     return {
+      teachingAreas: teacher.teachingAreas,
       teacherSubjectIds: this.stringArray(teacher.teacherSubjectIds),
       curriculumIds: this.stringArray(teacher.curriculumIds),
       teachingCountries: this.stringArray(teacher.teachingCountries),

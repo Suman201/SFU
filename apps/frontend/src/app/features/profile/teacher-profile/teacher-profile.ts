@@ -1,7 +1,13 @@
+import { TeachingAreasEditor } from '../../../shared/teaching-areas/teaching-areas-editor';
 import { DestroyRef } from '@angular/core';
 import {
   EUROPEAN_MARKETS,
   TEACHING_LEVELS,
+  legacyTeachingAreas,
+  type TeacherTeachingArea,
+  teachingCategoryPath,
+  resolveTeachingAssessments,
+  type CategoryAssessment,
   type TeachingCatalogSnapshot,
   type TutorApplication,
 } from '@native-sfu/contracts';
@@ -73,6 +79,7 @@ interface TeacherProfileForm {
   education: ProfileCredential[];
   experience: ProfileExperience[];
   socialLinks: ProfileSocialLink[];
+  teachingAreas: TeacherTeachingArea[];
   teacherSubjectIds: string[];
   curriculumIds: string[];
   teachingCountries: string[];
@@ -218,6 +225,7 @@ const EMPTY_FORM: TeacherProfileForm = {
   education: [],
   experience: [],
   socialLinks: [],
+  teachingAreas: [],
   teacherSubjectIds: [],
   curriculumIds: [],
   teachingCountries: [],
@@ -343,7 +351,7 @@ const EMPTY_PROMOTION_FORM: PromotionForm = {
 @Component({
   selector: 'sfu-teacher-profile',
   standalone: true,
-  imports: [Footer, Header, RouterLink, FormsModule],
+  imports: [Footer, Header, RouterLink, FormsModule, TeachingAreasEditor],
   templateUrl: './teacher-profile.html',
   styleUrls: ['./teacher-profile.scss', './teacher-onboarding.scss'],
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -471,14 +479,7 @@ export class TeacherProfile implements OnInit {
     { id: 'assessment', label: 'Teaching assessment' },
     { id: 'review', label: 'Review & submit' },
   ];
-  protected subjectCategory = '';
   protected curriculumSearch = '';
-  protected selectedSubjectName(id: string) {
-    return (
-      this.catalog().subjects.find((s) => s.id === id)?.name ||
-      'Archived subject'
-    );
-  }
   protected selectedCurriculumName(id: string) {
     return (
       this.catalog().curricula.find((c) => c.id === id)?.name ||
@@ -491,37 +492,60 @@ export class TeacherProfile implements OnInit {
       (c) => !q || c.name.toLowerCase().includes(q),
     );
   }
-  protected subjectSearch = '';
-  protected readonly requiredCategoryAssessments = computed(() =>
-    this.catalog().categories.filter((c) =>
-      this.catalog().subjects.some(
-        (s) =>
-          s.parentId === c.id && this.form().teacherSubjectIds.includes(s.id),
-      ),
-    ),
+  protected readonly onlyOtherAreas = computed(
+    () =>
+      this.form().teachingAreas.length > 0 &&
+      this.form().teachingAreas.every((a) => !a.categoryId),
   );
-  protected assessmentAnswer(id: string) {
-    return (
-      this.form().assessmentResponses.find((x) => x.categoryId === id)
-        ?.response ?? ''
+  protected readonly requiredAssessments = computed(() =>
+    resolveTeachingAssessments(this.catalog(), this.form().teachingAreas),
+  );
+  protected updateTeachingAreas(areas: TeacherTeachingArea[]) {
+    this.form.update((f) => ({
+      ...f,
+      teachingAreas: areas,
+      teacherSubjectIds: [...new Set(areas.flatMap((a) => a.subjectIds))],
+    }));
+  }
+  protected categoryLabel(id: string) {
+    return teachingCategoryPath(this.catalog().categories, id)
+      .map((c) => c.name)
+      .join(' › ');
+  }
+  private responseFor(task: CategoryAssessment) {
+    return this.form().assessmentResponses.find(
+      (x) => x.categoryId === task.categoryId && x.levelId === task.levelId,
     );
   }
-  protected assessmentEvidence(id: string) {
-    return (
-      this.form().assessmentResponses.find((x) => x.categoryId === id)
-        ?.evidenceUrl ?? ''
-    );
+  protected assessmentAnswer(task: CategoryAssessment) {
+    return this.responseFor(task)?.response ?? '';
+  }
+  protected assessmentEvidence(task: CategoryAssessment) {
+    return this.responseFor(task)?.evidenceUrl ?? '';
+  }
+  protected assessmentIsStale(task: CategoryAssessment) {
+    const response = this.responseFor(task);
+    return response && response.taskVersion !== task.taskVersion;
   }
   protected updateAssessment(
-    id: string,
+    task: CategoryAssessment,
     field: 'response' | 'evidenceUrl',
     value: string,
   ) {
     this.form.update((f) => {
       const rows = [...f.assessmentResponses];
-      const index = rows.findIndex((x) => x.categoryId === id);
-      if (index >= 0) rows[index] = { ...rows[index]!, [field]: value };
-      else rows.push({ categoryId: id, response: '', [field]: value });
+      const index = rows.findIndex(
+        (x) => x.categoryId === task.categoryId && x.levelId === task.levelId,
+      );
+      const row = {
+        ...(rows[index] ?? { response: '' }),
+        categoryId: task.categoryId,
+        levelId: task.levelId,
+        taskVersion: task.taskVersion,
+        [field]: value,
+      };
+      if (index >= 0) rows[index] = row;
+      else rows.push(row);
       return { ...f, assessmentResponses: rows };
     });
   }
@@ -531,18 +555,8 @@ export class TeacherProfile implements OnInit {
   protected countryName(code: string): string {
     return new Intl.DisplayNames(['en'], { type: 'region' }).of(code) || code;
   }
-  protected categorySubjects(id: string) {
-    const q = this.subjectSearch.trim().toLowerCase();
-    return this.catalog().subjects.filter(
-      (x) =>
-        x.parentId === id &&
-        (!this.subjectCategory || this.subjectCategory === id) &&
-        (!q || [x.name, ...x.aliases].some((s) => s.toLowerCase().includes(q))),
-    );
-  }
   protected toggleSelection(
     field:
-      | 'teacherSubjectIds'
       | 'curriculumIds'
       | 'teachingCountries'
       | 'learnerAgeGroups'
@@ -550,8 +564,7 @@ export class TeacherProfile implements OnInit {
     value: string,
   ) {
     const current = this.form()[field];
-    const limit =
-      field === 'teacherSubjectIds' ? 8 : field === 'curriculumIds' ? 12 : 60;
+    const limit = field === 'curriculumIds' ? 12 : 60;
     if (!current.includes(value) && current.length >= limit) {
       this.error.set(`Choose no more than ${limit} entries.`);
       return;
@@ -566,7 +579,16 @@ export class TeacherProfile implements OnInit {
   protected loadCatalogue() {
     this.catalogError.set('');
     this.profiles.teachingCatalog().subscribe({
-      next: (c) => this.catalog.set(c),
+      next: (c) => {
+        this.catalog.set(c);
+        const profile = this.profile();
+        if (
+          profile &&
+          profile.teachingAreas === undefined &&
+          !this.form().teachingAreas.length
+        )
+          this.updateTeachingAreas(legacyTeachingAreas(profile, c));
+      },
       error: () =>
         this.catalogError.set(
           'The teaching catalogue could not load. Retry before choosing subjects.',
@@ -1394,7 +1416,9 @@ export class TeacherProfile implements OnInit {
     return {
       introVideoUrl: form.introVideoUrl,
       assessmentResponses: form.assessmentResponses.filter((r) =>
-        this.requiredCategoryAssessments().some((c) => c.id === r.categoryId),
+        this.requiredAssessments().some(
+          (c) => c.categoryId === r.categoryId && c.levelId === r.levelId,
+        ),
       ),
       displayName: form.displayName,
       phone: form.phone,
@@ -1403,17 +1427,20 @@ export class TeacherProfile implements OnInit {
       location: form.location,
       timezone: form.timezone,
       availability: form.availability,
-      languages: this.parseList(form.languagesText),
+
       skills: this.parseList(form.skillsText),
       credentials: form.credentials,
       education: form.education,
       experience: form.experience,
       socialLinks: form.socialLinks,
-      teacherSubjectIds: form.teacherSubjectIds,
+      teachingAreas: form.teachingAreas.map((a) => ({
+        ...a,
+        otherSubjects: a.otherSubjects.map((n) => n.trim()).filter(Boolean),
+      })),
       curriculumIds: form.curriculumIds,
       teachingCountries: form.teachingCountries,
       learnerAgeGroups: form.learnerAgeGroups,
-      teachingLevels: form.teachingLevels,
+
       publicProfileEnabled:
         this.application()?.status === 'approved' && form.publicProfileEnabled,
     };
@@ -1580,6 +1607,7 @@ export class TeacherProfile implements OnInit {
       education: profile.education.map((item) => ({ ...item })),
       experience: profile.experience.map((item) => ({ ...item })),
       socialLinks: profile.socialLinks.map((item) => ({ ...item })),
+      teachingAreas: legacyTeachingAreas(profile, this.catalog()),
       teacherSubjectIds: [...(profile.teacherSubjectIds ?? [])],
       curriculumIds: [...(profile.curriculumIds ?? [])],
       teachingCountries: [...(profile.teachingCountries ?? [])],

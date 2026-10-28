@@ -35,6 +35,7 @@
         @for(subject of subjectNames(teacher.teacherSubjectIds);track
         subject){<span>{{subject}}</span>}
       </div>
+      <sfu-teaching-areas-summary [catalog]="catalog()" [areas]="teacher.teachingAreas||[]" />
       <article class="about-panel">
         <h2>A little about me</h2>
         <p>{{teacher.bio}}</p>
@@ -49,7 +50,7 @@
           <dt>Who I teach</dt>
           <dd>{{teacher.learnerAgeGroups?.join(' and ')}}</dd>
         </div>
-        }@if(teacher.teachingLevels?.length){
+        }@if(!teacher.teachingAreas?.length && teacher.teachingLevels?.length){
         <div>
           <dt>Levels</dt>
           <dd>{{teacher.teachingLevels?.join(', ')}}</dd>
@@ -271,7 +272,7 @@
       } @case ('batches') { @if (teacher.batches.length) {
       <div class="batch-list">
         @for (batch of teacher.batches; track batch.id) {
-        <article class="batch-row">
+        <article class="batch-row" [attr.data-batch-id]="batch.id">
           <div>
             <strong>{{ batch.title }}</strong>
             <span>{{ batch.subject || 'General course' }}</span>
@@ -284,7 +285,7 @@
             <span>{{ seatsLabel(batch) }}</span>
           </div>
           <footer>
-            <a routerLink="/student/explore">View classes</a>
+            <a routerLink="/student/explore" [queryParams]="{teacherId:teacher.id,batchId:batch.id}">View classes</a>
           </footer>
         </article>
         }

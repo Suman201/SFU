@@ -19,15 +19,7 @@
         (input)="updateFilter('q', inputValue($event))"
         placeholder="Subject, skill or teacher’s name"
     /></label>
-    <label
-      ><span>Language</span
-      ><input
-        name="language"
-        maxlength="160"
-        [value]="filters().language"
-        (input)="updateFilter('language', inputValue($event))"
-        placeholder="Any language"
-    /></label>
+    <label><span>Teaching language</span><select aria-label="Teaching language" name="languageId" [value]="filters().languageId" (change)="updateFilter('languageId',selectValue($event))"><option value="">Any language</option>@for(language of catalog().languages||[];track language.id){<option [value]="language.id">{{language.name}}</option>}</select></label>
     <label
       ><span>Availability</span
       ><select
@@ -60,19 +52,19 @@
         ><label
           ><span>Category</span
           ><select
-            name="categoryId"
+            aria-label="Category" name="categoryId"
             [value]="filters().categoryId"
             (change)="updateFilter('categoryId',selectValue($event))"
           >
             <option value="">All categories</option>
             @for(category of catalog().categories;track category.id){
-            <option [value]="category.id">{{category.name}}</option>
+            <option [value]="category.id">{{categoryName(category.id)}}</option>
             }
           </select></label
         ><label
           ><span>Subject</span
           ><select
-            name="subjectId"
+            aria-label="Subject" name="subjectId"
             [value]="filters().subjectId"
             (change)="updateFilter('subjectId',selectValue($event))"
           >
@@ -82,6 +74,7 @@
             }
           </select></label
         >
+        <label><span>Academic level</span><select aria-label="Academic level" name="levelId" [value]="filters().levelId" (change)="updateFilter('levelId',selectValue($event))"><option value="">Any academic level</option>@for(level of catalog().levels||[];track level.id){<option [value]="level.id">{{level.name}}</option>}</select></label>
       </div>
     </details>
     @if (hasFilters()) {

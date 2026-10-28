@@ -49,7 +49,7 @@ export interface StudentEnrolledBatch {
   capacity: number;
   feeAmount: number;
   startsAt: string;
-  level: 'Beginner' | 'Intermediate' | 'Advanced';
+  level?: string;
   enrollmentStatus?: StudentEnrollmentStatus;
 }
 
@@ -667,7 +667,6 @@ export class StudentEnrollmentsService {
       capacity: batch.maxCapacity,
       feeAmount: this.batchFeeAmount(batch),
       startsAt: nextStart.toISOString(),
-      level: 'Intermediate',
       ...(enrollment?.status ? { enrollmentStatus: enrollment.status } : {})
     };
   }

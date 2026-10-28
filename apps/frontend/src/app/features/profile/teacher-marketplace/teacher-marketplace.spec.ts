@@ -92,6 +92,11 @@ describe('Teacher marketplace search', () => {
     );
   });
 
+  it('sends catalogue category, subject, level and language filters to the backend',()=>{
+    params.next(convertToParamMap({categoryId:'science',subjectId:'physics',levelId:'advanced',languageId:'french'}));
+    expect(list.calls.mostRecent().args[0]).toEqual(jasmine.objectContaining({categoryId:'science',subjectId:'physics',levelId:'advanced',languageId:'french'}));
+  });
+
   it('clears loading after an API error and allows retry', () => {
     requests[0]!.error(new Error('offline'));
     expect(state.loading()).toBeFalse();

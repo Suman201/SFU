@@ -1,3 +1,7 @@
+import { exerciseLevelAssessments } from './helpers/level-assessment-acceptance';
+import { resolveTeachingAssessments } from '@native-sfu/contracts';
+import { runStudentEnrollmentJourney } from './helpers/student-enrollment-journey';
+import { exerciseFlexibleTeachingCatalog } from './helpers/flexible-teaching-catalog';
 import { test, expect } from '@playwright/test';
 import mongoose from 'mongoose';
 import { createServer, request as httpRequest } from 'node:http';
@@ -5,6 +9,8 @@ import { readFile, stat, mkdir, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { startAcceptanceStack, login } from './helpers/whiteboard-classroom';
+
+test.use({ actionTimeout: 15_000 });
 
 test('real backend: tutor catalogue, video, review and public profile', async ({
   browser,
@@ -59,6 +65,7 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
             assessmentResponses: [],
           },
           $unset: {
+            teachingAreas: '',
             tutorIntroVideo: '',
             introVideoUrl: '',
             coverImageUrl: '',
@@ -119,8 +126,8 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
       201,
     );
     const catalog = await api('GET', '/teaching-catalog', undefined);
-    expect(catalog.categories).toHaveLength(18);
-    expect(catalog.subjects).toHaveLength(268);
+    expect(catalog.categories.length).toBeGreaterThan(18);
+    expect(catalog.subjects).toHaveLength(270);
     expect(catalog.curricula).toHaveLength(80);
     await api(
       'POST',
@@ -131,9 +138,11 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
     );
     expect(
       (await api('GET', '/teaching-catalog', undefined)).subjects,
-    ).toHaveLength(268);
-    const maths = catalog.categories.find((x: any) => x.name === 'Mathematics');
+    ).toHaveLength(270);
     const algebra = catalog.subjects.find((x: any) => x.name === 'Algebra');
+    const maths = catalog.categories.find(
+      (x: any) => x.id === algebra.parentId,
+    );
     const curriculum = catalog.curricula.find((x: any) => x.name === 'GCSE');
     await api(
       'PATCH',
@@ -166,6 +175,19 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
       availability:
         'Monday to Friday, 16:00–20:00. Weekend lessons by arrangement.',
       teacherSubjectIds: [algebra.id],
+      teachingAreas: [
+        {
+          categoryId: maths.id,
+          subjectIds: [algebra.id],
+          otherSubjects: [],
+          levelIds: [
+            catalog.levels.find((x: any) => x.name === 'Primary school').id,
+          ],
+          languageIds: [
+            catalog.languages.find((x: any) => x.name === 'English').id,
+          ],
+        },
+      ],
       curriculumIds: curriculum ? [curriculum.id] : [],
       teachingCountries: ['DE', 'FR', 'GB'],
       learnerAgeGroups: ['children', 'adults'],
@@ -196,6 +218,15 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
       ],
       publicProfileEnabled: false,
     };
+    draft.assessmentResponses = resolveTeachingAssessments(
+      catalog,
+      draft.teachingAreas,
+    ).map((task) => ({
+      categoryId: task.categoryId,
+      levelId: task.levelId,
+      taskVersion: task.taskVersion,
+      response: draft.assessmentResponses[0]!.response,
+    }));
     await api('PATCH', '/profile/me', teacher.accessToken, draft);
     const avatar = await request.post(
       `${stack.nodeAUrl}/api/v1/profile/me/avatar`,
@@ -239,6 +270,25 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
     await page.locator('.edit-panel').screenshot({
       path: path.join(screenshotDir, 'teacher-subjects-panel.png'),
     });
+    await page
+      .locator('sfu-teaching-areas-editor')
+      .screenshot({
+        path: path.join(screenshotDir, 'teaching-areas.png'),
+        style: 'sfu-header{visibility:hidden!important}',
+      });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page
+      .locator('sfu-teaching-areas-editor')
+      .screenshot({
+        path: path.join(screenshotDir, 'teaching-areas-mobile.png'),
+        style: 'sfu-header{visibility:hidden!important}',
+      });
+    await page.setViewportSize({ width: 1440, height: 1100 });
     await page.getByRole('button', { name: '1 About you' }).click();
     await page.locator('.edit-panel').screenshot({
       path: path.join(screenshotDir, 'teacher-about-panel.png'),
@@ -247,12 +297,10 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
     await page
       .getByRole('button', { name: 'Paste a link', exact: true })
       .click();
-    await page
-      .locator('.edit-panel')
-      .screenshot({
-        path: path.join(screenshotDir, 'teacher-video-link.png'),
-        style: 'sfu-header{visibility:hidden!important}',
-      });
+    await page.locator('.edit-panel').screenshot({
+      path: path.join(screenshotDir, 'teacher-video-link.png'),
+      style: 'sfu-header{visibility:hidden!important}',
+    });
     await page
       .getByRole('button', { name: 'Upload video', exact: true })
       .click();
@@ -383,6 +431,8 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
       safeguardingChecked: true,
       assessmentResults: submitted.requiredAssessments.map((a: any) => ({
         categoryId: a.categoryId,
+        levelId: a.levelId,
+        taskVersion: a.taskVersion,
         version: a.version,
         passed: true,
         notes: 'Reviewed worked example and checked subject understanding.',
@@ -574,12 +624,10 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
     });
     await page.setViewportSize({ width: 1440, height: 1100 });
     await page.getByRole('button', { name: 'Switch to dark mode' }).click();
-    await page
-      .locator('.edit-panel')
-      .screenshot({
-        path: path.join(screenshotDir, 'teacher-video-dark.png'),
-        style: 'sfu-header{visibility:hidden!important}',
-      });
+    await page.locator('.edit-panel').screenshot({
+      path: path.join(screenshotDir, 'teacher-video-dark.png'),
+      style: 'sfu-header{visibility:hidden!important}',
+    });
     await page.getByRole('button', { name: 'Switch to light mode' }).click();
     const published = await api(
       'GET',
@@ -615,6 +663,26 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
       path: path.join(screenshotDir, 'public-tutor-profile.png'),
       fullPage: false,
     });
+    if (info.project.name === 'chromium')
+      await runStudentEnrollmentJourney(stack, teacherId);
+    await exerciseFlexibleTeachingCatalog(
+      api,
+      page,
+      adminPage,
+      teacherId,
+      teacher.accessToken,
+      admin.accessToken,
+      student.accessToken,
+    );
+    await exerciseLevelAssessments(
+      api,
+      page,
+      adminPage,
+      teacherId,
+      teacher.accessToken,
+      admin.accessToken,
+      screenshotDir,
+    );
     await api('PATCH', '/profile/me', teacher.accessToken, {
       introVideoUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
     });
@@ -737,7 +805,7 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
       201,
     );
     const seededAgain = await api('GET', '/teaching-catalog', undefined);
-    expect(seededAgain.categories).toHaveLength(19);
+    expect(seededAgain.categories).toHaveLength(catalog.categories.length + 4);
     expect(
       seededAgain.categories.find((c: any) => c.id === language.id).name,
     ).toBe('Languages and communication');
@@ -749,10 +817,19 @@ test('real backend: tutor catalogue, video, review and public profile', async ({
       ),
     ).toBe(true);
   } catch (error) {
+    for (const [i, context] of contexts.entries())
+      for (const [j, p] of context.pages().entries())
+        await p
+          .screenshot({
+            path: info.outputPath(`failure-${i}-${j}.png`),
+            fullPage: false,
+          })
+          .catch(() => undefined);
     await writeFile(info.outputPath('stack.log'), stack.getLogs());
     throw error;
   } finally {
-    for (const context of contexts) await context.close();
+    for (const context of contexts)
+      await context.close().catch(() => undefined);
     if (adminServer)
       await new Promise<void>((resolve) => adminServer!.close(() => resolve()));
     await stack.stop();

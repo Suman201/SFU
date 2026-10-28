@@ -1,0 +1,177 @@
+<div class="area-picker">
+  <label
+    >Find a category<input
+      type="search"
+      [value]="categorySearch()"
+      (input)="categorySearch.set(text($event))"
+      placeholder="Search categories and specialisms"
+  /></label>
+  <label
+    >Teaching category<select
+      aria-label="Teaching category"
+      [value]="categoryChoice()"
+      (change)="categoryChoice.set(text($event))"
+    >
+      <option value="">Choose a category</option>
+      @for(category of choices();track category.id){
+      <option [value]="category.id">{{categoryName(category.id)}}</option>
+      } @if(!hasOther()){
+      <option value="other">Other / subject not listed</option>
+      }
+    </select></label
+  >
+  <button
+    type="button"
+    class="add-area"
+    [disabled]="!categoryChoice()"
+    (click)="add()"
+  >
+    Add teaching area <span aria-hidden="true">+</span>
+  </button>
+</div>
+<p class="guidance">
+  Add every area you teach. Choose the academic levels and languages for each
+  area; there is no limit on the number of subjects or categories.
+</p>
+<div class="area-list">
+  @for(area of areas();track key(area);let i=$index){
+  <details #areaCard class="area-card" [open]="isExpanded(area,i)">
+    <summary (click)="toggleExpanded($event,area,i)">
+      <span
+        ><strong>{{categoryName(area.categoryId)}}</strong
+        ><small
+          >{{selectedNames(area.levelIds,catalog().levels)||'Choose academic
+          levels'}} ·
+          {{selectedNames(area.languageIds,catalog().languages)||'Choose
+          teaching languages'}}</small
+        ></span
+      ><span aria-hidden="true">⌄</span>
+    </summary>
+    @if(isExpanded(area,i)){
+    <div class="area-content">
+      @if(area.categoryId){
+      <fieldset>
+        <legend>Subjects and specialisms</legend>
+        <p class="guidance">
+          Select your specialisms, or leave empty if you teach this category
+          generally.
+        </p>
+        <input
+          type="search"
+          aria-label="Find subjects in this area"
+          [value]="subjectSearch()[key(area)]||''"
+          (input)="search(area,'subjects',$event)"
+          placeholder="Find a subject"
+        />
+        <div class="options subject-options">
+          @for(subject of subjects(area);track subject.id){<label class="choice"
+            ><input
+              type="checkbox"
+              [checked]="area.subjectIds.includes(subject.id)"
+              (change)="toggle(i,'subjectIds',subject.id)"
+            />{{subject.name}}</label
+          >}@empty{
+          <p class="guidance">
+            No matching subjects. You can still offer this category generally.
+          </p>
+          }
+        </div>
+        @if(area.subjectIds.length){
+        <p class="selection-summary">
+          Selected: {{selectedNames(area.subjectIds,catalog().subjects)}}
+        </p>
+        } @for(id of retired(area,'subjectIds');track id){<button
+          type="button"
+          (click)="toggle(i,'subjectIds',id)"
+        >
+          Remove unavailable subject</button
+        >}
+      </fieldset>
+      }@else{
+      <label
+        >Other subject names<textarea
+          rows="3"
+          [value]="area.otherSubjects.join('\n')"
+          (input)="setOtherSubjects(i,$event)"
+          placeholder="One subject per line"
+        ></textarea>
+      </label>
+      <p class="guidance">
+        These subjects have no preset assessment. An administrator will review
+        your experience and teaching suitability before approving your profile.
+      </p>
+      }
+      <fieldset>
+        <legend>Academic levels</legend>
+        <p class="guidance">
+          Choose the school or academic stages you can teach in this area, such
+          as primary school, secondary school or university.
+        </p>
+        <div class="options level-options">
+          @for(level of catalog().levels||[];track level.id){<label
+            class="choice"
+            ><input
+              type="checkbox"
+              [checked]="area.levelIds.includes(level.id)"
+              (change)="toggle(i,'levelIds',level.id)"
+            />{{level.name}}</label
+          >}
+        </div>
+        @for(id of retired(area,'levelIds');track id){<button
+          type="button"
+          (click)="toggle(i,'levelIds',id)"
+        >
+          Remove archived academic level</button
+        >}
+      </fieldset>
+      <fieldset>
+        <legend>Teaching languages</legend>
+        <p class="guidance">
+          The languages you use to explain and teach this area.
+        </p>
+        <input
+          type="search"
+          aria-label="Find teaching languages"
+          [value]="languageSearch()[key(area)]||''"
+          (input)="search(area,'languages',$event)"
+          placeholder="Find a language"
+        />
+        <div class="options language-options">
+          @for(language of languages(area);track language.id){<label
+            class="choice"
+            ><input
+              type="checkbox"
+              [checked]="area.languageIds.includes(language.id)"
+              (change)="toggle(i,'languageIds',language.id)"
+            />{{language.name}}</label
+          >}
+        </div>
+        @if(area.languageIds.length){
+        <p class="selection-summary">
+          Selected: {{selectedNames(area.languageIds,catalog().languages)}}
+        </p>
+        } @for(id of retired(area,'languageIds');track id){<button
+          type="button"
+          (click)="toggle(i,'languageIds',id)"
+        >
+          Remove archived teaching language</button
+        >}
+      </fieldset>
+      <button
+        type="button"
+        class="remove-area"
+        [attr.aria-label]="'Remove teaching area '+categoryName(area.categoryId)"
+        (click)="remove(i)"
+      >
+        Remove this area
+      </button>
+    </div>
+    }
+  </details>
+  }@empty{
+  <div class="empty-areas">
+    Start with a category you teach, or choose “Other” if your subject is not
+    listed.
+  </div>
+  }
+</div>
