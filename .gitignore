@@ -22,3 +22,6 @@ coverage
 /profile-media/
 /apps/backend/profile-media/
 /tutor-verification/
+
+# Scratch verification scripts
+/scratch/

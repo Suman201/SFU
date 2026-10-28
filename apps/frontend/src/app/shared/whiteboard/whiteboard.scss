@@ -2164,6 +2164,29 @@ h1 {
     var(--shadow-md);
 }
 
+.text-editor-shell.inline-text-mode {
+  min-width: 140px;
+  max-width: min(600px, calc(100% - 24px));
+  padding: 3px 6px;
+  border: 1.5px dashed var(--wb-primary);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 20px rgba(7, 28, 65, 0.14);
+
+  .text-editor {
+    border: none;
+    background: transparent;
+    padding: 2px 4px;
+    font-family: inherit;
+    line-height: 1.25;
+    outline: none;
+    resize: none;
+    min-height: 36px;
+    box-shadow: none;
+  }
+}
+
 .text-editor {
   width: 100%;
   min-width: 0;
@@ -3491,3 +3514,553 @@ h1 {
   position: relative;
   z-index: 81;
 }
+
+
+// Modern Floating Zoom and Navigation HUD
+.canvas-floating-zoom {
+  position: absolute;
+  bottom: 22px;
+  right: 22px;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 6px;
+  border: 1px solid var(--wb-control-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-elevated) 88%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 24px rgba(7, 28, 65, 0.12);
+  user-select: none;
+
+  .zoom-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+
+    svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    &:hover {
+      background: color-mix(in srgb, var(--wb-base) 16%, transparent);
+      color: var(--wb-base);
+    }
+  }
+
+  .zoom-pill {
+    min-width: 48px;
+    height: 28px;
+    padding: 0 6px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background 120ms ease;
+
+    &:hover {
+      background: color-mix(in srgb, var(--wb-base) 14%, transparent);
+    }
+  }
+
+  .zoom-divider {
+    width: 1px;
+    height: 14px;
+    margin: 0 2px;
+    background: var(--wb-control-border);
+    opacity: 0.6;
+  }
+}
+
+// Inline Label Editor for Diagrams and Shapes
+.text-editor-shell.inline-label-editor {
+  min-width: 110px;
+  max-width: 320px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 2px solid var(--wb-primary);
+  background: var(--panel-elevated);
+  box-shadow: 0 12px 28px rgba(7, 28, 65, 0.22);
+
+  .text-editor {
+    min-height: 32px;
+    height: auto;
+    padding: 4px 6px;
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+    line-height: 1.3;
+    resize: none;
+    border: none;
+    background: transparent;
+  }
+
+  .text-editor-actions {
+    display: none;
+  }
+}
+
+// Dedicated Highlighter Button
+.highlighter-tool-btn {
+  &.active {
+    background: color-mix(in srgb, #FFD150 24%, var(--control-bg));
+    border-color: #FFD150;
+    color: #CA8A04;
+  }
+}
+
+// 1-Click Teaching Color Strip (Pen Rail)
+.teaching-color-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 0;
+  width: 100%;
+
+  .teaching-color-dot {
+    position: relative;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: 2px solid rgba(255, 255, 255, 0.85);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+    cursor: pointer;
+    padding: 0;
+    transition: transform 120ms ease, box-shadow 120ms ease;
+
+    &:hover {
+      transform: scale(1.18);
+    }
+
+    &.active {
+      transform: scale(1.15);
+      box-shadow: 0 0 0 2px var(--wb-primary), 0 2px 6px rgba(0, 0, 0, 0.25);
+
+      .color-dot-indicator {
+        position: absolute;
+        inset: 4px;
+        border-radius: 999px;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+      }
+    }
+  }
+}
+
+// Classroom Teaching Slide Bar
+.page-tabs.teaching-slide-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 14px;
+  min-height: 46px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel-elevated) 92%, var(--wb-base) 8%), var(--panel-soft));
+  border-bottom: 1px solid var(--wb-control-border);
+
+  .slide-nav-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--control-bg);
+    border: 1px solid var(--wb-control-border);
+    border-radius: 10px;
+    padding: 2px 5px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+
+    .slide-nav-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      transition: background 120ms ease;
+
+      &:hover:not([disabled]) {
+        background: color-mix(in srgb, var(--wb-base) 12%, transparent);
+      }
+
+      &[disabled] {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+
+      svg {
+        width: 15px;
+        height: 15px;
+      }
+    }
+
+    .slide-counter-badge {
+      font-size: 13px;
+      color: var(--text);
+      font-weight: 500;
+      padding: 0 6px;
+      white-space: nowrap;
+
+      strong {
+        font-weight: 700;
+        color: var(--wb-primary);
+      }
+    }
+
+    .slide-add-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      height: 28px;
+      padding: 0 10px;
+      border: none;
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--wb-base) 10%, transparent);
+      color: var(--wb-base);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 120ms ease, color 120ms ease;
+
+      &:hover {
+        background: var(--wb-base);
+        color: #ffffff;
+      }
+
+      svg {
+        width: 14px;
+        height: 14px;
+      }
+    }
+  }
+
+  // Quick Teaching Background Switches
+  .teaching-bg-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--control-bg);
+    border: 1px solid var(--wb-control-border);
+    border-radius: 10px;
+    padding: 2px 4px;
+
+    .teaching-bg-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 28px;
+      padding: 0 10px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 120ms ease;
+
+      svg {
+        width: 14px;
+        height: 14px;
+        opacity: 0.75;
+      }
+
+      &:hover {
+        color: var(--text);
+        background: color-mix(in srgb, var(--wb-base) 8%, transparent);
+      }
+
+      &.active {
+        background: var(--panel-elevated);
+        border-color: var(--accent-border);
+        color: var(--wb-primary);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+
+        svg {
+          opacity: 1;
+          color: var(--wb-primary);
+        }
+      }
+    }
+  }
+
+  .slide-actions-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+
+    .slide-manager-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 32px;
+      padding: 0 12px;
+      border: 1px solid var(--wb-control-border);
+      border-radius: 8px;
+      background: var(--control-bg);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 120ms ease;
+
+      svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      &:hover,
+      &.active {
+        border-color: var(--wb-primary);
+        color: var(--wb-primary);
+      }
+    }
+  }
+}
+
+// Slide Deck Drawer / Popover
+.page-manager-popover {
+  position: absolute;
+  top: 52px;
+  right: 18px;
+  z-index: 100;
+  width: 320px;
+  max-height: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--wb-control-border);
+  background: var(--panel-elevated);
+  box-shadow: 0 18px 42px rgba(7, 28, 65, 0.22);
+
+  .page-manager-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    strong {
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .close-btn {
+      width: 24px;
+      height: 24px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 18px;
+      cursor: pointer;
+      border-radius: 4px;
+
+      &:hover {
+        background: color-mix(in srgb, var(--wb-base) 10%, transparent);
+        color: var(--text);
+      }
+    }
+  }
+
+  .page-manager-search .page-search-input {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid var(--line-soft);
+    background: var(--control-bg);
+    color: var(--text);
+    font-size: 12px;
+  }
+
+  .page-manager-thumbnails {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
+    overflow-y: auto;
+    padding-right: 4px;
+
+    .page-card {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line-soft);
+      background: var(--control-bg);
+      cursor: pointer;
+      transition: all 120ms ease;
+
+      &:hover {
+        border-color: var(--wb-primary);
+        background: color-mix(in srgb, var(--wb-primary) 6%, var(--control-bg));
+      }
+
+      &.active {
+        border-color: var(--wb-primary);
+        background: color-mix(in srgb, var(--wb-primary) 12%, var(--control-bg));
+
+        .page-card-title {
+          font-weight: 700;
+          color: var(--wb-primary);
+        }
+      }
+
+      .page-card-title {
+        font-size: 13px;
+        color: var(--text);
+      }
+
+      .page-card-meta {
+        font-size: 11px;
+        color: var(--muted);
+      }
+    }
+  }
+
+  .page-manager-edit-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 11px;
+      color: var(--muted);
+
+      input {
+        height: 28px;
+        padding: 0 8px;
+        border-radius: 5px;
+        border: 1px solid var(--line-soft);
+        background: var(--control-bg);
+        color: var(--text);
+        font-size: 12px;
+      }
+    }
+  }
+
+  .page-manager-footer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line-soft);
+
+    button {
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 6px;
+      border: 1px solid var(--line-soft);
+      background: var(--control-bg);
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+
+      &:hover:not([disabled]) {
+        border-color: var(--wb-primary);
+      }
+
+      &.danger {
+        color: var(--wb-primary);
+
+        &:hover:not([disabled]) {
+          background: color-mix(in srgb, var(--wb-primary) 12%, transparent);
+        }
+      }
+
+      &[disabled] {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+    }
+  }
+}
+
+/* ── Sleek Modern Floating Tooltip ── */
+.whiteboard-smart-tooltip {
+  position: fixed;
+  z-index: 99999;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  background: rgba(7, 28, 65, 0.94);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.15);
+  font-size: 11.5px;
+  font-weight: 550;
+  line-height: 1;
+  pointer-events: none;
+  white-space: nowrap;
+  animation: wbTooltipFadeIn 0.1s ease-out;
+
+  &.placement-right {
+    transform: translateY(-50%);
+  }
+
+  &.placement-bottom {
+    transform: translateX(-50%);
+  }
+
+  &.placement-top {
+    transform: translate(-50%, -100%);
+  }
+
+  .tooltip-label {
+    letter-spacing: 0.01em;
+  }
+
+  .tooltip-kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 5px;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #ffd150;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+}
+
+@keyframes wbTooltipFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+

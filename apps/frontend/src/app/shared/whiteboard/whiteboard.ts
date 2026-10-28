@@ -121,6 +121,9 @@ export interface WhiteboardShapeElement extends WhiteboardElementBase {
   width: number;
   from: WhiteboardPoint;
   to: WhiteboardPoint;
+  text?: string;
+  textColor?: string;
+  fontSize?: number;
 }
 
 export interface WhiteboardTextElement extends WhiteboardElementBase {
@@ -385,8 +388,9 @@ interface TextDraft {
   x: number;
   y: number;
   value: string;
-  mode: 'text' | 'equation';
+  mode: 'text' | 'equation' | 'shape-text' | 'diagram-label';
   elementId?: string;
+  labelIndex?: number;
   width?: number;
   height?: number;
   align?: WhiteboardTextAlignment;
@@ -1629,7 +1633,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   @ViewChild('mathToolsPopover') private readonly mathToolsPopover?: ElementRef<HTMLElement>;
   @ViewChild('fileInput') private readonly fileInput?: ElementRef<HTMLInputElement>;
 
-  protected readonly activeTool = signal<WhiteboardTool>('select');
+  protected readonly activeTool = signal<WhiteboardTool>('pen');
   protected readonly activeShapeTool = signal<WhiteboardShapeTool>('rectangle');
   protected readonly activeGeometryTool = signal<WhiteboardGeometryTool>('segment');
   protected readonly activeDiagramTool = signal<WhiteboardDiagramTool>('venn');
@@ -1656,6 +1660,19 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly eraserSize = signal(18);
   protected readonly fontSize = signal(28);
   protected readonly colors = ['#071c41', '#458B73', '#F26076', '#FF9760', '#FFD150'];
+  protected readonly isHighlighterActive = computed(
+    () => this.activeTool() === 'pen' && this.activePenStyle() === 'marker'
+  );
+  protected readonly isSolidPenActive = computed(
+    () => this.activeTool() === 'pen' && this.activePenStyle() !== 'marker'
+  );
+  protected readonly teachingColors = [
+    { value: '#071c41', label: 'Dark Charcoal (Writing)' },
+    { value: '#F26076', label: 'Marking Rose (Corrections)' },
+    { value: '#2563EB', label: 'Academic Blue (Formulas)' },
+    { value: '#458B73', label: 'Solution Green (Answers)' },
+    { value: '#FFD150', label: 'Highlighter Amber (Highlight)' }
+  ];
   protected readonly recentColors = signal<string[]>([]);
   protected readonly customRecentColors = computed(() =>
     this.recentColors().filter((color) => !this.colors.some((preset) => preset.toLowerCase() === color.toLowerCase()))
@@ -1742,6 +1759,8 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly presentationEditEnabled = signal(true);
   protected readonly alignmentGuides = signal<AlignmentGuide[]>([]);
   protected readonly selectionMarquee = signal<SelectionMarquee | null>(null);
+  private isSpacePressed = false;
+  private previousToolBeforeSpace: WhiteboardTool | null = null;
   protected readonly snapToGrid = signal(false);
   protected readonly snapToPoints = signal(false);
   protected readonly snapIndicator = signal<WhiteboardPoint | null>(null);
@@ -1764,6 +1783,51 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly templateOptions = TEMPLATE_OPTIONS;
   protected readonly pages = signal<WhiteboardPage[]>([this.createPage('Board 1')]);
   protected readonly activePageId = signal(this.pages()[0]!.id);
+  protected readonly activePageIndex = computed(
+    () => this.pages().findIndex((page) => page.id === this.activePageId()) + 1
+  );
+  protected readonly totalPages = computed(() => this.pages().length);
+  protected readonly pageManagerOpen = signal(false);
+  protected readonly activeTooltip = signal<{
+    text: string;
+    shortcut?: string;
+    x: number;
+    y: number;
+    placement: 'right' | 'bottom' | 'top';
+  } | null>(null);
+  private tooltipTimeoutId?: number;
+
+  protected showTooltip(
+    event: MouseEvent | FocusEvent,
+    text: string,
+    shortcut?: string,
+    placement: 'right' | 'bottom' | 'top' = 'right'
+  ): void {
+    window.clearTimeout(this.tooltipTimeoutId);
+    const target = event.currentTarget as HTMLElement | null;
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+
+    let x = rect.right + 8;
+    let y = rect.top + rect.height / 2;
+
+    if (placement === 'bottom') {
+      x = rect.left + rect.width / 2;
+      y = rect.bottom + 8;
+    } else if (placement === 'top') {
+      x = rect.left + rect.width / 2;
+      y = rect.top - 8;
+    }
+
+    this.tooltipTimeoutId = window.setTimeout(() => {
+      this.activeTooltip.set({ text, shortcut, x, y, placement });
+    }, 100);
+  }
+
+  protected hideTooltip(): void {
+    window.clearTimeout(this.tooltipTimeoutId);
+    this.activeTooltip.set(null);
+  }
   protected readonly pageSearchQuery = signal('');
   protected readonly selectedExportPageIds = signal<string[]>([]);
   protected readonly historyVersion = signal(0);
@@ -1953,6 +2017,34 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
     const key = event.key.toLowerCase();
     const usesModifier = event.ctrlKey || event.metaKey;
+
+    if (!usesModifier && !this.textDraft()) {
+      if (key === 'p') { this.selectPenTool(); return; }
+      if (key === 'm') { this.selectHighlighter(); return; }
+      if (key === 'v' || key === 's') { this.selectTool('select'); return; }
+      if (key === 'e') { this.selectTool('eraser'); return; }
+      if (key === 't') { this.selectTool('text'); return; }
+      if (key === 'n') { this.insertStickyNote(); return; }
+      if (key === 'r') { this.selectShapeTool('rectangle'); return; }
+      if (key === 'c' || key === 'o') { this.selectShapeTool('ellipse'); return; }
+      if (key === 'a') { this.selectShapeTool('arrow'); return; }
+      if (key === 'l') { this.selectTool('laser'); return; }
+      if (key === 'h') { this.selectTool('pan'); return; }
+    }
+
+    if (event.code === 'Space' && !this.isSpacePressed && !this.textDraft()) {
+      event.preventDefault();
+      this.isSpacePressed = true;
+      this.previousToolBeforeSpace = this.activeTool();
+      this.activeTool.set('pan');
+      return;
+    }
+
+    if (usesModifier && key === '0') {
+      event.preventDefault();
+      this.resetView();
+      return;
+    }
 
     if (!this.readOnly() && this.canUseTool('select') && usesModifier && key === 'a') {
       event.preventDefault();
@@ -2266,11 +2358,42 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     return this.renderPageImage(this.activePageId(), 'image/png');
   }
 
+  protected selectPenTool(): void {
+    if (this.readOnly()) return;
+    this.activeTool.set('pen');
+    if (this.activePenStyle() === 'marker') {
+      this.activePenStyle.set('solid');
+      this.penOpacity.set(1);
+      this.strokeWidth.set(4);
+      if (this.strokeColor() === '#FFD150') {
+        this.strokeColor.set('#071c41');
+      }
+    }
+    this.selectedElementIds.set([]);
+    this.penMenuOpen.set(false);
+  }
+
+  protected selectHighlighter(): void {
+    if (this.readOnly()) return;
+    this.activeTool.set('pen');
+    this.activePenStyle.set('marker');
+    this.penOpacity.set(0.35);
+    this.strokeWidth.set(16);
+    if (this.strokeColor() === '#071c41' || this.strokeColor() === '#1e293b') {
+      this.strokeColor.set('#FFD150');
+    }
+    this.selectedElementIds.set([]);
+    this.penMenuOpen.set(false);
+  }
+
   protected selectTool(tool: WhiteboardTool): void {
     if (!this.canUseTool(tool)) {
       return;
     }
     this.activeTool.set(tool);
+    if (tool !== 'select') {
+      this.selectedElementIds.set([]);
+    }
     if (!this.isShapeTool(tool)) {
       this.shapeMenuOpen.set(false);
     }
@@ -2298,6 +2421,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.activeShapeTool.set(tool);
     this.activeTool.set(tool);
     this.shapeMenuOpen.set(false);
+    this.selectedElementIds.set([]);
   }
 
   protected toggleGeometryMenu(event: MouseEvent): void {
@@ -2315,6 +2439,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.activeGeometryTool.set(tool);
     this.activeTool.set(tool);
     this.geometryMenuOpen.set(false);
+    this.selectedElementIds.set([]);
   }
 
   protected toggleDiagramMenu(event: MouseEvent): void {
@@ -2332,6 +2457,12 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.activeDiagramTool.set(tool);
     this.activeTool.set(tool);
     this.diagramMenuOpen.set(false);
+    this.selectedElementIds.set([]);
+  }
+
+  protected togglePageManager(event?: Event): void {
+    event?.stopPropagation();
+    this.pageManagerOpen.update((open) => !open);
   }
 
   protected selectColor(color: string): void {
@@ -3408,8 +3539,49 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   protected commitTextDraft(): void {
     const draft = this.textDraft();
-    const text = draft?.value.trim();
-    if (!draft || !text) {
+    const text = draft?.value.trim() ?? '';
+    if (!draft) {
+      return;
+    }
+
+    if (draft.mode === 'diagram-label' && draft.elementId && draft.labelIndex !== undefined) {
+      this.pushHistory();
+      this.elements = this.elements.map((item) => {
+        if (item.id === draft.elementId && item.type === 'diagram') {
+          const nextLabels = [...(item.labels ?? [])];
+          nextLabels[draft.labelIndex!] = text;
+          const updated: WhiteboardDiagramElement = { ...item, labels: nextLabels };
+          this.emitElementUpsert(updated);
+          return updated;
+        }
+        return item;
+      });
+      this.textDraft.set(null);
+      this.render();
+      return;
+    }
+
+    if (draft.mode === 'shape-text' && draft.elementId) {
+      this.pushHistory();
+      this.elements = this.elements.map((item) => {
+        if (item.id === draft.elementId && item.type === 'shape') {
+          const updated: WhiteboardShapeElement = {
+            ...item,
+            text,
+            textColor: this.strokeColor(),
+            fontSize: this.fontSize()
+          };
+          this.emitElementUpsert(updated);
+          return updated;
+        }
+        return item;
+      });
+      this.textDraft.set(null);
+      this.render();
+      return;
+    }
+
+    if (!text) {
       this.textDraft.set(null);
       return;
     }
@@ -3417,11 +3589,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.pushHistory();
     if (draft.elementId) {
       this.elements = this.elements.map((item) => (item.id === draft.elementId ? element : item));
-      this.selectedElementIds.set([draft.elementId]);
+      this.selectedElementIds.set([]);
       this.emitElementUpsert(element);
       this.render();
     } else {
-      this.addElement(element);
+      this.addElement(element, this.activePageId(), false);
     }
     this.textDraft.set(null);
   }
@@ -3429,6 +3601,238 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected cancelTextDraft(): void {
     this.textDraft.set(null);
   }
+
+  protected handleWheel(event: WheelEvent): void {
+    event.preventDefault();
+    if (event.ctrlKey || event.metaKey) {
+      const surface = this.whiteboardSurface?.nativeElement;
+      if (!surface) return;
+      const rect = surface.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+
+      const oldZoom = this.zoom();
+      const zoomFactor = event.deltaY < 0 ? 1.08 : 0.92;
+      const newZoom = Math.min(Math.max(Number((oldZoom * zoomFactor).toFixed(2)), 0.3), 3.0);
+      if (newZoom !== oldZoom) {
+        const scaleChange = newZoom / oldZoom;
+        const newPanX = mouseX - (mouseX - this.panX()) * scaleChange;
+        const newPanY = mouseY - (mouseY - this.panY()) * scaleChange;
+        this.panX.set(Math.round(newPanX));
+        this.panY.set(Math.round(newPanY));
+        this.zoom.set(newZoom);
+        this.persistActivePageView();
+        this.render();
+      }
+    } else {
+      this.panX.update((x) => Math.round(x - event.deltaX));
+      this.panY.update((y) => Math.round(y - event.deltaY));
+      this.persistActivePageView();
+      this.render();
+    }
+  }
+
+  @HostListener('window:keyup', ['$event'])
+  protected handleWindowKeyUp(event: KeyboardEvent): void {
+    if (event.code === 'Space' && this.isSpacePressed) {
+      this.isSpacePressed = false;
+      if (this.previousToolBeforeSpace) {
+        this.activeTool.set(this.previousToolBeforeSpace);
+        this.previousToolBeforeSpace = null;
+      }
+    }
+  }
+
+  protected onTextEditorEnter(event: Event | KeyboardEvent): void {
+    const keyEvent = event as KeyboardEvent;
+    if (this.textDraft()?.mode === 'diagram-label' || (!keyEvent.shiftKey && this.textDraft()?.mode === 'shape-text') || (!keyEvent.shiftKey && this.textDraft()?.mode === 'text')) {
+      event.preventDefault();
+      this.commitTextDraft();
+    } else if (keyEvent.ctrlKey || keyEvent.metaKey) {
+      event.preventDefault();
+      this.commitTextDraft();
+    }
+  }
+
+  protected onTextEditorBlur(): void {
+    const draft = this.textDraft();
+    if (draft) {
+      window.setTimeout(() => {
+        if (this.textDraft()) {
+          this.commitTextDraft();
+        }
+      }, 150);
+    }
+  }
+
+  protected insertStickyNote(color = '#FEF08A'): void {
+    if (this.readOnly()) {
+      return;
+    }
+    const point = this.defaultInsertPoint(180, 180);
+    const strokeColor = color === '#FEF08A' ? '#CA8A04' : color === '#BFDBFE' ? '#2563EB' : color === '#BBF7D0' ? '#16A34A' : '#E11D48';
+    const textColor = color === '#FEF08A' ? '#713F12' : color === '#BFDBFE' ? '#1E3A8A' : color === '#BBF7D0' ? '#14532D' : '#881337';
+    const element: WhiteboardShapeElement = {
+      id: `sticky-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      type: 'shape',
+      shape: 'rectangle',
+      strokeColor,
+      fillColor: color,
+      width: 2,
+      from: { x: point.x, y: point.y },
+      to: { x: point.x + 180, y: point.y + 180 },
+      text: 'Sticky Note',
+      textColor,
+      fontSize: 16
+    };
+    this.pushHistory();
+    this.addElement(element, this.activePageId(), false);
+    this.selectedElementIds.set([]);
+    this.openShapeTextDraft(element);
+  }
+
+  private openShapeTextDraft(element: WhiteboardShapeElement): void {
+    const centerX = (element.from.x + element.to.x) / 2;
+    const centerY = (element.from.y + element.to.y) / 2;
+    const width = Math.max(120, Math.min(300, Math.abs(element.to.x - element.from.x) * 0.85));
+    this.textDraft.set({
+      x: Math.round(centerX - width / 2),
+      y: Math.round(centerY - 22),
+      value: element.text ?? '',
+      mode: 'shape-text',
+      elementId: element.id,
+      width,
+      height: 44,
+      align: 'center'
+    });
+    this.render();
+    window.setTimeout(() => {
+      this.textEditor?.nativeElement.select();
+    });
+  }
+
+  private diagramLabelPositions(element: WhiteboardDiagramElement): Array<{ x: number; y: number; index: number; label: string }> {
+    const bounds = this.boundsForElement(element);
+    const results: Array<{ x: number; y: number; index: number; label: string }> = [];
+
+    if (element.kind === 'tree' || element.kind === 'probability-tree') {
+      const root = { x: bounds.x + bounds.width * 0.5, y: bounds.y + bounds.height * 0.2, index: 0, label: element.labels[0] ?? 'Root' };
+      const rowOne = [
+        { x: bounds.x + bounds.width * 0.3, y: bounds.y + bounds.height * 0.48, index: 1, label: element.labels[1] ?? 'A' },
+        { x: bounds.x + bounds.width * 0.7, y: bounds.y + bounds.height * 0.48, index: 2, label: element.labels[2] ?? 'B' }
+      ];
+      const rowTwo = [
+        { x: bounds.x + bounds.width * 0.18, y: bounds.y + bounds.height * 0.76, index: 3, label: element.labels[3] ?? 'A1' },
+        { x: bounds.x + bounds.width * 0.42, y: bounds.y + bounds.height * 0.76, index: 4, label: element.labels[4] ?? 'A2' },
+        { x: bounds.x + bounds.width * 0.58, y: bounds.y + bounds.height * 0.76, index: 5, label: element.labels[5] ?? 'B1' },
+        { x: bounds.x + bounds.width * 0.82, y: bounds.y + bounds.height * 0.76, index: 6, label: element.labels[6] ?? 'B2' }
+      ];
+      results.push(root, ...rowOne, ...rowTwo);
+      if (element.kind === 'probability-tree') {
+        results.push(
+          { x: (root.x + rowOne[0]!.x) / 2 - 12, y: (root.y + rowOne[0]!.y) / 2, index: 7, label: element.labels[7] ?? 'p' },
+          { x: (root.x + rowOne[1]!.x) / 2 + 16, y: (root.y + rowOne[1]!.y) / 2, index: 8, label: element.labels[8] ?? '1-p' }
+        );
+      }
+      return results;
+    }
+
+    if (element.kind === 'venn') {
+      const radius = Math.min(bounds.width, bounds.height) * 0.28;
+      const left = { x: bounds.x + bounds.width * 0.42, y: bounds.y + bounds.height * 0.48 };
+      const right = { x: bounds.x + bounds.width * 0.58, y: bounds.y + bounds.height * 0.48 };
+      results.push(
+        { x: left.x - radius * 0.45, y: left.y, index: 0, label: element.labels[0] ?? 'A' },
+        { x: right.x + radius * 0.45, y: right.y, index: 1, label: element.labels[1] ?? 'B' },
+        { x: bounds.x + bounds.width / 2, y: left.y + radius + 24, index: 2, label: element.labels[2] ?? 'A ∩ B' }
+      );
+      return results;
+    }
+
+    if (element.kind === 'node-edge') {
+      results.push(
+        { x: bounds.x + bounds.width * 0.25, y: bounds.y + bounds.height * 0.32, index: 0, label: element.labels[0] ?? 'A' },
+        { x: bounds.x + bounds.width * 0.7, y: bounds.y + bounds.height * 0.28, index: 1, label: element.labels[1] ?? 'B' },
+        { x: bounds.x + bounds.width * 0.36, y: bounds.y + bounds.height * 0.7, index: 2, label: element.labels[2] ?? 'C' },
+        { x: bounds.x + bounds.width * 0.78, y: bounds.y + bounds.height * 0.68, index: 3, label: element.labels[3] ?? 'D' }
+      );
+      return results;
+    }
+
+    results.push(
+      { x: bounds.x + bounds.width * 0.21, y: bounds.y + bounds.height * 0.47, index: 0, label: element.labels[0] ?? 'Start' },
+      { x: bounds.x + bounds.width * 0.5, y: bounds.y + bounds.height * 0.47, index: 1, label: element.labels[1] ?? 'Step' },
+      { x: bounds.x + bounds.width * 0.79, y: bounds.y + bounds.height * 0.47, index: 2, label: element.labels[2] ?? 'Result' }
+    );
+    return results;
+  }
+
+  private openDiagramLabelDraft(element: WhiteboardDiagramElement, point?: WhiteboardPoint): void {
+    const positions = this.diagramLabelPositions(element);
+    let target = positions[0]!;
+    if (point) {
+      let minDistance = Infinity;
+      for (const pos of positions) {
+        const dist = Math.hypot(pos.x - point.x, pos.y - point.y);
+        if (dist < minDistance) {
+          minDistance = dist;
+          target = pos;
+        }
+      }
+    }
+    const currentLabel = element.labels?.[target.index] ?? target.label;
+    this.textDraft.set({
+      x: Math.round(target.x - 65),
+      y: Math.round(target.y - 18),
+      value: currentLabel,
+      mode: 'diagram-label',
+      elementId: element.id,
+      labelIndex: target.index,
+      width: 130,
+      height: 38,
+      align: 'center'
+    });
+    this.render();
+    window.setTimeout(() => {
+      this.textEditor?.nativeElement.select();
+    });
+  }
+
+  private isDarkFillColor(color: string): boolean {
+    if (color.startsWith('#')) {
+      const hex = color.slice(1);
+      if (hex.length === 6) {
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        return (r * 0.299 + g * 0.587 + b * 0.114) < 140;
+      }
+    }
+    return false;
+  }
+
+  protected canEditSelectedDiagram(): boolean {
+    return this.selectedElements().some((element) => element.type === 'diagram');
+  }
+
+  protected canEditSelectedShapeText(): boolean {
+    return this.selectedElements().some((element) => element.type === 'shape');
+  }
+
+  protected editSelectedDiagramLabels(): void {
+    const diagram = this.selectedElements().find((element): element is WhiteboardDiagramElement => element.type === 'diagram');
+    if (diagram) {
+      this.openDiagramLabelDraft(diagram);
+    }
+  }
+
+  protected editSelectedShapeText(): void {
+    const shape = this.selectedElements().find((element): element is WhiteboardShapeElement => element.type === 'shape');
+    if (shape) {
+      this.openShapeTextDraft(shape);
+    }
+  }
+
 
   protected insertMathSnippet(snippet: string): void {
     const draft = this.textDraft();
@@ -3978,7 +4382,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.closeContextMenu();
     canvas.setPointerCapture(event.pointerId);
 
-    if (this.activeTool() === 'pan') {
+    if (this.activeTool() === 'pan' || event.button === 1 || this.isSpacePressed) {
       this.panStart = {
         clientX: event.clientX,
         clientY: event.clientY,
@@ -4006,6 +4410,18 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         this.render();
         return;
       }
+      if (element?.type === 'shape') {
+        this.setSelectionForElement(element, false);
+        this.openShapeTextDraft(element);
+        this.render();
+        return;
+      }
+      if (element?.type === 'diagram') {
+        this.setSelectionForElement(element, false);
+        this.openDiagramLabelDraft(element, point);
+        this.render();
+        return;
+      }
       if (element?.type === 'graph') {
         this.setSelectionForElement(element, false);
         this.openGraphDraftForElement(element);
@@ -4015,6 +4431,18 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       if (element?.type === 'matrix' || element?.type === 'table') {
         this.setSelectionForElement(element, false);
         this.openMatrixTableDraftForElement(element);
+        this.render();
+        return;
+      }
+      if (!element && !this.readOnly()) {
+        this.textDraft.set({
+          x: Math.round(point.x),
+          y: Math.round(point.y),
+          value: '',
+          mode: 'text',
+          align: 'left'
+        });
+        this.activeTool.set('text');
         this.render();
         return;
       }
@@ -4088,7 +4516,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
     if (this.isDiagramTool(this.activeTool())) {
       this.pushHistory();
-      this.addElement(this.createDiagramElement(this.activeTool() as WhiteboardDiagramTool, this.snapPoint(point)));
+      this.addElement(this.createDiagramElement(this.activeTool() as WhiteboardDiagramTool, this.snapPoint(point)), this.activePageId(), false);
+      this.selectedElementIds.set([]);
+      this.render();
       return;
     }
 
@@ -4096,7 +4526,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       const start = this.snapPoint(point);
       if (this.activeTool() === 'point') {
         this.pushHistory();
-        this.addElement(this.createGeometryElement('point', start, start));
+        this.addElement(this.createGeometryElement('point', start, start), this.activePageId(), false);
+        this.selectedElementIds.set([]);
+        this.render();
         return;
       }
       this.drawing = true;
@@ -4182,12 +4614,50 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     }
 
     event.preventDefault();
-    const nextPoint = this.snapPoint(point, this.shapeStart ?? undefined);
+    let nextPoint = this.snapPoint(point, this.shapeStart ?? undefined);
     if (this.previewElement.type === 'shape' && this.shapeStart) {
+      if (event.shiftKey) {
+        const dx = nextPoint.x - this.shapeStart.x;
+        const dy = nextPoint.y - this.shapeStart.y;
+        if (this.previewElement.shape === 'rectangle' || this.previewElement.shape === 'ellipse' || this.previewElement.shape === 'star') {
+          const maxDist = Math.max(Math.abs(dx), Math.abs(dy));
+          nextPoint = {
+            x: this.shapeStart.x + Math.sign(dx || 1) * maxDist,
+            y: this.shapeStart.y + Math.sign(dy || 1) * maxDist
+          };
+        } else if (this.previewElement.shape === 'line' || this.previewElement.shape === 'arrow') {
+          const angle = Math.atan2(dy, dx);
+          const snapAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+          const len = Math.hypot(dx, dy);
+          nextPoint = {
+            x: this.shapeStart.x + Math.cos(snapAngle) * len,
+            y: this.shapeStart.y + Math.sin(snapAngle) * len
+          };
+        }
+      }
       this.previewElement = this.createShapeElement(this.shapeStart, nextPoint, this.previewElement.shape);
     } else if (this.previewElement.type === 'geometry' && this.shapeStart) {
       this.previewElement = this.createGeometryElement(this.previewElement.kind, this.shapeStart, nextPoint, this.previewElement.id);
     } else if (this.previewElement.type === 'stroke') {
+      const firstPoint = this.previewElement.points[0];
+      if (event.shiftKey && firstPoint) {
+        const dx = nextPoint.x - firstPoint.x;
+        const dy = nextPoint.y - firstPoint.y;
+        const angle = Math.atan2(dy, dx);
+        const snapAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+        const len = Math.hypot(dx, dy);
+        const straightPoint: WhiteboardStrokePoint = {
+          x: Math.round(firstPoint.x + Math.cos(snapAngle) * len),
+          y: Math.round(firstPoint.y + Math.sin(snapAngle) * len)
+        };
+        this.previewElement = {
+          ...this.previewElement,
+          points: [firstPoint, straightPoint]
+        };
+        this.lastPoint = straightPoint;
+        this.render();
+        return;
+      }
       const previousStrokePoint = this.previewElement.points[this.previewElement.points.length - 1];
       const nextStrokePoint = this.getStrokePoint(event, nextPoint, previousStrokePoint);
       this.previewElement = {
@@ -4215,7 +4685,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     } else if (this.previewElement && !this.isTinyElement(this.previewElement)) {
       this.previewElement = this.finalizePreviewElement(this.previewElement);
       this.pushHistory();
-      this.addElement(this.previewElement);
+      this.addElement(this.previewElement, this.activePageId(), false);
     }
 
     this.drawing = false;
@@ -4234,6 +4704,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.movingSelection = false;
     this.transformStart = null;
     this.alignmentGuides.set([]);
+    if (this.activeTool() !== 'select') {
+      this.selectedElementIds.set([]);
+    }
     this.render();
   }
 
@@ -5157,7 +5630,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     };
   }
 
-  private addElement(element: WhiteboardElement, pageId = this.activePageId()): void {
+  private addElement(element: WhiteboardElement, pageId = this.activePageId(), autoSelect = false): void {
     const nextElement = this.cloneElement(element);
     const nextPages = this.pages().map((page) => page.id === pageId ? { ...page, elements: [...page.elements, nextElement] } : page);
     if (!this.acceptBoardChange(nextPages)) {
@@ -5169,7 +5642,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.pages.set(nextPages);
     this.previewElement = null;
     if (pageId === this.activePageId()) {
-      this.selectedElementIds.set([element.id]);
+      if (autoSelect) {
+        this.selectedElementIds.set([element.id]);
+      } else {
+        this.selectedElementIds.set([]);
+      }
       this.render();
     }
     this.emitElementUpsert(element, pageId);
@@ -5590,11 +6067,28 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   private drawStrokePolyline(context: CanvasRenderingContext2D, points: readonly WhiteboardStrokePoint[]): void {
-    context.beginPath();
-    context.moveTo(points[0]!.x, points[0]!.y);
-    for (const point of points.slice(1)) {
-      context.lineTo(point.x, point.y);
+    if (!points.length) {
+      return;
     }
+    context.beginPath();
+    if (points.length === 1) {
+      context.arc(points[0]!.x, points[0]!.y, context.lineWidth / 2, 0, Math.PI * 2);
+      context.fill();
+      return;
+    }
+    if (points.length === 2) {
+      context.moveTo(points[0]!.x, points[0]!.y);
+      context.lineTo(points[1]!.x, points[1]!.y);
+      context.stroke();
+      return;
+    }
+    context.moveTo(points[0]!.x, points[0]!.y);
+    for (let i = 1; i < points.length - 1; i++) {
+      const midX = (points[i]!.x + points[i + 1]!.x) / 2;
+      const midY = (points[i]!.y + points[i + 1]!.y) / 2;
+      context.quadraticCurveTo(points[i]!.x, points[i]!.y, midX, midY);
+    }
+    context.lineTo(points[points.length - 1]!.x, points[points.length - 1]!.y);
     context.stroke();
   }
 
@@ -5714,6 +6208,22 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       context.fill();
     }
     context.stroke();
+
+    if (element.text) {
+      const fontSize = element.fontSize ?? Math.max(13, Math.min(22, Math.abs(element.to.y - element.from.y) * 0.22));
+      context.font = `600 ${fontSize}px Inter, ui-sans-serif, system-ui, sans-serif`;
+      context.fillStyle = element.textColor ?? (element.fillColor && this.isDarkFillColor(element.fillColor) ? '#ffffff' : element.strokeColor);
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      const centerX = (element.from.x + element.to.x) / 2;
+      const centerY = (element.from.y + element.to.y) / 2;
+      const lines = element.text.split('\n');
+      const lineHeight = fontSize * 1.3;
+      const startY = centerY - ((lines.length - 1) * lineHeight) / 2;
+      for (let i = 0; i < lines.length; i++) {
+        context.fillText(lines[i]!, centerX, startY + i * lineHeight);
+      }
+    }
     context.restore();
   }
 

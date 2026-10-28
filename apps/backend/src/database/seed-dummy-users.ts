@@ -37,6 +37,13 @@ async function main(): Promise<void> {
 function getDummyUsers(password: string): SeedUser[] {
   return [
     {
+      displayName: 'System Administrator',
+      email: 'admin@example.com',
+      password,
+      roles: ['SUPER_ADMIN', 'ADMIN']
+    },
+
+    {
       displayName: 'Teacher One',
       email: 'teacher.one@example.com',
       password,
