@@ -8,9 +8,9 @@ describe('class session calendar dates', () => {
     const sessions = planClassSessions(batch, [{ dayOfWeek: 'WEDNESDAY', startTime: '12:30' }] as BatchScheduleMongoDocument[]);
     expect(sessions).toHaveLength(1);
     expect(sessions[0]!.id).toBe('calendar-WEDNESDAY-2026-10-28');
-    expect(sessions[0]!.scheduledAt.getDay()).toBe(3);
-    expect(sessions[0]!.scheduledAt.getDate()).toBe(28);
-    expect(sessions[0]!.scheduledAt.getHours()).toBe(12);
-    expect(sessions[0]!.scheduledAt.getMinutes()).toBe(30);
+    expect(sessions[0]!.scheduledAt.getUTCDay()).toBe(3);
+    expect(sessions[0]!.scheduledAt.getUTCDate()).toBe(28);
+    expect(sessions[0]!.scheduledAt.getUTCHours()).toBe(12);
+    expect(sessions[0]!.scheduledAt.getUTCMinutes()).toBe(30);
   });
 });

@@ -68,7 +68,8 @@
     "seed:teaching-catalog": "npm run build --workspace @native-sfu/contracts && npm run seed:teaching-catalog -w @native-sfu/backend",
     "verify:tutor-onboarding": "node scripts/tutor-onboarding-readiness.cjs",
     "setup:tutor-verification": "node scripts/setup-tutor-verification.cjs",
-    "setup:invoices": "node scripts/setup-invoices.cjs"
+    "setup:invoices": "node scripts/setup-invoices.cjs",
+    "setup:scheduling": "node scripts/setup-scheduling.cjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0"

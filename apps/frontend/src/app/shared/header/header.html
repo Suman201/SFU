@@ -23,6 +23,7 @@
   </button>
   <div class="navigation" id="site-navigation" [class.open]="menuOpen()">
     <nav class="primary-nav" aria-label="Primary" (click)="closeMenu()">
+      @if (auth.authenticated()) {<a routerLink="/calendar" routerLinkActive="active">Calendar</a>}
       @if (auth.role() === 'teacher') {
       <a routerLink="/teacher/dashboard" routerLinkActive="active"
         >My teaching</a
@@ -50,6 +51,7 @@
       }
     </nav>
     <div class="header-actions">
+      @if(auth.authenticated()){<sfu-class-notices />}
       @if(auth.role()==='teacher'){<sfu-tutor-notices />}
       <button
         class="theme-toggle"

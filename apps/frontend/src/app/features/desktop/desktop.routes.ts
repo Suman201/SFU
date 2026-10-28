@@ -15,6 +15,8 @@ export const desktopGuestGuard: CanActivateFn = (route) => {
 export const DESKTOP_CHILD_ROUTES: Routes = [
   { path: 'login', canActivate: [desktopGuestGuard], loadComponent: () => import('./desktop-login').then((module) => module.DesktopLogin) },
   { path: '', canActivate: [desktopAuthGuard], loadComponent: () => import('./desktop-shell').then((module) => module.DesktopShell), children: [
+    { path: 'batches', loadComponent:()=>import('../student/explore/explore').then(m=>m.StudentExplore) },
+    { path: 'calendar', loadComponent:()=>import('../calendar/calendar').then(m=>m.ClassCalendar) },
     { path: 'upcoming', loadComponent: () => import('./desktop-upcoming').then((module) => module.DesktopUpcoming) },
     { path: 'recordings', loadComponent: () => import('./desktop-recordings').then((module) => module.DesktopRecordings) },
     { path: 'devices', loadComponent: () => import('./desktop-devices').then((module) => module.DesktopDevices) },

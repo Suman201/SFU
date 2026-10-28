@@ -1,3 +1,6 @@
+import { planClassSessions } from '../class-sessions/class-session-planner';
+import { randomUUID } from 'node:crypto';
+import { scheduleEvent } from '../scheduling/schedule-event';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type {
@@ -192,10 +195,17 @@ export class StudentEnrollmentsService {
       throw new BadRequestException('Only student users can be enrolled in a batch.');
     }
     this.assertBatchOpenForEnrollment(batch);
-    await this.assertNoActiveEnrollment(user.sub, batch.id);
-    await this.assertBatchHasCapacity(batch);
-    await this.createEnrollment({ studentId: user.sub, batchId: batch.id, status: 'active', actorUserId: user.sub }, batch, student, 'active');
-    return this.findStudentBatch(user.sub, batch.id);
+    const token = randomUUID();
+    const locked = await this.batches.findOneAndUpdate({_id:batch.id,status:'ACTIVE',deletedAt:{$exists:false},$or:[{enrollmentLockUntil:{$exists:false}},{enrollmentLockUntil:{$lt:new Date()}}]},{$set:{enrollmentLockToken:token,enrollmentLockUntil:new Date(Date.now()+120000)}},{new:true}).exec();
+    if(!locked) throw new ConflictException('Enrollment is being updated. Please try again.');
+    try {
+      await this.assertNoActiveEnrollment(user.sub, batch.id);
+      await this.assertBatchHasCapacity(locked);
+      await this.createEnrollment({ studentId: user.sub, batchId: batch.id, status: 'active', actorUserId: user.sub }, locked, student, 'active');
+      return await this.findStudentBatch(user.sub, batch.id);
+    } finally {
+      await this.batches.updateOne({_id:batch.id,enrollmentLockToken:token},{$unset:{enrollmentLockToken:'',enrollmentLockUntil:''}},{timestamps:false});
+    }
   }
 
   async selfCancelStudentEnrollment(user: AuthenticatedUser, batchId: string): Promise<Record<string, unknown>> {
@@ -227,6 +237,7 @@ export class StudentEnrollmentsService {
         enrolledAt: status === 'active' || status === 'pending' ? now : undefined,
         createdBy: input.actorUserId,
         updatedBy: input.actorUserId,
+        scheduleEvents: [scheduleEvent('enrollment', {reason: status})],
         ...this.statusTimestamp(status, now)
       });
       return this.serialize(enrollment);
@@ -333,7 +344,7 @@ export class StudentEnrollmentsService {
   }
 
   async listAvailableBatches(studentId?: string): Promise<StudentEnrolledBatch[]> {
-    const batches = await this.batches.find({ status: 'ACTIVE', deletedAt: { $exists: false } }).sort({ startDate: 1, name: 1 }).exec();
+    const batches = await this.batches.find({ status: 'ACTIVE', deletedAt: { $exists: false }, endDate:{$gte:new Date()} }).sort({ startDate: 1, name: 1 }).exec();
     if (!batches.length) {
       return [];
     }
@@ -414,6 +425,7 @@ export class StudentEnrollmentsService {
     if (!existing) {
       throw new NotFoundException('Student enrollment not found.');
     }
+    if (existing.status === status) return this.serialize(existing);
     if (status === 'active') {
       await this.assertNoActiveEnrollment(existing.studentId, existing.batchId, existing.id);
     }
@@ -421,6 +433,7 @@ export class StudentEnrollmentsService {
     const updated = await this.enrollments.findOneAndUpdate(
       { _id: enrollmentId, deletedAt: { $exists: false } },
       {
+        $push: {scheduleEvents: scheduleEvent('enrollment', {reason:status})},
         $set: {
           status,
           updatedBy: actorUserId,
@@ -579,7 +592,7 @@ export class StudentEnrollmentsService {
   }
 
   private assertBatchOpenForEnrollment(batch: BatchMongoDocument): void {
-    if (batch.status !== 'ACTIVE') {
+    if (batch.status !== 'ACTIVE' || (batch.endDate && batch.endDate < new Date())) {
       throw new BadRequestException('This batch is not open for enrollment.');
     }
   }
@@ -660,7 +673,7 @@ export class StudentEnrollmentsService {
       teacherId: batch.teacherId,
       teacherName: teacher?.displayName ?? teacher?.name ?? 'Teacher',
       teacherTitle: 'Class instructor',
-      schedule: this.scheduleLabel(schedules),
+      schedule: `${this.scheduleLabel(schedules)} (${batch.scheduleTimezone??process.env.LEGACY_SCHEDULE_TIMEZONE??'UTC'})`,
       durationMinutes: 60,
       totalWeeks: Math.max(1, schedules.length * 12),
       enrolledCount,
@@ -722,14 +735,8 @@ export class StudentEnrollmentsService {
   }
 
   private nextClassStart(batch: BatchMongoDocument, schedules: BatchScheduleMongoDocument[]): Date {
-    const firstSchedule = schedules[0];
-    if (!firstSchedule) {
-      return batch.startDate;
-    }
-    const date = new Date(batch.startDate);
-    const [hour = '0', minute = '0'] = firstSchedule.startTime.split(':');
-    date.setUTCHours(Number(hour), Number(minute), 0, 0);
-    return date;
+    const plan = planClassSessions(batch,schedules);
+    return plan.find(item=>item.scheduledAt>=new Date())?.scheduledAt ?? plan[0]?.scheduledAt ?? batch.startDate;
   }
 
   private statusTimestamp(status: StudentEnrollmentStatus, date: Date): Partial<StudentEnrollmentDocument> {

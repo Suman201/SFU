@@ -17,6 +17,7 @@ export interface TeacherBatchSchedule {
 }
 
 export interface CreateTeacherBatchInput {
+  scheduleTimezone?: string;
   name: string;
   courseId?: string;
   courseName?: string;
@@ -51,6 +52,7 @@ export interface TeacherBatchStudent {
 }
 
 export interface TeacherBatch {
+  scheduleTimezone?: string;
   id: string;
   name: string;
   courseId?: string;
@@ -100,6 +102,7 @@ export interface TeacherMessageIndicator {
 }
 
 interface BackendTeacherBatch {
+  scheduleTimezone?: string;
   id: string;
   name: string;
   courseId?: string;
@@ -447,6 +450,7 @@ export class TeacherDashboardStore {
       courseId: batch.courseId,
       courseName: batch.courseName ?? 'General course',
       cohortCode: `${batch.year}`,
+      scheduleTimezone: batch.scheduleTimezone,
       year: batch.year,
       startDate: batch.startDate,
       endDate: batch.endDate,

@@ -1,4 +1,4 @@
-<sfu-header />
+@if(!desktop){<sfu-header />}
 <main class="student-page-shell">
   <section class="page-heading">
     <div>
@@ -7,9 +7,12 @@
       <p class="page-description">Check schedules, fees and available places before enrolling.</p>
     </div>
     <div class="heading-actions">
+      <a class="dashboard-link" [routerLink]="desktop?'/desktop/calendar':'/calendar'">Class calendar</a>
+      @if(!desktop){
       @if(scoped()){<a class="dashboard-link" routerLink="/student/explore">Show all classes</a>}
       <a class="dashboard-link" routerLink="/teachers">Browse teachers</a>
       <a class="dashboard-link" routerLink="/student/dashboard">My learning · {{ enrolledCount() }}</a>
+      }
     </div>
   </section>
 
@@ -62,7 +65,7 @@
           <footer>
             <span>{{ seatsLabel(batch) }}</span>
             @if (isEnrolled(batch)) {
-              <a routerLink="/student/dashboard">Enrolled</a>
+              <a [routerLink]="desktop?'/desktop/calendar':'/calendar'">Enrolled · View calendar</a>
             } @else {
               <button type="button" class="primary" [disabled]="isEnrollmentPending(batch)" (click)="enroll(batch)">
                 {{ isEnrollmentPending(batch) ? 'Enrolling...' : 'Enroll' }}
@@ -85,4 +88,4 @@
     }
   </section>
 </main>
-<sfu-footer />
+@if(!desktop){<sfu-footer />}

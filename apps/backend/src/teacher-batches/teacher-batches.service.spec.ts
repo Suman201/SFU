@@ -249,6 +249,7 @@ function harnessWith(options: { batchExists?: boolean; batches?: unknown[]; sche
     insertMany: jest.fn().mockResolvedValue(options.schedules ?? [])
   };
   const classSessions = {
+    updateOne: jest.fn().mockResolvedValue({modifiedCount:1}),
     find: jest.fn().mockReturnValue(queryChain([])),
     updateMany: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
     exists: jest.fn().mockReturnValue(queryResult(null))

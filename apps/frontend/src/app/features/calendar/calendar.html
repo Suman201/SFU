@@ -1,0 +1,333 @@
+@if(!desktop){<sfu-header />}
+<main class="calendar-page" id="main-content">
+  <header class="page-heading">
+    <div>
+      <p class="eyebrow">YOUR CLASSROOM, ON TIME</p>
+      <h1>Class calendar<span>.</span></h1>
+      <p>
+        {{teacher()?'A clear view of your teaching week. Keep every class in
+        sync.':'Your learning, one class at a time. All times are shown in your
+        timezone.'}}
+      </p>
+    </div>
+    <a
+      class="quiet-link"
+      [routerLink]="desktop?(teacher()?'/desktop/upcoming':'/desktop/batches'):teacher()?'/teacher/dashboard':'/student/explore'"
+      >{{teacher()?'Manage batches':'Explore batches'}}
+      <span aria-hidden="true">↗</span></a
+    >
+  </header>
+  @if(message()){
+  <p class="notice" role="status">
+    {{message()}}
+    <button (click)="message.set('')" aria-label="Dismiss update">×</button>
+  </p>
+  } @if(error()&&!edit()){
+  <p class="error" role="alert">
+    {{error()}} <button (click)="refresh()">Refresh</button>
+  </p>
+  }
+  <div class="calendar-layout">
+    <section class="calendar-card" aria-label="Class calendar">
+      <div class="toolbar">
+        <div class="period">
+          <button
+            type="button"
+            class="icon"
+            aria-label="Previous period"
+            (click)="navigate(-1)"
+          >
+            ←
+          </button>
+          <h2 aria-live="polite">{{title()}}</h2>
+          <button
+            type="button"
+            class="icon"
+            aria-label="Next period"
+            (click)="navigate(1)"
+          >
+            →
+          </button>
+        </div>
+        <div class="tools">
+          <button type="button" (click)="today()">Today</button
+          ><label class="month-picker"
+            ><span class="sr-only">Choose month</span
+            ><input
+              type="month"
+              [ngModel]="anchor().slice(0,7)"
+              (ngModelChange)="month($event)"
+          /></label>
+          <div class="view-switch" aria-label="Calendar view">
+            <button
+              type="button"
+              [attr.aria-pressed]="view()==='month'"
+              (click)="changeView('month')"
+            >
+              Month</button
+            ><button
+              type="button"
+              [attr.aria-pressed]="view()==='week'"
+              (click)="changeView('week')"
+            >
+              Week
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="timezone-bar">
+        <span
+          ><span class="timezone-dot"></span> Times in
+          <strong>{{zone()}}</strong></span
+        ><button type="button" (click)="refresh()" [disabled]="loading()">
+          {{loading()?'Loading…':'Refresh'}}
+        </button>
+      </div>
+      <div class="calendar-host" [attr.aria-busy]="loading()">
+        <wts-calendar-angular
+          [initialOptions]="initialCalendarOptions"
+          [options]="calendarOptions()"
+          [events]="calendarEvents()"
+          (ready)="calendarReady($event)"
+          (calendarError)="calendarRenderError($event)"
+        />
+      </div>
+      <footer class="calendar-footer">
+        <span
+          ><i class="legend scheduled"></i> Scheduled
+          <i class="legend live"></i> Live
+          <i class="legend cancelled"></i> Cancelled</span
+        ><span>{{classes().length}} classes in view</span>
+      </footer>
+    </section>
+    <aside class="details">
+      @if(selected();as item){
+      <section class="detail-card">
+        <div class="detail-top">
+          <span class="eyebrow">CLASS DETAILS</span
+          ><button
+            type="button"
+            (click)="selected.set(null)"
+            aria-label="Close class details"
+          >
+            ×
+          </button>
+        </div>
+        <span class="status" [class.cancelled]="item.status==='cancelled'"
+          >{{item.status}}</span
+        >
+        <h2>{{item.batchName}}</h2>
+        <p>{{item.title}}</p>
+        <dl>
+          <dt>Date</dt>
+          <dd>{{dateLabel(localDate(item.scheduledAt))}}</dd>
+          <dt>Time</dt>
+          <dd>{{time(item.scheduledAt)}} · {{item.durationMinutes}} min</dd>
+          <dt>Teacher</dt>
+          <dd>{{item.teacherName}}</dd>
+          <dt>Timezone</dt>
+          <dd>{{zone()}}</dd>
+        </dl>
+        @if(item.originalScheduledAt&&item.rescheduledAt){
+        <p class="changed">
+          Time changed from
+          {{dateLabel(localDate(item.originalScheduledAt),'short')}} at
+          {{time(item.originalScheduledAt)}}.
+        </p>
+        }@if(item.reason){
+        <p>{{item.reason}}</p>
+        }
+        @if(item.status==='live'||(teacher()&&item.status==='scheduled')){<button
+          type="button"
+          class="primary"
+          (click)="join(item)"
+        >
+          {{item.status==='live'?'Join classroom':'Open classroom'}}</button
+        >}@else if(item.status==='scheduled'){
+        <p class="waiting">
+          Your teacher will open the classroom when the class begins.
+        </p>
+        } @if(canEdit(item)){
+        <div class="detail-actions">
+          <button type="button" (click)="beginEdit('reschedule')">
+            Reschedule</button
+          ><button type="button" class="danger" (click)="beginEdit('cancel')">
+            Cancel class
+          </button>
+        </div>
+        }
+      </section>
+      }@else{
+      <section class="detail-card next-up">
+        <span class="eyebrow">COMING UP</span>
+        <h2>Your next classes</h2>
+        @for(item of upcoming();track item.id){<button
+          type="button"
+          class="upcoming-class"
+          (click)="selected.set(item)"
+        >
+          <span class="date-tile"
+            >{{localDate(item.scheduledAt).slice(-2)}}</span
+          ><span
+            ><strong>{{item.batchName}}</strong
+            ><small
+              >{{dateLabel(localDate(item.scheduledAt),'short')}} ·
+              {{time(item.scheduledAt)}}</small
+            ></span
+          ><span aria-hidden="true">↗</span></button
+        >}@empty{
+        <p>
+          No upcoming classes in this view. Choose another month or explore your
+          batches.
+        </p>
+        }
+        <p class="hint">
+          Select a class for its details{{teacher()?', or to change its
+          time.':'.'}}
+        </p>
+      </section>
+      } @if(teacher()&&google();as connection){
+      <section class="detail-card google-settings">
+        <span class="eyebrow">YOUR CALENDARS, CONNECTED</span>
+        <h2>Google Calendar</h2>
+        <p>
+          Keep a separate Sapiovian classes calendar in Google. Class time
+          changes and cancellations update automatically.
+        </p>
+        @if(connection.status==='connected'){<span class="status"
+          >Connected</span
+        >
+        <p>
+          {{connection.lastSyncAt?'Last synced
+          '+time(connection.lastSyncAt):'Your first sync is queued.'}}
+        </p>
+        <button type="button" (click)="syncGoogle()">Sync now</button
+        ><button
+          type="button"
+          (click)="disconnectGoogle()"
+          [disabled]="googleBusy()"
+        >
+          Disconnect
+        </button>
+        <p class="hint">
+          Disconnecting stops updates. Previously copied events stay in Google.
+        </p>
+        } @else{<button
+          type="button"
+          [disabled]="!connection.configured||googleBusy()"
+          (click)="connectGoogle()"
+        >
+          {{googleBusy()?'Connecting…':connection.status==='reconnect'?'Reconnect
+          Google Calendar':'Connect Google Calendar'}}</button
+        >@if(!connection.configured){
+        <p class="hint">Connection currently unavailable.</p>
+        }} @if(connection.message){
+        <p role="status">{{connection.message}}</p>
+        }
+        <p class="hint">Manage your class times in Sapiovian.</p>
+      </section>
+      }
+      <section class="detail-card timezone-settings">
+        <span class="eyebrow">MAKE IT YOUR TIME</span>
+        <h2>Calendar timezone</h2>
+        <p>
+          Class times adjust automatically. Your saved timezone is also used for
+          new class emails.
+        </p>
+        <label for="calendar-zone">Timezone</label
+        ><input
+          id="calendar-zone"
+          list="calendar-zones"
+          [(ngModel)]="zoneInput"
+        /><datalist id="calendar-zones">
+          @for(zone of zones;track zone){
+          <option [value]="zone"></option>
+          }</datalist
+        ><button type="button" (click)="setZone()">Save timezone</button>
+      </section>
+    </aside>
+  </div>
+</main>
+@if(edit()){
+<dialog
+  #editDialog
+  class="edit-dialog"
+  (cancel)="$event.preventDefault();closeEdit()"
+  aria-labelledby="edit-title"
+>
+  <form (ngSubmit)="save()">
+    <header>
+      <div>
+        <p class="eyebrow">{{selected()?.batchName}}</p>
+        <h2 id="edit-title">
+          {{edit()==='cancel'?'Cancel this class?':'Find a new time'}}
+        </h2>
+      </div>
+      <button
+        type="button"
+        class="icon"
+        (click)="closeEdit()"
+        aria-label="Close dialog"
+      >
+        ×
+      </button>
+    </header>
+    <p>
+      {{edit()==='cancel'?'Enrolled students will receive a cancellation notice.
+      Other classes in this batch stay on the timetable.':'Move this class only.
+      Enrolled students will receive the updated time.'}}
+    </p>
+    @if(edit()==='reschedule'){<label for="new-time"
+      >New date and time · {{zone()}}</label
+    ><input
+      id="new-time"
+      type="datetime-local"
+      name="localTime"
+      [(ngModel)]="localTime"
+      required
+      (ngModelChange)="chosenInstant=''"
+    />@if(!choices().length){
+    <p class="error">
+      This clock time does not exist in this timezone. Choose another time.
+    </p>
+    }@if(choices().length>1){<label for="clock-offset"
+      >This time occurs twice. Choose an occurrence</label
+    ><select
+      id="clock-offset"
+      name="chosenInstant"
+      [(ngModel)]="chosenInstant"
+      required
+    >
+      <option value="">Select UTC offset</option>
+      @for(instant of choices();track instant){
+      <option [value]="instant">{{time(instant)}} · {{instant}}</option>
+      }</select
+    >}}
+    <label for="change-reason"
+      >Message to students <span>(optional)</span></label
+    ><textarea
+      id="change-reason"
+      name="reason"
+      [(ngModel)]="reason"
+      maxlength="500"
+      rows="3"
+      placeholder="Let your students know what changed."
+    ></textarea
+    >@if(error()){
+    <p class="error" role="alert">{{error()}}</p>
+    }
+    <footer>
+      <button type="button" (click)="closeEdit()" [disabled]="saving()">
+        Keep current class</button
+      ><button
+        type="submit"
+        [class.danger]="edit()==='cancel'"
+        class="primary"
+        [disabled]="saving()||(edit()==='reschedule'&&(!choices().length||(choices().length>1&&!chosenInstant)))"
+      >
+        {{saving()?'Saving…':edit()==='cancel'?'Cancel class':'Save new time'}}
+      </button>
+    </footer>
+  </form>
+</dialog>
+}

@@ -335,6 +335,8 @@ function createService(): {
     countDocuments: jest.fn(() => queryResult(0))
   };
   const batches = {
+    findOneAndUpdate: jest.fn(() => queryResult(batchDoc())),
+    updateOne: jest.fn(async () => ({modifiedCount:1})),
     findOne: jest.fn(() => queryResult(batchDoc())),
     find: jest.fn(() => queryResult([]))
   };
@@ -380,6 +382,7 @@ function batchDoc(overrides: Record<string, unknown> = {}): Record<string, unkno
     courseName: 'Realtime media',
     teacherId: 'teacher-1',
     startDate: new Date('2026-01-01T00:00:00.000Z'),
+    endDate: new Date('2026-12-31T23:59:59.000Z'),
     maxCapacity: 30,
     feeAmount: 1200,
     status: 'ACTIVE',

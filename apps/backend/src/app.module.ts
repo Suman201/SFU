@@ -1,3 +1,4 @@
+import { SchedulingModule } from './scheduling/scheduling.module';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
@@ -68,6 +69,7 @@ import { UsersModule } from './users/users.module';
           transport: config.get<string>('app.nodeEnv') === 'production' ? undefined : { target: 'pino-pretty', options: { singleLine: true } },
           genReqId: (request: IncomingMessage) => request.headers['x-request-id']?.toString() ?? randomUUID(),
           customProps: (request: IncomingMessage) => ({ requestId: String((request as { id?: string | number }).id ?? '') }),
+          serializers: {req: (request: {url?:string; query?:unknown; [key:string]:unknown}) => request.url?.split('?')[0]?.endsWith('/calendar/google/callback') ? {...request,url:request.url.split('?')[0],query:undefined} : request},
           redact: {
             censor: '[REDACTED]',
             paths: [
@@ -79,6 +81,8 @@ import { UsersModule } from './users/users.module';
               'req.headers["x-real-ip"]',
               'req.remoteAddress',
               'req.remotePort',
+              'req.query.code',
+              'req.query.state',
               'req.query.token',
               'req.query.accessToken',
               'req.body.password',
@@ -206,6 +210,7 @@ import { UsersModule } from './users/users.module';
     ProfilesModule,
     NotificationsModule,
     InvoicesModule,
+    SchedulingModule,
     RoomsModule,
     MediaApiModule,
     HealthModule

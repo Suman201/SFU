@@ -1,3 +1,4 @@
+import { isDesktopSession } from '../../../core/services/desktop-bridge';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -15,6 +16,7 @@ import { StudentEnrollmentStore, type StudentBatch } from '../student-enrollment
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class StudentExplore implements OnInit {
+  protected readonly desktop = isDesktopSession();
   protected readonly enrollment = inject(StudentEnrollmentStore);
   private readonly route = inject(ActivatedRoute);
   private readonly params = toSignal(this.route.queryParamMap,{initialValue:this.route.snapshot.queryParamMap});

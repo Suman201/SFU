@@ -1,3 +1,4 @@
+import type { ScheduleEvent } from '../scheduling/schedule-event';
 import { randomUUID } from 'node:crypto';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
@@ -647,6 +648,15 @@ export class BatchDocument {
   @Prop({ required: true, type: Date })
   endDate!: Date;
 
+  @Prop({ trim: true })
+  scheduleTimezone?: string;
+
+  @Prop({type: Date})
+  enrollmentLockUntil?: Date;
+
+  @Prop()
+  enrollmentLockToken?: string;
+
   @Prop({ required: true, min: 1 })
   maxCapacity!: number;
 
@@ -745,6 +755,9 @@ export class StudentEnrollmentDocument {
 
   @Prop({ type: Date, index: true })
   deletedAt?: Date;
+
+  @Prop({ type: [Object], default: [] })
+  scheduleEvents!: ScheduleEvent[];
 
   createdAt!: Date;
   updatedAt!: Date;
@@ -852,12 +865,19 @@ export class ClassSessionDocument {
   @Prop({ type: Date, index: true })
   teacherReconnectDeadlineAt?: Date;
 
+  @Prop({default:false})
+  individualScheduleOverride?: boolean;
+
+  @Prop({ type: [Object], default: [] })
+  scheduleEvents!: ScheduleEvent[];
+
   createdAt!: Date;
   updatedAt!: Date;
 }
 
 export const ClassSessionSchema = SchemaFactory.createForClass(ClassSessionDocument);
 ClassSessionSchema.index({ batchId: 1, scheduledAt: 1 });
+ClassSessionSchema.index({status:1,scheduledAt:1});
 ClassSessionSchema.index({ batchId: 1, status: 1, scheduledAt: 1 });
 ClassSessionSchema.index({ teacherId: 1, status: 1, scheduledAt: 1 });
 ClassSessionSchema.index({ status: 1, teacherReconnectDeadlineAt: 1 });

@@ -113,6 +113,7 @@ export class TeacherDashboard {
       .sort((left, right) => Number(Boolean(right.warning)) - Number(Boolean(left.warning)))
       .slice(0, 6)
   );
+  protected readonly batchTimezone=Intl.DateTimeFormat().resolvedOptions().timeZone;
   protected readonly batchModel = signal<BatchFormModel>(this.initialBatchModel());
   protected readonly selectedSchedule = computed(() => this.scheduleFromModel(this.batchModel()));
   protected readonly schedulePreview = computed(() => this.previewSchedule(this.batchModel()).slice(0, 12));
@@ -312,7 +313,7 @@ export class TeacherDashboard {
   }
 
   protected scheduleLabel(batch: TeacherBatch): string {
-    return batch.schedule.map((item) => `${this.weekdayLabel(item.dayOfWeek)} ${item.startTime}`).join(', ');
+    return batch.schedule.map((item) => `${this.weekdayLabel(item.dayOfWeek)} ${item.startTime}`).join(', ')+` (${batch.scheduleTimezone??'UTC'})`;
   }
 
   protected formatDateTime(value: string): string {
@@ -363,6 +364,7 @@ export class TeacherDashboard {
       year: Number(value.year),
       maxCapacity: Number(value.maxCapacity),
       feeAmount: Math.max(0, Number(value.feeAmount ?? 0)),
+      scheduleTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       schedule: this.scheduleFromModel(value)
     };
   }

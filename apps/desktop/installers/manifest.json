@@ -1,22 +1,27 @@
 {
-  "generatedAt": "2026-10-27T15:14:59.000394+00:00",
-  "product": "EDCONNECTION Classroom",
+  "generatedAt": "2026-10-28T15:04:09.986849+00:00",
+  "product": "Sapiovian Classroom",
   "version": "0.1.0",
   "signed": false,
   "backend": "http://127.0.0.1:3000",
   "website": "http://localhost:4200",
-  "physicalWhiteboardTested": false,
   "currentInstallersLaunched": false,
+  "physicalWhiteboardTested": false,
   "validation": {
-    "frontendUnitTestsPassed": 183,
-    "backendFocusedTestsPassed": 254,
-    "desktopRuntimeTestsPassed": 21,
-    "workspaceBuildPassed": true,
+    "backendFocusedTestsPassed": 146,
+    "desktopRuntimeTestsPassed": 25,
+    "calendarBrowserProjectsPassed": [
+      "chromium",
+      "webkit"
+    ],
+    "realBackendAcceptance": true,
+    "googleLiveAccountTested": false,
     "macPackageBuildPassed": true,
-    "windowsPackageBuildPassed": true
+    "windowsPackageBuildPassed": true,
+    "bundledFrontendIdenticalAcrossArchitectures": true
   },
-  "sourceDigestSha256": "22c4940be834e7ccfe650d01f521d18f08cebbc556cb39f8ddf74effeb7ba733",
-  "sourceFiles": 252,
+  "sourceDigestSha256": "d2369b76dcc44d4867d7c48664aff288fb1b1ab6a41a688d5927cce58eed12b8",
+  "sourceFiles": 290,
   "sourceDigestPaths": [
     "apps/desktop/src",
     "apps/desktop/resources",
@@ -36,74 +41,74 @@
   "sourceDigestAlgorithm": "SHA256 of sorted unique git tracked/nonignored paths; each entry is path + NUL + file SHA256 hex + newline",
   "artifacts": [
     {
-      "name": "EDCONNECTION Classroom-0.1.0-mac-x64.dmg",
-      "bytes": 127886094,
-      "sha256": "ebea2280330cf6be1915e433432e717d9a4e6f970275aad054d7bab513f8cbd1"
+      "name": "Sapiovian Classroom-0.1.0-mac-arm64.dmg",
+      "bytes": 125654554,
+      "sha256": "ffcbdb933fd7cb389cf82d1c7b73bac9aa01944866b7ebecf938ed0345057a09"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-mac-x64.dmg.blockmap",
-      "bytes": 134978,
-      "sha256": "8963a80fd5d2029be166de6423c5a31365f101f0dc0ff80e15c9400883a57d2e"
+      "name": "Sapiovian Classroom-0.1.0-mac-arm64.dmg.blockmap",
+      "bytes": 133015,
+      "sha256": "a30505d70e5054889c28157e3f07e28d2147c5de74e697a73377649ef8e67390"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-mac-arm64.dmg",
-      "bytes": 123605960,
-      "sha256": "d0d032cb1195994346bf86550a1c793e19bcacc0c3b65c82f8ebd4a86cfea3a7"
+      "name": "Sapiovian Classroom-0.1.0-mac-arm64.zip",
+      "bytes": 122082867,
+      "sha256": "8aa006b51bc97a226b0484730d4745db1a108b249a4f652c49ea766746cb5ee6"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-mac-arm64.dmg.blockmap",
-      "bytes": 129739,
-      "sha256": "faddca95de6cee79c2b26526ba66479c5679a1757cb5fbc6ae0f372b08cd94b7"
+      "name": "Sapiovian Classroom-0.1.0-mac-arm64.zip.blockmap",
+      "bytes": 129425,
+      "sha256": "333fbdec147e2a143f73018f6edfc413378b38e81c2ad8c2e12bfdea3064b659"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-mac-x64.zip",
-      "bytes": 124383852,
-      "sha256": "d9163b1ded5bf3112e21608594c70a7b7f5dc685fa3ef0d14148b8814e19b7cb"
+      "name": "Sapiovian Classroom-0.1.0-mac-x64.dmg",
+      "bytes": 129910394,
+      "sha256": "9724aa1828962673e74f1180e3cea30bf028ffe67003abd3c555f8f23ac62975"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-mac-x64.zip.blockmap",
-      "bytes": 131515,
-      "sha256": "e152aab7ad0df1f4c98467e0194dda11d1130cb695eedc44a287ab085a8b3cc6"
+      "name": "Sapiovian Classroom-0.1.0-mac-x64.dmg.blockmap",
+      "bytes": 136389,
+      "sha256": "89abc56e4cff42c2b6713e229de8451248dad8d7a5e4d0227fee60a64841e763"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-mac-arm64.zip",
-      "bytes": 120135762,
-      "sha256": "c8f9637374da37d1f404040272cabd76684f824a223c2f1127863be305886908"
+      "name": "Sapiovian Classroom-0.1.0-mac-x64.zip",
+      "bytes": 126330957,
+      "sha256": "718f940cbf00668bfe85217da84ffa005a5bcea3149f55658f5272307d84cbb5"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-mac-arm64.zip.blockmap",
-      "bytes": 127346,
-      "sha256": "b90740d2740a7230e051410d8892115f84f91f53c8db29ebc8bb0ebd5d122234"
+      "name": "Sapiovian Classroom-0.1.0-mac-x64.zip.blockmap",
+      "bytes": 133228,
+      "sha256": "963b5b3435beb4bae299da3f97d80d1bb37abca68689cf1c752fd5e9004df8c4"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-win.exe",
-      "bytes": 242183816,
-      "sha256": "a40054affa52a6f3ddba8e08f33a638e67a03aed9e95e4256e59e58a17412049"
+      "name": "Sapiovian Classroom-0.1.0-win-arm64.exe",
+      "bytes": 120283829,
+      "sha256": "33142e00ff1962a6f2ca55db512114355be1dadcf6cec329281b687afa585094"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-win.exe.blockmap",
-      "bytes": 253170,
-      "sha256": "39b44573847cb11c46743f8917c12d885ca355c25c1b3d7828b7244e138ddbeb"
+      "name": "Sapiovian Classroom-0.1.0-win-arm64.exe.blockmap",
+      "bytes": 125572,
+      "sha256": "d8c8954bd62989de6cb34dbbc2baab413d767eab6347189debfd9a162e97cf3e"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-win-x64.exe",
-      "bytes": 124318018,
-      "sha256": "8252367801a9997d4651c2dbe1bb5ba6b1e7ed30ea7bb066733bb6c988c4b0d1"
+      "name": "Sapiovian Classroom-0.1.0-win-x64.exe",
+      "bytes": 126167168,
+      "sha256": "f1670af7788ab8771110155147611c8fce1fadc3071245beada25dc4b7f047ea"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-win-x64.exe.blockmap",
-      "bytes": 131645,
-      "sha256": "b95002d9381ecd1a8583e6a5170d9b20706c5428d5e4004962a0bb7286e46a6a"
+      "name": "Sapiovian Classroom-0.1.0-win-x64.exe.blockmap",
+      "bytes": 133504,
+      "sha256": "4a22885f55c5bc8651a53bfd8dd0b3d21f6dab04177f514f7c4d3fa3ac74e7c8"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-win-arm64.exe",
-      "bytes": 118434831,
-      "sha256": "40c04489a47926d839d4a17413c35ea7d7516011c4c2bf9778ea7bf903ec3e69"
+      "name": "Sapiovian Classroom-0.1.0-win.exe",
+      "bytes": 245866546,
+      "sha256": "0b1008c0a3ecadbf106e2f88a62fbd9e4f0aad24533fc9fc367c6b4078c13fab"
     },
     {
-      "name": "EDCONNECTION Classroom-0.1.0-win-arm64.exe.blockmap",
-      "bytes": 123078,
-      "sha256": "9556b000b9539823fff8791898481ae3f123bc9e6d9e1cc920d6f026532a2c81"
+      "name": "Sapiovian Classroom-0.1.0-win.exe.blockmap",
+      "bytes": 256656,
+      "sha256": "46366ee672cd63bae70b476153f57cdace041b4926866789e47a546af064459b"
     }
   ]
 }

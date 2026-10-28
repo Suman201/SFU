@@ -31,7 +31,7 @@ export function normalizeDesktopDestination(value: string | null | undefined): s
   try {
     const url = new URL(value, 'https://classroom.invalid');
     if (url.origin !== 'https://classroom.invalid') return null;
-    if (url.pathname === '/desktop/upcoming' || url.pathname === '/desktop/recordings') return url.pathname;
+    if (url.pathname === '/desktop/batches' || url.pathname === '/desktop/calendar' || url.pathname === '/desktop/upcoming' || url.pathname === '/desktop/recordings') return url.pathname;
     if (!['/desktop/join', '/class-session/teacher', '/class-session/student'].includes(url.pathname)) return null;
     const sessionId = url.searchParams.get('sessionId');
     const batchId = url.searchParams.get('batchId');

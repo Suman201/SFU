@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsEnum, IsInt, IsTimeZone, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BATCH_STATUSES, BATCH_WEEKDAYS, BatchStatus, BatchWeekday } from '../../database/schemas';
 
@@ -38,6 +38,10 @@ export class CreateTeacherBatchDto {
   @Min(2000)
   @Max(2100)
   year!: number;
+
+  @IsOptional()
+  @IsTimeZone()
+  scheduleTimezone?: string;
 
   @ApiProperty({ example: 30 })
   @Type(() => Number)

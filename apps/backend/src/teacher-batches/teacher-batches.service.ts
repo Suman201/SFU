@@ -1,3 +1,5 @@
+import { validTimeZone } from '@native-sfu/contracts';
+import { scheduleEvent } from '../scheduling/schedule-event';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type {
@@ -77,6 +79,7 @@ export class TeacherBatchesService {
             courseId: this.optionalTrim(dto.courseId),
             courseName: this.optionalTrim(dto.courseName),
             teacherId,
+            scheduleTimezone: dto.scheduleTimezone ?? 'UTC',
             year: dto.year,
             startDate: dates.startDate,
             endDate: dates.endDate,
@@ -147,14 +150,14 @@ export class TeacherBatchesService {
         await this.batches.updateOne({ _id: id, teacherId, deletedAt: { $exists: false } }, { $set: update }, { session });
       }
       if (schedule) {
-        await this.replaceSchedule({ id, name: update.name ?? existing.name, startDate: update.startDate ?? existing.startDate, endDate: update.endDate ?? existing.endDate }, schedule, session);
+        await this.replaceSchedule({ id, teacherId: existing.teacherId, name: update.name ?? existing.name, startDate: update.startDate ?? existing.startDate, endDate: update.endDate ?? existing.endDate, scheduleTimezone: existing.scheduleTimezone }, schedule, session);
       }
       return this.findOne(teacherId, id, session);
     });
   }
 
   private async replaceSchedule(
-    batch: { id: string; name: string; startDate: Date; endDate: Date },
+    batch: { id: string; teacherId: string; name: string; startDate: Date; endDate: Date; scheduleTimezone?: string },
     next: BatchScheduleDto[],
     transaction: ClientSession | undefined
   ): Promise<void> {
@@ -164,20 +167,30 @@ export class TeacherBatchesService {
     await this.schedules.deleteMany({ batchId: batch.id }, { session: transaction });
     await this.schedules.insertMany(replacement.map((item) => ({ ...item, batchId: batch.id })), { session: transaction });
     const planned = new Map(planClassSessions(batch, replacement as BatchScheduleMongoDocument[]).map((item) => [item.id, item]));
-    const persisted = await this.classSessions.find({ batchId: batch.id, status: 'scheduled' }).session(transaction ?? null);
+    const oldPlan = planClassSessions(batch, previous);
+    for (const plannedClass of oldPlan) {
+      const upcoming = planned.get(plannedClass.id);
+      if (plannedClass.scheduledAt < changedAt || (upcoming && upcoming.scheduledAt.getTime() === plannedClass.scheduledAt.getTime())) continue;
+      await this.classSessions.updateOne({ _id: plannedClass.id }, {$setOnInsert: {
+        ...plannedClass, _id: plannedClass.id, teacherId: batch.teacherId,
+        status: 'scheduled', ...classSessionChannelIds(plannedClass.id)
+      }}, {upsert: true, session: transaction});
+    }
+    const persisted = await this.classSessions.find({ batchId: batch.id, status: 'scheduled', individualScheduleOverride: {$ne:true} }).session(transaction ?? null);
     for (const current of persisted) {
       const nextSession = planned.get(current.id);
       if (nextSession && nextSession.scheduledAt.getTime() !== current.scheduledAt.getTime()) {
         await this.classSessions.updateOne({ _id: current.id, status: 'scheduled' }, { $set: {
           scheduledAt: nextSession.scheduledAt, originalScheduledAt: current.originalScheduledAt ?? current.scheduledAt, rescheduledAt: changedAt
-        } }, { session: transaction });
+        }, $push: { scheduleEvents: scheduleEvent('rescheduled', {oldScheduledAt: current.scheduledAt, scheduledAt: nextSession.scheduledAt}) } }, { session: transaction });
       } else if (!nextSession && current.scheduledAt.getTime() >= changedAt.getTime()) {
-        await this.classSessions.updateOne({ _id: current.id, status: 'scheduled' }, { $set: { status: 'cancelled', cancelledAt: changedAt } }, { session: transaction });
+        await this.classSessions.updateOne({ _id: current.id, status: 'scheduled' }, { $set: { status: 'cancelled', cancelledAt: changedAt }, $push: { scheduleEvents: scheduleEvent('cancelled', {scheduledAt: current.scheduledAt}) } }, { session: transaction });
       }
     }
   }
 
   async updateStatus(teacherId: string, id: string, status: BatchStatus): Promise<Record<string, unknown>> {
+    if (status === 'CANCELLED' || status === 'COMPLETED') await this.cancelFutureClasses(teacherId, id);
     const batch = await this.batches.findOneAndUpdate(
       { _id: id, teacherId, deletedAt: { $exists: false } },
       { $set: { status } },
@@ -190,12 +203,22 @@ export class TeacherBatchesService {
   }
 
   async remove(teacherId: string, id: string): Promise<void> {
+    await this.cancelFutureClasses(teacherId, id);
     const batch = await this.batches.findOneAndUpdate(
       { _id: id, teacherId, deletedAt: { $exists: false } },
       { $set: { deletedAt: new Date(), status: 'CANCELLED' } },
       { new: true }
     );
     if (!batch) throw new NotFoundException('Batch not found');
+  }
+
+  private async cancelFutureClasses(teacherId: string, batchId: string): Promise<void> {
+    const {batch, schedules} = await this.findOwnedWithSchedules(teacherId, batchId);
+    for (const planned of planClassSessions(batch, schedules).filter(item => item.scheduledAt >= new Date())) {
+      await this.classSessions.updateOne({_id: planned.id}, {$setOnInsert: {...planned, _id: planned.id, teacherId, status:'scheduled', ...classSessionChannelIds(planned.id)}}, {upsert:true});
+    }
+    const future = await this.classSessions.find({batchId, status:'scheduled', scheduledAt:{$gte:new Date()}});
+    for (const item of future) await this.classSessions.updateOne({_id:item.id, status:'scheduled'}, {$set:{status:'cancelled',cancelledAt:new Date()}, $push:{scheduleEvents:scheduleEvent('cancelled', {scheduledAt:item.scheduledAt, reason:'The batch is no longer running.'})}});
   }
 
   async getLiveSettings(teacherId: string, batchId: string): Promise<BatchLiveClassSettingsResponse> {
@@ -300,6 +323,7 @@ export class TeacherBatchesService {
             courseId: this.optionalTrim(courseId),
             courseName: this.optionalTrim(request.courseName),
             teacherId: teacher.id,
+            scheduleTimezone: teacher.timezone&&validTimeZone(teacher.timezone)?teacher.timezone:'UTC',
             year: request.year,
             startDate: dates.startDate,
             endDate: dates.endDate,
@@ -370,6 +394,7 @@ export class TeacherBatchesService {
     if (request.maxCapacity !== undefined) update.maxCapacity = request.maxCapacity;
     if (request.feeAmount !== undefined) update.feeAmount = this.normalizeFeeAmount(request.feeAmount, existing.feeAmount ?? 0);
     if (request.status !== undefined) update.status = request.status;
+    if(request.status==='CANCELLED'||request.status==='COMPLETED') await this.cancelFutureClasses(existing.teacherId,batchId);
     const detail = await this.withTransaction(async (session) => {
       if (Object.keys(update).length) {
         await this.batches.updateOne({ _id: batchId, deletedAt: { $exists: false } }, { $set: update }, { session });
@@ -378,7 +403,7 @@ export class TeacherBatchesService {
         }
       }
       if (schedule) {
-        await this.replaceSchedule({ id: batchId, name: update.name ?? existing.name, startDate: update.startDate ?? existing.startDate, endDate: update.endDate ?? existing.endDate }, schedule, session);
+        await this.replaceSchedule({ id: batchId, teacherId: nextTeacherId, name: update.name ?? existing.name, startDate: update.startDate ?? existing.startDate, endDate: update.endDate ?? existing.endDate, scheduleTimezone: existing.scheduleTimezone }, schedule, session);
       }
       return this.adminBatchDetail(batchId, session);
     });
@@ -415,6 +440,7 @@ export class TeacherBatchesService {
 
   async updateAdminBatchStatus(batchId: string, status: BatchStatus, user: AuthenticatedUser): Promise<AdminBatchDetail> {
     this.assertAdmin(user);
+    if(status==='CANCELLED'||status==='COMPLETED'){const previous=await this.findAdminBatch(batchId);await this.cancelFutureClasses(previous.teacherId,batchId);}
     const batch = await this.batches.findOneAndUpdate({ _id: batchId, deletedAt: { $exists: false } }, { $set: { status } }, { new: true }).exec();
     if (!batch) {
       throw new NotFoundException('Batch not found.');
@@ -875,6 +901,7 @@ export class TeacherBatchesService {
       courseId: batch.courseId,
       courseName: batch.courseName,
       teacherId: batch.teacherId,
+      scheduleTimezone: batch.scheduleTimezone??process.env.LEGACY_SCHEDULE_TIMEZONE??'UTC',
       year: batch.year,
       startDate: this.dateOnly(batch.startDate),
       endDate: this.dateOnly(batch.endDate),

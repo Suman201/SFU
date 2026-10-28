@@ -1,3 +1,5 @@
+@import '@wts-calendar/core/styles/calendar.css';
+
 :root {
   color-scheme: light;
   --brand-navy: #173d34;
@@ -681,4 +683,22 @@ input[type='radio'] {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Shared WTS calendar tokens inherit the website and classroom app theme. */
+.calendar-host { padding: 0 16px 16px; min-height: 300px; }
+.calendar-host wts-calendar-angular {display:block;}
+.calendar-host .sapiovian-class {border-inline-start: 3px solid #458b73 !important; cursor:pointer;}
+.calendar-host .class-live {border-inline-start-color:#ff9760 !important;}
+.calendar-host .class-cancelled {opacity:.65; text-decoration:line-through; border-inline-start-color:var(--muted) !important;}
+.calendar-host .class-rescheduled {border-inline-start-color:#f26076 !important;}
+.calendar-host button {font-family:inherit;}
+@media(max-width:600px) {.calendar-host{padding:0 12px 12px;}}
+
+@media(max-width:600px){
+  .calendar-host .calendar-list-event {grid-template-columns:8px minmax(0,1fr);grid-template-areas:"dot time" "dot copy";gap:4px 10px;padding:12px;}
+  .calendar-host .calendar-list-event-color {grid-area:dot;margin-top:6px;}
+  .calendar-host .calendar-list-event-time {grid-area:time;font-size:11px;}
+  .calendar-host .calendar-list-event-copy {grid-area:copy;}
+  .calendar-host .calendar-list-event-title {white-space:normal;overflow:visible;text-overflow:clip;font-size:13px;}
 }

@@ -1,3 +1,4 @@
+import { utcInstantsForLocal, validTimeZone } from '@native-sfu/contracts';
 import { BatchScheduleMongoDocument, BatchWeekday } from '../database/schemas';
 
 export interface ClassSessionBatchLike {
@@ -6,6 +7,7 @@ export interface ClassSessionBatchLike {
   name: string;
   startDate: Date;
   endDate: Date;
+  scheduleTimezone?: string;
 }
 
 export interface PlannedClassSession {
@@ -36,18 +38,27 @@ export function planClassSessions(batch: ClassSessionBatchLike, schedules: Batch
   if (!batchId) {
     return sessions;
   }
-  const start = new Date(`${dateOnly(batch.startDate)}T00:00:00`);
-  const end = new Date(`${dateOnly(batch.endDate)}T23:59:59`);
+  const zone = batch.scheduleTimezone ?? process.env.LEGACY_SCHEDULE_TIMEZONE ?? 'UTC';
+  if (!validTimeZone(zone)) throw new Error('Invalid batch schedule timezone');
+  const start = new Date(`${dateOnly(batch.startDate)}T00:00:00Z`);
+  const end = new Date(`${dateOnly(batch.endDate)}T23:59:59Z`);
 
   for (const schedule of schedules) {
     const current = new Date(start);
-    const dayOffset = (DAY_INDEX[schedule.dayOfWeek] - current.getDay() + WEEK_IN_DAYS) % WEEK_IN_DAYS;
-    current.setDate(current.getDate() + dayOffset);
+    const dayOffset = (DAY_INDEX[schedule.dayOfWeek] - current.getUTCDay() + WEEK_IN_DAYS) % WEEK_IN_DAYS;
+    current.setUTCDate(current.getUTCDate() + dayOffset);
 
     while (current <= end) {
-      // The iteration uses local calendar days; UTC conversion moves positive-offset midnights to yesterday.
-      const sessionDate = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
-      const scheduledAt = new Date(`${sessionDate}T${schedule.startTime}:00`);
+      const sessionDate = current.toISOString().slice(0,10);
+      const wallTime = `${sessionDate}T${schedule.startTime}`;
+      let choices = utcInstantsForLocal(wallTime, zone);
+      // A recurring time in the spring gap moves to the first valid clock minute.
+      for (let minutes = 1; !choices.length && minutes <= 180; minutes++) {
+        const next = new Date(Date.parse(wallTime + ':00Z') + minutes * 60000).toISOString().slice(0,16);
+        choices = utcInstantsForLocal(next, zone);
+      }
+      if (!choices.length) throw new Error('Cannot resolve recurring class time');
+      const scheduledAt = new Date(choices[0]!);
       sessions.push({
         id: classSessionId(batchId, schedule.dayOfWeek, sessionDate),
         batchId,
@@ -56,7 +67,7 @@ export function planClassSessions(batch: ClassSessionBatchLike, schedules: Batch
         scheduledAt,
         durationMinutes: SESSION_DURATION_MINUTES
       });
-      current.setDate(current.getDate() + WEEK_IN_DAYS);
+      current.setUTCDate(current.getUTCDate() + WEEK_IN_DAYS);
     }
   }
 
