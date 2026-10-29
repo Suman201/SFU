@@ -44,7 +44,8 @@ describe('Public error contract', () => {
     );
     expect(body).toMatchObject({
       statusCode: 500,
-      code: 'INTERNAL_ERROR',
+      code: 'SAP4001',
+      reason: 'INTERNAL_ERROR',
       requestId: 'test-reference-123',
       path: '/api/v1/test',
     });
@@ -53,12 +54,13 @@ describe('Public error contract', () => {
     expect(capture).toHaveBeenCalledTimes(1);
     expect(headers['Cache-Control']).toBe('no-store');
     expect(headers['x-request-id']).toBe(body.requestId);
+    expect(headers['x-error-code']).toBe(body.code);
   });
   it('also sanitizes explicitly thrown 5xx HttpExceptions', () => {
     const { body, capture } = run(
       new ServiceUnavailableException('Internal connection string secret'),
     );
-    expect(body.code).toBe('SERVICE_UNAVAILABLE');
+    expect(body.code).toBe('SAP3003');
     expect(JSON.stringify(body)).not.toContain('connection string');
     expect(capture).toHaveBeenCalledTimes(1);
   });
@@ -94,12 +96,13 @@ describe('Public error contract', () => {
         }),
         '/api/v1/auth/login',
       ).body.code,
-    ).toBe('INVALID_CREDENTIALS');
+    ).toBe('SAP2001');
     const denied = run(
       new ForbiddenException('Only enrolled students can join.'),
     );
     expect(denied.body).toMatchObject({
-      code: 'ACCESS_DENIED',
+      code: 'SAP2003',
+      reason: 'ACCESS_DENIED',
       message: 'Only enrolled students can join.',
     });
     expect(denied.capture).not.toHaveBeenCalled();
@@ -108,9 +111,7 @@ describe('Public error contract', () => {
     expect(
       run({ type: 'entity.parse.failed', body: 'secret' }).body.statusCode,
     ).toBe(400);
-    expect(run({ type: 'entity.too.large' }).body.code).toBe(
-      'REQUEST_TOO_LARGE',
-    );
+    expect(run({ type: 'entity.too.large' }).body.code).toBe('SAP1003');
   });
   it('honors registered exception codes and rejects unknown codes', () => {
     expect(
@@ -121,7 +122,8 @@ describe('Public error contract', () => {
         }),
       ).body,
     ).toMatchObject({
-      code: 'UNSUPPORTED_FILE_TYPE',
+      code: 'SAP1004',
+      reason: 'UNSUPPORTED_FILE_TYPE',
       statusCode: 400,
       message: 'Choose a PDF.',
     });
@@ -132,14 +134,14 @@ describe('Public error contract', () => {
           message: 'Review the request.',
         }),
       ).body.code,
-    ).toBe('VALIDATION_FAILED');
+    ).toBe('SAP1001');
     const internal = run(
       new ServiceUnavailableException({
         code: 'REQUEST_TIMEOUT',
         message: 'secret database address',
       }),
     ).body;
-    expect(internal.code).toBe('REQUEST_TIMEOUT');
+    expect(internal.code).toBe('SAP3002');
     expect(internal.message).not.toContain('secret');
   });
   it('uses safe request IDs and returns the same header reference', () => {

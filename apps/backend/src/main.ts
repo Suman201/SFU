@@ -39,7 +39,7 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: allowedOrigins,
     credentials: true,
-    exposedHeaders: ['x-request-id'],
+    exposedHeaders: ['x-request-id', 'x-error-code'],
   });
   const metricsPath = config.get<string>('metrics.path', 'metrics');
   app.setGlobalPrefix('api', {

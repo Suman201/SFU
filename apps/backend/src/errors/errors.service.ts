@@ -1,10 +1,17 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
   ERROR_CATALOG,
   errorFrames,
   errorPath,
+  errorReason,
+  publicErrorCode,
   type ApiErrorBody,
   type ErrorIncident,
   type ErrorIncidentPage,
@@ -41,12 +48,13 @@ export class ErrorsService {
       reference: body.requestId,
       requestId: body.requestId,
       code: body.code,
+      reason: body.reason,
       source: 'server',
       statusCode: body.statusCode,
       method: request.method,
       path: errorPath(request.route?.path ?? body.path),
       title: body.title,
-      message: ERROR_CATALOG[body.code].message,
+      message: ERROR_CATALOG[body.reason].message,
       nextStep: body.nextStep,
       exceptionName,
       frames,
@@ -77,13 +85,20 @@ export class ErrorsService {
     userId: string,
   ): Promise<{ reference: string }> {
     // This is client-reported metadata, never a trusted statement about a server exception.
-    const text = ERROR_CATALOG[input.code];
+    const reason = errorReason(input.code);
+    if (!reason || (input.reason && input.reason !== reason))
+      throw new BadRequestException({
+        code: 'INVALID_REQUEST',
+        message: 'The error code and reason do not match.',
+      });
+    const text = ERROR_CATALOG[reason];
     await this.incidents.findOneAndUpdate(
       { source: input.source, userId, reference: input.reference },
       {
         $setOnInsert: {
           ...input,
           ...text,
+          reason,
           frames: errorFrames(input.frames?.join('\n')),
           path: errorPath(input.path),
           userId,
@@ -148,9 +163,12 @@ export class ErrorsService {
     row: ErrorIncidentDocument & { _id: Types.ObjectId },
   ): ErrorIncident {
     const { _id, createdAt, resolvedAt, ...data } = row;
+    const reason =
+      errorReason(data.code) ?? errorReason(data.reason) ?? 'INTERNAL_ERROR';
     return {
       ...data,
-      code: data.code as ErrorIncident['code'],
+      code: publicErrorCode(reason),
+      reason,
       source: data.source as ErrorIncident['source'],
       status: data.status as ErrorIncident['status'],
       id: String(_id),

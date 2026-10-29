@@ -5,6 +5,7 @@ export class ErrorIncidentDocument {
   @Prop({ required: true }) reference!: string;
   @Prop() requestId?: string;
   @Prop({ required: true }) code!: string;
+  @Prop() reason?: string;
   @Prop({ required: true }) source!: string;
   @Prop() statusCode?: number;
   @Prop() method?: string;

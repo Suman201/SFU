@@ -1,7 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { ERROR_CATALOG } from '@native-sfu/contracts';
+import {
+  ERROR_CATALOG,
+  publicErrorCode,
+  type AppErrorCode,
+} from '@native-sfu/contracts';
 import { startAdminTestServer } from './helpers/admin-test-server';
 
 test('public admin-domain encyclopedia: all codes, search, deep links and backend-independent access', async ({
@@ -52,9 +56,7 @@ test('public admin-domain encyclopedia: all codes, search, deep links and backen
       .fill('network_error');
     await expect(page.locator('.code-row')).toHaveCount(1);
     await page.locator('.code-row').click();
-    await expect(page).toHaveURL(
-      server.origin + '/error-encyclopedia/NETWORK_ERROR',
-    );
+    await expect(page).toHaveURL(server.origin + '/error-encyclopedia/SAP3001');
     await expect(
       page.getByRole('heading', {
         name: 'Network connection failed',
@@ -65,7 +67,7 @@ test('public admin-domain encyclopedia: all codes, search, deep links and backen
       page.getByRole('heading', { name: 'Debugging this error', exact: true }),
     ).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Page link' })).toHaveValue(
-      server.origin + '/error-encyclopedia/NETWORK_ERROR',
+      server.origin + '/error-encyclopedia/SAP3001',
     );
     await page.screenshot({
       path: path.join(output, `${info.project.name}-network-error-guide.png`),
@@ -73,7 +75,7 @@ test('public admin-domain encyclopedia: all codes, search, deep links and backen
     });
     await page.goto(
       server.origin +
-        '/error-encyclopedia/NETWORK_ERROR?requestId=private-occurrence&token=private-token',
+        '/error-encyclopedia/SAP3001?requestId=private-occurrence&token=private-token',
     );
     await expect(
       page.getByRole('textbox', { name: 'Page link' }),
@@ -88,15 +90,22 @@ test('public admin-domain encyclopedia: all codes, search, deep links and backen
         exact: true,
       }),
     ).toBeVisible();
-    for (const code of Object.keys(ERROR_CATALOG)) {
+    for (const reason of Object.keys(ERROR_CATALOG) as AppErrorCode[]) {
+      const code = publicErrorCode(reason);
       await page.goto(`${server.origin}/error-encyclopedia/${code}`);
       await expect(page.locator('.guide-kicker code')).toHaveText(code);
       await expect(page.locator('#causes li')).toHaveCount(3);
       await expect(page.locator('#user-fixes li')).toHaveCount(3);
       await expect(page.locator('#developer-checks li')).toHaveCount(3);
-      await expect(page.locator('.example pre')).not.toBeEmpty();
+      await expect(page.locator('.example pre')).toContainText(code);
+      await expect(page.locator('.developer-reason')).toContainText(reason);
+      await page.goto(`${server.origin}/error-encyclopedia/${reason}`);
+      await expect(page.locator('.guide-kicker code')).toHaveText(code);
+      await expect(
+        page.getByRole('textbox', { name: 'Page link' }),
+      ).toHaveValue(`${server.origin}/error-encyclopedia/${code}`);
     }
-    await page.goto(server.origin + '/error-encyclopedia/NETWORK_ERROR');
+    await page.goto(server.origin + '/error-encyclopedia/SAP3001');
     await page
       .locator('.page-sections')
       .getByRole('link', { name: 'Developer checks', exact: true })
@@ -104,7 +113,7 @@ test('public admin-domain encyclopedia: all codes, search, deep links and backen
     await expect(page.locator('#developer-checks h2')).toBeInViewport();
     const relatedLink = page
       .locator('.related-links a')
-      .filter({ hasText: 'SERVICE_UNAVAILABLE' });
+      .filter({ hasText: 'SAP3003' });
     await relatedLink.scrollIntoViewIfNeeded();
     const previousScroll = await page.evaluate(() => scrollY);
     await relatedLink.click();
@@ -115,9 +124,7 @@ test('public admin-domain encyclopedia: all codes, search, deep links and backen
       }),
     ).toBeInViewport();
     await page.goBack();
-    await expect(page.locator('.guide-kicker code')).toHaveText(
-      'NETWORK_ERROR',
-    );
+    await expect(page.locator('.guide-kicker code')).toHaveText('SAP3001');
     await expect
       .poll(() =>
         page.evaluate(
@@ -154,10 +161,7 @@ test('public admin-domain encyclopedia: all codes, search, deep links and backen
       .getByRole('combobox', { name: 'Area', exact: true })
       .selectOption('Classroom & devices');
     await expect(page.locator('.code-row')).toHaveCount(4);
-    await page
-      .locator('.code-row')
-      .filter({ hasText: 'DEVICE_PERMISSION_DENIED' })
-      .click();
+    await page.locator('.code-row').filter({ hasText: 'SAP5001' }).click();
     await page.getByRole('button', { name: 'Switch to dark mode' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await page.screenshot({
@@ -217,7 +221,7 @@ test('existing errors link to public code descriptions while incident logs requi
     await expect(code).toContainText('Error code');
     await expect(code.getByRole('link')).toHaveAttribute(
       'href',
-      server.origin + '/error-encyclopedia/SERVICE_UNAVAILABLE',
+      server.origin + '/error-encyclopedia/SAP3003',
     );
     const output =
       process.env.ERROR_ENCYCLOPEDIA_UI_OUTPUT || info.outputPath('ui');
@@ -242,7 +246,7 @@ test('existing errors link to public code descriptions while incident logs requi
       code.getByRole('link').click(),
     ]);
     await expect(directGuide.locator('.guide-kicker code')).toHaveText(
-      'SERVICE_UNAVAILABLE',
+      'SAP3003',
     );
     await directGuide.close();
     await notice.getByRole('button', { name: 'View details' }).click();
@@ -251,7 +255,7 @@ test('existing errors link to public code descriptions while incident logs requi
     });
     await expect(link).toHaveAttribute(
       'href',
-      server.origin + '/error-encyclopedia/SERVICE_UNAVAILABLE',
+      server.origin + '/error-encyclopedia/SAP3003',
     );
     const [guide] = await Promise.all([
       page.waitForEvent('popup'),

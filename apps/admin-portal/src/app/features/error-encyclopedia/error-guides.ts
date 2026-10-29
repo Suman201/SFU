@@ -1,4 +1,9 @@
-import { ERROR_CATALOG, type AppErrorCode } from '@native-sfu/contracts';
+import {
+  ERROR_CATALOG,
+  errorReason,
+  type AppErrorCode,
+  type PublicErrorCode,
+} from '@native-sfu/contracts';
 export const ERROR_AREAS = [
   'Forms & files',
   'Account & access',
@@ -501,14 +506,26 @@ export const ERROR_GUIDES = {
   },
 } satisfies Record<AppErrorCode, GuideContent>;
 export type ErrorGuide = GuideContent & {
-  code: AppErrorCode;
+  code: PublicErrorCode;
+  reason: AppErrorCode;
   title: string;
   message: string;
   nextStep: string;
 };
 export const ALL_ERROR_GUIDES: ErrorGuide[] = (
   Object.keys(ERROR_CATALOG) as AppErrorCode[]
-).map((code) => ({ code, ...ERROR_CATALOG[code], ...ERROR_GUIDES[code] }));
+).map((reason) => ({
+  ...ERROR_CATALOG[reason],
+  ...ERROR_GUIDES[reason],
+  reason,
+  example: ERROR_GUIDES[reason].example.includes(`code: ${reason}`)
+    ? ERROR_GUIDES[reason].example.replaceAll(
+        `code: ${reason}`,
+        `code: ${ERROR_CATALOG[reason].code}\nreason: ${reason}`,
+      )
+    : `code: ${ERROR_CATALOG[reason].code}\nreason: ${reason}\n${ERROR_GUIDES[reason].example}`,
+}));
 export function findErrorGuide(code: string | null): ErrorGuide | undefined {
-  return ALL_ERROR_GUIDES.find((guide) => guide.code === code?.toUpperCase());
+  const reason = errorReason(code?.toUpperCase());
+  return ALL_ERROR_GUIDES.find((guide) => guide.reason === reason);
 }

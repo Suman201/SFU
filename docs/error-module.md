@@ -1,89 +1,59 @@
-# Error handling and diagnostics
+# Error codes and diagnostics
 
-Sapiovian uses one shared error UI in `apps/frontend/src/app/shared/error-center` for the website, desktop renderer and admin portal. The public code catalog is in `packages/contracts/src/errors.ts`.
+Sapiovian uses one registry in `packages/contracts/src/errors.ts` and one shared error UI in `apps/frontend/src/app/shared/error-center` for the website, desktop renderer and admin portal.
 
-## Public Error Encyclopedia
+## Public numbered codes
 
-The public code reference is hosted by the **admin portal domain**:
+The numbered code identifies a failure type. The semantic `reason` identifies that type in source code and developer diagnostics. The `requestId` (shown as **Reference**) identifies one occurrence. HTTP `statusCode` keeps its usual protocol meaning. Never renumber or reuse a published SAP identifier.
 
-- `/error-encyclopedia`: searchable code index, area filters and all currently emitted public codes.
-- `/error-encyclopedia/NETWORK_ERROR`: permanent description of one error code (replace with any known code).
-- `/errors`: the existing private incident log, still protected by admin authentication.
+| Public code | Developer reason |
+| --- | --- |
+| `SAP1001` | `VALIDATION_FAILED` |
+| `SAP1002` | `INVALID_REQUEST` |
+| `SAP1003` | `REQUEST_TOO_LARGE` |
+| `SAP1004` | `UNSUPPORTED_FILE_TYPE` |
+| `SAP1005` | `CONFLICT` |
+| `SAP2001` | `INVALID_CREDENTIALS` |
+| `SAP2002` | `AUTHENTICATION_REQUIRED` |
+| `SAP2003` | `ACCESS_DENIED` |
+| `SAP2004` | `RESOURCE_NOT_FOUND` |
+| `SAP3001` | `NETWORK_ERROR` |
+| `SAP3002` | `REQUEST_TIMEOUT` |
+| `SAP3003` | `SERVICE_UNAVAILABLE` |
+| `SAP3004` | `RATE_LIMITED` |
+| `SAP4001` | `INTERNAL_ERROR` |
+| `SAP4002` | `INVALID_RESPONSE` |
+| `SAP4003` | `CLIENT_ERROR` |
+| `SAP5001` | `DEVICE_PERMISSION_DENIED` |
+| `SAP5002` | `DEVICE_NOT_FOUND` |
+| `SAP5003` | `DEVICE_BUSY` |
+| `SAP5004` | `CLASSROOM_ERROR` |
 
-Each code page explains its meaning, likely causes, user recovery steps, developer debugging checks, an example and related codes. Content is authored in `apps/admin-portal/src/app/features/error-encyclopedia/error-guides.ts` and checked against the shared error catalog at compile time. It describes error types; it does not retrieve individual incidents or reference IDs. Public pages work without signing in or contacting the API, including when a stored admin session exists and the backend is unavailable.
+The registry is authoritative. A compile-time check requires an authored public guide for every reason. Contract tests protect the published mapping and uniqueness.
 
-The existing runtime error module remains useful for occurrence-specific diagnostics. Every visible error notice shows its documented code immediately, with a direct link to the matching public code page; detail dialogs retain the same link. Dismissed or quiet errors show their code in **Recent error**. Set `adminPortalUrl` in the website's `public/env.js` to the HTTPS **admin origin**, for example `https://admin.example.com` (replace with the real domain). Local web development defaults to the admin portal at port 4300. Production websites without a configured admin origin keep the code visible without inventing a public URL.
+## API response
 
-For desktop packages pass `--admin-url https://admin.example.com` or set `SFU_DESKTOP_ADMIN_URL`. The validated origin is embedded into the renderer's runtime configuration. Documentation opens in the system browser through the existing secure external-link bridge, preserving the classroom. Production packages without an admin URL omit the link. No occurrence references, tokens or diagnostic query strings are included in documentation links.
+The global Nest exception filter returns the same numbered `code` that appears in the error notice, copied diagnostics, incident API and public guide. For example, an invalid sign-in returns HTTP 401 with:
 
-## User experience
+```json
+{
+  "success": false,
+  "code": "SAP2001",
+  "reason": "INVALID_CREDENTIALS",
+  "title": "Check your sign-in details",
+  "message": "The email or password is incorrect.",
+  "nextStep": "Check your email and password, or reset your password.",
+  "errors": [],
+  "statusCode": 401,
+  "path": "/api/v1/auth/login",
+  "timestamp": "2026-10-29T10:00:00.000Z",
+  "requestId": "example-reference-123"
+}
+```
 
-A failed API action has a plain-language title, an explanation, a next step, a visible error code and a separate reference ID. The code identifies the failure type; the reference identifies one occurrence. **View details** shows field validation messages and selectable/copyable diagnostics. Notices remain until dismissed; **Recent error** reopens the latest one. Only the last ten entries are held in memory. Nothing is written to browser storage. Changing accounts clears this history.
+`x-error-code` repeats the numbered code; `x-request-id` repeats the occurrence reference. Both response headers are exposed through CORS. Download requests whose error body is a Blob can still read the exact code from the header. Successful responses retain their existing contracts. Media range responses, OAuth return pages and operational endpoints with their own non-JSON protocols are outside this JSON exception envelope.
 
-Network failures cannot prove whether a mutation reached the server. Recovery text asks the user to check whether the change saved before resubmitting. This module never automatically repeats requests or reloads a page. Existing feature-specific recovery logic remains in place.
-
-Session refresh/me/logout calls do not generate separate global notices; authentication owns these outcomes. The interceptor wraps authentication so only a final failed protected operation is surfaced. `QUIET_ERROR` records background failures without interrupting a user. Calendar polling, class notices, device setup and classroom acknowledgements use this pattern; existing contextual inline messages are retained.
-
-`EXPECTED_ERROR_STATUSES` lets a feature keep an explicitly handled fallback out of the error UI. The homepage and teacher directory use this only for missing optional CMS content; a missing requested public page still surfaces an error.
-
-Signed-in users can **Report issue**. Unexpected page/runtime errors also send a bounded technical report while signed in. Guests can copy details. Reporting failure is shown honestly, is not retried automatically, and cannot recurse into the error interceptor. Offline state is announced without clearing errors or claiming a save succeeded.
-
-## Server contract
-
-The existing `success`, `message`, `errors`, `statusCode`, `path`, `timestamp` and `requestId` fields remain. New `code`, `title` and `nextStep` fields are additive. `errors` contains flattened `{field, message}` constraints; raw class-validator targets and input values are excluded. HTTP 5xx messages and error arrays never expose the original exception. Body-parser JSON/size failures retain appropriate 400/413 statuses.
-
-Request IDs contain only 8–128 letters, numbers, underscores or hyphens; invalid IDs are replaced. The same ID is returned in the body and `x-request-id`, exposed through CORS. API request logs exclude query strings and request bodies. Structured `application_error` logs include code, request ID, method, route, exception name and file/line frames.
-
-Unexpected HTTP 5xx failures are recorded to MongoDB `error_incidents` on a best-effort basis. Recording never delays the response. At most 50 writes are pending per node during a database outage; logs remain the fallback. If the process exits before the asynchronous write completes, the DB record may be absent. This is an incident viewer, not a replacement for durable centralized production logs. Expected 4xx failures are not automatically persisted; the user can report them when needed.
-
-## Admin and developer workflow
-
-Open **Admin → Error log** (`/errors`). Filter by source/status or paste the full reference. Open a record to inspect its code, HTTP status, request reference, account ID (when authenticated), safe developer frames, known failure explanations (such as database validation or an unreachable dependency) and recovery guidance. Mark it resolved or reopen it. A resolution records who changed it and when; this does not itself change the product behavior.
-
-Only `ADMIN` and `SUPER_ADMIN` can list/read/update records. There is no public read endpoint. Authenticated client reports accept an allowlist of fields, derive the account ID from the verified session and are limited to ten reports per minute per IP. Reports are idempotent for `(source, userId, reference)` and are visibly labeled as client reports, not verified server exceptions.
-
-No passwords, cookies, request/response bodies, form values, raw exception messages, full local file paths or URL queries are retained in incidents or copied diagnostics. Frame entries contain file basenames and line/column numbers. Production source maps, where needed, should be held privately for developers to map minified bundle coordinates. Client frames and metadata are untrusted and rendered as text. Account IDs and route paths remain operational metadata: restrict admin access and set an explicit organizational log retention policy. This module does not silently delete records or send data to an external error-reporting service.
-
-## Deployment
-
-The user-facing module lives in the existing frontend repository and is served from its configured public website URL. Desktop and admin import that same implementation; the encyclopedia is served publicly by the admin portal, and the incident log stays private. The current installers target localhost. A live URL needs the frontend/backend hosting environment and public domain to be configured before rebuilding deployment installers.
-
-1. Build contracts, backend, frontend and admin portal as usual. Desktop packages compile the same shared UI.
-2. Before starting a production backend with automatic indexing disabled, run `MONGODB_URI=... npm run setup:errors`. Use `-- --allow-remote` only for the reviewed remote database.
-3. Deploy backend and both UIs together. No new credentials or paid service are required. Existing MongoDB/auth/logging infrastructure is reused.
-4. Retain structured server logs centrally. Search `requestId` from a user reference to correlate the failure.
-
-The module covers REST failures, uncaught Angular/browser errors, router navigation errors, device-setup failures and classroom acknowledgement failures. It does not capture native Electron main-process crashes, OS failures, service-worker startup failures, or every locally handled media/reconnect warning. Those require their own subsystem diagnostics. It cannot send reports while disconnected or before sign-in.
-
-## Validation
-
-Focused backend/Angular tests cover safe error envelopes, nested validation, body-parser errors, request-ID validation, blob errors, preserving typed HTTP errors, quiet polling, mutation retry prevention and report recursion prevention. The real-backend browser acceptance test uses isolated MongoDB, Redis and the existing Nest/Angular apps. It deliberately applies a temporary validator to the isolated session collection to induce a real database failure, then removes it. No HTTP response mocks or production failure endpoints are used. It also verifies offline handling, client reports, admin access control and resolution. Screenshots are captured headlessly.
-
-Validated locally on 29 October 2026:
-
-- 12 backend focused tests and 3 existing foundation integration checks passed.
-- 22 frontend focused checks and the admin root integration check passed; the 9 error-module checks were rerun after the final grouping/dialog changes.
-- Full real-backend acceptance passed in Chromium and WebKit with teacher, student, admin and shared desktop-renderer routes. Both narrow layouts were checked at 390px.
-- Focused backend lint passed without warnings. The production index setup script ran successfully against the isolated MongoDB database.
-- No native app or visible browser was opened.
-
-Website, desktop renderer and admin release builds passed. Windows x64/ARM64 (combined and separate NSIS installers) and Mac Intel/Apple Silicon (DMG and ZIP) packages were rebuilt. All 14 installer/blockmap checksums passed, both DMG integrity checks passed, both ZIP CRC checks passed, and all four unpacked architectures contain the same 59 frontend files. These remain unsigned localhost development installers, not a public deployment.
-
-## Error Encyclopedia verification
-
-On 29 October 2026, all 20 public code pages, search/filter behavior, deep-link reloads, copy-link fallback, unknown-code handling, light/dark and 390px layouts passed in headless Chromium, Firefox and WebKit (6 acceptance checks). Public-page tests used the actual admin release build with an unavailable upstream and a stale stored admin session, and confirmed zero API requests. A real reverse-proxy connection failure produced an error whose code explanation opened on the same admin origin. The private incident log still required sign-in. No response mocks were used.
-
-The updated shared error module passed 13 unit checks, including safe documentation URLs and desktop browser-bridge success/failure. The existing 25 desktop runtime checks passed; the added admin-origin option check and command regressions also passed. Website, admin and desktop-renderer builds succeeded. The native app and visible browsers stayed closed.
-
-The refreshed Windows/Mac installers and blockmaps passed all 14 SHA-256 checks. Both Mac DMG integrity checks and ZIP CRC checks passed; every packaged architecture contains the same 59 frontend files, including the configured local admin-portal documentation origin. These remain unsigned development installers.
-
-Section anchors retain the current code URL, and related-code navigation starts at the new explanation. Browser back navigation restores the reader’s position. These navigation behaviors are covered by the encyclopedia browser acceptance checks.
-
-## Assigning and tracing codes
-
-`packages/contracts/src/errors.ts` is the single registry of 20 stable descriptive codes. For example, `INVALID_CREDENTIALS` identifies a failed sign-in; `ACCESS_DENIED` identifies missing permission. Codes are not HTTP status numbers or occurrence references.
-
-For a specific backend failure, declare a registered code in the Nest exception response:
+For an explicit business classification, declare the semantic name in a Nest exception:
 
 ```ts
 throw new BadRequestException({
@@ -92,13 +62,72 @@ throw new BadRequestException({
 });
 ```
 
-The global filter preserves a registered code; otherwise it maps the HTTP status to a safe fallback. Sign-in now declares `INVALID_CREDENTIALS` explicitly. Unknown codes cannot create undocumented code pages. HTTP 5xx text remains the safe catalog message even with an explicit code.
+The filter normalizes this to `code: SAP1004`, `reason: UNSUPPORTED_FILE_TYPE`. It also accepts a registered numbered declaration. Otherwise, it maps the HTTP status to a registered fallback. Unknown values cannot create undocumented codes. HTTP 5xx responses always use the safe catalog message, including when an explicit code was declared. Validation constraints are flattened into `{field, message}` entries without class-validator target/value objects. Body-parser failures retain HTTP 400/413.
 
-Socket acknowledgments include `publicCode` from this same registry and a per-failure `requestId`. Their existing `code` discriminator and typed recovery `details` remain compatible with room redirects and permission handling. The client carries `publicCode` and `requestId` into recent errors, copyable diagnostics and submitted reports. Older servers fall back to `CLASSROOM_ERROR`. Expected automatic room redirects do not create a user incident. Unexpected signaling failures log their safe code/reference/frames; raw internal exception text is not sent in acknowledgments. These socket failures are not automatically written to MongoDB; authenticated user reports remain available.
+Request IDs accept only 8–128 letters, numbers, underscores and hyphens. Invalid IDs are replaced. Response paths exclude queries and fragments. Error responses use `Cache-Control: no-store`.
 
-To trace an occurrence, copy its **Reference** and search Admin → Error log or backend logs. Routine 4xx failures only appear in the incident log after an authenticated user reports them. Public guides contain code explanations, never occurrence data.
+## Classroom acknowledgments
+
+Socket acknowledgments carry the same numbered classification in `error.publicCode`, its semantic `error.reason` and a per-failure `error.requestId`. The existing signaling `error.code` discriminator (for example `ROOM_REDIRECT` or `ForbiddenException`) and typed recovery `details` remain intact for existing redirect and permission logic. This protocol discriminator is separate from the public Sapiovian code.
+
+The shared socket client carries the numbered code and server reference into recent errors, diagnostics and submitted reports. It accepts numbered codes, older semantic public codes and older servers without public metadata; unclassified failures use `SAP5004`. Missing acknowledgments use `SAP3002` and never cause automatic mutation retries. Expected room redirects do not create a user incident.
+
+Unexpected signaling failures log safe code/reason/reference/frame metadata; acknowledgments do not echo internal exception text. Socket failures are not automatically written to MongoDB; authenticated user reports remain available.
+
+## User experience
+
+A failed action has a plain-language title, explanation, next step, visible numbered code and separate reference. **View details** includes the developer reason, field messages and copyable diagnostics. Notices stay until dismissed; **Recent error** reopens the latest entry and displays its code. Only ten entries are held in memory, no error history is written to browser storage, and account changes clear the history.
+
+The module never automatically repeats requests or reloads the page. Network/timeout guidance asks users to check whether a change saved before resubmitting. Existing classroom/media recovery remains in charge of its own actions.
+
+`QUIET_ERROR` records background failures without interrupting the user. Calendar polling, class notices, device setup and classroom acknowledgments use this pattern. Auth refresh/me/logout outcomes remain owned by authentication. `EXPECTED_ERROR_STATUSES` excludes explicitly handled normal fallbacks, such as missing optional CMS content; requested pages still surface real failures.
+
+Signed-in users can **Report issue**. Unexpected page/runtime errors also send a bounded technical report while signed in. Guests can copy details. Reporting failures do not recurse through the interceptor, are shown honestly and are not automatically retried. Offline state never claims that a change saved.
+
+## Public Error Encyclopedia
+
+The code reference is public on the **admin portal domain**, independently of the private incident log:
+
+- `/error-encyclopedia`: search by SAP code, semantic reason, message or problem; filter by area.
+- `/error-encyclopedia/SAP3001`: a numbered code explanation, with causes, user fixes, developer checks, examples and related codes.
+- `/error-encyclopedia/NETWORK_ERROR`: a supported legacy alias for the same guide; generated share links use `SAP3001`.
+- `/errors`: the private admin incident log.
+
+All 20 guides are authored in `apps/admin-portal/src/app/features/error-encyclopedia/error-guides.ts`. They describe failure types and contain no occurrence data. Public pages load without signing in or calling the API, including with a stale stored admin session while the backend is unavailable. Section anchors preserve the current page; back navigation restores reading position.
+
+Notices and details link directly to their guide. Set `adminPortalUrl` in `apps/frontend/public/env.js` to the real HTTPS admin origin. Local web development defaults to port 4300. Production without a configured origin displays the code without inventing a URL.
+
+Desktop builds accept `--admin-url https://admin.example.com` or `SFU_DESKTOP_ADMIN_URL`. The validated origin is bundled with the renderer. Guides open through the existing system-browser bridge and contain no occurrence IDs, tokens or diagnostic query strings. No native app needs to open for headless verification.
+
+## Incident storage and admin workflow
+
+Unexpected HTTP 5xx failures are recorded to MongoDB `error_incidents` on a best-effort basis. Storage never delays the response, and at most 50 writes are pending per node during an outage. Structured logs remain the fallback. An exit before the asynchronous write completes can leave no database record. This does not replace centralized durable production logs.
+
+New records store the numbered `code` and semantic `reason`. Historical records with a semantic `code` are normalized when read through the incident API; they are not rewritten or deleted. Reports from older clients may submit semantic codes. New reports submit both values, and mismatched pairs are rejected. Report upserts remain idempotent for `(source, userId, reference)`.
+
+Only `ADMIN` and `SUPER_ADMIN` may list, read or resolve records. Authenticated client reports derive account identity from the verified session, accept allowlisted metadata and are limited to ten per minute per IP. Expected HTTP 4xx failures enter the incident log only when reported. Client reports are labeled separately from server exceptions.
+
+In **Admin → Error log**, search a full reference or filter by source/status. Open a record to see the numbered code, semantic reason, HTTP status, route, occurrence reference, account ID, safe frames and known developer explanations. Resolve or reopen it; this records who changed the status and when without changing product behavior.
+
+Reports/diagnostics exclude request bodies, passwords, cookies, raw exception messages, full local file paths and URL queries. Frames contain file basenames and coordinates only. Client metadata is untrusted and rendered as text. Account IDs and route paths are operational metadata: restrict admin access and define organizational retention. No records are silently expired or sent to an external reporting vendor.
+
+## Deployment and compatibility
+
+1. Build contracts, backend, website and admin portal; desktop packages compile the shared UI.
+2. For a production database with automatic indexing disabled, run `MONGODB_URI=... npm run setup:errors`. Use `-- --allow-remote` only for a reviewed target.
+3. Deploy the backend, then the matching website/admin builds and refreshed desktop installers. REST `code` is now numbered; clients that inspect the former semantic field must switch their semantic comparisons to `reason`.
+4. Existing semantic documentation URLs and historical incident records remain readable. The current shared client accepts older semantic API responses during rollout. New client reports require the updated backend; do not roll out new clients first.
+5. Configure the actual admin origin and retain structured server logs centrally, searchable by request ID.
+
+No new paid services or credentials are required. Current installers use localhost and remain unsigned development packages. A live application still needs a configured hosting environment and public domain.
+
+The module covers JSON REST exceptions, uncaught Angular/browser errors, router errors, device setup and classroom acknowledgments. It does not capture native Electron main-process crashes, OS failures, service-worker startup failures or every locally handled media/reconnect warning. Reports cannot be sent while disconnected or before sign-in.
+
+## Verification
+
+The focused suite checks published-code stability, HTTP and signaling mappings, safe messages, request references, old API compatibility, Blob headers, report normalization/mismatch rejection and historical-record reads. Real-backend acceptance uses isolated MongoDB/Redis and the existing Nest/Angular applications, with a temporary validator on the isolated sessions collection to induce an actual database failure. No HTTP response mocks or production failure endpoints are used. This test requires local MongoDB database `whiteboard_acceptance` and a dedicated local Redis URL ending in `/15`; before each browser project it clears only `sfu:throttle:*` counters in that isolated Redis database.
+
+Public-reference acceptance runs the built admin portal with a genuinely unavailable upstream. It checks all numbered pages and semantic aliases, public access with zero API calls, notice links, protected incident logs, search, anchors, copy-link fallback, dark mode and 390px layouts across headless Chromium, Firefox and WebKit. Actual screenshots are saved with the test artifacts. Installer checksums, DMG/ZIP integrity and cross-architecture renderer comparisons are recorded in `apps/desktop/installers/manifest.json`.
 
 
-### Visible-code and signaling verification — 29 October 2026
-
-The follow-up passed 63 backend checks (HTTP filter, signaling helper, room gateway and incident service), 22 shared error/socket client checks and 26 desktop runtime checks. Headless Chromium and WebKit passed the real-backend flow using isolated MongoDB/Redis, including new actual Socket.IO validation and unjoined-classroom failures. All 6 public-reference checks passed across Chromium, Firefox and WebKit, including a code visible before **View details**, a direct notice-to-guide link, a 390px screen and private-log authentication. Website, backend and admin release builds passed. Updated Windows/Mac installer integrity is recorded in their manifest; no native application or visible browser was launched.
+Validated on 29 October 2026: 69 backend checks, 24 shared error/socket client checks, 26 desktop runtime checks, both real-backend browser flows (Chromium/WebKit) and all 6 public-reference browser checks (Chromium/Firefox/WebKit) passed. Backend, website, admin and desktop-renderer builds succeeded. Native apps and visible browsers remained closed.

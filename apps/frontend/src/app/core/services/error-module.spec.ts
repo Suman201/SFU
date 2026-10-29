@@ -3,6 +3,7 @@ import {
   HttpClient,
   HttpContext,
   HttpErrorResponse,
+  HttpHeaders,
   provideHttpClient,
   withInterceptors,
 } from '@angular/common/http';
@@ -51,7 +52,7 @@ describe('Shared error module', () => {
       }),
     );
     expect(center.documentationUrl(item.code)).toBe(
-      'https://admin.sapiovian.example/error-encyclopedia/INTERNAL_ERROR',
+      'https://admin.sapiovian.example/error-encyclopedia/SAP4001',
     );
     expect(center.documentationUrl(item.code)).not.toContain(item.reference);
   });
@@ -64,7 +65,7 @@ describe('Shared error module', () => {
     ])
       expect(errorGuideUrl(base, 'NETWORK_ERROR')).toBeNull();
     expect(errorGuideUrl('http://localhost:4300', 'NETWORK_ERROR')).toBe(
-      'http://localhost:4300/error-encyclopedia/NETWORK_ERROR',
+      'http://localhost:4300/error-encyclopedia/SAP3001',
     );
     expect(
       errorGuideUrl('https://admin.example.com', '../private' as never),
@@ -77,7 +78,7 @@ describe('Shared error module', () => {
     expect(await center.openDocumentation(event, 'NETWORK_ERROR')).toBeTrue();
     expect(event.defaultPrevented).toBeTrue();
     expect(open).toHaveBeenCalledOnceWith(
-      'https://admin.sapiovian.example/error-encyclopedia/NETWORK_ERROR',
+      'https://admin.sapiovian.example/error-encyclopedia/SAP3001',
     );
   });
   it('handles a failed desktop documentation launch without creating another incident', async () => {
@@ -105,7 +106,7 @@ describe('Shared error module', () => {
     );
     expect(caught instanceof HttpErrorResponse).toBeTrue();
     expect(center.active()?.reference).toBe('server-reference-123');
-    expect(center.active()?.code).toBe('INTERNAL_ERROR');
+    expect(center.active()?.code).toBe('SAP4001');
     expect(center.diagnostic(center.active()!)).not.toMatch(
       /private|secret|password|database/,
     );
@@ -117,7 +118,7 @@ describe('Shared error module', () => {
         error: new SyntaxError('private body'),
       }),
     );
-    expect(item.code).toBe('INVALID_RESPONSE');
+    expect(item.code).toBe('SAP4002');
     expect(item.nextStep).toContain('whether your change saved');
   });
   it('preserves the backend classification independently of the HTTP status fallback', () => {
@@ -130,7 +131,7 @@ describe('Shared error module', () => {
         },
       }),
     );
-    expect(item.code).toBe('UNSUPPORTED_FILE_TYPE');
+    expect(item.code).toBe('SAP1004');
     expect(item.requestId).toBe('upload-reference-123');
     expect(
       center.capture(
@@ -139,7 +140,7 @@ describe('Shared error module', () => {
           error: { code: 'UNREGISTERED_PRIVATE_CODE' },
         }),
       ).code,
-    ).toBe('VALIDATION_FAILED');
+    ).toBe('SAP1001');
   });
   it('keeps a valid signaling occurrence reference and rejects malformed references', () => {
     const item = center.capture(new Error('private socket payload'), {
@@ -158,6 +159,51 @@ describe('Shared error module', () => {
       ).requestId,
     ).toBeUndefined();
   });
+  it('uses the exact numbered API code and derives its semantic reason from the registry', () => {
+    const item = center.capture(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          code: 'SAP1004',
+          reason: 'UNSUPPORTED_FILE_TYPE',
+          requestId: 'numbered-api-reference',
+        },
+      }),
+    );
+    expect(item.code).toBe('SAP1004');
+    expect(item.reason).toBe('UNSUPPORTED_FILE_TYPE');
+    expect(JSON.parse(center.diagnostic(item))).toEqual(
+      jasmine.objectContaining({
+        code: 'SAP1004',
+        reason: 'UNSUPPORTED_FILE_TYPE',
+      }),
+    );
+    // A conflicting label cannot redefine a published numbered code.
+    expect(
+      center.capture(
+        new HttpErrorResponse({
+          status: 500,
+          error: { code: 'SAP3001', reason: 'INTERNAL_ERROR' },
+        }),
+      ).reason,
+    ).toBe('NETWORK_ERROR');
+  });
+  it('reads the API code header when a download error body is a Blob', () => {
+    const item = center.capture(
+      new HttpErrorResponse({
+        status: 400,
+        error: new Blob(['private response']),
+        headers: new HttpHeaders({
+          'x-error-code': 'SAP1004',
+          'x-request-id': 'download-reference-123',
+        }),
+      }),
+    );
+    expect(item.code).toBe('SAP1004');
+    expect(item.reason).toBe('UNSUPPORTED_FILE_TYPE');
+    expect(item.requestId).toBe('download-reference-123');
+    expect(item.message).not.toContain('private response');
+  });
   it('records quiet background errors without opening an interrupting notice', () => {
     http
       .get('/api/v1/calendar/notices', {
@@ -168,9 +214,9 @@ describe('Shared error module', () => {
       .expectOne('/api/v1/calendar/notices')
       .error(new ProgressEvent('network'));
     expect(center.active()).toBeNull();
-    expect(center.latest()?.code).toBe('NETWORK_ERROR');
+    expect(center.latest()?.code).toBe('SAP3001');
     center.openLatest();
-    expect(center.active()?.code).toBe('NETWORK_ERROR');
+    expect(center.active()?.code).toBe('SAP3001');
   });
   it('does not surface an intermediate auth refresh failure or intercept unrelated origins', () => {
     for (const url of [
@@ -208,7 +254,7 @@ describe('Shared error module', () => {
         statusText: 'Forbidden',
         headers: { 'x-request-id': 'binary-reference-123' },
       });
-    expect(center.active()?.code).toBe('ACCESS_DENIED');
+    expect(center.active()?.code).toBe('SAP2003');
     expect(center.active()?.reference).toBe('binary-reference-123');
     expect(center.active()?.message).not.toContain('private');
   });
@@ -222,7 +268,7 @@ describe('Shared error module', () => {
     }
     expect(center.recent().length).toBe(1);
     expect(center.latest()?.count).toBe(3);
-    expect(center.active()?.code).toBe('SERVICE_UNAVAILABLE');
+    expect(center.active()?.code).toBe('SAP3003');
     backend.expectNone('/api/v1/calendar');
   });
   it('sends only permitted metadata and keeps report failures out of the error handler', () => {
@@ -233,6 +279,8 @@ describe('Shared error module', () => {
     );
     center.report(item.reference);
     const report = backend.expectOne('/api/v1/errors/reports');
+    expect(report.request.body.code).toBe('SAP5001');
+    expect(report.request.body.reason).toBe('DEVICE_PERMISSION_DENIED');
     expect(report.request.headers.get('Authorization')).toBe(
       'Bearer test-token',
     );

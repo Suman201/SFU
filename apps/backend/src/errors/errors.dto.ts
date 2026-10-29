@@ -11,7 +11,11 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ERROR_CATALOG } from '@native-sfu/contracts';
+import {
+  ERROR_CATALOG,
+  type AppErrorCode,
+  type PublicErrorCode,
+} from '@native-sfu/contracts';
 export class ReportErrorDto {
   @IsString() @Matches(/^[a-zA-Z0-9_-]{8,128}$/) reference!: string;
   @IsOptional()
@@ -24,7 +28,12 @@ export class ReportErrorDto {
   @IsString({ each: true })
   @MaxLength(200, { each: true })
   frames?: string[];
-  @IsIn(Object.keys(ERROR_CATALOG)) code!: keyof typeof ERROR_CATALOG;
+  @IsIn([
+    ...Object.keys(ERROR_CATALOG),
+    ...Object.values(ERROR_CATALOG).map((item) => item.code),
+  ])
+  code!: AppErrorCode | PublicErrorCode;
+  @IsOptional() @IsIn(Object.keys(ERROR_CATALOG)) reason?: AppErrorCode;
   @IsIn(['web', 'desktop', 'admin']) source!: 'web' | 'desktop' | 'admin';
   @IsString() @MaxLength(4096) path!: string;
   @IsOptional()

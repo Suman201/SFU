@@ -77,7 +77,8 @@ describe('Socket error-code propagation', () => {
       ok: false,
       error: {
         code: 'ForbiddenException',
-        publicCode: 'ACCESS_DENIED',
+        publicCode: 'SAP2003',
+        reason: 'ACCESS_DENIED',
         requestId: 'socket-reference-123',
         message: 'Permission denied',
       },
@@ -88,17 +89,21 @@ describe('Socket error-code propagation', () => {
     } catch (error) {
       expect(error instanceof SocketAckError).toBeTrue();
       expect((error as SocketAckError).code).toBe('ForbiddenException');
-      expect((error as SocketAckError).publicCode).toBe('ACCESS_DENIED');
+      expect((error as SocketAckError).publicCode).toBe('SAP2003');
     }
     expect(capture).toHaveBeenCalledWith(jasmine.any(SocketAckError), {
-      code: 'ACCESS_DENIED',
+      code: 'SAP2003',
       requestId: 'socket-reference-123',
       quiet: true,
       operation: 'room:leave',
     });
   });
   it('supports older servers with no public classification and rejects unknown codes', async () => {
-    for (const publicCode of [undefined, 'UNREGISTERED_CODE']) {
+    for (const publicCode of [
+      undefined,
+      'UNREGISTERED_CODE',
+      'CLASSROOM_ERROR',
+    ]) {
       const { service, capture } = harness({
         ok: false,
         error: { code: 'Error', message: 'Rejected', publicCode },
@@ -106,7 +111,7 @@ describe('Socket error-code propagation', () => {
       await expectAsync(
         service.emitAck('room:leave', { roomId: 'room-1' }),
       ).toBeRejected();
-      expect(capture.calls.mostRecent().args[1].code).toBe('CLASSROOM_ERROR');
+      expect(capture.calls.mostRecent().args[1].code).toBe('SAP5004');
     }
   });
   it('preserves automatic redirects without creating a spurious user error', async () => {
@@ -128,7 +133,7 @@ describe('Socket error-code propagation', () => {
     await expectAsync(
       service.emitAck('room:leave', { roomId: 'room-1' }),
     ).toBeRejected();
-    expect(capture.calls.mostRecent().args[1].code).toBe('REQUEST_TIMEOUT');
+    expect(capture.calls.mostRecent().args[1].code).toBe('SAP3002');
     expect(service.connect).toHaveBeenCalledTimes(1);
   });
 });

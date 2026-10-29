@@ -134,9 +134,9 @@
     <section class="empty-state">
       <h2>No matching error codes</h2>
       <p>
-        Try a code such as NETWORK_ERROR, or a problem such as camera or
-        sign-in. Reference IDs are private occurrence identifiers and cannot be
-        searched here.
+        Try a code such as SAP3001, or a problem such as camera or sign-in.
+        Reference IDs are private occurrence identifiers and cannot be searched
+        here.
       </p>
       <button class="secondary-button" (click)="reset()">
         Show all error codes
@@ -178,6 +178,9 @@
       <section id="developer-checks" class="guide-section">
         <p class="section-label">FOR DEVELOPERS</p>
         <h2>Debugging this error</h2>
+        <p class="developer-reason">
+          Internal reason: <code>{{ item.reason }}</code>
+        </p>
         <ol>
           @for (step of item.developerChecks; track step) {
           <li>{{ step }}</li>

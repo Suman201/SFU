@@ -25,7 +25,9 @@ import {
   errorFrames,
   errorPath,
   errorReference,
-  isAppErrorCode,
+  errorReason,
+  publicErrorCode,
+  type PublicErrorCode,
   type AppErrorCode,
   type ErrorField,
   type ErrorSource,
@@ -50,7 +52,8 @@ export const EXPECTED_ERROR_STATUSES = new HttpContextToken<readonly number[]>(
 export interface UserError {
   reference: string;
   requestId?: string;
-  code: AppErrorCode;
+  code: PublicErrorCode;
+  reason: AppErrorCode;
   title: string;
   message: string;
   nextStep: string;
@@ -109,7 +112,7 @@ export class ErrorCenter {
       method?: string;
       quiet?: boolean;
       operation?: string;
-      code?: AppErrorCode;
+      code?: AppErrorCode | PublicErrorCode;
       requestId?: string;
     } = {},
   ): UserError {
@@ -127,16 +130,18 @@ export class ErrorCenter {
         ? (http.error as Record<string, unknown>)
         : {};
     const status = http?.status;
-    const code: AppErrorCode =
-      context.code ??
-      (isAppErrorCode(body['code'])
-        ? body['code']
-        : http
-          ? http.status >= 200 && http.status < 300
-            ? 'INVALID_RESPONSE'
-            : errorCodeForStatus(http.status)
-          : 'CLIENT_ERROR');
-    const info = ERROR_CATALOG[code];
+    const reason =
+      errorReason(context.code) ??
+      errorReason(body['code']) ??
+      errorReason(http?.headers.get('x-error-code')) ??
+      errorReason(body['reason']) ??
+      (http
+        ? http.status >= 200 && http.status < 300
+          ? 'INVALID_RESPONSE'
+          : errorCodeForStatus(http.status)
+        : 'CLIENT_ERROR');
+    const code = publicErrorCode(reason);
+    const info = ERROR_CATALOG[reason];
     const requestId =
       errorReference(context.requestId) ??
       errorReference(body['requestId']) ??
@@ -171,6 +176,7 @@ export class ErrorCenter {
       reference,
       ...(requestId ? { requestId } : {}),
       code,
+      reason,
       title: info.title,
       message,
       nextStep: info.nextStep,
@@ -197,7 +203,7 @@ export class ErrorCenter {
       previous.path === path &&
       previous.method === item.method &&
       previous.operation === item.operation &&
-      (code !== 'CLIENT_ERROR' ||
+      (reason !== 'CLIENT_ERROR' ||
         previous.frames.join() === item.frames.join()) &&
       Date.now() - Date.parse(previous.occurredAt) < 60_000;
     if (duplicate) {
@@ -213,7 +219,7 @@ export class ErrorCenter {
       ]);
       if (
         this.activeReference() === previous.reference ||
-        (!context.quiet && code !== 'CLIENT_ERROR')
+        (!context.quiet && reason !== 'CLIENT_ERROR')
       )
         this.activeReference.set(reference);
     } else {
@@ -221,10 +227,11 @@ export class ErrorCenter {
       if (!context.quiet) this.activeReference.set(reference);
     }
     if (error && typeof error === 'object') this.seen.set(error, reference);
-    if (code === 'CLIENT_ERROR' && !duplicate) {
+    if (reason === 'CLIENT_ERROR' && !duplicate) {
       console.error('[Sapiovian error]', {
         reference,
         code,
+        reason,
         path,
         frames: item.frames,
       });
@@ -238,12 +245,12 @@ export class ErrorCenter {
     return item;
   }
 
-  documentationUrl(code: AppErrorCode): string | null {
+  documentationUrl(code: AppErrorCode | PublicErrorCode): string | null {
     return errorGuideUrl(this.config.documentationBaseUrl, code);
   }
   async openDocumentation(
     event: MouseEvent,
-    code: AppErrorCode,
+    code: AppErrorCode | PublicErrorCode,
   ): Promise<boolean> {
     const url = this.documentationUrl(code);
     if (!url || !this.config.openDocumentation) return true;
@@ -277,6 +284,7 @@ export class ErrorCenter {
         reference: item.reference,
         requestId: item.requestId,
         code: item.code,
+        reason: item.reason,
         source: item.source,
         statusCode: item.statusCode,
         method: item.method,
@@ -307,6 +315,7 @@ export class ErrorCenter {
           reference: item.reference,
           requestId: item.requestId,
           code: item.code,
+          reason: item.reason,
           source: item.source,
           path: item.path,
           statusCode: item.statusCode,

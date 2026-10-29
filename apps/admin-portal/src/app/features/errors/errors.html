@@ -95,7 +95,8 @@
                   rel="noopener noreferrer"
                   >{{ item.code }}</a
                 >
-                @if (item.statusCode) { · {{ item.statusCode }} }</small
+                · {{ item.reason }} @if (item.statusCode) { · {{ item.statusCode
+                }} }</small
               ><code>{{ item.reference }}</code>
             </td>
             <td><span class="path">{{ item.method }} {{ item.path }}</span></td>
@@ -214,6 +215,10 @@
               >{{ item.code }}</a
             >
           </dd>
+        </div>
+        <div>
+          <dt>Reason</dt>
+          <dd><code>{{ item.reason }}</code></dd>
         </div>
         <div>
           <dt>Location</dt>

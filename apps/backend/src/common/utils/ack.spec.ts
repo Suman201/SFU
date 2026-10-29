@@ -29,7 +29,8 @@ describe('Shared signaling error contract', () => {
     const second = await fail(new ForbiddenException());
     expect(first).toMatchObject({
       code: 'ForbiddenException',
-      publicCode: 'ACCESS_DENIED',
+      publicCode: 'SAP2003',
+      reason: 'ACCESS_DENIED',
       message: 'Only the teacher can do this.',
     });
     expect(first.requestId).toMatch(/^[a-f0-9-]{36}$/);
@@ -45,11 +46,11 @@ describe('Shared signaling error contract', () => {
           }),
         )
       ).publicCode,
-    ).toBe('UNSUPPORTED_FILE_TYPE');
+    ).toBe('SAP1004');
     expect(
       (await fail(new BadRequestException({ code: 'UNKNOWN_PRIVATE_ERROR' })))
         .publicCode,
-    ).toBe('VALIDATION_FAILED');
+    ).toBe('SAP1001');
   });
   it('keeps internal exception text out of acknowledgments and logs', async () => {
     const log = jest
@@ -59,7 +60,7 @@ describe('Shared signaling error contract', () => {
       const result = await fail(
         new Error('mongodb://user:secret@private-server'),
       );
-      expect(result.publicCode).toBe('CLASSROOM_ERROR');
+      expect(result.publicCode).toBe('SAP5004');
       expect(result.message).toBe(ERROR_CATALOG.CLASSROOM_ERROR.message);
       expect(JSON.stringify(log.mock.calls)).toContain(result.requestId!);
       expect(JSON.stringify([result, log.mock.calls])).not.toContain('secret');

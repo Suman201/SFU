@@ -43,7 +43,7 @@ import type {
 import type { RoomOwnerInfo, RoomOwnerLookupResponse } from './cluster.js';
 import type { DtlsParameters, IceCandidate, IceParameters, TransportOptions } from './transport.js';
 import type { RoomQualitySummaryState } from './metrics.js';
-import type { AppErrorCode } from './errors.js';
+import type { AppErrorCode, PublicErrorCode } from './errors.js';
 
 export type ClassSessionLifecycleStatus = 'live' | 'completed';
 
@@ -326,7 +326,8 @@ export type AckResponse<T> =
         /** Legacy signaling discriminator; retained for redirect and permission recovery. */
         code: string;
         /** Shared, documented application classification. Optional for older servers. */
-        publicCode?: AppErrorCode;
+        publicCode?: PublicErrorCode;
+        reason?: AppErrorCode;
         requestId?: string;
         message: string;
         details?: unknown;

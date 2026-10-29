@@ -2,6 +2,7 @@ import { expect, test, type BrowserContext } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import mongoose from 'mongoose';
+import Redis from 'ioredis';
 import { io } from 'socket.io-client';
 import { startAcceptanceStack, login } from './helpers/whiteboard-classroom';
 import { runtimeUrl } from './helpers/local-ui-stack';
@@ -18,6 +19,30 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
     uri.pathname !== '/whiteboard_acceptance'
   )
     throw Error('Use isolated local acceptance MongoDB.');
+  const redisUrl = new URL(process.env.REDIS_URL!);
+  if (
+    !['127.0.0.1', 'localhost'].includes(redisUrl.hostname) ||
+    redisUrl.pathname !== '/15'
+  )
+    throw Error('Use isolated local acceptance Redis database 15.');
+  // Browser projects share an IP. Clear only this fixture's throttle counters before starting nodes.
+  const redis = new Redis(redisUrl.toString(), { maxRetriesPerRequest: 1 });
+  try {
+    let cursor = '0';
+    do {
+      const [next, keys] = await redis.scan(
+        cursor,
+        'MATCH',
+        'sfu:throttle:*',
+        'COUNT',
+        100,
+      );
+      if (keys.length) await redis.unlink(...keys);
+      cursor = next;
+    } while (cursor !== '0');
+  } finally {
+    await redis.quit();
+  }
   const stack = await startAcceptanceStack({
     frontendPort: 4484,
     backendPort: 3384,
@@ -84,7 +109,11 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
         .emitWithAck('session:watch', { sessionId: 'invalid session id' });
       expect(malformedWatch).toMatchObject({
         ok: false,
-        error: { code: 'BadRequestException', publicCode: 'VALIDATION_FAILED' },
+        error: {
+          code: 'BadRequestException',
+          publicCode: 'SAP1001',
+          reason: 'VALIDATION_FAILED',
+        },
       });
       expect(malformedWatch.error.requestId).toMatch(/^[a-f0-9-]{36}$/);
       const missingRoom = await socket
@@ -92,7 +121,7 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
         .emitWithAck('room:leave', { roomId: 'unjoined-room' });
       expect(missingRoom).toMatchObject({
         ok: false,
-        error: { publicCode: 'CLASSROOM_ERROR' },
+        error: { publicCode: 'SAP5004', reason: 'CLASSROOM_ERROR' },
       });
       expect(missingRoom.error.requestId).not.toBe(
         malformedWatch.error.requestId,
@@ -123,7 +152,8 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
     });
     expect(invalid.status()).toBe(400);
     const invalidBody = await invalid.json();
-    expect(invalidBody.code).toBe('VALIDATION_FAILED');
+    expect(invalidBody.code).toBe('SAP1001');
+    expect(invalidBody.reason).toBe('VALIDATION_FAILED');
     expect(invalidBody.requestId).toBe('validation-reference-123');
     expect(invalidBody.errors.length).toBeGreaterThan(0);
     expect(JSON.stringify(invalidBody)).not.toContain('private-field-value');
@@ -176,9 +206,7 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
     const notice = page.getByRole('region', { name: 'Error information' });
     await expect(notice).toContainText('Check your sign-in details');
     await expect(notice).toContainText('The email or password is incorrect.');
-    await expect(notice.locator('.notice-code')).toContainText(
-      'INVALID_CREDENTIALS',
-    );
+    await expect(notice.locator('.notice-code')).toContainText('SAP2001');
     await page.screenshot({
       path: path.join(
         screenshots,
@@ -214,8 +242,13 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
     await page.getByRole('button', { name: 'Log in', exact: true }).click();
     const failure = await failedLogin;
     const failureBody = await failure.json();
-    expect(failureBody.code).toBe('INTERNAL_ERROR');
+    expect(failureBody.code).toBe('SAP4001');
+    expect(failureBody.reason).toBe('INTERNAL_ERROR');
     expect(failure.headers()['x-request-id']).toBe(failureBody.requestId);
+    expect(failure.headers()['x-error-code']).toBe(failureBody.code);
+    await expect(notice.locator('.notice-code')).toContainText(
+      failureBody.code,
+    );
     expect(JSON.stringify(failureBody)).not.toMatch(
       /Mongo|validator|Password@|__error_acceptance/,
     );
@@ -243,8 +276,30 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
     expect(JSON.stringify(stored)).not.toMatch(
       /Password@|__error_acceptance|teacher.one@example/,
     );
+    expect(stored!.code).toBe('SAP4001');
+    expect(stored!.reason).toBe('INTERNAL_ERROR');
     expect(stored!.frames.length).toBeGreaterThan(0);
     expect(stored!.diagnosticKind).toBe('database_validation');
+    const { _id: storedId, ...legacyData } = stored!;
+    const legacy = await db.collection('error_incidents').insertOne({
+      ...legacyData,
+      reference: 'legacy-code-reference-123',
+      requestId: 'legacy-code-reference-123',
+      code: 'NETWORK_ERROR',
+      reason: undefined,
+    });
+    const legacyResponse = (
+      await (await api(`admin/errors/${legacy.insertedId}`)).json()
+    ).data;
+    expect(legacyResponse).toMatchObject({
+      code: 'SAP3001',
+      reason: 'NETWORK_ERROR',
+    });
+    expect(
+      (await db
+        .collection('error_incidents')
+        .findOne({ _id: legacy.insertedId }))!.code,
+    ).toBe('NETWORK_ERROR');
 
     adminServer = await startAdminTestServer(stack.nodeAUrl);
     const adminContext = await browser.newContext({
@@ -291,6 +346,8 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
     const resolved = (await (await api(`admin/errors/${stored!._id}`)).json())
       .data;
     expect(resolved.status).toBe('resolved');
+    expect(resolved.code).toBe(failureBody.code);
+    expect(resolved.reason).toBe(failureBody.reason);
     expect(resolved.resolvedBy).toBeTruthy();
     await adminPage
       .getByRole('button', { name: 'Reopen error', exact: true })
@@ -374,14 +431,16 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
     ).toContainText('Something went wrong on this page');
     await expect
       .poll(() =>
-        db
-          .collection('error_incidents')
-          .countDocuments({ code: 'CLIENT_ERROR', source: 'web' }),
+        db.collection('error_incidents').countDocuments({
+          code: 'SAP4003',
+          reason: 'CLIENT_ERROR',
+          source: 'web',
+        }),
       )
       .toBe(1);
     const client = await db
       .collection('error_incidents')
-      .findOne({ code: 'CLIENT_ERROR', source: 'web' });
+      .findOne({ code: 'SAP4003', source: 'web' });
     expect(client!.userId).toBeTruthy();
     expect(JSON.stringify(client)).not.toContain('private-runtime-message');
     const duplicateReport = await api('errors/reports', student.accessToken, {
@@ -394,6 +453,24 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
       },
     });
     expect(duplicateReport.status()).toBe(201);
+    const mismatched = await api('errors/reports', student.accessToken, {
+      method: 'POST',
+      data: {
+        reference: 'mismatched-reference-123',
+        code: 'SAP3001',
+        reason: 'INTERNAL_ERROR',
+        source: 'web',
+        path: '/calendar',
+      },
+    });
+    expect(mismatched.status()).toBe(400);
+    expect((await mismatched.json()).code).toBe('SAP1002');
+    expect(
+      await db
+        .collection('error_incidents')
+        .countDocuments({ reference: 'mismatched-reference-123' }),
+    ).toBe(0);
+
     expect(
       await db
         .collection('error_incidents')
@@ -441,7 +518,7 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
     await adminPage
       .getByRole('button', { name: 'Search', exact: true })
       .click();
-    await expect(adminPage.locator('tbody tr')).toHaveCount(3);
+    await expect(adminPage.locator('tbody tr')).toHaveCount(4); // Server failure, legacy record, offline report and runtime report.
     await adminPage.getByRole('button', { name: 'Dark', exact: true }).click();
     await expect(adminPage.locator('html')).toHaveAttribute(
       'data-theme',
@@ -481,7 +558,7 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
       .poll(() =>
         db
           .collection('error_incidents')
-          .countDocuments({ source: 'desktop', code: 'CLIENT_ERROR' }),
+          .countDocuments({ source: 'desktop', code: 'SAP4003' }),
       )
       .toBe(1);
     await desktopPage

@@ -13,7 +13,8 @@ import {
   errorCodeForStatus,
   errorPath,
   errorReference,
-  isAppErrorCode,
+  errorReason,
+  publicErrorCode,
   type ApiErrorBody,
   type ErrorField,
 } from '@native-sfu/contracts';
@@ -48,16 +49,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       response && typeof response === 'object' && 'code' in response
         ? response.code
         : undefined;
-    const code = isAppErrorCode(declaredCode)
-      ? declaredCode
-      : errorCodeForStatus(statusCode);
-    const info = ERROR_CATALOG[code];
+    const reason = errorReason(declaredCode) ?? errorCodeForStatus(statusCode);
+    const info = ERROR_CATALOG[reason];
     const body: ApiErrorBody = {
       success: false,
-      code,
+      code: publicErrorCode(reason),
+      reason,
       title: info.title,
       message:
-        statusCode >= 500 || code === 'INVALID_CREDENTIALS'
+        statusCode >= 500 || reason === 'INVALID_CREDENTIALS'
           ? info.message
           : extractMessage(response, statusCode, info.message),
       nextStep: info.nextStep,
@@ -78,6 +78,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
     const res = context.getResponse();
     httpAdapter.setHeader?.(res, 'x-request-id', body.requestId);
+    httpAdapter.setHeader?.(res, 'x-error-code', body.code);
     httpAdapter.setHeader?.(res, 'Cache-Control', 'no-store');
     httpAdapter.reply(res, body, statusCode);
   }
@@ -85,6 +86,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     this.logger.error({
       event: 'application_error',
       code: body.code,
+      reason: body.reason,
       requestId: body.requestId,
       path: body.path,
       statusCode: body.statusCode,

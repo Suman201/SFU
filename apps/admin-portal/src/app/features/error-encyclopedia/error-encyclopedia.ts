@@ -52,7 +52,7 @@ export class ErrorEncyclopedia {
       (guide) =>
         (this.area() === 'All errors' || guide.area === this.area()) &&
         words.every((word) =>
-          `${guide.code} ${guide.name} ${guide.message} ${guide.explanation} ${guide.causes.join(' ')} ${guide.developerChecks.join(' ')}`
+          `${guide.code} ${guide.reason} ${guide.name} ${guide.message} ${guide.explanation} ${guide.causes.join(' ')} ${guide.developerChecks.join(' ')}`
             .toLowerCase()
             .includes(word),
         ),

@@ -4,7 +4,8 @@ import {
   ERROR_CATALOG,
   errorCodeForStatus,
   errorFrames,
-  isAppErrorCode,
+  errorReason,
+  publicErrorCode,
   type Ack,
   type AckResponse,
 } from '@native-sfu/contracts';
@@ -27,11 +28,10 @@ export async function socketAck<T>(
         : undefined;
     const status =
       error instanceof HttpException ? error.getStatus() : undefined;
-    const publicCode = isAppErrorCode(declaredCode)
-      ? declaredCode
-      : status
-        ? errorCodeForStatus(status)
-        : 'CLASSROOM_ERROR';
+    const reason =
+      errorReason(declaredCode) ??
+      (status ? errorCodeForStatus(status) : 'CLASSROOM_ERROR');
+    const publicCode = publicErrorCode(reason);
     const requestId = randomUUID();
     const redirect = err.name === 'ROOM_REDIRECT';
     const details =
@@ -43,6 +43,7 @@ export async function socketAck<T>(
         event: 'application_error',
         source: 'socket',
         code: publicCode,
+        reason,
         requestId,
         exceptionName: err.name,
         frames: errorFrames(err.stack),
@@ -54,11 +55,12 @@ export async function socketAck<T>(
         // Keep the signaling discriminator and redirect payload for existing recovery logic.
         code: err.name || 'Error',
         publicCode,
+        reason,
         requestId,
         message:
           redirect || (status !== undefined && status < 500)
             ? err.message.slice(0, 600)
-            : ERROR_CATALOG[publicCode].message,
+            : ERROR_CATALOG[reason].message,
         ...(details === undefined ? {} : { details }),
       },
     });

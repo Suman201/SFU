@@ -1,7 +1,9 @@
 import { ErrorCenter } from '@sapiovian/error-ui';
 import { Injectable, Optional } from '@angular/core';
 import {
-  isAppErrorCode,
+  errorReason,
+  publicErrorCode,
+  type PublicErrorCode,
   type AppErrorCode,
   type AckResponse,
   type ClientToServerEvents,
@@ -18,8 +20,9 @@ export class SocketAckError extends Error {
     readonly code: string,
     message: string,
     readonly details?: unknown,
-    readonly publicCode?: AppErrorCode,
+    readonly publicCode?: PublicErrorCode,
     readonly requestId?: string,
+    readonly reason?: AppErrorCode,
   ) {
     super(message);
     this.name = 'SocketAckError';
@@ -72,10 +75,12 @@ export class SocketService {
             'ACK_TIMEOUT',
             'The server did not acknowledge this action. Check whether it completed before trying again.',
             undefined,
+            publicErrorCode('REQUEST_TIMEOUT'),
+            undefined,
             'REQUEST_TIMEOUT',
           );
           this.errors?.capture(failure, {
-            code: 'REQUEST_TIMEOUT',
+            code: publicErrorCode('REQUEST_TIMEOUT'),
             quiet: true,
             operation: event,
           });
@@ -89,15 +94,18 @@ export class SocketService {
             >,
           );
         } else {
-          const publicCode = isAppErrorCode(response?.error.publicCode)
-            ? response.error.publicCode
-            : 'CLASSROOM_ERROR';
+          const reason =
+            errorReason(response?.error.publicCode) ??
+            errorReason(response?.error.reason) ??
+            'CLASSROOM_ERROR';
+          const publicCode = publicErrorCode(reason);
           const failure = new SocketAckError(
             response?.error.code ?? 'ACK_ERROR',
             response?.error.message ?? 'The server rejected this action.',
             response?.error.details,
             publicCode,
             response?.error.requestId,
+            reason,
           );
           if (failure.code !== 'ROOM_REDIRECT')
             this.errors?.capture(failure, {
