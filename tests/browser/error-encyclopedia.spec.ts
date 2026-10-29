@@ -96,6 +96,36 @@ test('public admin-domain encyclopedia: all codes, search, deep links and backen
       await expect(page.locator('#developer-checks li')).toHaveCount(3);
       await expect(page.locator('.example pre')).not.toBeEmpty();
     }
+    await page.goto(server.origin + '/error-encyclopedia/NETWORK_ERROR');
+    await page
+      .locator('.page-sections')
+      .getByRole('link', { name: 'Developer checks', exact: true })
+      .click();
+    await expect(page.locator('#developer-checks h2')).toBeInViewport();
+    const relatedLink = page
+      .locator('.related-links a')
+      .filter({ hasText: 'SERVICE_UNAVAILABLE' });
+    await relatedLink.scrollIntoViewIfNeeded();
+    const previousScroll = await page.evaluate(() => scrollY);
+    await relatedLink.click();
+    await expect(
+      page.getByRole('heading', {
+        name: 'Service is temporarily unavailable',
+        exact: true,
+      }),
+    ).toBeInViewport();
+    await page.goBack();
+    await expect(page.locator('.guide-kicker code')).toHaveText(
+      'NETWORK_ERROR',
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (position) => Math.abs(scrollY - position) < 3,
+          previousScroll,
+        ),
+      )
+      .toBe(true);
     expect(apiCalls).toEqual([]);
     await page.goto(server.origin + '/error-encyclopedia/does-not-exist');
     await expect(

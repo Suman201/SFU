@@ -1,4 +1,6 @@
-<a class="skip-link" href="#encyclopedia-main">Skip to content</a>
+<a class="skip-link" [routerLink]="[]" fragment="encyclopedia-main"
+  >Skip to content</a
+>
 <header class="docs-header">
   <a
     class="docs-brand"
@@ -152,9 +154,9 @@
         <p>{{ item.message }}</p>
       </div>
       <nav class="page-sections" aria-label="On this page">
-        <a href="#causes">Why it happens</a
-        ><a href="#user-fixes">How to fix it</a
-        ><a href="#developer-checks">Developer checks</a>
+        <a [routerLink]="[]" fragment="causes">Why it happens</a
+        ><a [routerLink]="[]" fragment="user-fixes">How to fix it</a
+        ><a [routerLink]="[]" fragment="developer-checks">Developer checks</a>
       </nav>
       <section id="causes" class="guide-section">
         <h2>Why it happens</h2>

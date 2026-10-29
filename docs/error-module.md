@@ -76,3 +76,5 @@ On 29 October 2026, all 20 public code pages, search/filter behavior, deep-link 
 The updated shared error module passed 13 unit checks, including safe documentation URLs and desktop browser-bridge success/failure. The existing 25 desktop runtime checks passed; the added admin-origin option check and command regressions also passed. Website, admin and desktop-renderer builds succeeded. The native app and visible browsers stayed closed.
 
 The refreshed Windows/Mac installers and blockmaps passed all 14 SHA-256 checks. Both Mac DMG integrity checks and ZIP CRC checks passed; every packaged architecture contains the same 59 frontend files, including the configured local admin-portal documentation origin. These remain unsigned development installers.
+
+Section anchors retain the current code URL, and related-code navigation starts at the new explanation. Browser back navigation restores the reader’s position. These navigation behaviors are covered by the encyclopedia browser acceptance checks.
