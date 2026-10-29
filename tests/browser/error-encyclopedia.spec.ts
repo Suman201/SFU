@@ -197,7 +197,7 @@ test('public admin-domain encyclopedia: all codes, search, deep links and backen
 
 test('existing errors link to public code descriptions while incident logs require admin sign-in', async ({
   browser,
-}) => {
+}, info) => {
   const server = await startAdminTestServer('http://127.0.0.1:9');
   const context = await browser.newContext();
   try {
@@ -212,10 +212,40 @@ test('existing errors link to public code descriptions while incident logs requi
       .fill('admin@example.test');
     await page.getByLabel(/Password/).fill('Password@12345');
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page
-      .getByRole('region', { name: 'Error information' })
-      .getByRole('button', { name: 'View details' })
-      .click();
+    const notice = page.getByRole('region', { name: 'Error information' });
+    const code = notice.locator('.notice-code');
+    await expect(code).toContainText('Error code');
+    await expect(code.getByRole('link')).toHaveAttribute(
+      'href',
+      server.origin + '/error-encyclopedia/SERVICE_UNAVAILABLE',
+    );
+    const output =
+      process.env.ERROR_ENCYCLOPEDIA_UI_OUTPUT || info.outputPath('ui');
+    await mkdir(output, { recursive: true });
+    await page.screenshot({
+      path: path.join(output, `${info.project.name}-visible-code-admin.png`),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(code).toBeInViewport();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: path.join(output, `${info.project.name}-visible-code-mobile.png`),
+      fullPage: true,
+    });
+    const [directGuide] = await Promise.all([
+      page.waitForEvent('popup'),
+      code.getByRole('link').click(),
+    ]);
+    await expect(directGuide.locator('.guide-kicker code')).toHaveText(
+      'SERVICE_UNAVAILABLE',
+    );
+    await directGuide.close();
+    await notice.getByRole('button', { name: 'View details' }).click();
     const link = page.getByRole('link', {
       name: 'Read this code in the Error Encyclopedia',
     });

@@ -2,6 +2,7 @@ import { expect, test, type BrowserContext } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import mongoose from 'mongoose';
+import { io } from 'socket.io-client';
 import { startAcceptanceStack, login } from './helpers/whiteboard-classroom';
 import { runtimeUrl } from './helpers/local-ui-stack';
 import { startAdminTestServer } from './helpers/admin-test-server';
@@ -67,6 +68,38 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
       'teacher.one@example.com',
       'Password@12345',
     );
+    // Exercise the actual Socket.IO gateway, preserving both legacy recovery and public codes.
+    const socket = io(stack.nodeAUrl + '/sfu', {
+      transports: ['websocket'],
+      auth: { token: student.accessToken },
+      reconnection: false,
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once('connect', resolve);
+        socket.once('connect_error', reject);
+      });
+      const malformedWatch = await socket
+        .timeout(10_000)
+        .emitWithAck('session:watch', { sessionId: 'invalid session id' });
+      expect(malformedWatch).toMatchObject({
+        ok: false,
+        error: { code: 'BadRequestException', publicCode: 'VALIDATION_FAILED' },
+      });
+      expect(malformedWatch.error.requestId).toMatch(/^[a-f0-9-]{36}$/);
+      const missingRoom = await socket
+        .timeout(10_000)
+        .emitWithAck('room:leave', { roomId: 'unjoined-room' });
+      expect(missingRoom).toMatchObject({
+        ok: false,
+        error: { publicCode: 'CLASSROOM_ERROR' },
+      });
+      expect(missingRoom.error.requestId).not.toBe(
+        malformedWatch.error.requestId,
+      );
+    } finally {
+      socket.disconnect();
+    }
     const api = (
       suffix: string,
       token = admin.accessToken,
@@ -143,6 +176,16 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
     const notice = page.getByRole('region', { name: 'Error information' });
     await expect(notice).toContainText('Check your sign-in details');
     await expect(notice).toContainText('The email or password is incorrect.');
+    await expect(notice.locator('.notice-code')).toContainText(
+      'INVALID_CREDENTIALS',
+    );
+    await page.screenshot({
+      path: path.join(
+        screenshots,
+        `${info.project.name}-visible-error-code.png`,
+      ),
+      fullPage: true,
+    });
     await notice.getByRole('button', { name: 'View details' }).click();
     const details = page.getByRole('dialog');
     await expect(details).toContainText('INVALID_CREDENTIALS');

@@ -10,9 +10,28 @@
     <p>{{ item.message }}</p>
     <small>{{ item.nextStep }}</small>
     @if (item.count > 1) { <small>Repeated {{ item.count }} times</small> }
+    <div class="notice-code">
+      <span>Error code</span>
+      @if (errors.documentationUrl(item.code); as url) {
+      <a
+        [href]="url"
+        target="_blank"
+        rel="noopener noreferrer"
+        (click)="openGuide($event)"
+      >
+        <code>{{ item.code }}</code><span aria-hidden="true"> ↗</span>
+      </a>
+      } @else { <code>{{ item.code }}</code> }
+    </div>
+    @if (documentationFailed()) {
+    <small role="status"
+      >Could not open the explanation. Find this code in the admin portal’s
+      Error Encyclopedia.</small
+    >
+    }
     <div class="notice-actions">
       <button type="button" (click)="showDetails()">View details</button>
-      <span class="reference">Ref. {{ item.reference }}</span>
+      <span class="reference">Reference {{ item.reference }}</span>
     </div>
   </div>
   <button
@@ -24,9 +43,9 @@
     ×
   </button>
 </section>
-} @else if (errors.latest()) {
+} @else if (errors.latest(); as item) {
 <button type="button" class="recent-button" (click)="errors.openLatest()">
-  Recent error <span aria-hidden="true">↗</span>
+  Recent error <code>{{ item.code }}</code> <span aria-hidden="true">↗</span>
 </button>
 }
 <dialog

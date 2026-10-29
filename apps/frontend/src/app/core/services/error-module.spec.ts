@@ -76,11 +76,19 @@ describe('Shared error module', () => {
     const event = new MouseEvent('click', { cancelable: true });
     expect(await center.openDocumentation(event, 'NETWORK_ERROR')).toBeTrue();
     expect(event.defaultPrevented).toBeTrue();
-    expect(open).toHaveBeenCalledOnceWith('https://admin.sapiovian.example/error-encyclopedia/NETWORK_ERROR');
+    expect(open).toHaveBeenCalledOnceWith(
+      'https://admin.sapiovian.example/error-encyclopedia/NETWORK_ERROR',
+    );
   });
   it('handles a failed desktop documentation launch without creating another incident', async () => {
-    TestBed.inject(ERROR_MODULE_CONFIG).openDocumentation = () => Promise.reject(new Error('Could not open browser'));
-    expect(await center.openDocumentation(new MouseEvent('click', { cancelable: true }), 'NETWORK_ERROR')).toBeFalse();
+    TestBed.inject(ERROR_MODULE_CONFIG).openDocumentation = () =>
+      Promise.reject(new Error('Could not open browser'));
+    expect(
+      await center.openDocumentation(
+        new MouseEvent('click', { cancelable: true }),
+        'NETWORK_ERROR',
+      ),
+    ).toBeFalse();
     expect(center.recent()).toEqual([]);
   });
   it('retains the real HTTP error for existing features and makes safe diagnostics available', () => {
@@ -111,6 +119,44 @@ describe('Shared error module', () => {
     );
     expect(item.code).toBe('INVALID_RESPONSE');
     expect(item.nextStep).toContain('whether your change saved');
+  });
+  it('preserves the backend classification independently of the HTTP status fallback', () => {
+    const item = center.capture(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          code: 'UNSUPPORTED_FILE_TYPE',
+          requestId: 'upload-reference-123',
+        },
+      }),
+    );
+    expect(item.code).toBe('UNSUPPORTED_FILE_TYPE');
+    expect(item.requestId).toBe('upload-reference-123');
+    expect(
+      center.capture(
+        new HttpErrorResponse({
+          status: 400,
+          error: { code: 'UNREGISTERED_PRIVATE_CODE' },
+        }),
+      ).code,
+    ).toBe('VALIDATION_FAILED');
+  });
+  it('keeps a valid signaling occurrence reference and rejects malformed references', () => {
+    const item = center.capture(new Error('private socket payload'), {
+      code: 'ACCESS_DENIED',
+      requestId: 'socket-reference-123',
+      quiet: true,
+      operation: 'session:watch',
+    });
+    expect(item.requestId).toBe('socket-reference-123');
+    expect(item.reference).toBe(item.requestId!);
+    expect(center.diagnostic(item)).not.toContain('private socket payload');
+    expect(
+      center.capture(
+        {},
+        { code: 'CLASSROOM_ERROR', requestId: 'unsafe value\n' },
+      ).requestId,
+    ).toBeUndefined();
   });
   it('records quiet background errors without opening an interrupting notice', () => {
     http

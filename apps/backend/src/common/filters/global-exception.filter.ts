@@ -13,6 +13,7 @@ import {
   errorCodeForStatus,
   errorPath,
   errorReference,
+  isAppErrorCode,
   type ApiErrorBody,
   type ErrorField,
 } from '@native-sfu/contracts';
@@ -43,10 +44,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       exception instanceof HttpException ? exception.getResponse() : undefined;
     const errors = statusCode < 500 ? extractFields(response) : [];
     const path = errorPath(request.url);
-    const code =
-      statusCode === 401 && path.endsWith('/auth/login')
-        ? 'INVALID_CREDENTIALS'
-        : errorCodeForStatus(statusCode);
+    const declaredCode =
+      response && typeof response === 'object' && 'code' in response
+        ? response.code
+        : undefined;
+    const code = isAppErrorCode(declaredCode)
+      ? declaredCode
+      : errorCodeForStatus(statusCode);
     const info = ERROR_CATALOG[code];
     const body: ApiErrorBody = {
       success: false,

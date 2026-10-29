@@ -12,13 +12,13 @@ The public code reference is hosted by the **admin portal domain**:
 
 Each code page explains its meaning, likely causes, user recovery steps, developer debugging checks, an example and related codes. Content is authored in `apps/admin-portal/src/app/features/error-encyclopedia/error-guides.ts` and checked against the shared error catalog at compile time. It describes error types; it does not retrieve individual incidents or reference IDs. Public pages work without signing in or contacting the API, including when a stored admin session exists and the backend is unavailable.
 
-The existing runtime error module remains useful for occurrence-specific diagnostics. Error detail dialogs link to the matching public code page. Set `adminPortalUrl` in the website's `public/env.js` to the HTTPS **admin origin**, for example `https://admin.example.com` (replace with the real domain). Local web development defaults to the admin portal at port 4300. Production websites without a configured admin origin keep the code visible without inventing a public URL.
+The existing runtime error module remains useful for occurrence-specific diagnostics. Every visible error notice shows its documented code immediately, with a direct link to the matching public code page; detail dialogs retain the same link. Dismissed or quiet errors show their code in **Recent error**. Set `adminPortalUrl` in the website's `public/env.js` to the HTTPS **admin origin**, for example `https://admin.example.com` (replace with the real domain). Local web development defaults to the admin portal at port 4300. Production websites without a configured admin origin keep the code visible without inventing a public URL.
 
 For desktop packages pass `--admin-url https://admin.example.com` or set `SFU_DESKTOP_ADMIN_URL`. The validated origin is embedded into the renderer's runtime configuration. Documentation opens in the system browser through the existing secure external-link bridge, preserving the classroom. Production packages without an admin URL omit the link. No occurrence references, tokens or diagnostic query strings are included in documentation links.
 
 ## User experience
 
-A failed API action has a plain-language title, an explanation, a next step and a reference ID. **View details** shows field validation messages and selectable/copyable diagnostics. Notices remain until dismissed; **Recent error** reopens the latest one. Only the last ten entries are held in memory. Nothing is written to browser storage. Changing accounts clears this history.
+A failed API action has a plain-language title, an explanation, a next step, a visible error code and a separate reference ID. The code identifies the failure type; the reference identifies one occurrence. **View details** shows field validation messages and selectable/copyable diagnostics. Notices remain until dismissed; **Recent error** reopens the latest one. Only the last ten entries are held in memory. Nothing is written to browser storage. Changing accounts clears this history.
 
 Network failures cannot prove whether a mutation reached the server. Recovery text asks the user to check whether the change saved before resubmitting. This module never automatically repeats requests or reloads a page. Existing feature-specific recovery logic remains in place.
 
@@ -78,3 +78,27 @@ The updated shared error module passed 13 unit checks, including safe documentat
 The refreshed Windows/Mac installers and blockmaps passed all 14 SHA-256 checks. Both Mac DMG integrity checks and ZIP CRC checks passed; every packaged architecture contains the same 59 frontend files, including the configured local admin-portal documentation origin. These remain unsigned development installers.
 
 Section anchors retain the current code URL, and related-code navigation starts at the new explanation. Browser back navigation restores the reader’s position. These navigation behaviors are covered by the encyclopedia browser acceptance checks.
+
+## Assigning and tracing codes
+
+`packages/contracts/src/errors.ts` is the single registry of 20 stable descriptive codes. For example, `INVALID_CREDENTIALS` identifies a failed sign-in; `ACCESS_DENIED` identifies missing permission. Codes are not HTTP status numbers or occurrence references.
+
+For a specific backend failure, declare a registered code in the Nest exception response:
+
+```ts
+throw new BadRequestException({
+  code: 'UNSUPPORTED_FILE_TYPE',
+  message: 'Choose a supported file type.',
+});
+```
+
+The global filter preserves a registered code; otherwise it maps the HTTP status to a safe fallback. Sign-in now declares `INVALID_CREDENTIALS` explicitly. Unknown codes cannot create undocumented code pages. HTTP 5xx text remains the safe catalog message even with an explicit code.
+
+Socket acknowledgments include `publicCode` from this same registry and a per-failure `requestId`. Their existing `code` discriminator and typed recovery `details` remain compatible with room redirects and permission handling. The client carries `publicCode` and `requestId` into recent errors, copyable diagnostics and submitted reports. Older servers fall back to `CLASSROOM_ERROR`. Expected automatic room redirects do not create a user incident. Unexpected signaling failures log their safe code/reference/frames; raw internal exception text is not sent in acknowledgments. These socket failures are not automatically written to MongoDB; authenticated user reports remain available.
+
+To trace an occurrence, copy its **Reference** and search Admin → Error log or backend logs. Routine 4xx failures only appear in the incident log after an authenticated user reports them. Public guides contain code explanations, never occurrence data.
+
+
+### Visible-code and signaling verification — 29 October 2026
+
+The follow-up passed 63 backend checks (HTTP filter, signaling helper, room gateway and incident service), 22 shared error/socket client checks and 26 desktop runtime checks. Headless Chromium and WebKit passed the real-backend flow using isolated MongoDB/Redis, including new actual Socket.IO validation and unjoined-classroom failures. All 6 public-reference checks passed across Chromium, Firefox and WebKit, including a code visible before **View details**, a direct notice-to-guide link, a 390px screen and private-log authentication. Website, backend and admin release builds passed. Updated Windows/Mac installer integrity is recorded in their manifest; no native application or visible browser was launched.

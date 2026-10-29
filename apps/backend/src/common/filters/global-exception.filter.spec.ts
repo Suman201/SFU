@@ -88,7 +88,10 @@ describe('Public error contract', () => {
   it('explains sign-in and access failures without recording routine mistakes as incidents', () => {
     expect(
       run(
-        new UnauthorizedException('Invalid credentials'),
+        new UnauthorizedException({
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid credentials',
+        }),
         '/api/v1/auth/login',
       ).body.code,
     ).toBe('INVALID_CREDENTIALS');
@@ -108,6 +111,36 @@ describe('Public error contract', () => {
     expect(run({ type: 'entity.too.large' }).body.code).toBe(
       'REQUEST_TOO_LARGE',
     );
+  });
+  it('honors registered exception codes and rejects unknown codes', () => {
+    expect(
+      run(
+        new BadRequestException({
+          code: 'UNSUPPORTED_FILE_TYPE',
+          message: 'Choose a PDF.',
+        }),
+      ).body,
+    ).toMatchObject({
+      code: 'UNSUPPORTED_FILE_TYPE',
+      statusCode: 400,
+      message: 'Choose a PDF.',
+    });
+    expect(
+      run(
+        new BadRequestException({
+          code: 'PRIVATE_CUSTOM_ERROR',
+          message: 'Review the request.',
+        }),
+      ).body.code,
+    ).toBe('VALIDATION_FAILED');
+    const internal = run(
+      new ServiceUnavailableException({
+        code: 'REQUEST_TIMEOUT',
+        message: 'secret database address',
+      }),
+    ).body;
+    expect(internal.code).toBe('REQUEST_TIMEOUT');
+    expect(internal.message).not.toContain('secret');
   });
   it('uses safe request IDs and returns the same header reference', () => {
     const req: any = { header: () => 'forged id with spaces\n' };

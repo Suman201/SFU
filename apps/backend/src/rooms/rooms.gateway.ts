@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Logger, Optional, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   Ack as WsAck,
@@ -1044,14 +1044,14 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
   private requireUser(socket: SfuSocket): SocketUser {
     if (!socket.data.user) {
-      throw new Error('Unauthenticated socket');
+      throw new UnauthorizedException('Please sign in again.');
     }
     return socket.data.user;
   }
 
   private requireParticipant(socket: SfuSocket): string {
     if (!socket.data.participantId) {
-      throw new Error('Socket has not joined a room');
+      throw new BadRequestException({ code: 'CLASSROOM_ERROR', message: 'Join the classroom before using this action.' });
     }
     return socket.data.participantId;
   }

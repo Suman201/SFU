@@ -89,6 +89,25 @@ small {
   gap: 10px;
   margin-top: 14px;
 }
+.notice-code {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  margin-top: 14px;
+  font-size: 11px;
+  color: var(--muted, #67746f);
+}
+.notice-code code,
+.recent-button code {
+  font:
+    11px ui-monospace,
+    monospace;
+  overflow-wrap: anywhere;
+}
+.recent-button code {
+  margin-left: 6px;
+}
 .notice-actions button {
   border: 1px solid var(--line, #dbe4e0);
   border-radius: 5px;

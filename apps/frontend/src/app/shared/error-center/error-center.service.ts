@@ -110,6 +110,7 @@ export class ErrorCenter {
       quiet?: boolean;
       operation?: string;
       code?: AppErrorCode;
+      requestId?: string;
     } = {},
   ): UserError {
     if (error && typeof error === 'object') {
@@ -137,6 +138,7 @@ export class ErrorCenter {
           : 'CLIENT_ERROR');
     const info = ERROR_CATALOG[code];
     const requestId =
+      errorReference(context.requestId) ??
       errorReference(body['requestId']) ??
       errorReference(http?.headers.get('x-request-id'));
     const fields: ErrorField[] = Array.isArray(body['errors'])

@@ -84,7 +84,7 @@ export class AuthService {
   async login(request: LoginDto, context: RequestContext = {}): Promise<TokenPair> {
     const user = await this.users.findOne({ email: request.email.toLowerCase(), deletedAt: { $exists: false } }).select('+passwordHash');
     if (!user || user.disabled || user.status !== 'active' || !(await bcrypt.compare(request.password, user.passwordHash))) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' });
     }
     user.lastLoginAt = new Date();
     await user.save();

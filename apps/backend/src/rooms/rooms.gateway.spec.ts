@@ -1,3 +1,4 @@
+import { expect as jestExpect } from '@jest/globals';
 import { ForbiddenException } from '@nestjs/common';
 import type {
   ChatMessage,
@@ -201,6 +202,8 @@ describe('RoomsGateway', () => {
         ok: false,
         error: {
           code: 'ForbiddenException',
+          publicCode: 'ACCESS_DENIED',
+          requestId: jestExpect.any(String),
           message: 'You are not allowed to open this class session.'
         }
       });
@@ -222,6 +225,8 @@ describe('RoomsGateway', () => {
         ok: false,
         error: {
           code: 'BadRequestException',
+          publicCode: 'VALIDATION_FAILED',
+          requestId: jestExpect.any(String),
           message: 'Invalid class session id.'
         }
       });
@@ -243,6 +248,8 @@ describe('RoomsGateway', () => {
         ok: false,
         error: {
           code: 'BadRequestException',
+          publicCode: 'VALIDATION_FAILED',
+          requestId: jestExpect.any(String),
           message: 'Invalid batch id.'
         }
       });
@@ -278,6 +285,8 @@ describe('RoomsGateway', () => {
         ok: false,
         error: {
           code: 'BadRequestException',
+          publicCode: 'VALIDATION_FAILED',
+          requestId: jestExpect.any(String),
           message: 'Invalid class session id.'
         }
       });
