@@ -1,154 +1,220 @@
 <section class="page-head">
   <div>
-    <p class="eyebrow">Operations home</p>
+    <p class="eyebrow">Your workspace at a glance</p>
     <h1>Dashboard</h1>
-    <p>Live platform health, today’s delivery, and the work that needs an admin’s eye.</p>
+    <p>Today’s classes, platform activity and the work that needs attention.</p>
   </div>
-  <button type="button" class="table-action accent" [disabled]="loading()" (click)="refresh()">
-    {{ loading() ? 'Refreshing' : 'Refresh' }}
+  <button
+    type="button"
+    class="table-action"
+    [disabled]="loading()"
+    (click)="refresh()"
+  >
+    <admin-icon name="refresh" />{{ loading() ? 'Refreshing…' : 'Refresh' }}
   </button>
 </section>
-
 @if (error()) {
-  <p class="table-error" role="alert">{{ error() }}</p>
+<p class="table-error" role="alert">{{ error() }}</p>
 }
-
-<section class="summary-grid" aria-label="Admin dashboard summary">
-  <article>
-    <span>Live sessions</span>
-    <strong>{{ summary()?.liveSessions ?? 0 }}</strong>
-    <a routerLink="/class-sessions" [queryParams]="{ status: 'live' }">Open live report</a>
-  </article>
-  <article>
-    <span>Scheduled today</span>
-    <strong>{{ summary()?.scheduledToday ?? 0 }}</strong>
-    <a routerLink="/class-sessions">View sessions</a>
-  </article>
-  <article>
-    <span>Completed today</span>
-    <strong>{{ summary()?.completedToday ?? 0 }}</strong>
-    <a routerLink="/attendance">Review attendance</a>
-  </article>
-  <article>
-    <span>Today attendance</span>
-    <strong>{{ attendanceRate() | percent: '1.0-0' }}</strong>
-    <a routerLink="/attendance">Open analytics</a>
-  </article>
-  <article>
-    <span>Recording health</span>
-    <strong>{{ summary()?.activeRecordings ?? 0 }} active</strong>
-    <small>{{ summary()?.failedRecordings ?? 0 }} failed</small>
-  </article>
-  <article>
-    <span>New enrollments</span>
-    <strong>{{ summary()?.newEnrollmentsToday ?? 0 }}</strong>
-    <small>{{ summary()?.activeEnrollments ?? 0 }} active total</small>
-  </article>
-  <article>
-    <span>Users</span>
-    <strong>{{ summary()?.activeUsers ?? 0 }}</strong>
-    <small>{{ summary()?.teachers ?? 0 }} teachers · {{ summary()?.students ?? 0 }} students</small>
-  </article>
-  <article>
-    <span>Catalog</span>
-    <strong>{{ summary()?.activeCourses ?? 0 }} courses</strong>
-    <small>{{ summary()?.activeBatches ?? 0 }} active batches</small>
-  </article>
+<section
+  class="metric-grid"
+  aria-label="Admin dashboard summary"
+  [attr.aria-busy]="loading()"
+>
+  <a
+    routerLink="/class-sessions"
+    [queryParams]="{ status: 'live' }"
+    class="metric-card"
+    ><div class="metric-label">
+      <span>Live sessions</span><admin-icon name="video" />
+    </div>
+    <strong>{{ summary()?.liveSessions ?? '—' }}</strong
+    ><span class="metric-caption"
+      ><span class="live-dot"></span>In progress now<admin-icon
+        name="arrow" /></span
+  ></a>
+  <a routerLink="/class-sessions" class="metric-card"
+    ><div class="metric-label">
+      <span>Scheduled today</span><admin-icon name="calendar" />
+    </div>
+    <strong>{{ summary()?.scheduledToday ?? '—' }}</strong
+    ><span class="metric-caption"
+      >{{ summary()?.completedToday ?? '—' }} completed today<admin-icon
+        name="arrow" /></span
+  ></a>
+  <a routerLink="/attendance" class="metric-card"
+    ><div class="metric-label">
+      <span>Today’s attendance</span><admin-icon name="chart" />
+    </div>
+    <strong>{{ summary() ? (attendanceRate() | percent:'1.0-0') : '—' }}</strong
+    ><span class="metric-caption"
+      >View attendance report<admin-icon name="arrow" /></span
+  ></a>
+  <a routerLink="/enrollments" class="metric-card"
+    ><div class="metric-label">
+      <span>New enrollments</span><admin-icon name="users" />
+    </div>
+    <strong>{{ summary()?.newEnrollmentsToday ?? '—' }}</strong
+    ><span class="metric-caption"
+      >{{ summary()?.pendingEnrollments ?? '—' }} awaiting review<admin-icon
+        name="arrow" /></span
+  ></a>
 </section>
-
 <section class="dashboard-grid">
   <section class="data-table-shell live-panel">
     <div class="data-table-toolbar">
       <div>
         <h2>Live now</h2>
-        <p>{{ summary()?.liveSessionItems?.length ?? 0 }} active classroom records</p>
+        <p>Classes currently in progress</p>
       </div>
-      <a class="table-action" routerLink="/class-sessions" [queryParams]="{ status: 'live' }">All live</a>
+      <a
+        class="table-action"
+        routerLink="/class-sessions"
+        [queryParams]="{ status:'live' }"
+        >View all<admin-icon name="arrow"
+      /></a>
     </div>
-
-    <div class="data-table-wrap" style="--data-table-min-width: 760px">
+    <div class="data-table-wrap" style="--data-table-min-width: 590px">
       <table class="data-table">
         <thead>
           <tr>
-            <th>Session</th>
-            <th>Batch</th>
+            <th>Class / batch</th>
             <th>Teacher</th>
             <th>Started</th>
-            <th class="actions-cell">Actions</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           @if (loading() && !summary()) {
-            <tr>
-              <td colspan="5" class="empty-state">Loading live sessions...</td>
-            </tr>
+          <tr>
+            <td colspan="4" class="empty-state">Loading live sessions…</td>
+          </tr>
           } @else if (!summary()?.liveSessionItems?.length) {
-            <tr>
-              <td colspan="5" class="empty-state">No live sessions right now.</td>
-            </tr>
-          } @else {
-            @for (session of summary()?.liveSessionItems ?? []; track trackBySession($index, session)) {
-              <tr>
-                <td>
-                  <strong>{{ session.title }}</strong>
-                  <small>{{ session.sessionId }}</small>
-                </td>
-                <td>
-                  <strong>{{ session.batchName || session.batchId }}</strong>
-                  <small>{{ session.batchId }}</small>
-                </td>
-                <td>{{ session.teacherName || session.teacherId }}</td>
-                <td>{{ session.startedAt ? (session.startedAt | date: 'short') : 'Starting' }}</td>
-                <td class="actions-cell">
-                  <a class="table-action" [routerLink]="['/class-sessions', session.sessionId]">View</a>
-                </td>
-              </tr>
-            }
-          }
+          <tr>
+            <td colspan="4" class="empty-state">
+              <div class="dashboard-empty">
+                <admin-icon name="video" /><strong
+                  >No classes live right now</strong
+                >
+                <p>
+                  Live classes will appear here when teachers start their
+                  sessions.
+                </p>
+                <a routerLink="/class-sessions">View scheduled classes →</a>
+              </div>
+            </td>
+          </tr>
+          } @else { @for (session of summary()?.liveSessionItems ?? []; track
+          session.sessionId) {
+          <tr>
+            <td>
+              <div class="class-name">
+                <span class="session-dot"></span>
+                <div>
+                  <strong>{{ session.title }}</strong
+                  ><small>{{ session.batchName || session.batchId }}</small>
+                </div>
+              </div>
+            </td>
+            <td>{{ session.teacherName || session.teacherId }}</td>
+            <td>
+              {{ session.startedAt ? (session.startedAt | date:'shortTime') :
+              'Starting' }}
+            </td>
+            <td>
+              <a
+                class="table-action"
+                [routerLink]="['/class-sessions',session.sessionId]"
+                >View</a
+              >
+            </td>
+          </tr>
+          } }
         </tbody>
       </table>
     </div>
+    <div class="panel-footnote">
+      <admin-icon name="clock" />@if(summary()?.generatedAt) { Updated {{
+      summary()!.generatedAt | date:'shortTime' }} } @else { Waiting for
+      platform data }
+    </div>
   </section>
-
-  <section class="data-table-shell">
+  <section class="data-table-shell attention-panel">
     <div class="data-table-toolbar">
       <div>
-        <h2>Issues</h2>
-        <p>{{ summary()?.issues?.length ?? 0 }} operational signals</p>
+        <h2>Needs attention</h2>
+        <p>Operational action items</p>
       </div>
+      <admin-icon name="alert" />
     </div>
-
     <div class="issue-list">
-      @if (loading() && !summary()) {
-        <p class="empty-state">Loading action items...</p>
-      } @else if (!summary()?.issues?.length) {
-        <p class="empty-state">No urgent action items.</p>
-      } @else {
-        @for (issue of summary()?.issues ?? []; track trackByIssue($index, issue)) {
-          <a class="issue-row {{ issueClass(issue) }}" [routerLink]="issuePath(issue)" [queryParams]="issueQueryParams(issue)">
-            <span>{{ issue.count }}</span>
-            <strong>{{ issue.label }}</strong>
-          </a>
-        }
-      }
+      @if(loading() && !summary()) {
+      <p class="empty-state">Loading action items…</p>
+      } @else if(!summary()?.issues?.length) {
+      <div class="attention-empty">
+        <admin-icon name="check" /><strong>Nothing urgent</strong>
+        <p>Items needing review will appear here.</p>
+      </div>
+      } @else { @for(issue of summary()?.issues ?? []; track
+      trackByIssue($index,issue)) {
+      <a
+        class="issue-row {{ issueClass(issue) }}"
+        [routerLink]="issuePath(issue)"
+        [queryParams]="issueQueryParams(issue)"
+        ><span class="issue-count">{{ issue.count }}</span
+        ><strong>{{ issue.label }}</strong><admin-icon name="chevron"
+      /></a>
+      } }
     </div>
+    <a class="support-link" routerLink="/support"
+      >Open support queue<admin-icon name="arrow"
+    /></a>
   </section>
 </section>
-
-<section class="quick-links data-table-shell">
-  <div class="data-table-toolbar">
-    <div>
-      <h2>Quick links</h2>
-      <p>Jump into the operational modules.</p>
-    </div>
+<section class="activity-strip" aria-label="Platform totals">
+  <a routerLink="/users"
+    ><span>Active users</span
+    ><strong>{{ summary()?.activeUsers ?? '—' }}</strong
+    ><small
+      >{{ summary()?.teachers ?? '—' }} teachers · {{ summary()?.students ?? '—'
+      }} students</small
+    ></a
+  >
+  <a routerLink="/enrollments"
+    ><span>Active enrollments</span
+    ><strong>{{ summary()?.activeEnrollments ?? '—' }}</strong
+    ><small>Across all active batches</small></a
+  >
+  <a routerLink="/courses"
+    ><span>Teaching catalog</span
+    ><strong
+      >{{ summary()?.activeCourses ?? '—' }} <small>courses</small></strong
+    ><small>{{ summary()?.activeBatches ?? '—' }} active batches</small></a
+  >
+  <a routerLink="/recordings"
+    ><span>Recording activity</span
+    ><strong
+      >{{ summary()?.activeRecordings ?? '—' }} <small>active</small></strong
+    ><small [class.recording-failed]="(summary()?.failedRecordings ?? 0) > 0"
+      >{{ summary()?.failedRecordings ?? '—' }} failed recordings</small
+    ></a
+  >
+</section>
+<section class="quick-access">
+  <div>
+    <h2>Quick access</h2>
+    <p>Manage your day-to-day operations.</p>
   </div>
   <div class="quick-grid">
-    <a routerLink="/attendance">Attendance analytics</a>
-    <a routerLink="/audit-logs">Audit logs</a>
-    <a routerLink="/recordings">Recording library</a>
-    <a routerLink="/enrollments">Enrollment oversight</a>
-    <a routerLink="/users">User management</a>
-    <a routerLink="/courses">Courses</a>
-    <a routerLink="/batches">Batches</a>
+    <a routerLink="/tutor-applications"
+      ><admin-icon name="shield" />Tutor applications<admin-icon
+        name="arrow" /></a
+    ><a routerLink="/batches"
+      ><admin-icon name="layers" />Manage batches<admin-icon name="arrow" /></a
+    ><a routerLink="/invoices"
+      ><admin-icon name="receipt" />Invoices<admin-icon name="arrow" /></a
+    ><a routerLink="/audit-logs"
+      ><admin-icon name="file" />Audit logs<admin-icon name="arrow"
+    /></a>
   </div>
 </section>

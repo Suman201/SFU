@@ -1,17 +1,23 @@
 import { RouterLink } from '@angular/router';
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ActivatedRoute } from '@angular/router';
+import { AdminIcon } from '../../../shared/admin-icon';
 import { AuthService } from '../../../core/services/auth.service';
 
 @Component({
   selector: 'sfu-admin-login',
   standalone: true,
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule, RouterLink, AdminIcon],
   templateUrl: './login.html',
   styleUrl: './login.scss',
-  changeDetection: ChangeDetectionStrategy.Eager
+  changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class AdminLogin {
   private readonly auth = inject(AuthService);
@@ -26,7 +32,7 @@ export class AdminLogin {
   protected readonly form = this.formBuilder.nonNullable.group({
     email: ['', [Validators.required, Validators.email]],
     password: ['', [Validators.required, Validators.minLength(8)]],
-    rememberMe: [false]
+    rememberMe: [false],
   });
 
   protected submit(): void {
@@ -38,12 +44,15 @@ export class AdminLogin {
     this.busy.set(true);
     this.error.set('');
     this.auth.login(value.email, value.password, value.rememberMe).subscribe({
-      next: () => void this.router.navigateByUrl(this.safeReturnUrl() ?? this.auth.redirectPath()),
+      next: () =>
+        void this.router.navigateByUrl(
+          this.safeReturnUrl() ?? this.auth.redirectPath(),
+        ),
       error: (error: unknown) => {
         this.error.set(this.auth.authErrorMessage(error));
         this.busy.set(false);
       },
-      complete: () => this.busy.set(false)
+      complete: () => this.busy.set(false),
     });
   }
 
@@ -53,7 +62,11 @@ export class AdminLogin {
 
   private safeReturnUrl(): string | null {
     const returnUrl = this.route.snapshot.queryParamMap.get('returnUrl');
-    if (!returnUrl?.startsWith('/') || returnUrl.startsWith('//') || returnUrl.startsWith('/login')) {
+    if (
+      !returnUrl?.startsWith('/') ||
+      returnUrl.startsWith('//') ||
+      returnUrl.startsWith('/login')
+    ) {
       return null;
     }
     return returnUrl;

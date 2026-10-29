@@ -1,86 +1,149 @@
-<div class="admin-shell">
-  <aside class="sidebar" aria-label="Admin navigation">
-    <a routerLink="/dashboard" class="brand">
-      <img class="sapiovian-logo" src="/brand/sapiovian-lockup.png" alt="Sapiovian — Your curiosity. Their calling." width="1736" height="468" />
-    </a>
-
-    <nav>
-      <a routerLink="/error-encyclopedia"><span aria-hidden="true">?</span>Error Encyclopedia</a>
-      <a routerLink="/errors" routerLinkActive="active"><span aria-hidden="true">!</span>Error log</a>
-      <a routerLink="/invoices" routerLinkActive="active"><span aria-hidden="true">●</span>Invoices</a>
-      <a routerLink="/teaching-catalog" routerLinkActive="active"><span aria-hidden="true">●</span>Subjects &amp; categories</a>
-      <a routerLink="/tutor-applications" routerLinkActive="active"><span aria-hidden="true">●</span>Tutor applications</a>
-      <a routerLink="/dashboard" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Dashboard
-      </a>
-      <a routerLink="/audit-logs" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Audit logs
-      </a>
-      <a routerLink="/class-sessions" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Class sessions
-      </a>
-      <a routerLink="/class-library" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Class library
-      </a>
-      <a routerLink="/cms/pages" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        CMS
-      </a>
-      <a routerLink="/cms/contact" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Contact Inbox
-      </a>
-      <a routerLink="/support" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Support
-      </a>
-      <a routerLink="/teacher-promotions" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Promotions
-      </a>
-      <a routerLink="/attendance" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Attendance
-      </a>
-      <a routerLink="/recordings" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Recordings
-      </a>
-      <a routerLink="/enrollments" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Enrollments
-      </a>
-      <a routerLink="/users" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Users
-      </a>
-      <a routerLink="/courses" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Courses
-      </a>
-      <a routerLink="/batches" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <span aria-hidden="true">●</span>
-        Batches
-      </a>
+<a class="skip-link" [href]="currentUrl().split('#')[0] + '#workspace-content'"
+  >Skip to main content</a
+>
+<div
+  class="admin-shell"
+  [class.nav-collapsed]="collapsed()"
+  [class.mobile-nav-open]="mobileOpen()"
+>
+  @if (mobileOpen()) {
+  <button
+    class="nav-backdrop"
+    tabindex="-1"
+    aria-label="Close navigation"
+    (click)="closeMobile()"
+  ></button>
+  }
+  <aside
+    #navPanel
+    id="admin-navigation"
+    class="sidebar"
+    aria-label="Admin navigation"
+    [attr.role]="mobileOpen() ? 'dialog' : null"
+    [attr.aria-modal]="mobileOpen() ? 'true' : null"
+    (keydown)="trapNavigation($event)"
+  >
+    <div class="brand-row">
+      <a routerLink="/dashboard" class="brand" aria-label="Sapiovian dashboard"
+        ><img
+          class="sapiovian-logo"
+          src="/brand/sapiovian-lockup.png"
+          alt="Sapiovian — Your curiosity. Their calling."
+          width="1736"
+          height="468"
+      /></a>
+      <button
+        class="icon-button mobile-close"
+        type="button"
+        aria-label="Close navigation"
+        (click)="closeMobile()"
+      >
+        <admin-icon name="close" />
+      </button>
+    </div>
+    <div class="sidebar-caption">
+      <span class="workspace-mark"><admin-icon name="shield" /></span>
+      <div><strong>Admin workspace</strong><small>Sapiovian</small></div>
+      <span class="workspace-role">ADMIN</span>
+    </div>
+    <label class="nav-search"
+      ><admin-icon name="search" /><input
+        type="search"
+        aria-label="Find a module"
+        placeholder="Find a module…"
+        [ngModel]="query()"
+        (ngModelChange)="query.set($event)"
+      />@if(query()) {
+      <button
+        type="button"
+        aria-label="Clear navigation search"
+        (click)="query.set('')"
+      >
+        <admin-icon name="close" />
+      </button>
+      }</label
+    >
+    <nav aria-label="Main navigation">
+      @for (group of filteredGroups(); track group.label) {
+      <section class="nav-group">
+        <h2>{{ group.label }}</h2>
+        @for (item of group.items; track item.path) {
+        <a
+          [routerLink]="item.path"
+          routerLinkActive="active"
+          ariaCurrentWhenActive="page"
+          [attr.title]="collapsed() ? item.label : null"
+          ><admin-icon [name]="item.icon" /><span>{{ item.label }}</span></a
+        >
+        }
+      </section>
+      } @empty {
+      <p class="nav-empty">No matching modules. Try another name.</p>
+      }
     </nav>
+    <footer class="sidebar-footer">
+      <admin-icon name="shield" /><span>Administration</span
+      ><button
+        type="button"
+        class="icon-button collapse-button"
+        [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
+        [attr.title]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
+        (click)="toggleCollapse()"
+      >
+        <admin-icon name="collapse" />
+      </button>
+    </footer>
   </aside>
-
-  <main class="workspace">
+  <main class="workspace" [inert]="mobileOpen()">
     <header class="topbar">
-      <div>
-        <p class="eyebrow">Admin workspace</p>
-        <strong>{{ auth.user()?.name || 'Administrator' }}</strong>
+      <div class="workspace-context">
+        <button
+          #navTrigger
+          type="button"
+          class="icon-button mobile-trigger"
+          aria-label="Open navigation"
+          aria-controls="admin-navigation"
+          [attr.aria-expanded]="mobileOpen()"
+          (click)="openMobile()"
+        >
+          <admin-icon name="menu" /></button
+        ><span class="context-group">{{ section()?.label ?? 'Workspace' }}</span
+        ><admin-icon name="chevron" /><strong>{{ currentPage() }}</strong>
       </div>
       <div class="topbar-actions">
-        <button type="button" class="ghost-action" (click)="theme.toggle()">{{ theme.isDark() ? 'Light' : 'Dark' }}</button>
-        <button type="button" class="danger-action" (click)="logout()">Logout</button>
+        <button
+          type="button"
+          class="icon-button theme-toggle"
+          [attr.aria-label]="theme.label()"
+          [attr.title]="theme.label()"
+          (click)="theme.toggle()"
+        >
+          <admin-icon [name]="theme.isDark() ? 'sun' : 'moon'" />
+        </button>
+        <div class="account">
+          <span class="account-avatar">{{ initials() }}</span>
+          <div>
+            <strong>{{ auth.user()?.name || 'Administrator' }}</strong
+            ><small>{{ role() }}</small>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="icon-button"
+          aria-label="Log out"
+          title="Log out"
+          (click)="logout()"
+        >
+          <admin-icon name="logout" />
+        </button>
       </div>
     </header>
-
-    <router-outlet />
+    <div
+      id="workspace-content"
+      class="page-content admin-workspace"
+      tabindex="-1"
+    >
+      <router-outlet />
+    </div>
   </main>
 </div>

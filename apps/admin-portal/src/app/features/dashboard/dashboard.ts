@@ -1,17 +1,28 @@
 import { DatePipe, PercentPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  inject,
+  signal,
+} from '@angular/core';
 import { RouterLink } from '@angular/router';
-import type { AdminDashboardIssue, AdminDashboardLiveSession, AdminDashboardSummary } from '@native-sfu/contracts';
+import type {
+  AdminDashboardIssue,
+  AdminDashboardLiveSession,
+  AdminDashboardSummary,
+} from '@native-sfu/contracts';
 import { finalize } from 'rxjs';
+import { AdminIcon } from '../../shared/admin-icon';
 import { AdminApiService } from '../../core/services/admin-api.service';
 
 @Component({
   selector: 'sfu-admin-dashboard',
   standalone: true,
-  imports: [DatePipe, PercentPipe, RouterLink],
+  imports: [DatePipe, PercentPipe, RouterLink, AdminIcon],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
-  changeDetection: ChangeDetectionStrategy.Eager
+  changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class AdminDashboard implements OnInit {
   private readonly api = inject(AdminApiService);
@@ -40,7 +51,9 @@ export class AdminDashboard implements OnInit {
     return issue.link.split('?')[0] || '/dashboard';
   }
 
-  protected issueQueryParams(issue: AdminDashboardIssue): Record<string, string> {
+  protected issueQueryParams(
+    issue: AdminDashboardIssue,
+  ): Record<string, string> {
     const query = issue.link.split('?')[1];
     if (!query) {
       return {};
@@ -58,7 +71,10 @@ export class AdminDashboard implements OnInit {
     return `${issue.severity}:${issue.label}:${issue.link}`;
   }
 
-  protected trackBySession(_index: number, session: AdminDashboardLiveSession): string {
+  protected trackBySession(
+    _index: number,
+    session: AdminDashboardLiveSession,
+  ): string {
     return session.sessionId;
   }
 
@@ -70,7 +86,8 @@ export class AdminDashboard implements OnInit {
       .pipe(finalize(() => this.loading.set(false)))
       .subscribe({
         next: (summary) => this.summary.set(summary),
-        error: (error: unknown) => this.error.set(this.api.apiErrorMessage(error))
+        error: (error: unknown) =>
+          this.error.set(this.api.apiErrorMessage(error)),
       });
   }
 }

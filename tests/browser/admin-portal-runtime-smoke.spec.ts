@@ -87,7 +87,7 @@ test.describe('admin portal runtime smoke', () => {
     await seedSession(page, 'STUDENT');
 
     await page.goto(`${origin}/dashboard`);
-    await expect(page.getByRole('heading', { name: 'Native SFU operations', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sapiovian operations', level: 1 })).toBeVisible();
     await expect(page.locator('body')).toContainText('Sign in with an admin or super admin account');
   });
 });

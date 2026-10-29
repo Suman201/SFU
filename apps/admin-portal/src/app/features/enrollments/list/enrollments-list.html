@@ -2,7 +2,9 @@
   <div>
     <p class="eyebrow">Roster control</p>
     <h1>Enrollments</h1>
-    <p>Manage the roster that controls student access to live class sessions.</p>
+    <p>
+      Manage the roster that controls student access to live class sessions.
+    </p>
   </div>
   <button type="button" class="primary-action" (click)="toggleCreate()">
     {{ showCreate() ? 'Close' : 'Add enrollment' }}
@@ -29,33 +31,54 @@
 </section>
 
 @if (showCreate()) {
-  <section class="create-panel" aria-labelledby="create-enrollment-title">
-    <div>
-      <p class="eyebrow">New enrollment</p>
-      <h2 id="create-enrollment-title">Add a student to a batch</h2>
-      <p>Search by name, then keep the selected ID so enrollment authorization remains exact.</p>
-    </div>
-    <form [formGroup]="createForm" (ngSubmit)="createEnrollment()">
-      <input type="search" formControlName="studentId" list="enrollment-create-student-options" placeholder="Student name or ID" aria-label="Student ID" />
-      <input type="search" formControlName="batchId" list="enrollment-create-batch-options" placeholder="Batch name or ID" aria-label="Batch ID" />
-      <select formControlName="status" aria-label="Initial status">
-        <option value="active">Active</option>
-        <option value="pending">Pending</option>
-        <option value="suspended">Suspended</option>
-      </select>
-      <button type="submit" class="table-action primary" [disabled]="saving()">{{ saving() ? 'Adding...' : 'Add' }}</button>
-      <datalist id="enrollment-create-student-options">
-        @for (option of lookup.students(); track option.id) {
-          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
-        }
-      </datalist>
-      <datalist id="enrollment-create-batch-options">
-        @for (option of lookup.batches(); track option.id) {
-          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
-        }
-      </datalist>
-    </form>
-  </section>
+<section class="create-panel" aria-labelledby="create-enrollment-title">
+  <div>
+    <p class="eyebrow">New enrollment</p>
+    <h2 id="create-enrollment-title">Add a student to a batch</h2>
+    <p>
+      Search by name, then keep the selected ID so enrollment authorization
+      remains exact.
+    </p>
+  </div>
+  <form [formGroup]="createForm" (ngSubmit)="createEnrollment()">
+    <input
+      type="search"
+      formControlName="studentId"
+      list="enrollment-create-student-options"
+      placeholder="Student name or ID"
+      aria-label="Student ID"
+    />
+    <input
+      type="search"
+      formControlName="batchId"
+      list="enrollment-create-batch-options"
+      placeholder="Batch name or ID"
+      aria-label="Batch ID"
+    />
+    <select formControlName="status" aria-label="Initial status">
+      <option value="active">Active</option>
+      <option value="pending">Pending</option>
+      <option value="suspended">Suspended</option>
+    </select>
+    <button type="submit" class="table-action primary" [disabled]="saving()">
+      {{ saving() ? 'Adding...' : 'Add' }}
+    </button>
+    <datalist id="enrollment-create-student-options">
+      @for (option of lookup.students(); track option.id) {
+      <option [value]="option.id">
+        {{ option.label }} - {{ option.sublabel }}
+      </option>
+      }
+    </datalist>
+    <datalist id="enrollment-create-batch-options">
+      @for (option of lookup.batches(); track option.id) {
+      <option [value]="option.id">
+        {{ option.label }} - {{ option.sublabel }}
+      </option>
+      }
+    </datalist>
+  </form>
+</section>
 }
 
 <section class="data-table-shell">
@@ -64,7 +87,11 @@
       <h2>Enrollment roster</h2>
       <p>{{ total() }} records found</p>
     </div>
-    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+    <form
+      class="data-table-filters"
+      [formGroup]="filters"
+      (ngSubmit)="applyFilters()"
+    >
       <select formControlName="status" aria-label="Status">
         <option value="all">All statuses</option>
         <option value="active">Active</option>
@@ -73,35 +100,75 @@
         <option value="cancelled">Cancelled</option>
         <option value="completed">Completed</option>
       </select>
-      <input type="search" formControlName="search" placeholder="Search student, email, batch" aria-label="Search" />
-      <input type="search" formControlName="courseId" list="enrollment-course-options" placeholder="Course name or ID" aria-label="Course ID" />
-      <input type="search" formControlName="batchId" list="enrollment-batch-options" placeholder="Batch name or ID" aria-label="Batch ID" />
-      <input type="search" formControlName="studentId" list="enrollment-student-options" placeholder="Student name or ID" aria-label="Student ID" />
+      <input
+        type="search"
+        formControlName="search"
+        placeholder="Search student, email, batch"
+        aria-label="Search"
+      />
+
+      <input
+        type="search"
+        formControlName="studentId"
+        list="enrollment-student-options"
+        placeholder="Student name or ID"
+        aria-label="Student ID"
+      />
       <button type="submit" class="table-action primary">Apply</button>
-      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+      <button type="button" class="table-action" (click)="resetFilters()">
+        Reset
+      </button>
       <datalist id="enrollment-course-options">
         @for (option of lookup.courses(); track option.id) {
-          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        <option [value]="option.id">
+          {{ option.label }} - {{ option.sublabel }}
+        </option>
         }
       </datalist>
       <datalist id="enrollment-batch-options">
         @for (option of lookup.batches(); track option.id) {
-          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        <option [value]="option.id">
+          {{ option.label }} - {{ option.sublabel }}
+        </option>
         }
       </datalist>
       <datalist id="enrollment-student-options">
         @for (option of lookup.students(); track option.id) {
-          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        <option [value]="option.id">
+          {{ option.label }} - {{ option.sublabel }}
+        </option>
         }
       </datalist>
+      <details class="advanced-filters">
+        <summary>More filters</summary>
+        <div class="advanced-filter-fields">
+          <label
+            ><span>Course</span
+            ><input
+              type="search"
+              formControlName="courseId"
+              list="enrollment-course-options"
+              placeholder="Course name or ID"
+              aria-label="Course ID"
+          /></label>
+          <label
+            ><span>Batch</span
+            ><input
+              type="search"
+              formControlName="batchId"
+              list="enrollment-batch-options"
+              placeholder="Batch name or ID"
+              aria-label="Batch ID"
+          /></label>
+        </div>
+      </details>
     </form>
   </div>
 
   @if (error()) {
-    <p class="table-error" role="alert">{{ error() }}</p>
-  }
-  @if (success()) {
-    <p class="table-success" role="status">{{ success() }}</p>
+  <p class="table-error" role="alert">{{ error() }}</p>
+  } @if (success()) {
+  <p class="table-success" role="status">{{ success() }}</p>
   }
 
   <div class="data-table-wrap" style="--data-table-min-width: 1120px">
@@ -120,69 +187,114 @@
       </thead>
       <tbody>
         @if (loading()) {
-          <tr>
-            <td colspan="8" class="empty-state">Loading enrollments...</td>
-          </tr>
+        <tr>
+          <td colspan="8" class="empty-state">Loading enrollments...</td>
+        </tr>
         } @else if (!rows().length) {
-          <tr>
-            <td colspan="8" class="empty-state">No enrollments match these filters.</td>
-          </tr>
-        } @else {
-          @for (row of rows(); track trackByEnrollment($index, row)) {
-            <tr>
-              <td>
-                <div class="primary-cell">
-                  <span class="table-avatar">{{ initials(row) || 'ST' }}</span>
-                  <div>
-                    <strong>{{ row.studentName }}</strong>
-                    <small>{{ row.studentEmail || row.studentId }}</small>
-                  </div>
-                </div>
-              </td>
-              <td>
-                <strong>{{ row.courseId || 'No course' }}</strong>
-                <small>{{ row.teacherId || 'No teacher' }}</small>
-              </td>
-              <td>
-                <strong>{{ row.batchName }}</strong>
-                <small>{{ row.batchId }}</small>
-              </td>
-              <td><span class="data-pill {{ statusClass(row.status) }}">{{ row.status }}</span></td>
-              <td>
-                <strong>{{ row.access.canAccessClassSessions ? 'Allowed' : 'Blocked' }}</strong>
-                <small>{{ row.access.reason }}</small>
-              </td>
-              <td>{{ row.enrolledAt ? (row.enrolledAt | date: 'mediumDate') : 'Not active' }}</td>
-              <td>{{ row.updatedAt ? (row.updatedAt | date: 'mediumDate') : 'Not updated' }}</td>
-              <td class="actions-cell">
-                <a class="table-action" [routerLink]="['/enrollments', row.id]">View</a>
-                @if (row.status === 'active') {
-                  <button type="button" class="table-action accent" [disabled]="pendingEnrollmentId() === row.id" (click)="transition(row, 'suspend')">
-                    Suspend
-                  </button>
-                } @else {
-                  <button type="button" class="table-action primary" [disabled]="pendingEnrollmentId() === row.id" (click)="transition(row, 'reactivate')">
-                    Reactivate
-                  </button>
-                }
-                @if (row.status !== 'cancelled') {
-                  <button type="button" class="table-action danger" [disabled]="pendingEnrollmentId() === row.id" (click)="transition(row, 'cancel')">
-                    Cancel
-                  </button>
-                }
-              </td>
-            </tr>
-          }
-        }
+        <tr>
+          <td colspan="8" class="empty-state">
+            No enrollments match these filters.
+          </td>
+        </tr>
+        } @else { @for (row of rows(); track trackByEnrollment($index, row)) {
+        <tr>
+          <td>
+            <div class="primary-cell">
+              <span class="table-avatar">{{ initials(row) || 'ST' }}</span>
+              <div>
+                <strong>{{ row.studentName }}</strong>
+                <small>{{ row.studentEmail || row.studentId }}</small>
+              </div>
+            </div>
+          </td>
+          <td>
+            <strong>{{ row.courseId || 'No course' }}</strong>
+            <small>{{ row.teacherId || 'No teacher' }}</small>
+          </td>
+          <td>
+            <strong>{{ row.batchName }}</strong>
+            <small>{{ row.batchId }}</small>
+          </td>
+          <td>
+            <span class="data-pill {{ statusClass(row.status) }}"
+              >{{ row.status }}</span
+            >
+          </td>
+          <td>
+            <strong
+              >{{ row.access.canAccessClassSessions ? 'Allowed' : 'Blocked'
+              }}</strong
+            >
+            <small>{{ row.access.reason }}</small>
+          </td>
+          <td>
+            {{ row.enrolledAt ? (row.enrolledAt | date: 'mediumDate') : 'Not
+            active' }}
+          </td>
+          <td>
+            {{ row.updatedAt ? (row.updatedAt | date: 'mediumDate') : 'Not
+            updated' }}
+          </td>
+          <td class="actions-cell">
+            <a class="table-action" [routerLink]="['/enrollments', row.id]"
+              >View</a
+            >
+            @if (row.status === 'active') {
+            <button
+              type="button"
+              class="table-action accent"
+              [disabled]="pendingEnrollmentId() === row.id"
+              (click)="transition(row, 'suspend')"
+            >
+              Suspend
+            </button>
+            } @else {
+            <button
+              type="button"
+              class="table-action primary"
+              [disabled]="pendingEnrollmentId() === row.id"
+              (click)="transition(row, 'reactivate')"
+            >
+              Reactivate
+            </button>
+            } @if (row.status !== 'cancelled') {
+            <button
+              type="button"
+              class="table-action danger"
+              [disabled]="pendingEnrollmentId() === row.id"
+              (click)="transition(row, 'cancel')"
+            >
+              Cancel
+            </button>
+            }
+          </td>
+        </tr>
+        } }
       </tbody>
     </table>
   </div>
 
   <div class="table-footer">
-    <span>Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span>
+    <span
+      >Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span
+    >
     <div>
-      <button type="button" class="table-action" [disabled]="page() <= 1" (click)="previousPage()">Previous</button>
-      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+      <button
+        type="button"
+        class="table-action"
+        [disabled]="page() <= 1"
+        (click)="previousPage()"
+      >
+        Previous
+      </button>
+      <button
+        type="button"
+        class="table-action"
+        [disabled]="page() * limit() >= total()"
+        (click)="nextPage()"
+      >
+        Next
+      </button>
     </div>
   </div>
 </section>

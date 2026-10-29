@@ -406,7 +406,7 @@ test('real backend: create, issue, PDF, email retry, numbering and payment recor
       path: path.join(screens, `${info.project.name}-invoice-list.png`),
       fullPage: true,
     });
-    await page.getByRole('button', { name: 'Dark', exact: true }).click();
+    await page.getByRole('button', { name: 'Switch to dark mode', exact: true }).click();
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
       path: path.join(screens, `${info.project.name}-invoice-list-dark.png`),

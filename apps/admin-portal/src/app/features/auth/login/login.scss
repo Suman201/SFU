@@ -1,147 +1,223 @@
 :host {
   display: block;
-  min-height: 100vh;
+  min-height: 100dvh;
 }
-
 .login-page {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--product-green) 12%, transparent), transparent 48%),
-    var(--bg);
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 44px 20px;
+  background: var(--bg);
 }
-
+.login-brand .sapiovian-logo {
+  width: 190px;
+}
 .login-panel {
-  width: min(100%, 420px);
+  width: min(100%, 408px);
   display: grid;
-  gap: 16px;
-  padding: 28px;
+  gap: 24px;
+  padding: 30px;
   border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--panel-elevated);
-  box-shadow: var(--shadow-lg);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
 }
-
-.eyebrow,
-.lede,
-.notice,
-.error {
-  margin: 0;
+.login-heading {
+  display: grid;
+  gap: 12px;
 }
-
-.eyebrow {
-  color: var(--product-green);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.access-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--green-ink);
 }
-
+.access-label admin-icon {
+  width: 14px;
+  height: 14px;
+}
 h1 {
   margin: 0;
   color: var(--text);
-  font-size: clamp(28px, 5vw, 40px);
-  line-height: 1.05;
-  letter-spacing: 0;
+  font-size: 25px;
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.8px;
 }
-
 .lede {
+  margin: 0;
+  font-size: 12.5px;
   color: var(--muted);
-  line-height: 1.55;
+  line-height: 1.6;
 }
-
 form {
   display: grid;
-  gap: 14px;
+  gap: 18px;
 }
-
-label {
+.field {
   display: grid;
   gap: 7px;
-  color: var(--text);
-  font-weight: 700;
-  font-size: 13px;
+  min-width: 0;
 }
-
-input {
+label {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text);
+}
+input:not([type='checkbox']) {
   width: 100%;
-  min-height: 44px;
+  height: 40px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0 12px;
+  border-radius: 5px;
+  padding: 0 11px;
   color: var(--text);
   background: var(--field);
-  font: inherit;
+  font-size: 13px;
 }
-
-input:focus {
-  outline: 2px solid color-mix(in srgb, var(--product-green) 35%, transparent);
-  outline-offset: 2px;
+input[aria-invalid='true'] {
+  border-color: var(--rose-ink);
 }
-
 .password-field {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.remember-row {
   display: flex;
   align-items: center;
-  gap: 9px;
-  color: var(--muted);
-  font-weight: 600;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--field);
 }
-
-.remember-row input {
-  width: 16px;
-  min-height: 16px;
+.password-field:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
 }
-
+.password-field input:not([type='checkbox']) {
+  border: 0;
+  outline: 0;
+  min-width: 0;
+}
 .text-button {
-  min-height: 40px;
+  flex: 0 0 auto;
+  height: 38px;
+  min-width: 49px;
+  padding: 0 11px;
+  font-size: 11px;
   border: 0;
-  border-radius: 10px;
-  padding: 0 12px;
-  color: var(--product-green);
-  background: color-mix(in srgb, var(--product-green) 10%, transparent);
-  font-weight: 800;
-  cursor: pointer;
+  color: var(--muted);
+  background: transparent;
 }
-
+.text-button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.remember-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 12px;
+}
+.remember-row input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
 .primary-action {
-  min-height: 46px;
-  border: 0;
-  border-radius: 12px;
-  color: white;
-  background: var(--product-rose);
-  font-weight: 900;
-  cursor: pointer;
-  box-shadow: 0 14px 28px color-mix(in srgb, var(--product-rose) 24%, transparent);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  border: 1px solid var(--action);
+  border-radius: 5px;
+  background: var(--action);
+  color: var(--bg);
+  font-weight: 600;
+  font-size: 12px;
+  box-shadow: none;
 }
-
-.primary-action:disabled {
-  opacity: 0.65;
-  cursor: progress;
+.primary-action admin-icon {
+  width: 15px;
+  height: 15px;
 }
-
+.primary-action:hover {
+  background: var(--action-hover);
+}
 .notice,
 .error {
-  border-radius: 12px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
   padding: 10px 12px;
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.5;
 }
-
 .notice {
-  color: var(--product-green);
-  background: color-mix(in srgb, var(--product-green) 12%, transparent);
+  color: var(--green-ink);
+  background: var(--green-soft);
 }
-
 .error {
-  color: var(--product-rose);
-  background: color-mix(in srgb, var(--product-rose) 12%, transparent);
+  color: var(--rose-ink);
+  background: color-mix(in srgb, var(--product-rose) 7%, var(--panel));
+}
+.field-error {
+  margin: 0;
+  color: var(--rose-ink);
+  font-size: 11px;
+}
+.login-help {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+.login-help > admin-icon {
+  width: 14px;
+  height: 14px;
+}
+.login-help a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.login-help a:hover {
+  color: var(--green-ink);
+  text-decoration: underline;
+}
+.login-help a admin-icon {
+  width: 11px;
+  height: 11px;
+}
+footer {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+@media (max-width: 500px) {
+  .login-page {
+    padding: 32px 18px;
+    gap: 24px;
+  }
+  .login-panel {
+    padding: 24px;
+  }
+  input:not([type='checkbox']) {
+    font-size: 16px;
+    height: 44px;
+  }
+  .password-field .text-button {
+    height: 42px;
+  }
+  .primary-action {
+    height: 44px;
+  }
 }

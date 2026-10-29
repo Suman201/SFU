@@ -33,7 +33,7 @@ import { AuthService } from '../../core/services/auth.service';
         gap: 12px;
         padding: 26px;
         border: 1px solid var(--line);
-        border-radius: 18px;
+        border-radius: 8px;
         background: var(--panel-elevated);
         box-shadow: var(--shadow-md);
       }
@@ -52,9 +52,9 @@ import { AuthService } from '../../core/services/auth.service';
       }
 
       .eyebrow {
-        color: var(--product-rose);
+        color: var(--rose-ink);
         font-size: 12px;
-        font-weight: 800;
+        font-weight: 600;
         letter-spacing: 0.06em;
         text-transform: uppercase;
       }
@@ -66,19 +66,19 @@ import { AuthService } from '../../core/services/auth.service';
         display: inline-flex;
         align-items: center;
         border-radius: 10px;
-        font-weight: 800;
+        font-weight: 600;
       }
 
       button {
         border: 0;
         padding: 0 14px;
-        color: white;
+        color: #29131a;
         background: var(--product-rose);
         cursor: pointer;
       }
 
       a {
-        color: var(--product-green);
+        color: var(--green-ink);
       }
     `
   ],

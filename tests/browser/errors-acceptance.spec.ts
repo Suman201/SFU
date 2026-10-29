@@ -519,7 +519,7 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
       .getByRole('button', { name: 'Search', exact: true })
       .click();
     await expect(adminPage.locator('tbody tr')).toHaveCount(4); // Server failure, legacy record, offline report and runtime report.
-    await adminPage.getByRole('button', { name: 'Dark', exact: true }).click();
+    await adminPage.getByRole('button', { name: 'Switch to dark mode', exact: true }).click();
     await expect(adminPage.locator('html')).toHaveAttribute(
       'data-theme',
       'dark',

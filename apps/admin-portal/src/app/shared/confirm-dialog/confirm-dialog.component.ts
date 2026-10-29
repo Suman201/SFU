@@ -1,4 +1,14 @@
-import { ChangeDetectionStrategy, Component, ElementRef, HostListener, ViewChild, effect, inject } from '@angular/core';
+import {
+  afterNextRender,
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  HostListener,
+  Injector,
+  ViewChild,
+  effect,
+  inject,
+} from '@angular/core';
 import { ConfirmDialogService } from './confirm-dialog.service';
 
 @Component({
@@ -14,7 +24,13 @@ import { ConfirmDialogService } from './confirm-dialog.service';
         aria-describedby="admin-confirm-message"
         (click)="cancel()"
       >
-        <article class="confirm-modal" [class.danger]="current.variant === 'danger'" [class.warning]="current.variant === 'warning'" (click)="$event.stopPropagation()">
+        <article
+          class="confirm-modal"
+          tabindex="-1"
+          [class.danger]="current.variant === 'danger'"
+          [class.warning]="current.variant === 'warning'"
+          (click)="$event.stopPropagation()"
+        >
           <header>
             <span class="confirm-mark" aria-hidden="true"></span>
             <div>
@@ -24,7 +40,13 @@ import { ConfirmDialogService } from './confirm-dialog.service';
           </header>
           <p id="admin-confirm-message">{{ current.message }}</p>
           <footer>
-            <button #cancelButton class="confirm-button secondary" type="button" [disabled]="current.pending" (click)="cancel()">
+            <button
+              #cancelButton
+              class="confirm-button secondary"
+              type="button"
+              [disabled]="current.pending"
+              (click)="cancel()"
+            >
               {{ current.cancelLabel }}
             </button>
             <button
@@ -35,7 +57,9 @@ import { ConfirmDialogService } from './confirm-dialog.service';
               [disabled]="current.pending"
               (click)="accept()"
             >
-              {{ current.pending ? current.pendingLabel : current.confirmLabel }}
+              {{
+                current.pending ? current.pendingLabel : current.confirmLabel
+              }}
             </button>
           </footer>
         </article>
@@ -50,10 +74,11 @@ import { ConfirmDialogService } from './confirm-dialog.service';
         z-index: 5000;
         display: grid;
         place-items: center;
-        padding: max(18px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom))
+        padding: max(18px, env(safe-area-inset-top))
+          max(14px, env(safe-area-inset-right))
+          max(18px, env(safe-area-inset-bottom))
           max(14px, env(safe-area-inset-left));
         background: color-mix(in srgb, #07110e 56%, transparent);
-        backdrop-filter: blur(12px);
       }
 
       .confirm-modal {
@@ -61,8 +86,9 @@ import { ConfirmDialogService } from './confirm-dialog.service';
         display: grid;
         gap: 16px;
         padding: 18px;
-        border: 1px solid color-mix(in srgb, var(--product-green) 22%, var(--line));
-        border-radius: 14px;
+        border: 1px solid
+          color-mix(in srgb, var(--product-green) 22%, var(--line));
+        border-radius: 8px;
         background: var(--panel-elevated);
         color: var(--text);
         box-shadow: var(--shadow-lg);
@@ -95,7 +121,7 @@ import { ConfirmDialogService } from './confirm-dialog.service';
       header p {
         color: var(--muted);
         font-size: 11px;
-        font-weight: 900;
+        font-weight: 600;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
@@ -129,8 +155,8 @@ import { ConfirmDialogService } from './confirm-dialog.service';
 
       .confirm-mark::before {
         content: '!';
-        color: var(--product-green);
-        font-weight: 900;
+        color: var(--green-ink);
+        font-weight: 600;
       }
 
       .warning .confirm-mark {
@@ -146,14 +172,14 @@ import { ConfirmDialogService } from './confirm-dialog.service';
       }
 
       .danger .confirm-mark::before {
-        color: var(--product-rose);
+        color: var(--rose-ink);
       }
 
       .confirm-button {
         min-height: 38px;
-        border-radius: 10px;
+        border-radius: 5px;
         padding: 0 14px;
-        font-weight: 900;
+        font-weight: 600;
       }
 
       .confirm-button.secondary {
@@ -161,9 +187,9 @@ import { ConfirmDialogService } from './confirm-dialog.service';
       }
 
       .confirm-button.primary {
-        border-color: var(--product-green);
-        background: var(--product-green);
-        color: #fff;
+        border-color: var(--action);
+        background: var(--action);
+        color: var(--bg);
       }
 
       .confirm-button.primary.warning {
@@ -172,8 +198,9 @@ import { ConfirmDialogService } from './confirm-dialog.service';
       }
 
       .confirm-button.primary.danger {
-        border-color: var(--product-rose);
+        border-color: var(--rose-ink);
         background: var(--product-rose);
+        color: #29131a;
       }
 
       @media (max-width: 520px) {
@@ -182,7 +209,7 @@ import { ConfirmDialogService } from './confirm-dialog.service';
         }
 
         .confirm-modal {
-          border-radius: 14px 14px 0 0;
+          border-radius: 8px 14px 0 0;
         }
 
         footer {
@@ -190,18 +217,21 @@ import { ConfirmDialogService } from './confirm-dialog.service';
           grid-template-columns: 1fr;
         }
       }
-    `
+    `,
   ],
-  changeDetection: ChangeDetectionStrategy.Eager
+  changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class ConfirmDialogComponent {
   private readonly confirmDialog = inject(ConfirmDialogService);
+  private readonly host: ElementRef<HTMLElement> = inject(ElementRef);
+  private readonly injector = inject(Injector);
   private lastDialogId: number | null = null;
   private returnFocus: HTMLElement | null = null;
 
   protected readonly dialog = this.confirmDialog.dialog;
 
-  @ViewChild('cancelButton') private readonly cancelButton?: ElementRef<HTMLButtonElement>;
+  @ViewChild('cancelButton')
+  private readonly cancelButton?: ElementRef<HTMLButtonElement>;
 
   constructor() {
     effect(() => {
@@ -215,9 +245,37 @@ export class ConfirmDialogComponent {
         return;
       }
       this.lastDialogId = dialog.id;
-      this.returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      queueMicrotask(() => this.cancelButton?.nativeElement.focus());
+      this.returnFocus =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      afterNextRender(() => this.cancelButton?.nativeElement.focus(), {
+        injector: this.injector,
+      });
     });
+  }
+
+  @HostListener('document:keydown', ['$event'])
+  protected trapFocus(event: KeyboardEvent): void {
+    if (!this.dialog() || event.key !== 'Tab') return;
+    const modal =
+      this.host.nativeElement.querySelector<HTMLElement>('.confirm-modal');
+    const buttons = Array.from(
+      modal?.querySelectorAll<HTMLButtonElement>('button:not([disabled])') ??
+        [],
+    );
+    const first = buttons[0],
+      last = buttons[buttons.length - 1];
+    if (!first) {
+      event.preventDefault();
+      modal?.focus();
+    } else if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   @HostListener('document:keydown.escape')
@@ -232,6 +290,6 @@ export class ConfirmDialogComponent {
   private restoreFocus(): void {
     const target = this.returnFocus;
     this.returnFocus = null;
-    queueMicrotask(() => target?.focus());
+    afterNextRender(() => target?.focus(), { injector: this.injector });
   }
 }

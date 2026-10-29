@@ -2,7 +2,10 @@
   <div>
     <p class="eyebrow">Security trail</p>
     <h1>Audit logs</h1>
-    <p>Review who changed platform records, when it happened, and which resource was affected.</p>
+    <p>
+      Review who changed platform records, when it happened, and which resource
+      was affected.
+    </p>
   </div>
 </section>
 
@@ -12,7 +15,11 @@
       <h2>Activity ledger</h2>
       <p>{{ total() }} audit events found</p>
     </div>
-    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+    <form
+      class="data-table-filters"
+      [formGroup]="filters"
+      (ngSubmit)="applyFilters()"
+    >
       <select formControlName="status" aria-label="Status">
         <option value="all">All statuses</option>
         <option value="success">Success</option>
@@ -26,20 +33,72 @@
         <option value="STUDENT">Student</option>
         <option value="SYSTEM">System</option>
       </select>
-      <input type="search" formControlName="search" placeholder="Search action, actor, resource" aria-label="Search" />
-      <input type="search" formControlName="actorId" placeholder="Actor ID" aria-label="Actor ID" />
-      <input type="search" formControlName="action" placeholder="Action" aria-label="Action" />
-      <input type="search" formControlName="resourceType" placeholder="Resource type" aria-label="Resource type" />
-      <input type="search" formControlName="resourceId" placeholder="Resource ID" aria-label="Resource ID" />
-      <input type="datetime-local" formControlName="dateFrom" aria-label="From date" />
-      <input type="datetime-local" formControlName="dateTo" aria-label="To date" />
+      <input
+        type="search"
+        formControlName="search"
+        placeholder="Search action, actor, resource"
+        aria-label="Search"
+      />
+
+      <input
+        type="search"
+        formControlName="action"
+        placeholder="Action"
+        aria-label="Action"
+      />
+
       <button type="submit" class="table-action primary">Apply</button>
-      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+      <button type="button" class="table-action" (click)="resetFilters()">
+        Reset
+      </button>
+      <details class="advanced-filters">
+        <summary>More filters</summary>
+        <div class="advanced-filter-fields">
+          <label
+            ><span>Actor</span
+            ><input
+              type="search"
+              formControlName="actorId"
+              placeholder="Actor ID"
+              aria-label="Actor ID"
+          /></label>
+          <label
+            ><span>Resource type</span
+            ><input
+              type="search"
+              formControlName="resourceType"
+              placeholder="Resource type"
+              aria-label="Resource type"
+          /></label>
+          <label
+            ><span>Resource</span
+            ><input
+              type="search"
+              formControlName="resourceId"
+              placeholder="Resource ID"
+              aria-label="Resource ID"
+          /></label>
+          <label
+            ><span>From date</span
+            ><input
+              type="datetime-local"
+              formControlName="dateFrom"
+              aria-label="From date"
+          /></label>
+          <label
+            ><span>To date</span
+            ><input
+              type="datetime-local"
+              formControlName="dateTo"
+              aria-label="To date"
+          /></label>
+        </div>
+      </details>
     </form>
   </div>
 
   @if (error()) {
-    <p class="table-error" role="alert">{{ error() }}</p>
+  <p class="table-error" role="alert">{{ error() }}</p>
   }
 
   <div class="data-table-wrap" style="--data-table-min-width: 1120px">
@@ -57,54 +116,83 @@
       </thead>
       <tbody>
         @if (loading()) {
-          <tr>
-            <td colspan="7" class="empty-state">Loading audit logs...</td>
-          </tr>
+        <tr>
+          <td colspan="7" class="empty-state">Loading audit logs...</td>
+        </tr>
         } @else if (!rows().length) {
-          <tr>
-            <td colspan="7" class="empty-state">No audit logs match these filters.</td>
-          </tr>
-        } @else {
-          @for (row of rows(); track trackByAuditLog($index, row)) {
-            <tr>
-              <td>
-                <strong>{{ row.createdAt | date: 'short' }}</strong>
-                <small>{{ row.requestId || row.id }}</small>
-              </td>
-              <td>
-                <div class="actor-cell">
-                  <span class="table-avatar">{{ actor(row).slice(0, 2).toUpperCase() }}</span>
-                  <div>
-                    <strong>{{ actor(row) }}</strong>
-                    <small>{{ row.actorRoles.join(', ') || row.actorId || 'No roles' }}</small>
-                  </div>
-                </div>
-              </td>
-              <td><code>{{ row.action }}</code></td>
-              <td>
-                <strong>{{ row.resourceType || 'resource' }}</strong>
-                <small>{{ row.resourceLabel || row.resourceId || 'No target' }}</small>
-              </td>
-              <td><span class="data-pill {{ statusClass(row.status) }}">{{ row.status }}</span></td>
-              <td>{{ row.summary || row.action }}</td>
-              <td class="actions-cell">
-                @if (resourceLink(row); as link) {
-                  <a class="table-action" [routerLink]="link">Open resource</a>
-                }
-                <a class="table-action" [routerLink]="['/audit-logs', row.id]">View</a>
-              </td>
-            </tr>
-          }
-        }
+        <tr>
+          <td colspan="7" class="empty-state">
+            No audit logs match these filters.
+          </td>
+        </tr>
+        } @else { @for (row of rows(); track trackByAuditLog($index, row)) {
+        <tr>
+          <td>
+            <strong>{{ row.createdAt | date: 'short' }}</strong>
+            <small>{{ row.requestId || row.id }}</small>
+          </td>
+          <td>
+            <div class="actor-cell">
+              <span class="table-avatar"
+                >{{ actor(row).slice(0, 2).toUpperCase() }}</span
+              >
+              <div>
+                <strong>{{ actor(row) }}</strong>
+                <small
+                  >{{ row.actorRoles.join(', ') || row.actorId || 'No roles'
+                  }}</small
+                >
+              </div>
+            </div>
+          </td>
+          <td><code>{{ row.action }}</code></td>
+          <td>
+            <strong>{{ row.resourceType || 'resource' }}</strong>
+            <small
+              >{{ row.resourceLabel || row.resourceId || 'No target' }}</small
+            >
+          </td>
+          <td>
+            <span class="data-pill {{ statusClass(row.status) }}"
+              >{{ row.status }}</span
+            >
+          </td>
+          <td>{{ row.summary || row.action }}</td>
+          <td class="actions-cell">
+            @if (resourceLink(row); as link) {
+            <a class="table-action" [routerLink]="link">Open resource</a>
+            }
+            <a class="table-action" [routerLink]="['/audit-logs', row.id]"
+              >View</a
+            >
+          </td>
+        </tr>
+        } }
       </tbody>
     </table>
   </div>
 
   <div class="table-footer">
-    <span>Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span>
+    <span
+      >Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span
+    >
     <div>
-      <button type="button" class="table-action" [disabled]="page() <= 1" (click)="previousPage()">Previous</button>
-      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+      <button
+        type="button"
+        class="table-action"
+        [disabled]="page() <= 1"
+        (click)="previousPage()"
+      >
+        Previous
+      </button>
+      <button
+        type="button"
+        class="table-action"
+        [disabled]="page() * limit() >= total()"
+        (click)="nextPage()"
+      >
+        Next
+      </button>
     </div>
   </div>
 </section>

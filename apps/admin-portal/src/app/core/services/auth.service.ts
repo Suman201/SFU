@@ -85,7 +85,8 @@ export class AuthService {
   checkSession(): Observable<AuthUser | null> {
     const token = this.accessToken();
     if (!token) {
-      this.clearSession();
+      // A subsequent guest guard must keep the reason for a session/access redirect visible.
+      this.clearSession(this.sessionNoticeSignal());
       return of(null);
     }
     if (this.isTokenExpired(token)) {

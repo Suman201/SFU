@@ -2,7 +2,9 @@
   <div>
     <p class="eyebrow">Reporting</p>
     <h1>Class sessions</h1>
-    <p>Monitor live delivery, attendance, completion, and session-level outcomes.</p>
+    <p>
+      Monitor live delivery, attendance, completion, and session-level outcomes.
+    </p>
   </div>
 </section>
 
@@ -21,7 +23,10 @@
   </article>
   <article>
     <span>Average attendance</span>
-    <strong>{{ ((summary()?.averageAttendancePercent ?? 0) / 100) | percent: '1.0-0' }}</strong>
+    <strong
+      >{{ ((summary()?.averageAttendancePercent ?? 0) / 100) | percent: '1.0-0'
+      }}</strong
+    >
   </article>
 </section>
 
@@ -31,7 +36,11 @@
       <h2>Session report</h2>
       <p>{{ total() }} sessions found</p>
     </div>
-    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+    <form
+      class="data-table-filters"
+      [formGroup]="filters"
+      (ngSubmit)="applyFilters()"
+    >
       <select formControlName="status" aria-label="Status">
         <option value="all">All statuses</option>
         <option value="scheduled">Scheduled</option>
@@ -39,33 +48,80 @@
         <option value="completed">Completed</option>
         <option value="cancelled">Cancelled</option>
       </select>
-      <input type="search" formControlName="teacherId" list="session-teacher-options" placeholder="Teacher name or ID" aria-label="Teacher ID" />
-      <input type="search" formControlName="batchId" list="session-batch-options" placeholder="Batch name or ID" aria-label="Batch ID" />
-      <input type="search" formControlName="courseId" list="session-course-options" placeholder="Course name or ID" aria-label="Course ID" />
-      <input type="date" formControlName="dateFrom" aria-label="Date from" />
-      <input type="date" formControlName="dateTo" aria-label="Date to" />
+
       <button type="submit" class="table-action primary">Apply</button>
-      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+      <button type="button" class="table-action" (click)="resetFilters()">
+        Reset
+      </button>
       <datalist id="session-course-options">
         @for (option of lookup.courses(); track option.id) {
-          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        <option [value]="option.id">
+          {{ option.label }} - {{ option.sublabel }}
+        </option>
         }
       </datalist>
       <datalist id="session-batch-options">
         @for (option of lookup.batches(); track option.id) {
-          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        <option [value]="option.id">
+          {{ option.label }} - {{ option.sublabel }}
+        </option>
         }
       </datalist>
       <datalist id="session-teacher-options">
         @for (option of lookup.teachers(); track option.id) {
-          <option [value]="option.id">{{ option.label }} - {{ option.sublabel }}</option>
+        <option [value]="option.id">
+          {{ option.label }} - {{ option.sublabel }}
+        </option>
         }
       </datalist>
+      <details class="advanced-filters">
+        <summary>More filters</summary>
+        <div class="advanced-filter-fields">
+          <label
+            ><span>Course</span
+            ><input
+              type="search"
+              formControlName="courseId"
+              list="session-course-options"
+              placeholder="Course name or ID"
+              aria-label="Course ID"
+          /></label>
+          <label
+            ><span>Batch</span
+            ><input
+              type="search"
+              formControlName="batchId"
+              list="session-batch-options"
+              placeholder="Batch name or ID"
+              aria-label="Batch ID"
+          /></label>
+          <label
+            ><span>Teacher</span
+            ><input
+              type="search"
+              formControlName="teacherId"
+              list="session-teacher-options"
+              placeholder="Teacher name or ID"
+              aria-label="Teacher ID"
+          /></label>
+          <label
+            ><span>Date from</span
+            ><input
+              type="date"
+              formControlName="dateFrom"
+              aria-label="Date from"
+          /></label>
+          <label
+            ><span>Date to</span
+            ><input type="date" formControlName="dateTo" aria-label="Date to"
+          /></label>
+        </div>
+      </details>
     </form>
   </div>
 
   @if (error()) {
-    <p class="table-error" role="alert">{{ error() }}</p>
+  <p class="table-error" role="alert">{{ error() }}</p>
   }
 
   <div class="data-table-wrap" style="--data-table-min-width: 1120px">
@@ -84,66 +140,98 @@
       </thead>
       <tbody>
         @if (loading()) {
-          <tr>
-            <td colspan="8" class="empty-state">Loading class sessions...</td>
-          </tr>
+        <tr>
+          <td colspan="8" class="empty-state">Loading class sessions...</td>
+        </tr>
         } @else if (!rows().length) {
-          <tr>
-            <td colspan="8" class="empty-state">No class sessions match these filters.</td>
-          </tr>
-        } @else {
-          @for (row of rows(); track trackBySession($index, row)) {
-            <tr>
-              <td>
-                <div class="primary-cell">
-                  <span class="table-avatar">{{ row.sessionNumber }}</span>
-                  <div>
-                    <strong>{{ row.title }}</strong>
-                    <small>{{ row.sessionId }}</small>
-                  </div>
-                </div>
-              </td>
-              <td>
-                <strong>{{ row.batchName }}</strong>
-                <small>{{ row.courseName || row.courseId || 'No course' }}</small>
-              </td>
-              <td>
-                <strong>{{ row.teacherName || row.teacherId }}</strong>
-                <small>{{ row.teacherEmail || row.teacherId }}</small>
-              </td>
-              <td>{{ row.scheduledAt | date: 'medium' }}</td>
-              <td><span class="data-pill {{ statusClass(row.status) }}">{{ row.status }}</span></td>
-              <td>
-                <strong>{{ row.attendance.present }}/{{ row.attendance.enrolled }}</strong>
-                <small>{{ attendancePercent(row) | percent: '1.0-0' }} present</small>
-              </td>
-              <td>
-                <strong>{{ row.attendance.averageDurationSeconds || 0 }}s avg</strong>
-                <small>{{ row.attendance.reconnects }} reconnects</small>
-              </td>
-              <td class="actions-cell">
-                <a class="table-action" [routerLink]="['/class-sessions', row.sessionId]">View</a>
-                <button
-                  type="button"
-                  class="table-action accent"
-                  [disabled]="!row.roomId || downloadingSessionId() === row.sessionId"
-                  (click)="downloadAttendance(row)"
-                >
-                  {{ downloadingSessionId() === row.sessionId ? 'Downloading' : 'Attendance' }}
-                </button>
-              </td>
-            </tr>
-          }
-        }
+        <tr>
+          <td colspan="8" class="empty-state">
+            No class sessions match these filters.
+          </td>
+        </tr>
+        } @else { @for (row of rows(); track trackBySession($index, row)) {
+        <tr>
+          <td>
+            <div class="primary-cell">
+              <span class="table-avatar">{{ row.sessionNumber }}</span>
+              <div>
+                <strong>{{ row.title }}</strong>
+                <small>{{ row.sessionId }}</small>
+              </div>
+            </div>
+          </td>
+          <td>
+            <strong>{{ row.batchName }}</strong>
+            <small>{{ row.courseName || row.courseId || 'No course' }}</small>
+          </td>
+          <td>
+            <strong>{{ row.teacherName || row.teacherId }}</strong>
+            <small>{{ row.teacherEmail || row.teacherId }}</small>
+          </td>
+          <td>{{ row.scheduledAt | date: 'medium' }}</td>
+          <td>
+            <span class="data-pill {{ statusClass(row.status) }}"
+              >{{ row.status }}</span
+            >
+          </td>
+          <td>
+            <strong
+              >{{ row.attendance.present }}/{{ row.attendance.enrolled
+              }}</strong
+            >
+            <small
+              >{{ attendancePercent(row) | percent: '1.0-0' }} present</small
+            >
+          </td>
+          <td>
+            <strong
+              >{{ row.attendance.averageDurationSeconds || 0 }}s avg</strong
+            >
+            <small>{{ row.attendance.reconnects }} reconnects</small>
+          </td>
+          <td class="actions-cell">
+            <a
+              class="table-action"
+              [routerLink]="['/class-sessions', row.sessionId]"
+              >View</a
+            >
+            <button
+              type="button"
+              class="table-action accent"
+              [disabled]="!row.roomId || downloadingSessionId() === row.sessionId"
+              (click)="downloadAttendance(row)"
+            >
+              {{ downloadingSessionId() === row.sessionId ? 'Downloading' :
+              'Attendance' }}
+            </button>
+          </td>
+        </tr>
+        } }
       </tbody>
     </table>
   </div>
 
   <div class="table-footer">
-    <span>Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span>
+    <span
+      >Page {{ page() }} · Showing {{ rows().length }} of {{ total() }}</span
+    >
     <div>
-      <button type="button" class="table-action" [disabled]="page() <= 1" (click)="previousPage()">Previous</button>
-      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+      <button
+        type="button"
+        class="table-action"
+        [disabled]="page() <= 1"
+        (click)="previousPage()"
+      >
+        Previous
+      </button>
+      <button
+        type="button"
+        class="table-action"
+        [disabled]="page() * limit() >= total()"
+        (click)="nextPage()"
+      >
+        Next
+      </button>
     </div>
   </div>
 </section>
