@@ -1,86 +1,146 @@
 :host {
   display: block;
+  background: transparent;
+  padding-bottom: 32px;
+  padding-top: 20px;
+  width: min(1200px, calc(100% - 48px));
+  margin-inline: auto;
+
+  @media (max-width: 640px) {
+    width: calc(100% - 24px);
+    padding-bottom: 20px;
+  }
 }
+
 .site-footer {
-  background: var(--panel);
-  border-top: 1px solid var(--line);
-  padding: 58px max(24px, calc((100vw - 1240px) / 2)) 24px;
+  padding: 44px 32px 24px;
+  border-radius: 24px;
+  background: rgba(10, 25, 48, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 }
+
+:root[data-theme='light'] & {
+  .site-footer {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.08);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  }
+}
+
 .footer-inner {
   display: grid;
   grid-template-columns: 1.6fr 1fr 1fr 1fr;
-  gap: 48px;
-  padding-bottom: 48px;
+  gap: 40px;
+  padding-bottom: 36px;
 }
+
 a {
   color: var(--muted);
   text-decoration: none;
-  font-size: 14px;
+  font-size: 13.5px;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--brand-rose);
+    text-decoration: none;
+  }
 }
-a:hover {
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 4px;
-}
+
 .footer-logo {
   display: inline-flex;
   color: var(--text);
+  margin-bottom: 12px;
+
+  &:hover {
+    text-decoration: none;
+  }
+
+  ::ng-deep sfu-brand-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+
+    sfu-brand-mark {
+      width: 22px !important;
+      height: 29px !important;
+    }
+
+    .wordmark, img {
+      width: 100px !important;
+      height: auto !important;
+    }
+
+    .tagline {
+      display: none !important;
+    }
+  }
 }
-.footer-logo:hover {
-  text-decoration: none;
-}
+
 .footer-brand p {
-  font-size: 14px;
+  font-size: 13.5px;
   color: var(--muted);
-  line-height: 1.8;
-  margin: 18px 0 0;
+  line-height: 1.7;
+  margin: 0;
 }
+
 nav {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 13px;
+  gap: 11px;
 }
+
 h2 {
-  font-size: 13px;
+  font-size: 11.5px;
   font-weight: 700;
-  margin: 5px 0 8px;
-  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 4px;
+  color: var(--brand-green);
 }
+
 .footer-bottom {
-  border-top: 1px solid var(--line);
-  padding-top: 24px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 20px;
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 20px;
   color: var(--muted);
   font-size: 12px;
-}
-.footer-bottom div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 24px;
-}
-.footer-bottom a {
-  font-size: 12px;
-}
-@media (max-width: 800px) {
-  .footer-inner {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 26px;
-  }
-  .footer-brand {
-    grid-column: 1 / -1;
+
+  div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+
+    a {
+      font-size: 12px;
+    }
   }
 }
-@media (max-width: 520px) {
-  .site-footer {
-    padding-top: 38px;
-  }
+
+@media (max-width: 960px) {
   .footer-inner {
     grid-template-columns: 1fr 1fr;
+    gap: 30px;
+  }
+}
+
+@media (max-width: 600px) {
+  .site-footer {
+    padding: 28px 20px 20px;
+  }
+  .footer-inner {
+    grid-template-columns: 1fr;
+    gap: 24px;
   }
   .footer-bottom {
     flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
   }
 }

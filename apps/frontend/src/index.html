@@ -20,12 +20,7 @@
         } catch {
           storedTheme = null;
         }
-        const theme =
-          storedTheme === 'dark' || storedTheme === 'light'
-            ? storedTheme
-            : matchMedia('(prefers-color-scheme: dark)').matches
-              ? 'dark'
-              : 'light';
+        const theme = storedTheme === 'light' ? 'light' : 'dark';
         document.documentElement.dataset.theme = theme;
         document.documentElement.style.colorScheme = theme;
       })();

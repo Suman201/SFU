@@ -1,155 +1,632 @@
-<sfu-header />
-<main id="main-content" class="landing">
-  <section class="hero" aria-labelledby="landing-title">
-    <div class="hero-copy">
-      <p class="eyebrow">Online classes on Sapiovian</p>
-      <h1 id="landing-title">{{ heroTitle() }}</h1>
-      <p class="hero-lead">{{ heroLead() }}</p>
-      <form class="teacher-search" (submit)="findTeacher($event)">
-        <label for="learning-search">What would you like to learn?</label>
-        <div class="search-controls">
+<div class="template-canvas">
+
+  <!-- 1. Top Navigation: Sleek Glassmorphic Floating Header Capsule -->
+  <header class="top-nav-bar" [class.scrolled]="isScrolled()" role="banner">
+    <div class="nav-capsule">
+      
+      <!-- Brand Logo (Canonical Preserved) -->
+      <a routerLink="/" class="nav-brand" aria-label="Sapiovian Home">
+        <sfu-brand-logo />
+      </a>
+
+      <!-- Production Navigation Links -->
+      <nav class="nav-links" aria-label="Main Navigation">
+        <a routerLink="/whiteboard" class="nav-item">Whiteboard</a>
+        <a routerLink="/teachers" class="nav-item">Find Teachers</a>
+        <a href="#how-it-works" class="nav-item">How It Works</a>
+        <a href="#faq" class="nav-item">FAQ</a>
+      </nav>
+
+      <!-- Working Teacher & Topic Search Input -->
+      <form class="nav-search-form" (submit)="findTeacher($event)">
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
           <input
-            id="learning-search"
             type="search"
-            name="q"
-            maxlength="160"
-            placeholder="Subject, skill or teacher’s name"
+            placeholder="Search subjects or teachers..."
             [value]="search()"
             (input)="updateSearch($event)"
+            aria-label="Search subjects or teachers"
           />
-          <button type="submit">Find a teacher</button>
         </div>
       </form>
-      <p class="existing-account">
-        Already have an account? <a routerLink="/student/login">Log in</a>
-      </p>
+
+      <!-- Portal CTAs -->
+      <div class="nav-actions">
+        <a routerLink="/student/login" class="nav-login-link">Log in</a>
+        <a routerLink="/whiteboard" class="nav-cta-btn">Start Free Lesson</a>
+      </div>
+
     </div>
-    <figure class="hero-banner">
-      <img
-        src="/assets/images/sapiovian-learning-banner-v1.webp"
-        srcset="
-          /assets/images/sapiovian-learning-banner-v1-small.webp  760w,
-          /assets/images/sapiovian-learning-banner-v1.webp       1448w
-        "
-        sizes="(max-width: 760px) calc(100vw - 40px), (max-width: 1264px) 46vw, 536px"
-        width="1448"
-        height="1086"
-        alt="A student taking notes during an online lesson with a teacher"
-        fetchpriority="high"
-      />
-    </figure>
-  </section>
-  <div class="feature-strip" aria-label="Classroom features">
-    <span>Live video classes</span><span>Collaborative whiteboard</span
-    ><span>Recordings and materials</span>
-  </div>
-  <section
-    class="how-section section"
-    id="how-it-works"
-    aria-labelledby="how-title"
-  >
-    <h2 id="how-title">How classes work</h2>
-    <div class="steps">
-      @for (step of steps; track step.title; let i = $index) {
-      <article>
-        <span class="step-number">{{ i + 1 }}</span>
-        <h3>{{ step.title }}</h3>
-        <p>{{ step.body }}</p>
-      </article>
-      }
-    </div>
-  </section>
-  <section class="classroom-section section" aria-labelledby="classroom-title">
-    <figure class="classroom-preview">
-      <img
-        src="/assets/images/sapiovian-classroom.webp"
-        alt="Sapiovian’s whiteboard showing a worked example of equivalent fractions, with drawing tools and lesson pages"
-        width="1030"
-        height="824"
-        loading="lazy"
-      />
-      <figcaption>The Sapiovian whiteboard · Example lesson</figcaption>
-    </figure>
-    <div class="classroom-copy">
-      <h2 id="classroom-title">Work through it together.</h2>
-      <p>
-        Explain a problem, draw a diagram or ask your teacher a question while
-        you’re in class.
-      </p>
-      <dl>
-        <div>
-          <dt>During the lesson</dt>
-          <dd>
-            Video, chat and a shared whiteboard, with teacher controls for
-            student participation.
-          </dd>
+  </header>
+
+  <main id="main-content">
+
+    <!-- 2. Hero Section (Centered Production Presentation) -->
+    <section class="hero-section" aria-labelledby="hero-title">
+      <div class="hero-header-stack">
+        <p class="hero-eyebrow">ACADEMIC EXCELLENCE &bull; REAL-TIME CLASSROOM</p>
+        <h1 id="hero-title" class="hero-main-title">
+          Where Complex Ideas <br>
+          <span class="title-gradient">Become Crystal Clear</span>
+        </h1>
+        <div class="hero-relay-badge">
+          <span class="relay-dot-icon" aria-hidden="true">
+            <span class="dot-inner"></span>
+          </span>
+          <span>&lt;100ms Native SFU Relay &bull; Zero-Lag Vector Ink</span>
         </div>
-        <div>
-          <dt>After the lesson</dt>
-          <dd>
-            Assignments and shared resources in your dashboard. Recordings are
-            available when your teacher publishes them.
-          </dd>
+      </div>
+
+      <!-- Flagship Desktop Window Classroom Stage -->
+      <div class="desktop-classroom-card">
+        <div class="ambient-glow" aria-hidden="true"></div>
+
+        <!-- Window Title Bar -->
+        <div class="window-bar">
+          <div class="traffic-dots" aria-hidden="true">
+            <span class="w-dot dot-red"></span>
+            <span class="w-dot dot-yellow"></span>
+            <span class="w-dot dot-green"></span>
+            <div class="window-nav-arrows">
+              <span class="w-arr">&lsaquo;</span>
+              <span class="w-arr">&rsaquo;</span>
+            </div>
+          </div>
+          
+          <div class="window-url-bar">
+            <svg class="url-lock-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M4 6V4a4 4 0 0 1 8 0v2h1a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h1zm2-2v2h4V4a2 2 0 1 0-4 0z"/>
+            </svg>
+            <span class="url-text">sapiovian.com/classroom/differential-topology</span>
+          </div>
+
+          <!-- Classroom Canvas Template Switchers -->
+          <div class="window-templates" aria-label="Canvas template">
+            <button type="button" [class.active]="currentTemplate() === 'grid'" (click)="setTemplate('grid')">Grid</button>
+            <button type="button" [class.active]="currentTemplate() === 'ruled'" (click)="setTemplate('ruled')">Ruled</button>
+            <button type="button" [class.active]="currentTemplate() === 'blank'" (click)="setTemplate('blank')">Blank</button>
+          </div>
         </div>
-      </dl>
-    </div>
-  </section>
-  @if (homeSections().length || cmsHome()?.bodyMarkdown) {
-  <section class="cms-home section" aria-label="More from Sapiovian">
-    @if (cmsHome()?.bodyMarkdown) {
-    <p class="cms-body">{{ cmsHome()?.bodyMarkdown }}</p>
-    }@for (section of homeSections(); track section.blockId || $index) {
-    <article>
-      @if (section.eyebrow) {
-      <p class="eyebrow">{{ section.eyebrow }}</p>
-      }@if (section.title) {
-      <h2>{{ section.title }}</h2>
-      }@if (section.body) {
-      <p>{{ section.body }}</p>
-      }@for (link of section.links ?? []; track link.url) {
-      <a
-        class="text-link"
-        [routerLink]="link.url.startsWith('/') ? link.url : null"
-        [href]="link.url.startsWith('/') ? null : link.url"
-        >{{ link.label }} <span aria-hidden="true">↗</span></a
-      >
-      }
-    </article>
+
+        <!-- Classroom Screen Viewport -->
+        <div
+          class="classroom-screen"
+          [class.template-grid]="currentTemplate() === 'grid'"
+          [class.template-ruled]="currentTemplate() === 'ruled'"
+          [class.template-blank]="currentTemplate() === 'blank'"
+        >
+          
+          <!-- Mode 1: Teacher Lecture (Default) -->
+          @if (activeMode() === 'lecture') {
+          <div class="screen-math-panel">
+            <div class="math-line font-mono math-highlight">
+              <span class="katex-badge">Stokes Theorem</span>
+              <span class="katex-eq">&#x222C;<sub>M</sub> (curl F) &middot; dS = &oint;<sub>&part;M</sub> F &middot; dr</span>
+            </div>
+            
+            <div class="math-formula-block font-mono">
+              <div class="f-row">
+                <span class="f-integral">J(&alpha;) = &int;<sub>0</sub><sup>&alpha;</sup> f(x) x² dx + 3 &int;<sub>0</sub><sup>10</sup> x⁹ dx = C</span>
+              </div>
+              <div class="f-row ind-1">
+                <span>= 1 / (2&pi;i) &middot; &oint;<sub>&gamma;</sub> [f(z) / (z - z₀)] dz + &Delta;S</span>
+              </div>
+              <div class="f-row ind-1">
+                <span>= (-d(&omega;) / 2)³ - 2 &int;<sub>0</sub><sup>&alpha;</sup> f(g(x) &middot; dl) dx</span>
+              </div>
+              <div class="f-row ind-2">
+                <span class="f-result">Tangent Space T<sub>p</sub>(M) &oplus; N<sub>p</sub>(M) = &Ropf;ⁿ</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="screen-geometry-panel">
+            <svg class="geometry-svg" viewBox="0 0 360 220" fill="none" aria-hidden="true">
+              <!-- Coordinate Axes with Arrows -->
+              <line x1="30" y1="180" x2="330" y2="180" stroke="#475569" stroke-width="1.6"/>
+              <polygon points="330,180 322,176 322,184" fill="#64748b"/>
+              <text x="334" y="184" fill="#94a3b8" font-size="12" font-family="monospace">x</text>
+
+              <line x1="160" y1="200" x2="160" y2="20" stroke="#475569" stroke-width="1.6"/>
+              <polygon points="160,20 156,28 164,28" fill="#64748b"/>
+              <text x="156" y="14" fill="#94a3b8" font-size="12" font-family="monospace">y</text>
+
+              <!-- Origin & Axis Marks -->
+              <text x="145" y="195" fill="#64748b" font-size="11">O</text>
+              <text x="210" y="195" fill="#64748b" font-size="11">e₁</text>
+              <text x="260" y="195" fill="#64748b" font-size="11">e₂</text>
+
+              <!-- Rose Vector a -->
+              <line x1="160" y1="180" x2="260" y2="60" stroke="#F26076" stroke-width="2.6" stroke-linecap="round"/>
+              <polygon points="260,60 250,68 248,56" fill="#F26076"/>
+              <text x="202" y="110" fill="#F26076" font-size="12" font-weight="bold">v₁ (Tangent)</text>
+
+              <!-- Amber Vector b -->
+              <line x1="260" y1="60" x2="90" y2="110" stroke="#FFD150" stroke-width="2.2" stroke-linecap="round"/>
+              <polygon points="90,110 102,110 98,122" fill="#FFD150"/>
+              <text x="235" y="130" fill="#FFD150" font-size="12" font-weight="bold">v₂</text>
+
+              <!-- Green Vector c -->
+              <line x1="90" y1="110" x2="160" y2="180" stroke="#458B73" stroke-width="2.2" stroke-linecap="round"/>
+              <text x="110" y="152" fill="#458B73" font-size="12" font-weight="bold">v₃</text>
+
+              <!-- Auxiliary Arc & Angle Indicators -->
+              <path d="M 230 180 A 70 70 0 0 0 210 120" stroke="#FF9760" stroke-width="1.4" stroke-dasharray="3,3" fill="none"/>
+              <path d="M 160 150 A 30 30 0 0 1 185 160" stroke="#00f2fe" stroke-width="1.5" fill="none"/>
+
+              <!-- Handwritten Style Label: vector geometry with curved arrow -->
+              <text x="75" y="210" fill="#38bdf8" font-size="13" font-family="'Caveat', cursive, system-ui, sans-serif" font-weight="600">vector manifold</text>
+              <path d="M 180 206 Q 200 206 215 190" stroke="#38bdf8" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+              <polygon points="215,190 210,197 205,192" fill="#38bdf8"/>
+
+              <!-- Formula Box -->
+              <text x="260" y="200" fill="#ffffff" font-size="12" font-family="monospace">dim(M) = 3</text>
+              <text x="260" y="215" fill="#38bdf8" font-size="11" font-family="monospace">&nabla; &times; F = 0</text>
+            </svg>
+          </div>
+
+          <!-- Real Instructor Webcam PIP -->
+          <div class="teacher-pip-tile">
+            <div class="pip-photo">
+              <img src="/assets/images/hero-teacher.webp" alt="Dr. Sarah Chen live webcam" class="pip-photo-img" />
+              <div class="pip-live-indicator" aria-hidden="true"></div>
+            </div>
+            <div class="pip-label">Dr. Sarah Chen &bull; Host</div>
+          </div>
+          }
+
+          <!-- Mode 2: Peer Study Pod -->
+          @if (activeMode() === 'peer') {
+          <div class="peer-study-viewport">
+            <div class="peer-board-preview">
+              <div class="pod-header">
+                <span class="pod-badge">Peer Study Pod #4 &bull; 4 Active</span>
+                <span class="pod-task">Problem Set: Eigenvalues & Hermitian Operators</span>
+              </div>
+              <div class="pod-formula font-mono">
+                <p>Ĥ |&psi;<sub>n</sub>⟩ = E<sub>n</sub> |&psi;<sub>n</sub>⟩</p>
+                <p class="text-green">⟨&psi;<sub>m</sub>|&psi;<sub>n</sub>⟩ = &delta;<sub>mn</sub> &bull; Orthonormal Basis</p>
+              </div>
+            </div>
+            <div class="peer-tiles-grid">
+              <div class="peer-tile">
+                <img src="/assets/images/testimonial-1.webp" alt="Arthur" />
+                <span>Prof. Arthur</span>
+              </div>
+              <div class="peer-tile">
+                <img src="/assets/images/testimonial-2.webp" alt="Maya" />
+                <span>Maya K.</span>
+              </div>
+              <div class="peer-tile">
+                <img src="/assets/images/testimonial-3.webp" alt="David" />
+                <span>David K.</span>
+              </div>
+              <div class="peer-tile active-speaker">
+                <img src="/assets/images/hero-teacher.webp" alt="Sarah" />
+                <span>Dr. Sarah (Speaking 🎙️)</span>
+              </div>
+            </div>
+          </div>
+          }
+
+          <!-- Mode 3: 1-on-1 Tutoring -->
+          @if (activeMode() === 'tutoring') {
+          <div class="tutoring-viewport">
+            <div class="tutoring-split-board">
+              <div class="tutoring-head">
+                <span class="tutoring-pill">1-on-1 Private Session</span>
+                <span>Calculus III: Multiple Integrals & Jacobians</span>
+              </div>
+              <div class="tutoring-math font-mono">
+                <p>&#x222C;<sub>R</sub> f(x, y) dA = &#x222C;<sub>G</sub> f(x(u,v), y(u,v)) |J(u,v)| du dv</p>
+                <p class="text-amber">Jacobian determinant verified: J = &part;(x,y)/&part;(u,v)</p>
+              </div>
+            </div>
+            <div class="tutoring-cam-column">
+              <div class="tutoring-cam-card host">
+                <img src="/assets/images/hero-teacher.webp" alt="Dr. Sarah Chen" />
+                <span>Dr. Sarah Chen (Teacher)</span>
+              </div>
+              <div class="tutoring-cam-card student">
+                <img src="/assets/images/testimonial-2.webp" alt="Student" />
+                <span>Elena R. (Student)</span>
+              </div>
+            </div>
+          </div>
+          }
+
+          <!-- Bottom Center Floating Classroom Dock -->
+          <div class="floating-dock-bar" role="toolbar" aria-label="Classroom Tools">
+            <button type="button" class="dock-btn active" title="Vector Pen">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>
+            </button>
+            <button type="button" class="dock-btn" title="Whiteboard Board">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            </button>
+            <button type="button" class="dock-btn" title="HD Camera">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            </button>
+            <button type="button" class="dock-btn" title="Microphone">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <button type="button" class="dock-btn" title="Audio Levels">
+              <span class="dock-audio-dot"></span>
+            </button>
+            <button type="button" class="dock-btn" title="Screen Share">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M12 12v5"/><path d="M10 14l2-2 2 2"/></svg>
+            </button>
+            <button type="button" class="dock-btn" title="Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <a routerLink="/whiteboard" class="dock-launch-link" title="Open Full Whiteboard Studio">Open Studio ↗</a>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Bento Grid: 4 Core Learning Benefits in 1 Row -->
+    <section class="bento-row-section" aria-label="Core Learning Benefits">
+      <div class="bento-4-grid">
+        
+        <!-- Card 1: Uninterrupted Learning -->
+        <article class="bento-card">
+          <div class="card-head">
+            <h3>Uninterrupted Learning</h3>
+            <p>Crystal-clear audio and video on any device. Even with weak Wi-Fi, live lessons continue without frozen screens or dropped teacher explanations.</p>
+          </div>
+          <div class="card-visual visual-graph">
+            <svg class="graph-svg" viewBox="0 0 200 110" fill="none" aria-hidden="true">
+              <text x="4" y="16" fill="#64748b" font-size="8">1080p HD</text>
+              <text x="6" y="36" fill="#64748b" font-size="8">720p</text>
+              <text x="6" y="56" fill="#64748b" font-size="8">Audio</text>
+              <text x="6" y="76" fill="#64748b" font-size="8">Ink</text>
+              <text x="12" y="96" fill="#64748b" font-size="8">0</text>
+
+              <line x1="26" y1="14" x2="195" y2="14" stroke="rgba(255,255,255,0.05)"/>
+              <line x1="26" y1="34" x2="195" y2="34" stroke="rgba(255,255,255,0.05)"/>
+              <line x1="26" y1="54" x2="195" y2="54" stroke="rgba(255,255,255,0.05)"/>
+              <line x1="26" y1="74" x2="195" y2="74" stroke="rgba(255,255,255,0.05)"/>
+              <line x1="26" y1="94" x2="195" y2="94" stroke="rgba(255,255,255,0.08)"/>
+
+              <defs>
+                <linearGradient id="relayGradProd" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#FF9760" stop-opacity="0.5"/>
+                  <stop offset="50%" stop-color="#458B73" stop-opacity="0.3"/>
+                  <stop offset="100%" stop-color="#458B73" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M 26 94 L 45 90 Q 65 65 80 54 T 120 48 T 150 56 T 175 50 L 195 52 L 195 94 Z" fill="url(#relayGradProd)"/>
+              <path d="M 26 94 L 45 90 Q 65 65 80 54 T 120 48 T 150 56 T 175 50 L 195 52" stroke="#FF9760" stroke-width="2" fill="none"/>
+
+              <text x="32" y="106" fill="#64748b" font-size="8">Home Wi-Fi</text>
+              <text x="94" y="106" fill="#FF9760" font-size="8" font-weight="bold">Zero Lag</text>
+              <text x="156" y="106" fill="#64748b" font-size="8">Mobile Ready</text>
+            </svg>
+          </div>
+        </article>
+
+        <!-- Card 2: Interactive Digital Board -->
+        <article class="bento-card">
+          <div class="card-head">
+            <h3>Interactive Digital Board</h3>
+            <p>Real-time mathematical drawing with straight-edge ruler guides, geometric coordinate tools, and instant formula rendering—just like in person.</p>
+          </div>
+          <div class="card-visual visual-ruler">
+            <div class="ruler-stick">
+              <div class="ruler-ticks">
+                <span class="tick major"></span><span class="tick"></span><span class="tick"></span><span class="tick"></span><span class="tick mid"></span>
+                <span class="tick major"></span><span class="tick"></span><span class="tick"></span><span class="tick"></span><span class="tick mid"></span>
+                <span class="tick major"></span><span class="tick"></span><span class="tick"></span><span class="tick"></span><span class="tick mid"></span>
+                <span class="tick major"></span><span class="tick"></span><span class="tick"></span><span class="tick"></span><span class="tick mid"></span>
+                <span class="tick major"></span><span class="tick"></span><span class="tick"></span><span class="tick"></span><span class="tick mid"></span>
+                <span class="tick major"></span><span class="tick"></span><span class="tick"></span><span class="tick"></span><span class="tick mid"></span>
+              </div>
+              <div class="ruler-pointer" aria-hidden="true">&searr;</div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Card 3: Multi-Slide Class Notes -->
+        <article class="bento-card">
+          <div class="card-head">
+            <h3>Multi-Slide Class Notes</h3>
+            <p>Teachers never erase the board mid-explanation. Every proof, derivation, and diagram is saved across pages in a clean, downloadable PDF notebook.</p>
+          </div>
+          <div class="card-visual visual-notebook">
+            <div class="notebook-sheet">
+              <div class="notebook-header">
+                <span class="nb-dot dot-red"></span>
+                <span class="nb-dot dot-yellow"></span>
+                <span class="nb-dot dot-green"></span>
+              </div>
+              <div class="notebook-paper">
+                <div class="margin-line" aria-hidden="true"></div>
+                <div class="ruled-lines" aria-hidden="true">
+                  <div class="r-line"></div>
+                  <div class="r-line"></div>
+                  <div class="r-line"></div>
+                  <div class="r-line"></div>
+                  <div class="r-line"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Card 4: On-Demand Class Replays -->
+        <article class="bento-card">
+          <div class="card-head">
+            <h3>On-Demand Lesson Replays</h3>
+            <p>Review full class recordings before exams, pause difficult concepts, and jump directly to exact explanations with synchronized audio transcripts.</p>
+          </div>
+          <div class="card-visual visual-audio">
+            <div class="waveform-box">
+              <div class="bars-container" aria-hidden="true">
+                <span class="bar h-1"></span><span class="bar h-2"></span><span class="bar h-4"></span>
+                <span class="bar h-7"></span><span class="bar h-9"></span><span class="bar h-6"></span>
+                <span class="bar h-3"></span><span class="bar h-8"></span><span class="bar h-10"></span>
+                <span class="bar h-5"></span><span class="bar h-4"></span><span class="bar h-8"></span>
+                <span class="bar h-6"></span><span class="bar h-2"></span><span class="bar h-5"></span>
+                <span class="bar h-9"></span><span class="bar h-3"></span><span class="bar h-7"></span>
+              </div>
+              <button type="button" class="audio-play-circle" (click)="toggleAudio()" [attr.aria-label]="isAudioPlaying() ? 'Pause audio demo' : 'Play audio demo'">
+                @if (isAudioPlaying()) {
+                  <span class="pause-icon">❚❚</span>
+                } @else {
+                  <span class="play-icon">▶</span>
+                }
+              </button>
+            </div>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- 4. Interactive Mode Selector -->
+    <section class="mode-selector-section" aria-labelledby="mode-selector-title">
+      <div class="section-title-wrap">
+        <h2 id="mode-selector-title">Interactive Classroom Modes</h2>
+        <p>Switch pedagogical layouts tailored for lectures, peer study pods, and 1-on-1 private mentoring.</p>
+      </div>
+
+      <div class="mode-tabs-capsule" role="tablist" aria-label="Classroom mode selector">
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="activeMode() === 'lecture'"
+          [class.active]="activeMode() === 'lecture'"
+          (click)="setMode('lecture')"
+        >
+          Teacher Lecture
+        </button>
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="activeMode() === 'peer'"
+          [class.active]="activeMode() === 'peer'"
+          (click)="setMode('peer')"
+        >
+          Peer Study Pod
+        </button>
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="activeMode() === 'tutoring'"
+          [class.active]="activeMode() === 'tutoring'"
+          (click)="setMode('tutoring')"
+        >
+          1-on-1 Tutoring
+        </button>
+      </div>
+    </section>
+
+    <!-- 5. Curated Faculty Marketplace -->
+    <section class="marketplace-section" aria-labelledby="marketplace-title">
+      <div class="marketplace-head">
+        <div class="head-text">
+          <h2 id="marketplace-title">Learn from Verified Specialists</h2>
+          <p>Connect with leading professors, Olympiad mentors, and domain researchers across STEM.</p>
+        </div>
+        <div class="marketplace-actions">
+          <a routerLink="/teachers" class="view-all-link">Browse All Faculty &rarr;</a>
+        </div>
+      </div>
+
+      <div class="instructors-4-grid">
+        @for (faculty of facultyMembers; track faculty.id) {
+        <article class="instructor-card" [attr.data-teacher]="faculty.id">
+          <!-- Glassmorphic Rate Pill Top Right -->
+          <div class="rate-badge-pill">
+            <span class="rate-amount">${{ faculty.hourlyRate }}</span>
+            <span class="rate-unit">/hr</span>
+          </div>
+
+          <!-- Avatar with Gradient Glow Ring & Pulsing Status -->
+          <div class="instructor-avatar-wrap">
+            <div class="avatar-ring">
+              <img
+                [src]="faculty.photoUrl"
+                [alt]="faculty.name"
+                class="avatar-photo"
+                [class.avatar-sarah]="faculty.isSarahChen"
+              />
+            </div>
+            <span class="status-live-dot" title="Online & Available for Trial" aria-hidden="true">
+              <span class="dot-ping"></span>
+            </span>
+          </div>
+
+          <!-- Top Info Group -->
+          <div class="card-info-group">
+            <div class="name-badge-row">
+              <h3 class="instructor-name">{{ faculty.name }}</h3>
+              <svg class="verified-badge-icon" viewBox="0 0 20 20" fill="currentColor" aria-label="Verified instructor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" />
+              </svg>
+            </div>
+            <p class="instructor-title-sub">{{ faculty.title }}</p>
+          </div>
+
+          <!-- Subject & Specialization Tags (Uniform Reserved Height) -->
+          <div class="instructor-tags-row">
+            <span class="tag-chip">{{ faculty.subject }}</span>
+            <span class="tag-chip">{{ faculty.tag }}</span>
+          </div>
+
+          <!-- Bottom Actions (Pushed to bottom with margin-top: auto for perfect alignment) -->
+          <div class="card-bottom-actions">
+            <!-- 5 Golden Rating Stars with Review Count -->
+            <div class="star-rating-row" aria-label="5 stars rating">
+              <div class="stars-flex" aria-hidden="true">
+                <span class="star">★</span>
+                <span class="star">★</span>
+                <span class="star">★</span>
+                <span class="star">★</span>
+                <span class="star">★</span>
+              </div>
+              <span class="rating-num">{{ faculty.rating }}</span>
+              <span class="reviews-count">({{ faculty.reviewsCount }})</span>
+            </div>
+
+            <!-- Modern Animated Gradient CTA Button -->
+            <a
+              routerLink="/teachers"
+              [queryParams]="{ teacher: faculty.id }"
+              class="btn-booking"
+              aria-label="Book Trial Class with {{ faculty.name }}"
+            >
+              <span>Book Trial Class</span>
+              <span class="btn-arrow" aria-hidden="true">&rarr;</span>
+            </a>
+          </div>
+        </article>
+        }
+      </div>
+    </section>
+
+    <!-- 6. Student Journey: How Classes Work -->
+    <section id="how-it-works" class="workflow-section" aria-labelledby="workflow-title">
+      <div class="section-title-wrap">
+        <p class="section-eyebrow">STUDENT JOURNEY</p>
+        <h2 id="workflow-title">How Learning on Sapiovian Works</h2>
+        <p>Three straightforward steps from discovery to mastering advanced topics.</p>
+      </div>
+
+      <div class="workflow-grid">
+        @for (step of steps; track step.step) {
+        <div class="workflow-card">
+          <span class="step-num">{{ step.step }}</span>
+          <h3>{{ step.title }}</h3>
+          <p>{{ step.body }}</p>
+        </div>
+        }
+      </div>
+    </section>
+
+    <!-- 7. Frequently Asked Questions -->
+    <section id="faq" class="faq-section" aria-labelledby="faq-title">
+      <div class="section-title-wrap">
+        <p class="section-eyebrow">COMMON QUESTIONS</p>
+        <h2 id="faq-title">Frequently Asked Questions</h2>
+        <p>Everything you need to know about attendance, hardware, recordings, and tutoring.</p>
+      </div>
+
+      <div class="faq-accordion-wrap">
+        @for (faq of faqs; track faq.question; let i = $index) {
+        <div class="faq-item" [class.open]="openFaqIndex() === i">
+          <button type="button" class="faq-trigger" (click)="toggleFaq(i)" [attr.aria-expanded]="openFaqIndex() === i">
+            <span>{{ faq.question }}</span>
+            <span class="faq-chevron" aria-hidden="true">{{ openFaqIndex() === i ? '−' : '+' }}</span>
+          </button>
+          @if (openFaqIndex() === i) {
+          <div class="faq-content">
+            <p>{{ faq.answer }}</p>
+          </div>
+          }
+        </div>
+        }
+      </div>
+    </section>
+
+    <!-- 8. Dynamic CMS Sections (Rendered if configured in Admin Portal) -->
+    @for (block of homeSections(); track block.blockId || $index) {
+    <section class="cms-block-section">
+      <h3>{{ block.title }}</h3>
+      <div [innerHTML]="block.body"></div>
+    </section>
     }
-  </section>
-  }
-  <section
-    class="teacher-section section"
-    id="for-teachers"
-    aria-labelledby="teacher-title"
-  >
-    <div>
-      <p class="eyebrow">For teachers</p>
-      <h2 id="teacher-title">Teach on Sapiovian</h2>
-      <p>
-        Set up your profile, organize class groups and teach online. Manage
-        schedules, assignments and recordings from your teaching dashboard.
-      </p>
+
+  </main>
+
+  <!-- 9. Production SaaS 5-Column Footer -->
+  <footer class="mockup-footer" role="contentinfo">
+    <div class="footer-cols-wrap">
+      
+      <!-- Col 1: Sapiovian Brand & Mission -->
+      <div class="footer-col col-brand">
+        <sfu-brand-logo />
+        <p class="brand-desc">Next-generation real-time academic learning platform powered by Native WebRTC SFU technology, sub-100ms vector whiteboards, and verified STEM faculty.</p>
+      </div>
+
+      <!-- Col 2: Classroom Features -->
+      <div class="footer-col">
+        <h4>Classroom</h4>
+        <ul>
+          <li><a routerLink="/whiteboard">Vector Whiteboard</a></li>
+          <li><a routerLink="/whiteboard">Adaptive Simulcast</a></li>
+          <li><a routerLink="/teachers">Peer Study Pods</a></li>
+          <li><a routerLink="/teachers">1-on-1 Mentorship</a></li>
+        </ul>
+      </div>
+
+      <!-- Col 3: Teaching Faculty -->
+      <div class="footer-col">
+        <h4>Faculty & Topics</h4>
+        <ul>
+          <li><a routerLink="/teachers" [queryParams]="{ subject: 'math' }">Mathematics</a></li>
+          <li><a routerLink="/teachers" [queryParams]="{ subject: 'physics' }">Physics & Olympiads</a></li>
+          <li><a routerLink="/teachers" [queryParams]="{ subject: 'cs' }">Computer Science</a></li>
+          <li><a routerLink="/teachers">Apply as Teacher</a></li>
+        </ul>
+      </div>
+
+      <!-- Col 4: Platform & Access -->
+      <div class="footer-col">
+        <h4>Portals</h4>
+        <ul>
+          <li><a routerLink="/student/login">Student Sign In</a></li>
+          <li><a routerLink="/teacher/dashboard">Teacher Dashboard</a></li>
+          <li><a routerLink="/whiteboard">Whiteboard Studio</a></li>
+          <li><a href="#faq">Help & Support</a></li>
+        </ul>
+      </div>
+
+      <!-- Col 5: Legal & Infrastructure -->
+      <div class="footer-col">
+        <h4>Trust & Security</h4>
+        <ul>
+          <li><a routerLink="/">Privacy Policy</a></li>
+          <li><a routerLink="/">Terms of Service</a></li>
+          <li><a routerLink="/">Security & Coturn Relay</a></li>
+          <li><span class="uptime-badge">&bull; 99.98% System Uptime</span></li>
+        </ul>
+      </div>
+
     </div>
-    <div class="teacher-actions">
-      <a class="solid-link" routerLink="/contact-us"
-        >Contact us about teaching</a
-      ><a class="text-link" routerLink="/teacher/login">Teacher login</a>
+
+    <!-- Bottom Attribution Bar -->
+    <div class="footer-bottom-bar">
+      <span class="inspired-text">&copy; {{ 2026 }} Sapiovian Inc. All rights reserved.</span>
+      <div class="footer-social-icons">
+        <a routerLink="/whiteboard" class="footer-status-pill">WebRTC SFU: Operational</a>
+      </div>
     </div>
-  </section>
-  <section class="faq-section section" aria-labelledby="faq-title">
-    <div>
-      <h2 id="faq-title">Before your first class</h2>
-      <a class="text-link" routerLink="/help">Visit the help center</a>
-    </div>
-    <div class="faq-list">
-      @for (faq of faqs; track faq.question) {
-      <details>
-        <summary>{{ faq.question }}<span aria-hidden="true">+</span></summary>
-        <p>{{ faq.answer }}</p>
-      </details>
-      }
-    </div>
-  </section>
-</main>
-<sfu-footer />
+  </footer>
+
+</div>

@@ -5,6 +5,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  HostListener,
   inject,
   signal,
   viewChild,
@@ -25,6 +26,13 @@ export class Header {
   private readonly menuButton =
     viewChild<ElementRef<HTMLButtonElement>>('menuButton');
   protected readonly menuOpen = signal(false);
+  protected readonly isScrolled = signal(false);
+
+  @HostListener('window:scroll')
+  onWindowScroll(): void {
+    const scrollY = typeof window !== 'undefined' ? window.scrollY : 0;
+    this.isScrolled.set(scrollY > 20);
+  }
   protected toggleMenu(): void {
     this.menuOpen.update((open) => !open);
   }

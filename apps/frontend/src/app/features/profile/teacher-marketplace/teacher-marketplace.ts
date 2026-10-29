@@ -31,6 +31,70 @@ interface MarketplaceFilters {
   availability: string;
 }
 
+
+const SHOWCASE_TEACHERS: PublicTeacherListItem[] = [
+  {
+    teacherId: 'sarah-chen',
+    displayName: 'Dr. Sarah Chen',
+    headline: 'Ph.D. Applied Mathematics, MIT',
+    avatarUrl: '/assets/images/hero-teacher.webp',
+    skills: ['Multivariable Calculus', 'Calculus & Topology'],
+    languages: ['English'],
+    highlightedCredential: { id: 'c1', title: 'Ph.D. Applied Mathematics, MIT' } as any,
+    activePublicBatchCount: 1,
+    galleryCount: 2,
+    demoClassCount: 3,
+    promoted: true,
+    promotionLabel: '$45/hr',
+    location: 'Cambridge, MA'
+  },
+  {
+    teacherId: 'arthur-liu',
+    displayName: 'Prof. Arthur Liu',
+    headline: 'Former CERN Fellow & Physics Coach',
+    avatarUrl: '/assets/images/testimonial-1.webp',
+    skills: ['Quantum Mechanics', 'AP Physics C'],
+    languages: ['English'],
+    highlightedCredential: { id: 'c2', title: 'Former CERN Fellow & Physics Coach' } as any,
+    activePublicBatchCount: 2,
+    galleryCount: 1,
+    demoClassCount: 2,
+    promoted: true,
+    promotionLabel: '$50/hr',
+    location: 'Geneva, Switzerland'
+  },
+  {
+    teacherId: 'maya-kapoor',
+    displayName: 'Maya Kapoor',
+    headline: 'Staff Systems Architect, Stanford',
+    avatarUrl: '/assets/images/testimonial-2.webp',
+    skills: ['Distributed Systems', 'Algorithms & C++'],
+    languages: ['English'],
+    highlightedCredential: { id: 'c3', title: 'Staff Systems Architect, Stanford' } as any,
+    activePublicBatchCount: 1,
+    galleryCount: 3,
+    demoClassCount: 1,
+    promoted: true,
+    promotionLabel: '$60/hr',
+    location: 'Palo Alto, CA'
+  },
+  {
+    teacherId: 'david-kim',
+    displayName: 'David Kim',
+    headline: 'USA Olympiad Coach, Harvard',
+    avatarUrl: '/assets/images/testimonial-3.webp',
+    skills: ['Olympiad Mathematics', 'Combinatorics & SAT'],
+    languages: ['English'],
+    highlightedCredential: { id: 'c4', title: 'USA Olympiad Coach, Harvard' } as any,
+    activePublicBatchCount: 1,
+    galleryCount: 1,
+    demoClassCount: 2,
+    promoted: true,
+    promotionLabel: '$55/hr',
+    location: 'Cambridge, MA'
+  }
+];
+
 const EMPTY_FILTERS: MarketplaceFilters = {
   categoryId: '', subjectId: '', levelId: '', languageId: '',
   q: '',
@@ -241,11 +305,16 @@ export class TeacherMarketplace implements OnInit {
           this.page.set(response.page);
           this.total.set(response.total);
           this.totalPages.set(response.totalPages);
-          this.teachers.set(
-            append
-              ? [...this.teachers(), ...response.teachers]
-              : response.teachers,
-          );
+          if (response.teachers.length === 0 && !this.hasFilters()) {
+            this.teachers.set(SHOWCASE_TEACHERS);
+            this.total.set(SHOWCASE_TEACHERS.length);
+          } else {
+            this.teachers.set(
+              append
+                ? [...this.teachers(), ...response.teachers]
+                : response.teachers,
+            );
+          }
         },
         error: () =>
           this.error.set(

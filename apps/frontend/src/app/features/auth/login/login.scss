@@ -12,32 +12,61 @@ header {
 
 h1 {
   margin: 0;
-  font-size: 29px;
-  font-weight: 650;
-  letter-spacing: -.035em;
+  font-size: 28px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  color: var(--text);
 }
 
 .eyebrow {
-  margin: 0 0 4px;
-  color: var(--success);
+  margin: 0 0 6px;
+  color: var(--brand-green);
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 a {
-  color: var(--accent);
-  font-size: 14px;
-  font-weight: 700;
+  color: var(--brand-rose);
+  font-size: 13px;
+  font-weight: 650;
   text-decoration: none;
+  transition: opacity 0.15s ease;
+
+  &:hover {
+    opacity: 0.85;
+  }
+}
+
+header > a {
+  font-size: 12.5px;
+  text-align: right;
+  padding-top: 4px;
 }
 
 label {
   display: grid;
-  gap: 6px;
+  gap: 7px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+input:not([type="checkbox"]) {
+  min-height: 44px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 0 14px;
+  font-size: 14px;
+  transition: border-color 0.15s ease;
+
+  &:focus {
+    border-color: var(--brand-rose);
+    outline: none;
+  }
 }
 
 .password-field {
@@ -62,24 +91,14 @@ label {
   border: none;
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
-  line-height: 1;
   padding: 4px;
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
 
-.password-toggle:hover,
-.password-toggle:focus-visible {
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.password-toggle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  &:hover {
+    color: var(--text);
+  }
 }
 
 .remember-row {
@@ -100,13 +119,14 @@ label {
 .checkbox-row input {
   width: 18px;
   height: 18px;
-  accent-color: var(--accent);
+  accent-color: var(--brand-rose);
 }
 
 .error {
   margin: 0;
   color: var(--danger);
   font-weight: 600;
+  font-size: 13px;
   white-space: pre-line;
 }
 
@@ -116,7 +136,20 @@ label {
   font-size: 13px;
 }
 
-.auth-panel > .primary { min-height: 46px; font-weight: 650; }
-.auth-panel input:not([type="checkbox"]) { min-height: 46px; }
-.password-toggle:not(:disabled):hover { transform: translateY(-50%); box-shadow: none; }
-header > a { font-size: 12px; text-align: right; }
+.auth-panel > .primary {
+  min-height: 46px;
+  font-weight: 650;
+  font-size: 14px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, var(--brand-rose) 0%, var(--brand-coral) 100%);
+  border: none;
+  color: #ffffff;
+  box-shadow: 0 4px 16px rgba(242, 96, 118, 0.4);
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 22px rgba(242, 96, 118, 0.6);
+  }
+}

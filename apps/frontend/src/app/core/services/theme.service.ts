@@ -43,7 +43,7 @@ export class ThemeService {
     if (storedTheme) {
       return storedTheme;
     }
-    return 'system';
+    return 'dark';
   }
 
   private systemTheme(): EffectiveTheme {
