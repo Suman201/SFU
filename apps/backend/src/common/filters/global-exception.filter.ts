@@ -1,74 +1,150 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
+import {
+  ERROR_CATALOG,
+  errorCodeForStatus,
+  errorPath,
+  errorReference,
+  type ApiErrorBody,
+  type ErrorField,
+} from '@native-sfu/contracts';
 import { Request } from 'express';
-import { REQUEST_ID_HEADER } from '../middleware/request-id.middleware';
-
-interface ErrorResponseBody {
-  success: false;
-  message: string;
-  errors: unknown[];
-  statusCode: number;
-  path: string;
-  timestamp: string;
-  requestId: string;
-}
+import { ErrorsService } from '../../errors/errors.service';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
-
-  constructor(private readonly httpAdapterHost: HttpAdapterHost) {}
+  constructor(
+    private readonly httpAdapterHost: HttpAdapterHost,
+    private readonly incidents?: ErrorsService,
+  ) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const { httpAdapter } = this.httpAdapterHost;
     const context = host.switchToHttp();
     const request = context.getRequest<Request>();
-    const statusCode = exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
-    const response = exception instanceof HttpException ? exception.getResponse() : undefined;
-    const errors = extractErrors(response);
-    const message = extractMessage(response, statusCode);
-    const body: ErrorResponseBody = {
+    const rawStatus =
+      exception instanceof HttpException
+        ? exception.getStatus()
+        : parserStatus(exception);
+    const statusCode =
+      rawStatus >= 400 && rawStatus <= 599
+        ? rawStatus
+        : HttpStatus.INTERNAL_SERVER_ERROR;
+    const response =
+      exception instanceof HttpException ? exception.getResponse() : undefined;
+    const errors = statusCode < 500 ? extractFields(response) : [];
+    const path = errorPath(request.url);
+    const code =
+      statusCode === 401 && path.endsWith('/auth/login')
+        ? 'INVALID_CREDENTIALS'
+        : errorCodeForStatus(statusCode);
+    const info = ERROR_CATALOG[code];
+    const body: ApiErrorBody = {
       success: false,
-      message,
+      code,
+      title: info.title,
+      message:
+        statusCode >= 500 || code === 'INVALID_CREDENTIALS'
+          ? info.message
+          : extractMessage(response, statusCode, info.message),
+      nextStep: info.nextStep,
       errors,
       statusCode,
-      path: request.url,
+      path,
       timestamp: new Date().toISOString(),
-      requestId: String(request.id ?? request.header(REQUEST_ID_HEADER) ?? 'unknown')
+      requestId: errorReference(String(request.id ?? '')) ?? randomUUID(),
     };
-
-    if (!(exception instanceof HttpException)) {
-      const error = exception instanceof Error ? exception : new Error(String(exception));
-      this.logger.error(
-        `${request.method} ${request.url} failed (requestId=${body.requestId}): ${error.message}`,
-        error.stack
-      );
+    if (statusCode >= 500) {
+      try {
+        if (this.incidents)
+          this.incidents.capture(body, exception, request as never);
+        else this.logFallback(body);
+      } catch {
+        this.logFallback(body);
+      }
     }
-
-    httpAdapter.reply(context.getResponse(), body, statusCode);
+    const res = context.getResponse();
+    httpAdapter.setHeader?.(res, 'x-request-id', body.requestId);
+    httpAdapter.setHeader?.(res, 'Cache-Control', 'no-store');
+    httpAdapter.reply(res, body, statusCode);
+  }
+  private logFallback(body: ApiErrorBody): void {
+    this.logger.error({
+      event: 'application_error',
+      code: body.code,
+      requestId: body.requestId,
+      path: body.path,
+      statusCode: body.statusCode,
+    });
   }
 }
-
-function extractMessage(response: unknown, statusCode: number): string {
-  if (typeof response === 'object' && response !== null && 'message' in response) {
-    const value = (response as { message?: unknown }).message;
-    if (Array.isArray(value)) {
-      return statusCode === HttpStatus.BAD_REQUEST ? 'Validation failed' : value.join(', ');
-    }
-    if (typeof value === 'string') {
-      return value;
-    }
+function parserStatus(error: unknown): number {
+  // Express body-parser errors are not Nest HttpExceptions. Never turn malformed JSON into a 500.
+  if (error && typeof error === 'object' && 'type' in error) {
+    const type = (error as { type?: string }).type;
+    if (type === 'entity.too.large') return 413;
+    if (type === 'entity.parse.failed') return 400;
   }
-  if (typeof response === 'string') {
-    return response;
-  }
-  return statusCode === HttpStatus.INTERNAL_SERVER_ERROR ? 'Internal server error' : 'Request failed';
+  return 500;
 }
-
-function extractErrors(response: unknown): unknown[] {
-  if (typeof response === 'object' && response !== null && 'message' in response) {
-    const value = (response as { message?: unknown }).message;
-    return Array.isArray(value) ? value : [];
+function extractMessage(
+  response: unknown,
+  status: number,
+  fallback: string,
+): string {
+  const value =
+    typeof response === 'object' && response !== null && 'message' in response
+      ? (response as { message?: unknown }).message
+      : response;
+  if (Array.isArray(value))
+    return status === 400 || status === 422 ? 'Validation failed' : fallback;
+  return typeof value === 'string' && value.trim()
+    ? value.slice(0, 600)
+    : fallback;
+}
+function extractFields(response: unknown): ErrorField[] {
+  const value =
+    typeof response === 'object' && response !== null && 'message' in response
+      ? (response as { message?: unknown }).message
+      : undefined;
+  if (!Array.isArray(value)) return [];
+  const fields: ErrorField[] = [];
+  function walk(items: unknown[], parent = '', depth = 0): void {
+    if (depth > 6 || fields.length >= 30) return;
+    for (const item of items.slice(0, 30)) {
+      if (typeof item === 'string') {
+        fields.push({ field: '', message: item.slice(0, 300) });
+        continue;
+      }
+      if (!item || typeof item !== 'object') continue;
+      const row = item as {
+        property?: unknown;
+        constraints?: unknown;
+        children?: unknown;
+      };
+      const key =
+        typeof row.property === 'string'
+          ? row.property.replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 100)
+          : '';
+      const field = parent && key ? `${parent}.${key}` : key || parent;
+      if (row.constraints && typeof row.constraints === 'object') {
+        for (const message of Object.values(row.constraints).slice(0, 8)) {
+          if (typeof message === 'string' && fields.length < 30)
+            fields.push({ field, message: message.slice(0, 300) });
+        }
+      }
+      if (Array.isArray(row.children)) walk(row.children, field, depth + 1);
+    }
   }
-  return [];
+  walk(value);
+  return fields.slice(0, 30);
 }

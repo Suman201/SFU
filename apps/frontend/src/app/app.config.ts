@@ -1,3 +1,5 @@
+import { appErrorModule } from './core/services/error-module';
+import { errorInterceptor } from '@sapiovian/error-ui';
 import { ViewportScroller } from '@angular/common';
 import {
   ApplicationConfig,
@@ -17,9 +19,10 @@ import { routes } from './app.routes';
 
 export const appConfig: ApplicationConfig = {
   providers: [
+    appErrorModule(),
     provideZonelessChangeDetection(),
     provideAnimations(),
-    provideHttpClient(withXhr(), withInterceptors([authInterceptor])),
+    provideHttpClient(withXhr(), withInterceptors([errorInterceptor, authInterceptor])),
     provideAppInitializer(() => inject(ViewportScroller).setOffset([0, 96])),
     provideRouter(
       routes,

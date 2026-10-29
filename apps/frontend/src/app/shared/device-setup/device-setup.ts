@@ -1,3 +1,4 @@
+import { ErrorCenter } from '@sapiovian/error-ui';
 import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, OnInit, ViewChild, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { WebRtcService } from '../../core/services/webrtc.service';
@@ -17,6 +18,7 @@ export class DeviceSetupComponent implements OnInit, OnDestroy {
   protected readonly displayedCamera = computed(() => this.previewVisible() ? this.borrowedPreview() ?? this.cameraStream() : null);
   readonly microphoneSelected = output<string>();
   readonly cameraSelected = output<string>();
+  private readonly errors = inject(ErrorCenter);
   protected readonly webrtc = inject(WebRtcService);
   protected readonly microphoneStream = signal<MediaStream | null>(null);
   protected readonly cameraStream = signal<MediaStream | null>(null);
@@ -144,6 +146,7 @@ export class DeviceSetupComponent implements OnInit, OnDestroy {
   }
   private permissionMessage(error: unknown, device: string): string {
     const name = error instanceof DOMException ? error.name : '';
+    this.errors.capture(error, { quiet: true, code: name === 'NotAllowedError' || name === 'SecurityError' ? 'DEVICE_PERMISSION_DENIED' : name === 'NotFoundError' || name === 'OverconstrainedError' ? 'DEVICE_NOT_FOUND' : 'DEVICE_BUSY' });
     if (name === 'NotAllowedError') return `Allow ${device} access in system privacy settings, then try again.`;
     if (name === 'NotFoundError' || name === 'OverconstrainedError') return `The selected ${device} is unavailable. Connect it or choose System default.`;
     return `The ${device} could not start. Close other apps using it and try again.`;

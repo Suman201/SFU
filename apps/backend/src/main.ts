@@ -6,6 +6,7 @@ import { HttpAdapterHost } from '@nestjs/core';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
+import { ErrorsService } from './errors/errors.service';
 import { AppModule } from './app.module';
 import { buildPublicRouteExclusions } from './bootstrap/public-routes';
 import { whiteboardBodyParser } from './bootstrap/whiteboard-body-parser';
@@ -37,7 +38,8 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
   app.enableCors({
     origin: allowedOrigins,
-    credentials: true
+    credentials: true,
+    exposedHeaders: ['x-request-id'],
   });
   const metricsPath = config.get<string>('metrics.path', 'metrics');
   app.setGlobalPrefix('api', {
@@ -59,7 +61,7 @@ async function bootstrap(): Promise<void> {
       })))
     })
   );
-  app.useGlobalFilters(new GlobalExceptionFilter(app.get(HttpAdapterHost)));
+  app.useGlobalFilters(new GlobalExceptionFilter(app.get(HttpAdapterHost), app.get(ErrorsService)));
   app.useGlobalInterceptors(new SuccessResponseInterceptor());
 
   if (config.get<boolean>('swagger.enabled', true)) {

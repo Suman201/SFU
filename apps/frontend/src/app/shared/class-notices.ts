@@ -156,7 +156,7 @@ export class ClassNotices {
     if (this.open()) this.refresh();
   }
   protected refresh() {
-    this.api.notices().subscribe({
+    this.api.notices(!this.open()).subscribe({
       next: (n) => {
         this.notices.set(n);
         this.error.set('');

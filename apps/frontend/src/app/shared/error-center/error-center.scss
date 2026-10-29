@@ -1,0 +1,250 @@
+:host {
+  color: var(--text, #17201d);
+  font-family: inherit;
+}
+button {
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+}
+button:focus-visible,
+summary:focus-visible,
+pre:focus-visible {
+  outline: 3px solid #458b73;
+  outline-offset: 3px;
+}
+.offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2200;
+  background: #ffd150;
+  color: #2d2818;
+  padding: 10px 18px;
+  text-align: center;
+  font-size: 13px;
+}
+.error-notice {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 2100;
+  display: flex;
+  gap: 12px;
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100dvh - 60px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--line, #dbe4e0);
+  border-left: 3px solid #f26076;
+  border-radius: 10px;
+  background: var(--panel, white);
+  box-shadow: 0 12px 36px #0002;
+}
+.notice-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #f260761c;
+  color: var(--text, #17201d);
+  font-weight: 700;
+}
+.notice-content {
+  flex: 1;
+  min-width: 0;
+}
+strong {
+  font-size: 14px;
+}
+p {
+  line-height: 1.55;
+}
+.notice-content p {
+  margin: 7px 0;
+  font-size: 13px;
+}
+small {
+  display: block;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted, #67746f);
+}
+.close {
+  border: 0;
+  background: none;
+  font-size: 24px;
+  line-height: 1;
+  padding: 0 4px;
+  align-self: flex-start;
+  min-height: 28px;
+  min-width: 28px;
+}
+.notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+.notice-actions button {
+  border: 1px solid var(--line, #dbe4e0);
+  border-radius: 5px;
+  padding: 7px 10px;
+  background: var(--panel, #fff);
+  font-size: 12px;
+  font-weight: 600;
+}
+.reference {
+  color: var(--muted, #67746f);
+  font:
+    10px ui-monospace,
+    monospace;
+  overflow-wrap: anywhere;
+}
+.recent-button {
+  position: fixed;
+  right: 20px;
+  bottom: 16px;
+  z-index: 2090;
+  padding: 8px 12px;
+  border: 1px solid var(--line, #dbe4e0);
+  border-radius: 6px;
+  background: var(--panel, #fff);
+  box-shadow: 0 3px 10px #0001;
+  font-size: 12px;
+}
+.error-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  padding: 24px;
+  color: var(--text, #17201d);
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, #dbe4e0);
+  border-radius: 12px;
+  box-shadow: 0 18px 64px #0003;
+}
+.error-dialog::backdrop {
+  background: #091a1480;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--muted, #67746f);
+  margin: 0 0 9px;
+}
+h2 {
+  margin: 0;
+  font-size: 23px;
+  line-height: 1.2;
+  letter-spacing: -0.6px;
+}
+.description {
+  font-size: 14px;
+  margin: 18px 0;
+}
+.next-step {
+  padding: 14px;
+  background: color-mix(in srgb, #458b73 9%, var(--panel, white));
+  border-left: 2px solid #458b73;
+  border-radius: 5px;
+}
+.next-step p {
+  font-size: 13px;
+  margin: 6px 0 0;
+}
+dl {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  margin: 22px 0;
+  font-size: 12px;
+}
+dl > div {
+  display: grid;
+  grid-template-columns: 85px minmax(0, 1fr);
+  gap: 10px;
+}
+dt {
+  color: var(--muted, #67746f);
+}
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    11px/1.7 ui-monospace,
+    monospace;
+  padding: 12px;
+  background: var(--bg, #f6f8f7);
+  border: 1px solid var(--line, #dbe4e0);
+  border-radius: 5px;
+}
+.privacy,
+.report-status {
+  color: var(--muted, #67746f);
+  font-size: 11px;
+  margin: 13px 0 0;
+}
+footer {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+footer button {
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--line, #dbe4e0);
+  font-size: 12px;
+}
+.primary {
+  background: #458b73;
+  color: white;
+  border-color: transparent !important;
+}
+.secondary {
+  background: var(--panel, #fff);
+}
+button:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+.field-errors {
+  font-size: 12px;
+  padding-left: 18px;
+  line-height: 1.8;
+}
+.field-errors strong {
+  font-size: inherit;
+}
+@media (max-width: 600px) {
+  .error-notice {
+    bottom: 16px;
+    right: 16px;
+    padding: 16px;
+  }
+  .error-dialog {
+    padding: 20px;
+  }
+  h2 {
+    font-size: 21px;
+  }
+}

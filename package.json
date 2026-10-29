@@ -69,9 +69,11 @@
     "verify:tutor-onboarding": "node scripts/tutor-onboarding-readiness.cjs",
     "setup:tutor-verification": "node scripts/setup-tutor-verification.cjs",
     "setup:invoices": "node scripts/setup-invoices.cjs",
-    "setup:scheduling": "node scripts/setup-scheduling.cjs"
+    "setup:scheduling": "node scripts/setup-scheduling.cjs",
+    "setup:errors": "node scripts/setup-errors.cjs"
   },
   "devDependencies": {
+    "@angular/compiler": "22.0.1",
     "@playwright/test": "^1.61.0"
   }
 }

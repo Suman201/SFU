@@ -1,3 +1,6 @@
+import { showBootstrapError } from '@sapiovian/error-ui';
+import { appErrorModule } from './app/core/services/error-module';
+import { errorInterceptor } from '@sapiovian/error-ui';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideAnimations } from '@angular/platform-browser/animations';
@@ -15,4 +18,4 @@ const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'desktop' },
   { path: '**', redirectTo: 'desktop' }
 ];
-bootstrapApplication(AppComponent, { providers: [provideZonelessChangeDetection(), provideAnimations(), provideHttpClient(withXhr(), withInterceptors([authInterceptor])), provideRouter(routes)] }).catch((error) => console.error(error));
+bootstrapApplication(AppComponent, { providers: [appErrorModule(), provideZonelessChangeDetection(), provideAnimations(), provideHttpClient(withXhr(), withInterceptors([errorInterceptor, authInterceptor])), provideRouter(routes)] }).catch(showBootstrapError);

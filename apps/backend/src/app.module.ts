@@ -1,3 +1,5 @@
+import { ErrorsModule } from './errors/errors.module';
+import { errorPath, errorReference } from '@native-sfu/contracts';
 import { SchedulingModule } from './scheduling/scheduling.module';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
@@ -67,9 +69,9 @@ import { UsersModule } from './users/users.module';
         pinoHttp: {
           level: config.get<string>('logging.level', config.get<string>('app.nodeEnv') === 'production' ? 'info' : 'debug'),
           transport: config.get<string>('app.nodeEnv') === 'production' ? undefined : { target: 'pino-pretty', options: { singleLine: true } },
-          genReqId: (request: IncomingMessage) => request.headers['x-request-id']?.toString() ?? randomUUID(),
+          genReqId: (request: IncomingMessage) => errorReference(request.headers['x-request-id']) ?? randomUUID(),
           customProps: (request: IncomingMessage) => ({ requestId: String((request as { id?: string | number }).id ?? '') }),
-          serializers: {req: (request: {url?:string; query?:unknown; [key:string]:unknown}) => request.url?.split('?')[0]?.endsWith('/calendar/google/callback') ? {...request,url:request.url.split('?')[0],query:undefined} : request},
+          serializers: { req: (request: { id?: string; method?: string; url?: string }) => ({ id: request.id, method: request.method, url: errorPath(request.url) }) },
           redact: {
             censor: '[REDACTED]',
             paths: [
@@ -117,6 +119,7 @@ import { UsersModule } from './users/users.module';
       })
     }),
     DatabaseModule,
+    ErrorsModule,
     DesktopModule,
     RedisModule,
     MetricsModule,

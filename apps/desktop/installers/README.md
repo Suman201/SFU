@@ -14,6 +14,8 @@ These are unsigned development installers for the local backend at `http://127.0
 
 All four packaged app architectures contain the same verified frontend bytes. The shared website/app now includes the free WTS month/week calendar, mobile agenda, timezone settings, class notifications, teacher rescheduling/cancellation and student batch discovery/enrollment. Google Calendar connection is optional and disabled until backend OAuth credentials are configured; a live Google account has not been tested. See [class scheduling](../../../docs/class-scheduling.md).
 
+The shared error module is included in the frontend: clear recovery messages, copyable references, offline notices and authenticated issue reports. Administrators can trace reports and server failures in **Error log**. Run the backend error-index setup before production deployment; see [error module and deployment](../../../docs/error-module.md). A public application URL still requires a deployed domain/server; no separate error-reporting site is needed.
+
 The existing classroom, device settings, shared whiteboard and permission-based device whiteboard sharing remain included. No installer or development app was launched during this rebuild. Windows runtime, Apple Silicon runtime and physical whiteboard hardware still need device testing.
 
 `SHA256SUMS` and `manifest.json` identify the exact installer bytes and source digest. Verify with `shasum -a 256 -c SHA256SUMS` on Mac or `Get-FileHash -Algorithm SHA256 'filename.exe'` on Windows. No hosted update feed is configured.

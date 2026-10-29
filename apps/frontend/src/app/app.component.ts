@@ -1,5 +1,12 @@
-import { Component, ChangeDetectionStrategy, inject } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ErrorCenter, ErrorCenterComponent } from '@sapiovian/error-ui';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  effect,
+  inject,
+} from '@angular/core';
+import { NavigationError, Router, RouterOutlet } from '@angular/router';
 import { AuthService } from './core/services/auth.service';
 import { ProfileService } from './core/services/profile.service';
 import { ThemeService } from './core/services/theme.service';
@@ -8,7 +15,7 @@ import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.c
 @Component({
   selector: 'sfu-root',
   standalone: true,
-  imports: [ConfirmDialogComponent, RouterOutlet],
+  imports: [ConfirmDialogComponent, RouterOutlet, ErrorCenterComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @if (auth.checking()) {
@@ -21,6 +28,7 @@ import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.c
       </main>
     }
     <router-outlet />
+    <sapiovian-error-center />
     <sfu-confirm-dialog />
   `,
   styles: [
@@ -70,8 +78,8 @@ import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.c
           transform: rotate(360deg);
         }
       }
-    `
-  ]
+    `,
+  ],
 })
 export class AppComponent {
   protected readonly auth = inject(AuthService);
@@ -79,13 +87,28 @@ export class AppComponent {
   private readonly theme = inject(ThemeService);
 
   constructor() {
+    const errors = inject(ErrorCenter);
+    let previousAccount = this.auth.user()?.id ?? null;
+    effect(() => {
+      const account = this.auth.user()?.id ?? null;
+      if (account !== previousAccount) {
+        previousAccount = account;
+        errors.clear();
+      }
+    });
+    inject(Router)
+      .events.pipe(takeUntilDestroyed())
+      .subscribe((event) => {
+        if (event instanceof NavigationError)
+          errors.capture(event.error, { path: event.url });
+      });
     this.auth.checkSession().subscribe((user) => {
       if (!user) {
         return;
       }
       this.profiles.getMySettings().subscribe({
         next: (settings) => this.theme.setPreference(settings.theme),
-        error: () => undefined
+        error: () => undefined,
       });
     });
   }

@@ -335,7 +335,7 @@ export class ClassCalendar {
     const to = new Date(
       Date.parse(this.dates().at(-1)! + 'T00:00:00Z') + 2 * 86400000,
     ).toISOString();
-    this.api.list(from, to).subscribe({
+    this.api.list(from, to, !showLoading).subscribe({
       next: (rows) => {
         if (version !== this.loadVersion) return;
         const visibleDays = new Set(

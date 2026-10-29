@@ -7,6 +7,9 @@
     "paths": {
       "@native-sfu/contracts": [
         "../../packages/contracts/dist/index.d.ts"
+      ],
+      "@sapiovian/error-ui": [
+        "../frontend/src/app/shared/error-center/index.ts"
       ]
     },
     "useDefineForClassFields": false,

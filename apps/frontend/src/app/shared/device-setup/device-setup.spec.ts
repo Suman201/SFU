@@ -1,3 +1,4 @@
+import { ErrorCenter } from '@sapiovian/error-ui';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { WebRtcService } from '../../core/services/webrtc.service';
@@ -18,7 +19,7 @@ describe('Shared device setup', () => {
       refreshDevices: jasmine.createSpy().and.resolveTo(), selectAudioDevice: jasmine.createSpy(), selectVideoDevice: jasmine.createSpy(), selectSpeakerDevice: jasmine.createSpy().and.resolveTo(), stopCamera: jasmine.createSpy()
     };
     getUserMedia = spyOn(navigator.mediaDevices, 'getUserMedia').and.rejectWith(new DOMException('Unavailable', 'NotFoundError'));
-    TestBed.configureTestingModule({ imports: [DeviceSetupComponent, DeviceSetupDialogComponent], providers: [{ provide: WebRtcService, useValue: media }] });
+    TestBed.configureTestingModule({ imports: [DeviceSetupComponent, DeviceSetupDialogComponent], providers: [{ provide: ErrorCenter, useValue: { capture: jasmine.createSpy('capture') } }, { provide: WebRtcService, useValue: media }] });
     fixture = TestBed.createComponent(DeviceSetupComponent); component = fixture.componentInstance;
   });
   afterEach(() => fixture.destroy());

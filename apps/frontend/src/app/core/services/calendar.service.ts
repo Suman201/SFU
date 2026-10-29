@@ -1,4 +1,5 @@
-import { HttpClient } from '@angular/common/http';
+import { QUIET_ERROR } from '@sapiovian/error-ui';
+import { HttpContext, HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { map } from 'rxjs';
 import type {
@@ -14,11 +15,11 @@ const unwrap = <T>(r: T | { data: T }): T =>
 @Injectable({ providedIn: 'root' })
 export class CalendarApi {
   private readonly http = inject(HttpClient);
-  list(from: string, to: string) {
+  list(from: string, to: string, quiet = false) {
     return this.http
       .get<
         CalendarClass[] | { data: CalendarClass[] }
-      >(`${API_BASE_URL}/calendar/classes`, { params: { from, to } })
+      >(`${API_BASE_URL}/calendar/classes`, { params: { from, to }, context: new HttpContext().set(QUIET_ERROR, quiet) })
       .pipe(map(unwrap));
   }
   change(item: CalendarClass, request: CalendarChangeRequest) {
@@ -27,11 +28,11 @@ export class CalendarApi {
       request,
     );
   }
-  notices() {
+  notices(quiet = true) {
     return this.http
       .get<
         ClassNotice[] | { data: ClassNotice[] }
-      >(`${API_BASE_URL}/calendar/notices`)
+      >(`${API_BASE_URL}/calendar/notices`, { context: new HttpContext().set(QUIET_ERROR, quiet) })
       .pipe(map(unwrap));
   }
   read(id: string) {

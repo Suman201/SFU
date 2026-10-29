@@ -1,0 +1,245 @@
+<main class="errors-page">
+  <header class="page-heading">
+    <div>
+      <p class="eyebrow">PLATFORM HEALTH</p>
+      <h1>Error log</h1>
+      <p>Understand failures, trace a reference and keep track of the fix.</p>
+    </div>
+    <button
+      class="secondary-button"
+      type="button"
+      [disabled]="loading()"
+      (click)="load(page())"
+    >
+      {{ loading() ? 'Refreshing…' : 'Refresh' }}
+    </button>
+  </header>
+  <div class="log-note">
+    <span class="note-icon" aria-hidden="true">i</span>
+    <p>
+      Server failures are recorded automatically. Website and app entries
+      contain technical details reported by a user or an unexpected page error.
+    </p>
+  </div>
+  @if (failure()) {
+  <p role="alert" class="feedback">{{ failure() }}</p>
+  } @if (message()) {
+  <p role="status" class="feedback">{{ message() }}</p>
+  }
+  <section class="data-table-shell" aria-label="Error records">
+    <form class="data-table-toolbar" (ngSubmit)="load()">
+      <label class="reference-filter"
+        >Find a reference<input
+          name="reference"
+          [(ngModel)]="reference"
+          placeholder="Paste the complete reference ID"
+          maxlength="128"
+      /></label>
+      <label
+        >Status<select
+          name="status"
+          [(ngModel)]="status"
+          (ngModelChange)="load()"
+        >
+          <option value="all">All statuses</option>
+          <option value="open">Open</option>
+          <option value="resolved">Resolved</option>
+        </select></label
+      >
+      <label
+        >Source<select
+          name="source"
+          [(ngModel)]="source"
+          (ngModelChange)="load()"
+        >
+          <option value="all">All sources</option>
+          <option value="server">Server</option>
+          <option value="web">Website</option>
+          <option value="desktop">Desktop app</option>
+          <option value="admin">Admin portal</option>
+        </select></label
+      >
+      <button class="primary-button" type="submit" [disabled]="loading()">
+        Search
+      </button>
+    </form>
+    <div class="data-table-filters">
+      <span>{{ total() }} records</span><span>Newest first · 25 per page</span>
+    </div>
+    <div
+      class="data-table-wrap"
+      role="region"
+      aria-label="Scrollable error records"
+      tabindex="0"
+    >
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Error</th>
+            <th scope="col">Location</th>
+            <th scope="col">Source</th>
+            <th scope="col">Status</th>
+            <th scope="col">Occurred</th>
+            <th scope="col">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (item of rows(); track item.id) {
+          <tr>
+            <td>
+              <strong>{{ item.title }}</strong
+              ><small
+                >{{ item.code }} @if (item.statusCode) { · {{ item.statusCode }}
+                }</small
+              ><code>{{ item.reference }}</code>
+            </td>
+            <td><span class="path">{{ item.method }} {{ item.path }}</span></td>
+            <td>
+              <span class="source"
+                >{{ item.source === 'server' ? 'Server' : item.source === 'web'
+                ? 'Website' : item.source === 'desktop' ? 'Desktop app' : 'Admin
+                portal' }}</span
+              >
+            </td>
+            <td>
+              <span
+                class="data-pill"
+                [class.resolved]="item.status === 'resolved'"
+                >{{ item.status === 'open' ? 'Open' : 'Resolved' }}</span
+              >
+            </td>
+            <td class="time">
+              {{ item.createdAt | date:'MMM d, y' }}<small
+                >{{ item.createdAt | date:'HH:mm:ss' }}</small
+              >
+            </td>
+            <td>
+              <button type="button" class="table-action" (click)="open(item)">
+                View details
+              </button>
+            </td>
+          </tr>
+          } @empty {
+          <tr>
+            <td colspan="6" class="empty">
+              {{ loading() ? 'Loading error records…' : 'No errors match these
+              filters.' }}
+            </td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <footer class="table-footer">
+      <span>Page {{ page() }} · {{ total() }} records</span>
+      <div>
+        <button
+          class="secondary-button"
+          [disabled]="page() <= 1 || loading()"
+          (click)="load(page() - 1)"
+        >
+          Previous</button
+        ><button
+          class="secondary-button"
+          [disabled]="page() * 25 >= total() || loading()"
+          (click)="load(page() + 1)"
+        >
+          Next
+        </button>
+      </div>
+    </footer>
+  </section>
+  @if (selected(); as item) {
+  <section class="incident-detail" aria-labelledby="incident-title">
+    <header class="detail-heading">
+      <div>
+        <p class="eyebrow">
+          {{ item.source === 'server' ? 'SERVER FAILURE' : 'CLIENT REPORT' }}
+        </p>
+        <h2 id="incident-title">{{ item.title }}</h2>
+      </div>
+      <button
+        type="button"
+        class="secondary-button"
+        [disabled]="saving()"
+        (click)="close()"
+      >
+        Close details
+      </button>
+    </header>
+    <div class="detail-grid">
+      <div>
+        <h3>What happened</h3>
+        <p>{{ item.message }}</p>
+        @if (item.developerHint) {
+        <h3>Developer explanation</h3>
+        <p>{{ item.developerHint }}</p>
+        }
+        <h3>Suggested recovery</h3>
+        <p>{{ item.nextStep }}</p>
+        <div class="detail-actions">
+          <button
+            class="primary-button"
+            [disabled]="saving()"
+            (click)="update()"
+          >
+            {{ saving() ? 'Saving…' : item.status === 'open' ? 'Mark resolved' :
+            'Reopen error' }}</button
+          ><button class="secondary-button" (click)="copy()">
+            {{ copied() ? 'Copied' : 'Copy diagnostics' }}
+          </button>
+        </div>
+      </div>
+      <dl>
+        <div>
+          <dt>Reference</dt>
+          <dd>{{ item.reference }}</dd>
+        </div>
+        <div>
+          <dt>Request ID</dt>
+          <dd>{{ item.requestId || 'Not available' }}</dd>
+        </div>
+        <div>
+          <dt>Error code</dt>
+          <dd>{{ item.code }}</dd>
+        </div>
+        <div>
+          <dt>Location</dt>
+          <dd>
+            {{ item.method }} {{ item.path }} @if (item.operation) { · {{
+            item.operation }} }
+          </dd>
+        </div>
+        <div>
+          <dt>Occurred</dt>
+          <dd>{{ item.createdAt | date:'medium' }}</dd>
+        </div>
+        @if (item.userId) {
+        <div>
+          <dt>Account ID</dt>
+          <dd>{{ item.userId }}</dd>
+        </div>
+        }@if (item.resolvedAt) {
+        <div>
+          <dt>Resolved</dt>
+          <dd>{{ item.resolvedAt | date:'medium' }}</dd>
+        </div>
+        }
+      </dl>
+    </div>
+    @if (item.frames?.length) {
+    <details>
+      <summary>
+        Developer trace · {{ item.exceptionName || 'Client error' }}
+      </summary>
+      <pre>{{ item.frames?.join('\n') }}</pre>
+    </details>
+    }
+    <p class="privacy">
+      Use the request ID to find the matching structured server log. Client
+      reports are unverified. Passwords, request bodies, URL queries and
+      original exception messages are excluded from this log.
+    </p>
+  </section>
+  }
+</main>

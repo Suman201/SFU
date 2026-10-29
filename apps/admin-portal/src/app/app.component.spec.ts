@@ -1,3 +1,6 @@
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideErrorModule } from '@sapiovian/error-ui';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
@@ -8,10 +11,11 @@ import { AppComponent } from './app.component';
 
 describe('Admin AppComponent', () => {
   let fixture: ComponentFixture<AppComponent>;
-  let authMock: { checking: ReturnType<typeof signal<boolean>>; checkSession: jasmine.Spy };
+  let authMock: { user: ReturnType<typeof signal<any>>; checking: ReturnType<typeof signal<boolean>>; checkSession: jasmine.Spy };
 
   beforeEach(async () => {
     authMock = {
+      user: signal(null),
       checking: signal(false),
       checkSession: jasmine.createSpy('checkSession').and.returnValue(of(null))
     };
@@ -20,6 +24,8 @@ describe('Admin AppComponent', () => {
       imports: [AppComponent],
       providers: [
         provideRouter([]),
+        provideHttpClient(), provideHttpClientTesting(),
+        provideErrorModule(() => ({ apiBaseUrl: '/api/v1', source: () => 'admin', accessToken: () => null })),
         { provide: AuthService, useValue: authMock },
         { provide: ThemeService, useValue: {} }
       ]

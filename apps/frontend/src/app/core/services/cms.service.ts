@@ -1,4 +1,5 @@
-import { HttpClient, HttpErrorResponse, HttpParams } from '@angular/common/http';
+import { EXPECTED_ERROR_STATUSES } from '@sapiovian/error-ui';
+import { HttpClient, HttpContext, HttpErrorResponse, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import type { CmsPage, CmsPageListQuery, CmsPageListResponse, ContactSubmissionAck, CreateContactSubmissionRequest } from '@native-sfu/contracts';
 import { Observable, catchError, map, throwError } from 'rxjs';
@@ -14,10 +15,11 @@ interface ApiEnvelope<T> {
 export class CmsService {
   constructor(private readonly http: HttpClient) {}
 
-  getPublishedPage(slug: string, locale = 'en'): Observable<CmsPage> {
+  getPublishedPage(slug: string, locale = 'en', optional = false): Observable<CmsPage> {
     return this.http
       .get<CmsPage | ApiEnvelope<CmsPage>>(`${API_BASE_URL}/cms/pages/${encodeURIComponent(slug)}`, {
-        params: locale ? new HttpParams().set('locale', locale) : undefined
+        params: locale ? new HttpParams().set('locale', locale) : undefined,
+        context: new HttpContext().set(EXPECTED_ERROR_STATUSES, optional ? [404] : [])
       })
       .pipe(
         map((response) => this.unwrap(response)),

@@ -61,7 +61,7 @@ export class Landing implements OnInit {
     },
   ];
   ngOnInit(): void {
-    this.cms.getPublishedPage('home').subscribe({
+    this.cms.getPublishedPage('home', 'en', true).subscribe({
       next: (page) => this.cmsHome.set(page),
       error: () => this.cmsHome.set(null),
     });

@@ -1,0 +1,118 @@
+@if (!errors.online()) {
+<aside class="offline-banner" role="status">
+  You are offline. Check your connection before submitting changes.
+</aside>
+} @if (errors.active(); as item) {
+<section class="error-notice" role="region" aria-label="Error information">
+  <span class="notice-icon" aria-hidden="true">!</span>
+  <div class="notice-content" role="alert" aria-live="polite">
+    <strong>{{ item.title }}</strong>
+    <p>{{ item.message }}</p>
+    <small>{{ item.nextStep }}</small>
+    @if (item.count > 1) { <small>Repeated {{ item.count }} times</small> }
+    <div class="notice-actions">
+      <button type="button" (click)="showDetails()">View details</button>
+      <span class="reference">Ref. {{ item.reference }}</span>
+    </div>
+  </div>
+  <button
+    type="button"
+    class="close"
+    aria-label="Dismiss error"
+    (click)="dismiss()"
+  >
+    ×
+  </button>
+</section>
+} @else if (errors.latest()) {
+<button type="button" class="recent-button" (click)="errors.openLatest()">
+  Recent error <span aria-hidden="true">↗</span>
+</button>
+}
+<dialog
+  #details
+  class="error-dialog"
+  aria-labelledby="error-details-title"
+  (cancel)="closeDetails()"
+>
+  @if (errors.active(); as item) {
+  <header>
+    <div>
+      <p class="eyebrow">ERROR DETAILS</p>
+      <h2 id="error-details-title">{{ item.title }}</h2>
+    </div>
+    <button
+      class="close"
+      type="button"
+      aria-label="Close error details"
+      (click)="closeDetails()"
+    >
+      ×
+    </button>
+  </header>
+  <p class="description">{{ item.message }}</p>
+  <div class="next-step">
+    <strong>What you can do</strong>
+    <p>{{ item.nextStep }}</p>
+  </div>
+  @if (item.fields.length) {
+  <ul class="field-errors" aria-label="Fields to review">
+    @for (field of item.fields; track $index) {
+    <li><strong>{{ field.field }}</strong> {{ field.message }}</li>
+    }
+  </ul>
+  }
+  <dl>
+    <div>
+      <dt>Error code</dt>
+      <dd>{{ item.code }}</dd>
+    </div>
+    <div>
+      <dt>Time</dt>
+      <dd>{{ item.occurredAt | date:'medium' }}</dd>
+    </div>
+    <div>
+      <dt>Reference</dt>
+      <dd>{{ item.reference }}</dd>
+    </div>
+  </dl>
+  <details>
+    <summary>Technical details</summary>
+    <pre tabindex="0">{{ diagnostic() }}</pre>
+    <p class="privacy">
+      Contains technical references only. Passwords, form contents and URL
+      queries are excluded.
+    </p>
+  </details>
+  <footer>
+    <button type="button" class="secondary" (click)="copy()">
+      {{ copied() ? 'Copied' : 'Copy details' }}
+    </button>
+    @if (errors.canReport()) {
+    <button
+      type="button"
+      class="primary"
+      [disabled]="item.reportState === 'sending' || item.reportState === 'sent'"
+      (click)="errors.report(item.reference)"
+    >
+      {{ item.reportState === 'sent' ? 'Reported' : item.reportState ===
+      'sending' ? 'Sending…' : 'Report issue' }}
+    </button>
+    }
+    <button type="button" class="secondary" (click)="dismiss()">Dismiss</button>
+  </footer>
+  @if (item.reportState === 'sent') {
+  <p role="status" class="report-status">
+    Technical details saved for your administrator.
+  </p>
+  } @if (item.reportState === 'failed') {
+  <p role="status" class="report-status">
+    The report could not be sent. Copy the details to share with support, or try
+    reporting again when connected.
+  </p>
+  } @if (!errors.canReport()) {
+  <p class="privacy">
+    Copy these details to share with support. Sign in to send an issue report.
+  </p>
+  } }
+</dialog>

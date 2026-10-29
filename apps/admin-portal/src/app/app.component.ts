@@ -1,5 +1,12 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ErrorCenter, ErrorCenterComponent } from '@sapiovian/error-ui';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  effect,
+  inject,
+} from '@angular/core';
+import { NavigationError, Router, RouterOutlet } from '@angular/router';
 import { AuthService } from './core/services/auth.service';
 import { ThemeService } from './core/services/theme.service';
 import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.component';
@@ -7,7 +14,7 @@ import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.c
 @Component({
   selector: 'sfu-admin-root',
   standalone: true,
-  imports: [ConfirmDialogComponent, RouterOutlet],
+  imports: [ConfirmDialogComponent, RouterOutlet, ErrorCenterComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @if (auth.checking()) {
@@ -20,13 +27,29 @@ import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.c
       </main>
     }
     <router-outlet />
+    <sapiovian-error-center />
     <sfu-admin-confirm-dialog />
-  `
+  `,
 })
 export class AppComponent {
   protected readonly auth = inject(AuthService);
 
   constructor() {
+    const errors = inject(ErrorCenter);
+    let previousAccount = this.auth.user()?.id ?? null;
+    effect(() => {
+      const account = this.auth.user()?.id ?? null;
+      if (account !== previousAccount) {
+        previousAccount = account;
+        errors.clear();
+      }
+    });
+    inject(Router)
+      .events.pipe(takeUntilDestroyed())
+      .subscribe((event) => {
+        if (event instanceof NavigationError)
+          errors.capture(event.error, { path: event.url });
+      });
     inject(ThemeService);
     this.auth.checkSession().subscribe();
   }

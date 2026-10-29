@@ -1,4 +1,5 @@
-import { Injectable } from '@angular/core';
+import { ErrorCenter } from '@sapiovian/error-ui';
+import { Injectable, Optional } from '@angular/core';
 import type { AckResponse, ClientToServerEvents, ServerToClientEvents } from '@native-sfu/contracts';
 import { io, Socket } from 'socket.io-client';
 import { AuthService } from './auth.service';
@@ -21,7 +22,7 @@ export class SocketAckError extends Error {
 export class SocketService {
   private socket?: Socket<ServerToClientEvents, ClientToServerEvents>;
 
-  constructor(private readonly auth: AuthService) {}
+  constructor(private readonly auth: AuthService, @Optional() private readonly errors?: ErrorCenter) {}
 
   connect(): Socket<ServerToClientEvents, ClientToServerEvents> {
     if (this.socket && (this.socket.connected || this.socket.active)) {
@@ -54,13 +55,17 @@ export class SocketService {
       };
       timeoutSocket.emit(event, payload, (error, response) => {
         if (error) {
-          reject(new SocketAckError('ACK_TIMEOUT', 'The server did not acknowledge this action. Please try again.'));
+          const failure = new SocketAckError('ACK_TIMEOUT', 'The server did not acknowledge this action. Check whether it completed before trying again.');
+          this.errors?.capture(failure, { code: 'REQUEST_TIMEOUT', quiet: true, operation: event });
+          reject(failure);
           return;
         }
         if (response?.ok) {
           resolve(response.data as ExtractAckData<Parameters<ClientToServerEvents[K]>[1]>);
         } else {
-          reject(new SocketAckError(response?.error.code ?? 'ACK_ERROR', response?.error.message ?? 'The server rejected this action.', response?.error.details));
+          const failure = new SocketAckError(response?.error.code ?? 'ACK_ERROR', response?.error.message ?? 'The server rejected this action.', response?.error.details);
+          this.errors?.capture(failure, { code: 'CLASSROOM_ERROR', quiet: true, operation: event });
+          reject(failure);
         }
       });
     });

@@ -88,7 +88,7 @@ export class TeacherMarketplace implements OnInit {
   ngOnInit(): void {
     this.profiles.teachingCatalog().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({next:c=>this.catalog.set(c),error:()=>undefined});
     this.cms
-      .getPublishedPage('teacher-marketplace')
+      .getPublishedPage('teacher-marketplace', 'en', true)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (page) => this.cmsIntro.set(page),
