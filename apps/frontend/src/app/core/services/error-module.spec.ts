@@ -1,3 +1,4 @@
+import { errorGuideUrl } from '@native-sfu/contracts';
 import {
   HttpClient,
   HttpContext,
@@ -12,6 +13,7 @@ import {
 import { TestBed } from '@angular/core/testing';
 import {
   ErrorCenter,
+  ERROR_MODULE_CONFIG,
   errorInterceptor,
   provideErrorModule,
   QUIET_ERROR,
@@ -29,6 +31,7 @@ describe('Shared error module', () => {
         provideHttpClientTesting(),
         provideErrorModule(() => ({
           apiBaseUrl: '/api/v1',
+          documentationBaseUrl: 'https://admin.sapiovian.example',
           source: () => 'web',
           accessToken: () => token,
         })),
@@ -40,6 +43,46 @@ describe('Shared error module', () => {
     spyOn(console, 'error');
   });
   afterEach(() => backend.verify());
+  it('links a code to its public admin-domain explanation without including the occurrence reference', () => {
+    const item = center.capture(
+      new HttpErrorResponse({
+        status: 500,
+        error: { requestId: 'private-reference-123' },
+      }),
+    );
+    expect(center.documentationUrl(item.code)).toBe(
+      'https://admin.sapiovian.example/error-encyclopedia/INTERNAL_ERROR',
+    );
+    expect(center.documentationUrl(item.code)).not.toContain(item.reference);
+  });
+  it('rejects unsafe or non-origin documentation addresses', () => {
+    for (const base of [
+      'javascript:alert(1)',
+      'http://admin.example.com',
+      'https://user:password@admin.example.com',
+      'https://admin.example.com/private?token=secret',
+    ])
+      expect(errorGuideUrl(base, 'NETWORK_ERROR')).toBeNull();
+    expect(errorGuideUrl('http://localhost:4300', 'NETWORK_ERROR')).toBe(
+      'http://localhost:4300/error-encyclopedia/NETWORK_ERROR',
+    );
+    expect(
+      errorGuideUrl('https://admin.example.com', '../private' as never),
+    ).toBeNull();
+  });
+  it('uses the desktop external-browser action without navigating the classroom', async () => {
+    const open = jasmine.createSpy('openDocumentation').and.resolveTo();
+    TestBed.inject(ERROR_MODULE_CONFIG).openDocumentation = open;
+    const event = new MouseEvent('click', { cancelable: true });
+    expect(await center.openDocumentation(event, 'NETWORK_ERROR')).toBeTrue();
+    expect(event.defaultPrevented).toBeTrue();
+    expect(open).toHaveBeenCalledOnceWith('https://admin.sapiovian.example/error-encyclopedia/NETWORK_ERROR');
+  });
+  it('handles a failed desktop documentation launch without creating another incident', async () => {
+    TestBed.inject(ERROR_MODULE_CONFIG).openDocumentation = () => Promise.reject(new Error('Could not open browser'));
+    expect(await center.openDocumentation(new MouseEvent('click', { cancelable: true }), 'NETWORK_ERROR')).toBeFalse();
+    expect(center.recent()).toEqual([]);
+  });
   it('retains the real HTTP error for existing features and makes safe diagnostics available', () => {
     let caught: unknown;
     http

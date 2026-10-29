@@ -83,3 +83,9 @@ test("root and direct workspace commands build fresh desktop assets exactly once
     assert.match(steps[2], /^electron-builder /);
   }
 });
+
+test("documentation URL uses a validated admin origin", () => {
+  const result = parseOptions(["package:win", "--server-url", "https://api.example.com", "--admin-url", "https://admin.example.com"]);
+  assert.equal(result.environment.SFU_DESKTOP_ADMIN_URL, "https://admin.example.com");
+  for (const value of ["http://admin.example.com", "https://user:secret@admin.example.com", "https://admin.example.com/path"]) assert.throws(() => parseOptions(["dev", "--admin-url", value]));
+});

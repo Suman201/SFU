@@ -207,3 +207,27 @@ export function errorFrames(stack: unknown): string[] {
     })
     .slice(0, 16);
 }
+
+/** Public documentation URLs contain a code only, never occurrence IDs or diagnostic payloads. */
+export function errorGuideUrl(
+  adminPortalUrl: string | undefined,
+  code: AppErrorCode,
+): string | null {
+  if (!adminPortalUrl || !isAppErrorCode(code)) return null;
+  try {
+    const base = new URL(adminPortalUrl);
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(base.hostname);
+    if (
+      base.username ||
+      base.password ||
+      base.search ||
+      base.hash ||
+      (base.pathname !== '/' && base.pathname !== '') ||
+      (base.protocol !== 'https:' && !(base.protocol === 'http:' && local))
+    )
+      return null;
+    return `${base.origin}/error-encyclopedia/${code}`;
+  } catch {
+    return null;
+  }
+}

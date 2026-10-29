@@ -4,5 +4,7 @@ window.__SFU_ENV__ = window.__SFU_ENV__ || {
   // Never ship localhost values in production; non-local browsers ignore them.
   // Example:
   // apiBaseUrl: 'https://staging.example.com/api/v1',
-  // socketUrl: 'https://staging.example.com/sfu'
+  // socketUrl: 'https://staging.example.com/sfu',
+  // Public error documentation is hosted by the admin portal:
+  // adminPortalUrl: 'https://admin.example.com'
 };

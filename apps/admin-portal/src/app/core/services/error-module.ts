@@ -8,6 +8,7 @@ export const appErrorModule = () =>
     const injector = inject(Injector);
     return {
       apiBaseUrl: API_BASE_URL,
+      documentationBaseUrl: globalThis.location?.origin,
       source: () => 'admin' as const,
       accessToken: () => injector.get(AuthService).accessToken(),
     };

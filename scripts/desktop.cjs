@@ -10,6 +10,7 @@ const commands = new Set(["dev", "build", "package:mac", "package:win"]);
 const options = {
   "--server-url": "SFU_DESKTOP_SERVER_URL",
   "--website-url": "SFU_DESKTOP_WEBSITE_URL",
+  "--admin-url": "SFU_DESKTOP_ADMIN_URL",
   "--update-url": "SFU_DESKTOP_UPDATE_URL",
 };
 const help = `Sapiovian Classroom desktop
@@ -23,11 +24,13 @@ Commands:
 Optional arguments (after -- when using npm):
   --server-url URL   Existing backend origin; required for installer packaging
   --website-url URL  Website origin if different from the backend
+  --admin-url URL    Admin portal origin for the public Error Encyclopedia
   --update-url URL   HTTPS electron-updater feed
   --help            Show this help without building
 
-Environment variables SFU_DESKTOP_SERVER_URL, SFU_DESKTOP_WEBSITE_URL, and
-SFU_DESKTOP_UPDATE_URL are also supported. Arguments override environment values.
+Environment variables SFU_DESKTOP_SERVER_URL, SFU_DESKTOP_WEBSITE_URL,
+SFU_DESKTOP_ADMIN_URL and SFU_DESKTOP_UPDATE_URL are also supported.
+Arguments override environment values.
 Dev and unpacked builds default to local backend http://127.0.0.1:3000 and
 website http://localhost:4200. Start your existing backend separately.
 
@@ -77,6 +80,7 @@ function parseOptions(argv, inherited = {}) {
     environment.SFU_DESKTOP_WEBSITE_URL = serverOrigin(
       environment.SFU_DESKTOP_WEBSITE_URL,
     );
+  if (environment.SFU_DESKTOP_ADMIN_URL) environment.SFU_DESKTOP_ADMIN_URL = serverOrigin(environment.SFU_DESKTOP_ADMIN_URL);
   if (environment.SFU_DESKTOP_UPDATE_URL) {
     const url = new URL(environment.SFU_DESKTOP_UPDATE_URL);
     if (url.protocol !== "https:" || url.username || url.password)

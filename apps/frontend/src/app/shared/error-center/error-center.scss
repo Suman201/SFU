@@ -248,3 +248,17 @@ button:disabled {
     font-size: 21px;
   }
 }
+
+.explanation-link {
+  font-size: 12px;
+  margin: 20px 0 0;
+}
+a {
+  color: var(--text, #17201d);
+  text-decoration-color: #458b73;
+  text-underline-offset: 3px;
+}
+a:focus-visible {
+  outline: 3px solid #458b73;
+  outline-offset: 3px;
+}

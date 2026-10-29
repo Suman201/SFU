@@ -1,6 +1,7 @@
 type RuntimeEnvironment = {
   apiBaseUrl?: string;
   socketUrl?: string;
+  adminPortalUrl?: string;
 };
 
 type RuntimeOverrideKey = keyof RuntimeEnvironment;
@@ -23,6 +24,10 @@ const defaultApiBaseUrl = browserOrigin ? `${browserOrigin}/api/v1` : '/api/v1';
 const defaultSocketUrl = browserOrigin ? `${browserOrigin}/sfu` : '/sfu';
 
 export const API_BASE_URL = normalizeUrl(runtimeEnvironment?.apiBaseUrl ?? defaultApiBaseUrl);
+export const ADMIN_PORTAL_URL = runtimeEnvironment?.adminPortalUrl !== undefined
+  ? runtimeEnvironment.adminPortalUrl || undefined
+  : isLocalBrowserOrigin ? `${new URL(browserOrigin!).protocol}//${new URL(browserOrigin!).hostname}:4300` : undefined;
+
 export const SOCKET_URL = normalizeUrl(runtimeEnvironment?.socketUrl ?? defaultSocketUrl);
 
 export function buildRoomOwnerRedirectUrl(ownerUrl: string, roomId: string, joinContext?: RoomOwnerRedirectJoinContext): string {
@@ -86,6 +91,7 @@ function sanitizeRuntimeEnvironment(
   }
   return {
     ...(configured.apiBaseUrl && !isLocalRuntimeUrl(configured.apiBaseUrl, currentWindow) ? { apiBaseUrl: configured.apiBaseUrl } : {}),
+    ...(configured.adminPortalUrl && !isLocalRuntimeUrl(configured.adminPortalUrl, currentWindow) ? { adminPortalUrl: configured.adminPortalUrl } : {}),
     ...(configured.socketUrl && !isLocalRuntimeUrl(configured.socketUrl, currentWindow) ? { socketUrl: configured.socketUrl } : {})
   };
 }

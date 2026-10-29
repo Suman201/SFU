@@ -65,7 +65,17 @@
   <dl>
     <div>
       <dt>Error code</dt>
-      <dd>{{ item.code }}</dd>
+      <dd>
+        @if (errors.documentationUrl(item.code); as url) {
+        <a
+          [href]="url"
+          target="_blank"
+          rel="noopener noreferrer"
+          (click)="openGuide($event)"
+          >{{ item.code }} ↗</a
+        >
+        } @else { {{ item.code }} }
+      </dd>
     </div>
     <div>
       <dt>Time</dt>
@@ -84,6 +94,23 @@
       queries are excluded.
     </p>
   </details>
+  @if (errors.documentationUrl(item.code); as url) {
+  <p class="explanation-link">
+    <a
+      [href]="url"
+      target="_blank"
+      rel="noopener noreferrer"
+      (click)="openGuide($event)"
+      >Read this code in the Error Encyclopedia
+      <span aria-hidden="true">↗</span></a
+    >
+  </p>
+  } @if (documentationFailed()) {
+  <p class="privacy" role="status">
+    The browser could not open the explanation. Copy the error code and look it
+    up in the admin portal’s public Error Encyclopedia.
+  </p>
+  }
   <footer>
     <button type="button" class="secondary" (click)="copy()">
       {{ copied() ? 'Copied' : 'Copy details' }}

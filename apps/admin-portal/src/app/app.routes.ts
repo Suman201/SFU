@@ -2,6 +2,8 @@ import { Routes } from '@angular/router';
 import { adminGuard, guestGuard } from './core/services/auth.guards';
 
 export const routes: Routes = [
+  { path: 'error-encyclopedia', loadComponent: () => import('./features/error-encyclopedia/error-encyclopedia').then(m => m.ErrorEncyclopedia) },
+  { path: 'error-encyclopedia/:code', loadComponent: () => import('./features/error-encyclopedia/error-encyclopedia').then(m => m.ErrorEncyclopedia) },
   {
     path: 'login',
     canActivate: [guestGuard],

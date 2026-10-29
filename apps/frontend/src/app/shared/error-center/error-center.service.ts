@@ -20,6 +20,7 @@ import {
 import { catchError, throwError, timeout } from 'rxjs';
 import {
   ERROR_CATALOG,
+  errorGuideUrl,
   errorCodeForStatus,
   errorFrames,
   errorPath,
@@ -32,6 +33,8 @@ import {
 
 export interface ErrorModuleConfig {
   apiBaseUrl: string;
+  documentationBaseUrl?: string;
+  openDocumentation?: (url: string) => Promise<void>;
   source: () => Exclude<ErrorSource, 'server'>;
   accessToken: () => string | null;
 }
@@ -231,6 +234,24 @@ export class ErrorCenter {
       this.timers.add(timer);
     }
     return item;
+  }
+
+  documentationUrl(code: AppErrorCode): string | null {
+    return errorGuideUrl(this.config.documentationBaseUrl, code);
+  }
+  async openDocumentation(
+    event: MouseEvent,
+    code: AppErrorCode,
+  ): Promise<boolean> {
+    const url = this.documentationUrl(code);
+    if (!url || !this.config.openDocumentation) return true;
+    event.preventDefault();
+    try {
+      await this.config.openDocumentation(url);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   dismiss(): void {

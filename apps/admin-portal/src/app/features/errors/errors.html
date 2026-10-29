@@ -89,8 +89,13 @@
             <td>
               <strong>{{ item.title }}</strong
               ><small
-                >{{ item.code }} @if (item.statusCode) { · {{ item.statusCode }}
-                }</small
+                ><a
+                  [routerLink]="['/error-encyclopedia', item.code]"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >{{ item.code }}</a
+                >
+                @if (item.statusCode) { · {{ item.statusCode }} }</small
               ><code>{{ item.reference }}</code>
             </td>
             <td><span class="path">{{ item.method }} {{ item.path }}</span></td>
@@ -201,7 +206,14 @@
         </div>
         <div>
           <dt>Error code</dt>
-          <dd>{{ item.code }}</dd>
+          <dd>
+            <a
+              [routerLink]="['/error-encyclopedia', item.code]"
+              target="_blank"
+              rel="noopener noreferrer"
+              >{{ item.code }}</a
+            >
+          </dd>
         </div>
         <div>
           <dt>Location</dt>

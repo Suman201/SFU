@@ -18,6 +18,8 @@ const serverUrl = process.env.SFU_DESKTOP_SERVER_URL
 const websiteUrl = process.env.SFU_DESKTOP_WEBSITE_URL
   ? serverOrigin(process.env.SFU_DESKTOP_WEBSITE_URL)
   : serverUrl;
+const adminPortalUrl = process.env.SFU_DESKTOP_ADMIN_URL ? serverOrigin(process.env.SFU_DESKTOP_ADMIN_URL) : serverUrl && new URL(serverUrl).protocol === 'https:' ? '' : 'http://localhost:4300';
+fs.appendFileSync(path.join(target, 'env.js'), '\nwindow.__SFU_ENV__ = Object.assign({}, window.__SFU_ENV__, ' + JSON.stringify({ adminPortalUrl }) + ');\n');
 const updateUrl = process.env.SFU_DESKTOP_UPDATE_URL;
 if (updateUrl) {
   const parsed = new URL(updateUrl);

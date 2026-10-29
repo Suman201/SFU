@@ -7,13 +7,13 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import type { ErrorIncident, ErrorIncidentPage } from '@native-sfu/contracts';
 import { API_BASE_URL } from '../../core/services/app-environment';
 @Component({
   selector: 'sfu-admin-errors',
   standalone: true,
-  imports: [FormsModule, DatePipe],
+  imports: [FormsModule, DatePipe, RouterLink],
   templateUrl: './errors.html',
   styleUrl: './errors.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

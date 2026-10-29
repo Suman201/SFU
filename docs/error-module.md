@@ -2,6 +2,20 @@
 
 Sapiovian uses one shared error UI in `apps/frontend/src/app/shared/error-center` for the website, desktop renderer and admin portal. The public code catalog is in `packages/contracts/src/errors.ts`.
 
+## Public Error Encyclopedia
+
+The public code reference is hosted by the **admin portal domain**:
+
+- `/error-encyclopedia`: searchable code index, area filters and all currently emitted public codes.
+- `/error-encyclopedia/NETWORK_ERROR`: permanent description of one error code (replace with any known code).
+- `/errors`: the existing private incident log, still protected by admin authentication.
+
+Each code page explains its meaning, likely causes, user recovery steps, developer debugging checks, an example and related codes. Content is authored in `apps/admin-portal/src/app/features/error-encyclopedia/error-guides.ts` and checked against the shared error catalog at compile time. It describes error types; it does not retrieve individual incidents or reference IDs. Public pages work without signing in or contacting the API, including when a stored admin session exists and the backend is unavailable.
+
+The existing runtime error module remains useful for occurrence-specific diagnostics. Error detail dialogs link to the matching public code page. Set `adminPortalUrl` in the website's `public/env.js` to the HTTPS **admin origin**, for example `https://admin.example.com` (replace with the real domain). Local web development defaults to the admin portal at port 4300. Production websites without a configured admin origin keep the code visible without inventing a public URL.
+
+For desktop packages pass `--admin-url https://admin.example.com` or set `SFU_DESKTOP_ADMIN_URL`. The validated origin is embedded into the renderer's runtime configuration. Documentation opens in the system browser through the existing secure external-link bridge, preserving the classroom. Production packages without an admin URL omit the link. No occurrence references, tokens or diagnostic query strings are included in documentation links.
+
 ## User experience
 
 A failed API action has a plain-language title, an explanation, a next step and a reference ID. **View details** shows field validation messages and selectable/copyable diagnostics. Notices remain until dismissed; **Recent error** reopens the latest one. Only the last ten entries are held in memory. Nothing is written to browser storage. Changing accounts clears this history.
@@ -32,7 +46,7 @@ No passwords, cookies, request/response bodies, form values, raw exception messa
 
 ## Deployment
 
-The user-facing module lives in the existing frontend repository and is served from its configured public website URL. Desktop and admin import that same implementation; no separate public site is required. The current installers target localhost. A live URL needs the frontend/backend hosting environment and public domain to be configured before rebuilding deployment installers.
+The user-facing module lives in the existing frontend repository and is served from its configured public website URL. Desktop and admin import that same implementation; the encyclopedia is served publicly by the admin portal, and the incident log stays private. The current installers target localhost. A live URL needs the frontend/backend hosting environment and public domain to be configured before rebuilding deployment installers.
 
 1. Build contracts, backend, frontend and admin portal as usual. Desktop packages compile the same shared UI.
 2. Before starting a production backend with automatic indexing disabled, run `MONGODB_URI=... npm run setup:errors`. Use `-- --allow-remote` only for the reviewed remote database.
@@ -54,3 +68,11 @@ Validated locally on 29 October 2026:
 - No native app or visible browser was opened.
 
 Website, desktop renderer and admin release builds passed. Windows x64/ARM64 (combined and separate NSIS installers) and Mac Intel/Apple Silicon (DMG and ZIP) packages were rebuilt. All 14 installer/blockmap checksums passed, both DMG integrity checks passed, both ZIP CRC checks passed, and all four unpacked architectures contain the same 59 frontend files. These remain unsigned localhost development installers, not a public deployment.
+
+## Error Encyclopedia verification
+
+On 29 October 2026, all 20 public code pages, search/filter behavior, deep-link reloads, copy-link fallback, unknown-code handling, light/dark and 390px layouts passed in headless Chromium, Firefox and WebKit (6 acceptance checks). Public-page tests used the actual admin release build with an unavailable upstream and a stale stored admin session, and confirmed zero API requests. A real reverse-proxy connection failure produced an error whose code explanation opened on the same admin origin. The private incident log still required sign-in. No response mocks were used.
+
+The updated shared error module passed 13 unit checks, including safe documentation URLs and desktop browser-bridge success/failure. The existing 25 desktop runtime checks passed; the added admin-origin option check and command regressions also passed. Website, admin and desktop-renderer builds succeeded. The native app and visible browsers stayed closed.
+
+The refreshed Windows/Mac installers and blockmaps passed all 14 SHA-256 checks. Both Mac DMG integrity checks and ZIP CRC checks passed; every packaged architecture contains the same 59 frontend files, including the configured local admin-portal documentation origin. These remain unsigned development installers.

@@ -5,8 +5,14 @@ import {
   Component,
   effect,
   inject,
+  signal,
 } from '@angular/core';
-import { NavigationError, Router, RouterOutlet } from '@angular/router';
+import {
+  NavigationError,
+  NavigationStart,
+  Router,
+  RouterOutlet,
+} from '@angular/router';
 import { AuthService } from './core/services/auth.service';
 import { ThemeService } from './core/services/theme.service';
 import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.component';
@@ -17,7 +23,7 @@ import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.c
   imports: [ConfirmDialogComponent, RouterOutlet, ErrorCenterComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    @if (auth.checking()) {
+    @if (auth.checking() && !publicReference()) {
       <main class="auth-loading" aria-live="polite">
         <div>
           <span class="loader" aria-hidden="true"></span>
@@ -33,6 +39,9 @@ import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.c
 })
 export class AppComponent {
   protected readonly auth = inject(AuthService);
+  protected readonly publicReference = signal(
+    /^\/error-encyclopedia(?:\/|$)/.test(globalThis.location?.pathname ?? ''),
+  );
 
   constructor() {
     const errors = inject(ErrorCenter);
@@ -47,10 +56,14 @@ export class AppComponent {
     inject(Router)
       .events.pipe(takeUntilDestroyed())
       .subscribe((event) => {
+        if (event instanceof NavigationStart)
+          this.publicReference.set(
+            /^\/error-encyclopedia(?:[/?#]|$)/.test(event.url),
+          );
         if (event instanceof NavigationError)
           errors.capture(event.error, { path: event.url });
       });
     inject(ThemeService);
-    this.auth.checkSession().subscribe();
+    if (!this.publicReference()) this.auth.checkSession().subscribe();
   }
 }

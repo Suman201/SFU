@@ -1,0 +1,254 @@
+<a class="skip-link" href="#encyclopedia-main">Skip to content</a>
+<header class="docs-header">
+  <a
+    class="docs-brand"
+    routerLink="/error-encyclopedia"
+    aria-label="Sapiovian Error Encyclopedia"
+    ><img
+      class="sapiovian-logo"
+      src="/brand/sapiovian-lockup.png"
+      alt="Sapiovian"
+      width="1736"
+      height="468"
+  /></a>
+  <span class="header-label">Error Encyclopedia</span>
+  <div class="header-actions">
+    <button
+      type="button"
+      class="theme-button"
+      (click)="theme.toggle()"
+      [attr.aria-label]="theme.label()"
+    >
+      {{ theme.isDark() ? 'Light' : 'Dark' }} mode</button
+    ><a class="admin-link" routerLink="/login"
+      >Admin sign in <span aria-hidden="true">↗</span></a
+    >
+  </div>
+</header>
+<div class="docs-layout">
+  <aside class="docs-sidebar" aria-label="Error reference navigation">
+    <p class="nav-label">REFERENCE</p>
+    <a
+      routerLink="/error-encyclopedia"
+      class="overview-link"
+      [class.current]="!requested()"
+      >All error codes <span>{{ guides.length }}</span></a
+    >
+    <p class="nav-label category-label">BROWSE BY AREA</p>
+    @for (item of areas; track item) { @if (requested()) {
+    <a
+      class="category-link"
+      routerLink="/error-encyclopedia"
+      [queryParams]="{ category: item }"
+      >{{ item }} <span>{{ count(item) }}</span></a
+    >
+    } @else {
+    <button
+      type="button"
+      class="category-link"
+      [class.current]="area() === item"
+      [attr.aria-pressed]="area() === item"
+      (click)="area.set(item)"
+    >
+      {{ item }} <span>{{ count(item) }}</span>
+    </button>
+    } }
+    <div class="reference-note">
+      <strong>Code or reference?</strong>
+      <p>
+        A code describes a type of problem. A reference ID identifies one
+        occurrence. Share reference IDs privately with support.
+      </p>
+    </div>
+    <a class="private-log-link" routerLink="/errors"
+      >Open private error log <span aria-hidden="true">↗</span></a
+    >
+  </aside>
+  <main id="encyclopedia-main" class="docs-main">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a routerLink="/error-encyclopedia">Error Encyclopedia</a>@if
+      (requested()) { <span aria-hidden="true">/</span
+      ><span>{{ guide()?.code ?? 'Unknown code' }}</span> }
+    </nav>
+    @if (!requested()) {
+    <p class="eyebrow">SAPIOVIAN REFERENCE</p>
+    <h1>Error Encyclopedia<span class="accent">.</span></h1>
+    <p class="intro">
+      Understand what happened, why it happened and what to do next.
+    </p>
+    <p class="index-description">
+      Look up the code shown in an error message. Each entry includes recovery
+      steps for users and troubleshooting checks for developers.
+    </p>
+    <div class="search-toolbar">
+      <label class="search-field"
+        ><span>Search error codes</span
+        ><input
+          type="search"
+          placeholder="Code, message or problem…"
+          maxlength="160"
+          [ngModel]="query()"
+          (ngModelChange)="query.set($event)" /></label
+      ><label class="area-select"
+        ><span>Area</span
+        ><select [ngModel]="area()" (ngModelChange)="area.set($event)">
+          <option>All errors</option>
+          @for (item of areas; track item) {
+          <option>{{ item }}</option>
+          }
+        </select></label
+      >
+    </div>
+    <div class="result-heading">
+      <p role="status">
+        {{ results().length }} of {{ guides.length }} error codes
+      </p>
+      @if (query() || area() !== 'All errors') {
+      <button type="button" class="text-button" (click)="reset()">
+        Clear filters
+      </button>
+      }
+    </div>
+    @for (group of groups(); track group.area) {
+    <section class="code-group" [attr.aria-label]="group.area">
+      <h2>{{ group.area }}</h2>
+      <div class="code-table">
+        <div class="table-labels" aria-hidden="true">
+          <span>CODE</span><span>DESCRIPTION</span>
+        </div>
+        @for (item of group.items; track item.code) {
+        <a class="code-row" [routerLink]="['/error-encyclopedia', item.code]"
+          ><code>{{ item.code }}</code>
+          <div>
+            <strong>{{ item.name }}</strong>
+            <p>{{ item.message }}</p>
+          </div>
+          <span class="row-arrow" aria-hidden="true">↗</span></a
+        >
+        }
+      </div>
+    </section>
+    } @empty {
+    <section class="empty-state">
+      <h2>No matching error codes</h2>
+      <p>
+        Try a code such as NETWORK_ERROR, or a problem such as camera or
+        sign-in. Reference IDs are private occurrence identifiers and cannot be
+        searched here.
+      </p>
+      <button class="secondary-button" (click)="reset()">
+        Show all error codes
+      </button>
+    </section>
+    } } @else if (guide(); as item) {
+    <article class="guide-article">
+      <div class="guide-kicker">
+        <code>{{ item.code }}</code><span>{{ item.area }}</span>
+      </div>
+      <h1>{{ item.name }}</h1>
+      <p class="intro guide-intro">{{ item.explanation }}</p>
+      <div class="quick-message">
+        <p class="nav-label">MESSAGE YOU MAY SEE</p>
+        <p>{{ item.message }}</p>
+      </div>
+      <nav class="page-sections" aria-label="On this page">
+        <a href="#causes">Why it happens</a
+        ><a href="#user-fixes">How to fix it</a
+        ><a href="#developer-checks">Developer checks</a>
+      </nav>
+      <section id="causes" class="guide-section">
+        <h2>Why it happens</h2>
+        <ul>
+          @for (cause of item.causes; track cause) {
+          <li>{{ cause }}</li>
+          }
+        </ul>
+      </section>
+      <section id="user-fixes" class="guide-section">
+        <p class="section-label">FOR USERS</p>
+        <h2>How to fix it</h2>
+        <ol>
+          @for (step of item.userSteps; track step) {
+          <li>{{ step }}</li>
+          }
+        </ol>
+      </section>
+      <section id="developer-checks" class="guide-section">
+        <p class="section-label">FOR DEVELOPERS</p>
+        <h2>Debugging this error</h2>
+        <ol>
+          @for (step of item.developerChecks; track step) {
+          <li>{{ step }}</li>
+          }
+        </ol>
+        <div class="example">
+          <p class="nav-label">EXAMPLE</p>
+          <pre><code>{{ item.example }}</code></pre>
+        </div>
+      </section>
+      <section
+        class="guide-section share-section"
+        aria-labelledby="share-title"
+      >
+        <h2 id="share-title">Share this explanation</h2>
+        <p>
+          This public link contains only the error code. Send private occurrence
+          details to support separately.
+        </p>
+        <div class="permalink">
+          <input
+            readonly
+            aria-label="Page link"
+            [value]="permalink()"
+            (click)="$any($event.target).select()"
+          /><button type="button" class="secondary-button" (click)="copy()">
+            {{ copied() ? 'Copied' : 'Copy link' }}
+          </button>
+        </div>
+        @if (copyFailed()) {
+        <p class="copy-feedback" role="status">
+          Clipboard access is blocked. Select and copy the page link above.
+        </p>
+        }@if (copied()) {
+        <span class="copy-feedback" role="status">Link copied.</span> }
+      </section>
+      <section class="guide-section related-section">
+        <h2>Related error codes</h2>
+        <div class="related-links">
+          @for (related of related(); track related.code) {
+          <a [routerLink]="['/error-encyclopedia', related.code]"
+            ><code>{{ related.code }}</code
+            ><span
+              >{{ related.name }} <span aria-hidden="true">↗</span></span
+            ></a
+          >
+          }
+        </div>
+      </section>
+    </article>
+    } @else {
+    <section class="unknown-code">
+      <p class="eyebrow">ERROR REFERENCE</p>
+      <h1>Code not found</h1>
+      <p>
+        This code is not in the Sapiovian Error Encyclopedia. Check the code in
+        the original message or browse the reference below.
+      </p>
+      <p>
+        A reference ID is different from an error code. Share it privately with
+        support.
+      </p>
+      <a class="secondary-button" routerLink="/error-encyclopedia"
+        >Browse all error codes</a
+      >
+    </section>
+    }
+    <footer class="docs-footer">
+      <span>Sapiovian · Error Encyclopedia</span
+      ><span
+        >Public explanations. Private incident details stay in the admin
+        log.</span
+      >
+    </footer>
+  </main>
+</div>
