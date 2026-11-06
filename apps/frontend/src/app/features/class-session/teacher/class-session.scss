@@ -76,8 +76,7 @@
   display: grid;
   place-items: center;
   padding: max(16px, env(safe-area-inset-top, 0px)) 24px max(16px, env(safe-area-inset-bottom, 0px));
-  background: color-mix(in srgb, #07100d 72%, transparent);
-  backdrop-filter: blur(16px);
+  background: var(--dialog-scrim, rgb(4 13 22 / 64%));
 }
 
 .teacher-preflight-modal {
@@ -90,14 +89,11 @@
   overflow: auto;
   overscroll-behavior: contain;
   padding: 18px;
-  border: 1px solid color-mix(in srgb, #458B73 38%, var(--line-soft));
-  border-radius: 10px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--panel-elevated) 92%, #458B73 8%), var(--panel)),
-    var(--panel);
-  box-shadow:
-    var(--shadow-md),
-    0 28px 88px color-mix(in srgb, #07100d 44%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--surface-radius);
+  background: var(--dialog-surface);
+  color: var(--text);
+  box-shadow: var(--shadow-md);
 }
 
 .preflight-header,
@@ -132,7 +128,7 @@
   border: 1px solid color-mix(in srgb, #FF9760 42%, var(--line-soft));
   border-radius: 999px;
   background: color-mix(in srgb, #FF9760 12%, var(--panel-elevated));
-  color: #FF9760;
+  color: var(--live-ink);
   font-size: 12px;
   font-weight: 900;
   white-space: nowrap;
@@ -191,11 +187,11 @@
 }
 
 .preflight-preview-placeholder strong {
-  color: var(--text);
+  color: var(--video-text);
 }
 
 .preflight-preview-placeholder span {
-  color: var(--muted);
+  color: var(--video-text);
   font-size: 13px;
 }
 
@@ -348,9 +344,9 @@
 }
 
 .preflight-error {
-  border: 1px solid color-mix(in srgb, #F26076 42%, var(--line-soft));
-  background: color-mix(in srgb, #F26076 10%, var(--panel-elevated));
-  color: #F26076;
+  border: 1px solid var(--feedback-error-line);
+  background: var(--feedback-error-bg);
+  color: var(--feedback-error);
   font-weight: 850;
 }
 
@@ -364,8 +360,8 @@
   min-height: 28px;
   border: 1px solid color-mix(in srgb, #F26076 34%, var(--line-soft));
   border-radius: 7px;
-  background: color-mix(in srgb, #F26076 12%, var(--panel-elevated));
-  color: #F26076;
+  background: var(--feedback-error-bg);
+  color: var(--feedback-error);
   font-size: 11px;
   font-weight: 900;
   cursor: pointer;
@@ -409,44 +405,13 @@
   padding: 0 14px;
 }
 
-.teacher-confirm-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: grid;
-  place-items: center;
-  padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
-  background: color-mix(in srgb, #07100d 66%, transparent);
-  backdrop-filter: blur(14px);
+.teacher-confirm-modal {
+  --dialog-width: 440px;
 }
 
-.teacher-confirm-modal {
-  box-sizing: border-box;
+.teacher-confirm-modal article {
   display: grid;
   gap: 14px;
-  width: min(440px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  padding: 16px;
-  border: 1px solid color-mix(in srgb, #458B73 34%, var(--line-soft));
-  border-radius: 10px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--panel-elevated) 92%, #458B73 8%), var(--panel)),
-    var(--panel);
-  color: var(--text);
-  box-shadow:
-    var(--shadow-md),
-    0 24px 80px color-mix(in srgb, #07100d 40%, transparent);
-}
-
-.teacher-confirm-modal.warning {
-  border-color: color-mix(in srgb, #FFD150 52%, var(--line-soft));
-}
-
-.teacher-confirm-modal.danger {
-  border-color: color-mix(in srgb, #F26076 58%, var(--line-soft));
 }
 
 .teacher-confirm-modal header,
@@ -462,8 +427,16 @@
 
 .teacher-confirm-modal header h2,
 .teacher-confirm-modal header p,
-.teacher-confirm-modal > p {
+.teacher-confirm-modal article > p {
   margin: 0;
+}
+
+.teacher-confirm-modal header .eyebrow {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .teacher-confirm-modal header h2 {
@@ -472,7 +445,7 @@
   line-height: 1.2;
 }
 
-.teacher-confirm-modal > p {
+.teacher-confirm-modal article > p {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
@@ -492,7 +465,7 @@
   place-items: center;
   border-radius: 50%;
   background: color-mix(in srgb, #458B73 14%, var(--panel-elevated));
-  color: #458B73;
+  color: var(--success-ink);
 }
 
 .confirm-mark::before {
@@ -504,26 +477,26 @@
   content: '';
 }
 
-.teacher-confirm-modal.warning .confirm-mark {
+.teacher-confirm-modal .warning .confirm-mark {
   background: color-mix(in srgb, #FFD150 18%, var(--panel-elevated));
-  color: #FFD150;
+  color: var(--dialog-warning-text);
 }
 
-.teacher-confirm-modal.danger .confirm-mark {
+.teacher-confirm-modal .danger .confirm-mark {
   background: color-mix(in srgb, #F26076 15%, var(--panel-elevated));
-  color: #F26076;
+  color: var(--feedback-error);
 }
 
 .confirm-primary.warning {
   border-color: color-mix(in srgb, #FFD150 62%, var(--line-soft));
-  background: linear-gradient(135deg, #FFD150, #FF9760);
+  background: var(--dialog-warning-bg);
   color: #2f2107;
 }
 
 .confirm-primary.danger {
   border-color: color-mix(in srgb, #F26076 62%, var(--line-soft));
-  background: linear-gradient(135deg, #F26076, #FF9760);
-  color: #ffffff;
+  background: var(--dialog-danger-bg);
+  color: var(--dialog-danger-text);
 }
 
 sfu-whiteboard,
@@ -2877,10 +2850,6 @@ h2 {
     max-height: calc(100dvh - 78px - env(safe-area-inset-bottom, 0px));
   }
 
-  .teacher-confirm-backdrop {
-    place-items: end stretch;
-    padding: max(12px, env(safe-area-inset-top, 0px)) 12px max(12px, env(safe-area-inset-bottom, 0px));
-  }
 
   .teacher-confirm-modal {
     width: 100%;
@@ -3140,10 +3109,6 @@ h2 {
     max-height: calc(100dvh - 16px);
   }
 
-  .teacher-confirm-backdrop {
-    place-items: center end;
-    padding: max(8px, env(safe-area-inset-top, 0px)) 8px max(8px, env(safe-area-inset-bottom, 0px));
-  }
 
   .teacher-confirm-modal {
     width: min(420px, calc(100vw - 16px));

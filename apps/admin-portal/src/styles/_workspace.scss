@@ -400,8 +400,8 @@
     font-size: 12px;
   }
   .table-error {
-    color: var(--rose-ink);
-    background: color-mix(in srgb, var(--product-rose) 8%, var(--panel));
+    color: var(--feedback-error);
+    background: var(--feedback-error-bg);
   }
   .table-success {
     color: var(--green-ink);

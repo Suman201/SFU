@@ -1122,7 +1122,7 @@
       <div class="page-manager-popover" role="dialog" aria-label="Slide Deck">
         <div class="page-manager-header">
           <strong>Slide Deck ({{ pages().length }})</strong>
-          <button type="button" class="close-btn" (click)="pageManagerOpen.set(false)">&times;</button>
+          <button type="button" class="close-btn" aria-label="Close slide deck" (click)="pageManagerOpen.set(false)">&times;</button>
         </div>
         <div class="page-manager-search">
           <input class="page-search-input" type="search" [value]="pageSearchQuery()" aria-label="Search slides"
@@ -1138,7 +1138,7 @@
         </div>
         @if (canManagePages()) {
         <div class="page-manager-edit-row">
-          <label>Title: <input type="text" [value]="activePage().title" (change)="renameActivePage($event)" /></label>
+          <label>Title: <input type="text" aria-label="Rename current board page" [value]="activePage().title" (change)="renameActivePage($event)" /></label>
           <label>Tags: <input type="text" [value]="activePageTagsText()" placeholder="e.g. algebra, ch1" (change)="updateActivePageTags($event)" /></label>
         </div>
         <div class="page-manager-footer-actions">

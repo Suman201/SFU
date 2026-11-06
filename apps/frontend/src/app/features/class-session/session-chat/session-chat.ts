@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
+import { isDialogBackdropClick } from '../../../shared/confirm-dialog/dialog-backdrop';
+import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, OnInit, ViewChild, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { FormField, FormRoot, form as signalForm } from '@angular/forms/signals';
 import type {
   ChatAttachment,
@@ -71,6 +72,7 @@ export interface ChatThreadParticipant {
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class SessionChat {
+  protected readonly isBackdropClick = isDialogBackdropClick;
   private readonly auth = inject(AuthService);
   private readonly classSessions = inject(ClassSessionService);
   private readonly socket = inject(SocketService);
@@ -83,9 +85,8 @@ export class SessionChat {
   private loadedSummaryContextKey = '';
   private lastMarkedReadKeys = new Set<string>();
   private viewportFrame = 0;
-  private linkDialogReturnFocus: HTMLElement | null = null;
 
-  @ViewChild('linkUrlInput') private readonly linkUrlInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('linkDialog', { static: true }) private readonly linkDialog?: ElementRef<HTMLDialogElement>;
 
   readonly currentUser = input('Teacher');
   readonly currentRole = input<'Teacher' | 'Student'>('Teacher');
@@ -116,7 +117,6 @@ export class SessionChat {
   protected readonly uploadingAttachments = signal(0);
   protected readonly socketConnected = signal(this.realtimeSocket.connected);
   protected readonly chatError = signal('');
-  protected readonly linkDialogOpen = signal(false);
   protected readonly linkDraft = signal('');
   protected readonly linkDialogError = signal('');
   protected readonly nextBefore = signal<string | null>(null);
@@ -252,16 +252,6 @@ export class SessionChat {
     if (this.viewportFrame) {
       window.cancelAnimationFrame(this.viewportFrame);
     }
-  }
-
-  @HostListener('document:keydown.escape', ['$event'])
-  protected closeLinkDialogOnEscape(event: Event): void {
-    if (!this.linkDialogOpen()) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    this.cancelLinkAttachment();
   }
 
   protected toggleCollapsed(event?: Event): void {
@@ -414,11 +404,10 @@ export class SessionChat {
     if (!this.canAddAttachment()) {
       return;
     }
-    this.linkDialogReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     this.linkDraft.set('');
     this.linkDialogError.set('');
-    this.linkDialogOpen.set(true);
-    window.setTimeout(() => this.linkUrlInput?.nativeElement.focus());
+    const dialog = this.linkDialog?.nativeElement;
+    if (dialog && !dialog.open) dialog.showModal();
   }
 
   protected updateLinkDraft(event: Event): void {
@@ -426,15 +415,14 @@ export class SessionChat {
   }
 
   protected cancelLinkAttachment(): void {
-    this.linkDialogOpen.set(false);
+    this.linkDialog?.nativeElement.close();
     this.linkDraft.set('');
     this.linkDialogError.set('');
-    this.restoreLinkDialogFocus();
   }
 
   protected confirmLinkAttachment(event?: Event): void {
     event?.preventDefault();
-    if (!this.linkDialogOpen()) {
+    if (!this.linkDialog?.nativeElement.open) {
       return;
     }
     const rawUrl = this.linkDraft().trim();
@@ -649,16 +637,6 @@ export class SessionChat {
       return false;
     }
     return true;
-  }
-
-  private restoreLinkDialogFocus(): void {
-    const target = this.linkDialogReturnFocus;
-    this.linkDialogReturnFocus = null;
-    window.setTimeout(() => {
-      if (target?.isConnected) {
-        target.focus();
-      }
-    });
   }
 
   private pendingAttachmentToRequest(attachment: PendingChatAttachment): SendChatAttachment {

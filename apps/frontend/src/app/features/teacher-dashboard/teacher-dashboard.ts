@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { isDialogBackdropClick } from '../../shared/confirm-dialog/dialog-backdrop';
+import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { ConfirmDialogService } from '../../shared/confirm-dialog/confirm-dialog.service';
@@ -56,11 +57,12 @@ interface NextBatchAction {
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class TeacherDashboard {
+  protected readonly isBackdropClick = isDialogBackdropClick;
   private readonly router = inject(Router);
   private readonly confirmDialog = inject(ConfirmDialogService);
   protected readonly dashboard = inject(TeacherDashboardStore);
 
-  protected readonly createDrawerOpen = signal(false);
+  private readonly createDrawer = viewChild<ElementRef<HTMLDialogElement>>('createDrawer');
   protected readonly formSubmitted = signal(false);
   protected readonly backendError = signal('');
   protected readonly weekdays: WeekdayOption[] = [
@@ -142,7 +144,7 @@ export class TeacherDashboard {
       next: async (batch) => {
         this.batchModel.set(this.initialBatchModel());
         this.formSubmitted.set(false);
-        this.createDrawerOpen.set(false);
+        this.createDrawer()?.nativeElement.close();
         await this.router.navigate(['/teacher/dashboard/batches', batch.id]);
       },
       error: () => this.backendError.set(this.dashboard.error())
@@ -328,14 +330,15 @@ export class TeacherDashboard {
 
   protected openCreateDrawer(): void {
     this.backendError.set('');
-    this.createDrawerOpen.set(true);
+    const drawer = this.createDrawer()?.nativeElement;
+    if (drawer && !drawer.open) drawer.showModal();
   }
 
   protected closeCreateDrawer(): void {
     if (this.saving()) {
       return;
     }
-    this.createDrawerOpen.set(false);
+    this.createDrawer()?.nativeElement.close();
   }
 
   protected showValidation(): boolean {

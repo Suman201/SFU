@@ -231,7 +231,7 @@ describe('SessionChat delivery state', () => {
     const root = fixture.nativeElement as HTMLElement;
     const input = root.querySelector('.link-dialog input') as HTMLInputElement | null;
     expect(promptSpy).not.toHaveBeenCalled();
-    expect(root.querySelector('.link-dialog-backdrop[role="dialog"]')).not.toBeNull();
+    expect(root.querySelector('dialog.chat-link-dialog[open]')).not.toBeNull();
     expect(input).not.toBeNull();
 
     input!.value = 'https://example.test/reference';
@@ -246,7 +246,7 @@ describe('SessionChat delivery state', () => {
         url: 'https://example.test/reference'
       })
     );
-    expect(root.querySelector('.link-dialog-backdrop')).toBeNull();
+    expect(root.querySelector('dialog.chat-link-dialog[open]')).toBeNull();
   });
 
   it('uploads file attachments before sending chat with attachment ids only', async () => {

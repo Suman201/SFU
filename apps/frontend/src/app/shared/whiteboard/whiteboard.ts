@@ -2000,6 +2000,9 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   @HostListener('window:keydown', ['$event'])
   protected handleKeyboardShortcut(event: KeyboardEvent): void {
+    if (event.defaultPrevented || (event.target instanceof Element && event.target.closest('dialog[open]'))) {
+      return;
+    }
     if (event.key === 'Escape') {
       event.preventDefault();
       const trigger = this.whiteboardCanvas?.nativeElement.closest('.whiteboard-pane')

@@ -1,5 +1,5 @@
 <sfu-header />
-<main class="teacher-dashboard-shell site-page" [class.drawer-open]="createDrawerOpen()">
+<main class="teacher-dashboard-shell site-page">
   <section class="dashboard-hero">
     <div>
       <p class="eyebrow">Teacher workspace</p>
@@ -232,7 +232,7 @@
       </div>
     } @else if (batches().length) {
       @if (dashboard.error()) {
-        <div class="form-alert">{{ dashboard.error() }}</div>
+        <div class="form-alert" role="alert">{{ dashboard.error() }}</div>
       }
       <div class="data-table-shell">
         <div class="data-table-toolbar">
@@ -333,29 +333,31 @@
     }
   </section>
 
-  @if (createDrawerOpen()) {
-    <button class="drawer-backdrop" type="button" aria-label="Close add batch form" (click)="closeCreateDrawer()"></button>
-  }
-
-  <aside class="batch-drawer" [attr.aria-hidden]="!createDrawerOpen()" aria-label="Create a class group">
+  <dialog
+    #createDrawer
+    class="batch-drawer sfu-dialog"
+    aria-labelledby="create-batch-title"
+    (cancel)="$event.preventDefault(); closeCreateDrawer()"
+    (click)="isBackdropClick($event) ? closeCreateDrawer() : null"
+  >
     <form class="drawer-panel" (submit)="createBatch($event)">
       <header>
         <div>
           <p class="eyebrow">Create</p>
-          <h2>New batch</h2>
+          <h2 id="create-batch-title">New batch</h2>
         </div>
-        <button class="icon-button" type="button" aria-label="Close add batch form" (click)="closeCreateDrawer()">×</button>
+        <button class="icon-button" type="button" aria-label="Close add batch form" autofocus [disabled]="saving()" (click)="closeCreateDrawer()">×</button>
       </header>
 
       <div class="form-grid">
         @if (backendError()) {
-          <div class="form-alert">{{ backendError() }}</div>
+          <div class="form-alert" role="alert">{{ backendError() }}</div>
         } @else if (dashboard.error()) {
-          <div class="form-alert">{{ dashboard.error() }}</div>
+          <div class="form-alert" role="alert">{{ dashboard.error() }}</div>
         }
 
         @if (showValidation() && formErrors().length) {
-          <div class="form-alert validation-list">
+          <div class="form-alert validation-list" role="alert">
             @for (error of formErrors(); track error) {
               <span>{{ error }}</span>
             }
@@ -441,6 +443,6 @@
         </button>
       </footer>
     </form>
-  </aside>
+  </dialog>
 </main>
 <sfu-footer />

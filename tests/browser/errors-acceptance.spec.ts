@@ -45,6 +45,7 @@ test('real backend: safe failures, offline recovery, client reports and admin tr
   }
   const stack = await startAcceptanceStack({
     frontendPort: 4484,
+    frontendDir: 'apps/frontend/dist/frontend/browser',
     backendPort: 3384,
     secondBackendPort: 3386,
   });

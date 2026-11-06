@@ -199,7 +199,7 @@ test.describe('Desktop classroom with the real backend', () => {
       await step('stopping the recording creates playable indexed WebM on the real backend', async () => {
         await teacher.getByRole('button', { name: 'Open media controls', exact: true }).click();
         await teacher.getByRole('menuitem', { name: 'Stop Recording', exact: true }).click();
-        const stopDialog = teacher.locator('.teacher-confirm-backdrop');
+        const stopDialog = teacher.locator('.teacher-confirm-modal[open]');
         if (await stopDialog.isVisible()) await stopDialog.locator('.confirm-primary').click();
         await expect.poll(async () => (await api(teacherToken, '/desktop/recordings')).items.find((item: any) => item.recordingId === recordingId)?.status, { timeout: 120_000 }).toBe('available');
         const playback = await api(teacherToken, `/desktop/recordings/${recordingId}/playback`);

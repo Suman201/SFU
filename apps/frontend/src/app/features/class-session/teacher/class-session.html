@@ -973,22 +973,16 @@
   </section>
 }
 
-@if (confirmationDialog(); as dialog) {
-  <section
-    class="teacher-confirm-backdrop"
-    role="dialog"
-    aria-modal="true"
+  <dialog
+    #teacherConfirmModal
+    class="sfu-dialog teacher-confirm-modal"
+    (cancel)="$event.preventDefault(); cancelConfirmation()"
+    (click)="isBackdropClick($event) ? cancelConfirmation() : null"
     aria-labelledby="teacher-confirm-title"
     aria-describedby="teacher-confirm-message"
-    (click)="cancelConfirmation()"
   >
-    <article
-      class="teacher-confirm-modal"
-      [class.danger]="dialog.variant === 'danger'"
-      [class.warning]="dialog.variant === 'warning'"
-      [class.neutral]="dialog.variant === 'neutral'"
-      (click)="$event.stopPropagation()"
-    >
+    @if (confirmationDialog(); as dialog) {
+    <article [class.danger]="dialog.variant === 'danger'" [class.warning]="dialog.variant === 'warning'">
       <header>
         <span class="confirm-mark" aria-hidden="true"></span>
         <div>
@@ -997,12 +991,14 @@
         </div>
       </header>
       <p id="teacher-confirm-message">{{ dialog.message }}</p>
+      @if (confirmationError()) {
+        <div class="sfu-error-feedback" role="alert">{{ confirmationError() }}</div>
+      }
       <footer>
         <button #confirmCancelButton class="button ghost" type="button" [disabled]="dialog.pending" (click)="cancelConfirmation()">
           {{ dialog.cancelLabel }}
         </button>
         <button
-          #confirmPrimaryButton
           class="button primary confirm-primary"
           type="button"
           [class.danger]="dialog.variant === 'danger'"
@@ -1014,5 +1010,5 @@
         </button>
       </footer>
     </article>
-  </section>
-}
+    }
+  </dialog>

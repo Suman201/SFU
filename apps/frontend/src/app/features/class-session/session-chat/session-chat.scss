@@ -127,34 +127,13 @@
   font-size: 12px;
 }
 
-.link-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: grid;
-  place-items: center;
-  padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
-  background: color-mix(in srgb, #07100d 62%, transparent);
-  backdrop-filter: blur(12px);
-  pointer-events: auto;
+.chat-link-dialog {
+  --dialog-width: 440px;
 }
 
 .link-dialog {
-  box-sizing: border-box;
   display: grid;
   gap: 12px;
-  width: min(420px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  overflow: auto;
-  padding: 16px;
-  border: 1px solid color-mix(in srgb, #458b73 34%, var(--line-soft));
-  border-radius: 10px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--panel-elevated) 92%, #458b73 8%), var(--panel)),
-    var(--panel);
-  box-shadow:
-    var(--shadow-md),
-    0 24px 80px color-mix(in srgb, #07100d 38%, transparent);
 }
 
 .link-dialog header,
@@ -194,19 +173,13 @@
 }
 
 .link-dialog input:focus-visible {
-  border-color: color-mix(in srgb, #f26076 54%, var(--line-soft));
-  box-shadow: 0 0 0 3px color-mix(in srgb, #f26076 15%, transparent);
-  outline: none;
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .link-dialog-error {
-  border: 1px solid color-mix(in srgb, #f26076 32%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, #f26076 10%, transparent);
-  color: #f26076;
-  padding: 8px 10px;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .link-dialog footer {
@@ -687,7 +660,7 @@
 }
 
 .chat-error {
-  color: #f26076;
+  color: var(--feedback-error);
 }
 
 .chat-hint {

@@ -115,8 +115,8 @@
 .form-alert {
   border: 1px solid rgba(242, 96, 118, .28);
   border-radius: var(--radius);
-  background: rgba(242, 96, 118, .1);
-  color: #F26076;
+  background: var(--feedback-error-bg);
+  color: var(--feedback-error);
   padding: 12px 14px;
   font-weight: 650;
 }
@@ -301,7 +301,7 @@
 .batch-session-error {
   flex: 1 0 100%;
   margin: 0;
-  color: #F26076;
+  color: var(--feedback-error);
   font-size: 13px;
   font-weight: 650;
 }

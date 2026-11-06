@@ -3794,7 +3794,7 @@ h1 {
 
         svg {
           opacity: 1;
-          color: var(--wb-primary);
+          color: var(--accent-strong);
         }
       }
     }
@@ -3840,15 +3840,17 @@ h1 {
   top: 52px;
   right: 18px;
   z-index: 100;
-  width: 320px;
-  max-height: 480px;
+  width: min(320px, calc(100vw - 36px));
+  max-height: min(480px, calc(100dvh - 80px));
+  overflow: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 14px;
   border-radius: 12px;
   border: 1px solid var(--wb-control-border);
-  background: var(--panel-elevated);
+  background: var(--dialog-surface);
   box-shadow: 0 18px 42px rgba(7, 28, 65, 0.22);
 
   .page-manager-header {
@@ -3890,6 +3892,7 @@ h1 {
   }
 
   .page-manager-thumbnails {
+    min-height: 48px;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -3898,6 +3901,7 @@ h1 {
     padding-right: 4px;
 
     .page-card {
+      flex: 0 0 auto;
       display: flex;
       flex-direction: column;
       gap: 2px;

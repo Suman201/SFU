@@ -1,3 +1,5 @@
+@use './styles/overlays';
+
 @import '@wts-calendar/core/styles/calendar.css';
 
 :root {
@@ -40,6 +42,16 @@
   --warning: #8a5500;
   --danger: #b94141;
   --danger-soft: #fff3f3;
+  --dialog-surface: var(--panel);
+  --feedback-error: var(--danger);
+  --feedback-error-bg: var(--danger-soft);
+  --feedback-error-line: color-mix(in srgb, var(--danger) 36%, var(--line));
+  --dialog-action-bg: var(--accent);
+  --dialog-action-text: var(--on-accent);
+  --dialog-warning-text: var(--warning);
+  --dialog-warning-bg: var(--brand-amber);
+  --dialog-danger-bg: var(--danger);
+  --dialog-danger-text: var(--danger-ink);
   --success: var(--brand-green);
   --success-soft: var(--brand-green-soft);
   --success-border: rgba(69, 139, 115, 0.28);
@@ -96,6 +108,7 @@
   --panel-muted: #132746;
   --panel-soft: rgba(14, 30, 56, 0.88);
   --panel-elevated: #11233f;
+  --dialog-surface: var(--panel-elevated);
   --panel-glass: rgba(10, 25, 48, 0.78);
   --control-bg: #132746;
   --text: #f8fafc;

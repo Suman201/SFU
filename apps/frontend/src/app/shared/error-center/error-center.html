@@ -50,7 +50,7 @@
 }
 <dialog
   #details
-  class="error-dialog"
+  class="error-dialog sfu-dialog"
   aria-labelledby="error-details-title"
   (cancel)="closeDetails()"
 >
@@ -64,6 +64,7 @@
       class="close"
       type="button"
       aria-label="Close error details"
+      autofocus
       (click)="closeDetails()"
     >
       ×

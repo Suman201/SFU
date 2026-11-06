@@ -1,3 +1,4 @@
+import { isDialogBackdropClick } from '../../../shared/confirm-dialog/dialog-backdrop';
 import { WhiteboardSourceControl, type ClassroomWhiteboardSource } from '../../../shared/whiteboard-source/whiteboard-source';
 import { DeviceSetupDialogComponent } from '../../../shared/device-setup/device-setup-dialog';
 import { ClassroomConnectionTools } from '../../../shared/classroom-connection-tools/classroom-connection-tools';
@@ -5,7 +6,7 @@ import { firstValueFrom, type Observable } from 'rxjs';
 import { LessonRecordingService } from '../../../core/services/lesson-recording.service';
 import { ClassroomRecoveryStore } from '../../../core/services/classroom-recovery-store';
 import { isDesktopSession } from '../../../core/services/desktop-bridge';
-import { ChangeDetectionStrategy, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, ElementRef, HostListener, Injector, OnDestroy, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type {
   ClassSessionLifecycleEvent,
@@ -129,6 +130,7 @@ interface StudentWhiteboardAttempt {
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class TeacherClassSession implements OnInit, OnDestroy {
+  protected readonly isBackdropClick = isDialogBackdropClick;
   private readonly host = inject(ElementRef<HTMLElement>);
   protected readonly lessonRecorder = inject(LessonRecordingService);
   protected readonly desktopSession = isDesktopSession();
@@ -178,7 +180,8 @@ export class TeacherClassSession implements OnInit, OnDestroy {
   protected readonly whiteboardSourceChoice = signal<ClassroomWhiteboardSource>('classroom');
   private readonly whiteboardCursorTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private confirmationHandler: (() => Promise<void> | void) | null = null;
-  private confirmationReturnFocus: HTMLElement | null = null;
+  protected readonly confirmationError = signal('');
+  private readonly injector = inject(Injector);
   private whiteboardMemoryLoadedSessionId = '';
   private whiteboardMemoryApplying = false;
   private whiteboardMemoryReady = false;
@@ -190,8 +193,8 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   @ViewChild(Whiteboard) private readonly whiteboard?: Whiteboard;
   @ViewChild(SessionMaterials) private readonly materialsPanel?: SessionMaterials;
+  @ViewChild('teacherConfirmModal', { static: true }) private readonly teacherConfirmModal?: ElementRef<HTMLDialogElement>;
   @ViewChild('confirmCancelButton') private readonly confirmCancelButton?: ElementRef<HTMLButtonElement>;
-  @ViewChild('confirmPrimaryButton') private readonly confirmPrimaryButton?: ElementRef<HTMLButtonElement>;
 
   protected readonly session = signal<ClassroomPayload | null>(null);
   protected readonly loading = signal(true);
@@ -495,22 +498,9 @@ export class TeacherClassSession implements OnInit, OnDestroy {
 
   @HostListener('document:keydown.escape')
   protected closeTeacherOverlays(): void {
-    if (this.confirmationDialog()) {
-      this.cancelConfirmation();
-      return;
-    }
+    if (this.confirmationDialog()) return;
     this.closeMediaMenu();
     this.closeMediaDrawer();
-  }
-
-  @HostListener('document:keydown.enter', ['$event'])
-  protected confirmDialogOnEnter(event: Event): void {
-    const dialog = this.confirmationDialog();
-    if (!dialog || dialog.pending || this.isEditableKeyboardTarget(event.target)) {
-      return;
-    }
-    event.preventDefault();
-    void this.confirmDialogAction();
   }
 
   ngOnInit(): void {
@@ -1147,7 +1137,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     }
     this.confirmationHandler = null;
     this.confirmationDialog.set(null);
-    this.restoreConfirmationFocus();
+    this.teacherConfirmModal?.nativeElement.close();
   }
 
   protected async confirmDialogAction(): Promise<void> {
@@ -1156,46 +1146,30 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     if (!dialog || dialog.pending || !handler) {
       return;
     }
+    this.confirmationError.set('');
     this.confirmationDialog.set({ ...dialog, pending: true });
     try {
       await handler();
       this.confirmationHandler = null;
       this.confirmationDialog.set(null);
-      this.restoreConfirmationFocus();
+      this.teacherConfirmModal?.nativeElement.close();
     } catch (error) {
-      this.mediaError.set(error instanceof Error ? error.message : 'Unable to complete this action.');
+      this.confirmationError.set(error instanceof Error ? error.message : 'Unable to complete this action.');
       this.confirmationDialog.update((current) => (current ? { ...current, pending: false } : current));
     }
   }
 
   private openConfirmation(dialog: Omit<ConfirmationDialog, 'pending'>, handler: () => Promise<void> | void): void {
-    this.confirmationReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     this.closeMediaMenu();
     this.confirmationHandler = handler;
+    this.confirmationError.set('');
     this.confirmationDialog.set({ ...dialog, pending: false });
-    window.setTimeout(() => {
-      const target = dialog.variant === 'danger' ? this.confirmCancelButton?.nativeElement : this.confirmPrimaryButton?.nativeElement;
-      target?.focus();
-    });
-  }
-
-  private restoreConfirmationFocus(): void {
-    const target = this.confirmationReturnFocus;
-    this.confirmationReturnFocus = null;
-    window.setTimeout(() => {
-      if (target?.isConnected) {
-        target.focus();
-      }
-    });
-  }
-
-  private isEditableKeyboardTarget(target: EventTarget | null): boolean {
-    const element = target as HTMLElement | null;
-    if (!element) {
-      return false;
-    }
-    const tagName = element.tagName.toLowerCase();
-    return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || element.isContentEditable;
+    afterNextRender(() => {
+      const modal = this.teacherConfirmModal?.nativeElement;
+      if (!modal || modal.open || !this.confirmationDialog()) return;
+      modal.showModal();
+      this.confirmCancelButton?.nativeElement.focus();
+    }, { injector: this.injector });
   }
 
   protected async muteAllStudents(): Promise<void> {

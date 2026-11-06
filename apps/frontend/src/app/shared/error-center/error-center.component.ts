@@ -34,7 +34,8 @@ export class ErrorCenterComponent {
   showDetails(): void {
     this.copied.set(false);
     this.documentationFailed.set(false);
-    this.dialog()?.nativeElement.showModal();
+    const dialog = this.dialog()?.nativeElement;
+    if (dialog && !dialog.open) dialog.showModal();
   }
   closeDetails(): void {
     this.dialog()?.nativeElement.close();

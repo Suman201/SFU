@@ -1,233 +1,184 @@
-import { ChangeDetectionStrategy, Component, ElementRef, HostListener, ViewChild, effect, inject } from '@angular/core';
+import { isDialogBackdropClick } from './dialog-backdrop';
+import {
+  afterNextRender,
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  Injector,
+  effect,
+  inject,
+  viewChild,
+} from '@angular/core';
 import { ConfirmDialogService } from './confirm-dialog.service';
 
 @Component({
   selector: 'sfu-confirm-dialog',
   standalone: true,
   template: `
-    @if (dialog(); as current) {
-      <section
-        class="confirm-backdrop"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="app-confirm-title"
-        aria-describedby="app-confirm-message"
-        (click)="cancel()"
-      >
-        <article class="confirm-modal" [class.danger]="current.variant === 'danger'" [class.warning]="current.variant === 'warning'" (click)="$event.stopPropagation()">
-          <header>
-            <span class="confirm-mark" aria-hidden="true"></span>
-            <div>
-              <p>Confirm action</p>
-              <h2 id="app-confirm-title">{{ current.title }}</h2>
-            </div>
-          </header>
-          <p id="app-confirm-message">{{ current.message }}</p>
-          <footer>
-            <button #cancelButton class="confirm-button secondary" type="button" [disabled]="current.pending" (click)="cancel()">
-              {{ current.cancelLabel }}
-            </button>
-            <button
-              class="confirm-button primary"
-              type="button"
-              [class.danger]="current.variant === 'danger'"
-              [class.warning]="current.variant === 'warning'"
-              [disabled]="current.pending"
-              (click)="accept()"
-            >
-              {{ current.pending ? current.pendingLabel : current.confirmLabel }}
-            </button>
-          </footer>
-        </article>
-      </section>
-    }
+    <dialog
+      #modal
+      class="sfu-dialog confirm-modal"
+      aria-labelledby="app-confirm-title"
+      aria-describedby="app-confirm-message"
+      (cancel)="$event.preventDefault(); cancel()"
+      (click)="isBackdropClick($event) ? cancel() : null"
+    >
+      @if (dialog(); as current) {
+        <header>
+          <span
+            class="confirm-mark"
+            [class]="current.variant"
+            aria-hidden="true"
+            >!</span
+          >
+          <h2 id="app-confirm-title">{{ current.title }}</h2>
+        </header>
+        <p id="app-confirm-message">{{ current.message }}</p>
+        <footer>
+          <button
+            #cancelButton
+            type="button"
+            [disabled]="current.pending"
+            (click)="cancel()"
+          >
+            {{ current.cancelLabel }}
+          </button>
+          <button
+            class="confirm-action"
+            type="button"
+            [class.danger]="current.variant === 'danger'"
+            [class.warning]="current.variant === 'warning'"
+            [disabled]="current.pending"
+            (click)="accept()"
+          >
+            {{ current.pending ? current.pendingLabel : current.confirmLabel }}
+          </button>
+        </footer>
+      }
+    </dialog>
   `,
   styles: [
     `
-      .confirm-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 5000;
-        display: grid;
-        place-items: center;
-        padding: max(18px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom))
-          max(14px, env(safe-area-inset-left));
-        background: color-mix(in srgb, #041128 58%, transparent);
-        backdrop-filter: blur(12px);
-      }
-
       .confirm-modal {
-        width: min(420px, 100%);
-        display: grid;
-        gap: 16px;
-        padding: 18px;
-        border: 1px solid color-mix(in srgb, var(--success) 24%, var(--line));
-        border-radius: 14px;
-        background: var(--panel-elevated);
-        color: var(--text);
-        box-shadow: var(--shadow-md);
+        --dialog-width: 440px;
       }
-
-      .confirm-modal.warning {
-        border-color: color-mix(in srgb, var(--brand-amber) 48%, var(--line));
-      }
-
-      .confirm-modal.danger {
-        border-color: color-mix(in srgb, var(--brand-rose) 48%, var(--line));
-      }
-
-      header,
-      footer {
+      header {
         display: flex;
         align-items: center;
         gap: 12px;
       }
-
-      header {
-        align-items: flex-start;
-      }
-
-      h2,
-      p {
-        margin: 0;
-      }
-
-      header p {
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 900;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
       h2 {
-        margin-top: 2px;
-        font-size: 18px;
-        letter-spacing: 0;
+        margin: 0;
+        font-size: 20px;
+        line-height: 1.25;
+        letter-spacing: -0.02em;
       }
-
-      .confirm-modal > p {
+      p {
+        margin: 14px 0 20px;
         color: var(--muted);
         font-size: 14px;
-        line-height: 1.5;
+        line-height: 1.55;
       }
-
-      footer {
-        justify-content: flex-end;
-        flex-wrap: wrap;
-      }
-
       .confirm-mark {
-        width: 34px;
-        height: 34px;
-        flex: 0 0 auto;
+        flex: 0 0 32px;
+        height: 32px;
         display: grid;
         place-items: center;
-        border-radius: 999px;
-        background: color-mix(in srgb, var(--success) 14%, transparent);
+        border-radius: 50%;
+        background: var(--success-soft, var(--green-soft));
+        color: var(--success-ink, var(--green-ink));
+        font-weight: 700;
       }
-
-      .confirm-mark::before {
-        content: '!';
-        color: var(--success);
-        font-weight: 900;
+      .confirm-mark.warning {
+        background: color-mix(
+          in srgb,
+          var(--dialog-warning-bg) 18%,
+          transparent
+        );
+        color: var(--dialog-warning-text);
       }
-
-      .warning .confirm-mark {
-        background: color-mix(in srgb, var(--brand-amber) 22%, transparent);
+      .confirm-mark.danger {
+        background: var(--feedback-error-bg);
+        color: var(--feedback-error);
       }
-
-      .warning .confirm-mark::before {
-        color: var(--brand-amber-strong);
+      footer {
+        display: flex;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: 8px;
       }
-
-      .danger .confirm-mark {
-        background: color-mix(in srgb, var(--brand-rose) 18%, transparent);
+      button {
+        min-height: 40px;
+        padding: 8px 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius, 8px);
+        background: var(--panel);
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 650;
       }
-
-      .danger .confirm-mark::before {
-        color: var(--brand-rose);
+      .confirm-action {
+        border-color: transparent;
+        background: var(--dialog-action-bg);
+        color: var(--dialog-action-text);
       }
-
-      .confirm-button {
-        min-height: 38px;
-        border-radius: var(--radius);
-        padding: 0 14px;
-        font-weight: 900;
+      .confirm-action.warning {
+        background: var(--dialog-warning-bg);
+        color: #2f2107;
       }
-
-      .confirm-button.primary {
-        border-color: var(--success);
-        background: var(--success);
-        color: #fff;
+      .confirm-action.danger {
+        background: var(--dialog-danger-bg);
+        color: var(--dialog-danger-text);
       }
-
-      .confirm-button.primary.warning {
-        border-color: var(--brand-amber);
-        background: var(--brand-amber-strong);
+      button:hover:not(:disabled) {
+        border-color: var(--focus-ring, var(--focus));
       }
-
-      .confirm-button.primary.danger {
-        border-color: var(--brand-rose);
-        background: var(--brand-rose);
-      }
-
-      @media (max-width: 520px) {
-        .confirm-backdrop {
-          place-items: end center;
-        }
-
-        .confirm-modal {
-          border-radius: 14px 14px 0 0;
-        }
-
-        footer {
-          display: grid;
-          grid-template-columns: 1fr;
+      @media (max-width: 420px) {
+        footer > button {
+          flex: 1 1 auto;
+          min-height: 44px;
         }
       }
-    `
+    `,
   ],
-  changeDetection: ChangeDetectionStrategy.Eager
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ConfirmDialogComponent {
-  private readonly confirmDialog = inject(ConfirmDialogService);
-  private lastDialogId: number | null = null;
-  private returnFocus: HTMLElement | null = null;
-
-  protected readonly dialog = this.confirmDialog.dialog;
-
-  @ViewChild('cancelButton') private readonly cancelButton?: ElementRef<HTMLButtonElement>;
+  protected readonly isBackdropClick = isDialogBackdropClick;
+  private readonly service = inject(ConfirmDialogService);
+  private readonly injector = inject(Injector);
+  private readonly modal = viewChild<ElementRef<HTMLDialogElement>>('modal');
+  private readonly cancelButton =
+    viewChild<ElementRef<HTMLButtonElement>>('cancelButton');
+  protected readonly dialog = this.service.dialog;
 
   constructor() {
     effect(() => {
-      const dialog = this.dialog();
-      if (!dialog) {
-        this.restoreFocus();
-        this.lastDialogId = null;
+      const state = this.dialog();
+      const modal = this.modal()?.nativeElement;
+      if (!modal) return;
+      if (!state) {
+        if (modal.open) modal.close();
         return;
       }
-      if (dialog.id === this.lastDialogId) {
-        return;
-      }
-      this.lastDialogId = dialog.id;
-      this.returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      queueMicrotask(() => this.cancelButton?.nativeElement.focus());
+      if (modal.open) return;
+      afterNextRender(
+        () => {
+          if (this.dialog() && modal.isConnected && !modal.open) {
+            modal.showModal();
+            this.cancelButton()?.nativeElement.focus();
+          }
+        },
+        { injector: this.injector },
+      );
     });
   }
 
-  @HostListener('document:keydown.escape')
   protected cancel(): void {
-    this.confirmDialog.cancel();
+    this.service.cancel();
   }
 
   protected accept(): void {
-    this.confirmDialog.accept();
-  }
-
-  private restoreFocus(): void {
-    const target = this.returnFocus;
-    this.returnFocus = null;
-    queueMicrotask(() => target?.focus());
+    this.service.accept();
   }
 }

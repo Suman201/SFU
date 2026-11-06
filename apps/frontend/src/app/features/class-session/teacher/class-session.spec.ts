@@ -355,7 +355,8 @@ describe('TeacherClassSession participant cards', () => {
     };
 
     component.endSession();
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    const modal = (fixture.nativeElement as HTMLElement).querySelector('.teacher-confirm-modal')!;
+    modal.dispatchEvent(new Event('cancel', { cancelable: true }));
 
     expect(component.confirmationDialog()).toBeNull();
     expect(classSessionsMock.endSession).not.toHaveBeenCalled();

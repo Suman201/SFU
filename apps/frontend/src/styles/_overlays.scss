@@ -1,0 +1,48 @@
+// Shared by the web, desktop and admin renderers.
+:where(.sfu-dialog) {
+  width: min(var(--dialog-width, 520px), calc(100% - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: clamp(16px, 4vw, 24px);
+  border: 1px solid var(--line);
+  border-radius: var(--surface-radius, 14px);
+  background: var(--dialog-surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg, var(--shadow-md));
+  overflow-wrap: anywhere;
+}
+
+:where(.sfu-dialog)::backdrop,
+.sfu-dialog-scrim {
+  background: var(--dialog-scrim, rgb(4 13 22 / 64%));
+}
+
+:where(.sfu-error-feedback) {
+  padding: 10px 12px;
+  border: 1px solid var(--feedback-error-line);
+  border-radius: var(--radius, 8px);
+  background: var(--feedback-error-bg);
+  color: var(--feedback-error);
+  overflow-wrap: anywhere;
+}
+
+.sfu-startup-error {
+  margin: max(24px, 10vh) auto 24px;
+}
+
+.sfu-startup-error h1 {
+  margin: 0;
+  font-size: clamp(24px, 5vw, 30px);
+  line-height: 1.2;
+}
+
+.sfu-startup-error details {
+  margin-block: 16px;
+}
+
+.sfu-startup-error pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

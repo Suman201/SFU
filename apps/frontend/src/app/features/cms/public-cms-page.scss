@@ -238,8 +238,8 @@
 }
 
 .form-error {
-  background: color-mix(in srgb, #f26076 12%, transparent);
-  color: #f26076;
+  background: var(--feedback-error-bg);
+  color: var(--feedback-error);
 }
 
 .cms-item-grid {

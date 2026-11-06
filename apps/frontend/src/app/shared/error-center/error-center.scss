@@ -10,7 +10,7 @@ button {
 button:focus-visible,
 summary:focus-visible,
 pre:focus-visible {
-  outline: 3px solid #458b73;
+  outline: 3px solid var(--focus-ring, var(--focus));
   outline-offset: 3px;
 }
 .offline-banner {
@@ -37,10 +37,10 @@ pre:focus-visible {
   overflow: auto;
   padding: 20px;
   border: 1px solid var(--line, #dbe4e0);
-  border-left: 3px solid #f26076;
-  border-radius: 10px;
-  background: var(--panel, white);
-  box-shadow: 0 12px 36px #0002;
+  border-inline-start: 3px solid var(--feedback-error);
+  border-radius: var(--surface-radius, 14px);
+  background: var(--dialog-surface);
+  box-shadow: var(--shadow-lg, var(--shadow-md));
 }
 .notice-icon {
   display: grid;
@@ -48,8 +48,8 @@ pre:focus-visible {
   flex: 0 0 26px;
   height: 26px;
   border-radius: 50%;
-  background: #f260761c;
-  color: var(--text, #17201d);
+  background: var(--feedback-error-bg);
+  color: var(--feedback-error);
   font-weight: 700;
 }
 .notice-content {
@@ -110,7 +110,7 @@ small {
 }
 .notice-actions button {
   border: 1px solid var(--line, #dbe4e0);
-  border-radius: 5px;
+  border-radius: var(--radius, 8px);
   padding: 7px 10px;
   background: var(--panel, #fff);
   font-size: 12px;
@@ -136,18 +136,7 @@ small {
   font-size: 12px;
 }
 .error-dialog {
-  width: min(560px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  box-sizing: border-box;
-  padding: 24px;
-  color: var(--text, #17201d);
-  background: var(--panel, #fff);
-  border: 1px solid var(--line, #dbe4e0);
-  border-radius: 12px;
-  box-shadow: 0 18px 64px #0003;
-}
-.error-dialog::backdrop {
-  background: #091a1480;
+  --dialog-width: 560px;
 }
 header {
   display: flex;
@@ -173,9 +162,9 @@ h2 {
 }
 .next-step {
   padding: 14px;
-  background: color-mix(in srgb, #458b73 9%, var(--panel, white));
-  border-left: 2px solid #458b73;
-  border-radius: 5px;
+  background: var(--success-soft, var(--green-soft));
+  border-inline-start: 2px solid var(--brand-green, var(--product-green));
+  border-radius: var(--radius, 8px);
 }
 .next-step p {
   font-size: 13px;
@@ -214,7 +203,7 @@ pre {
   padding: 12px;
   background: var(--bg, #f6f8f7);
   border: 1px solid var(--line, #dbe4e0);
-  border-radius: 5px;
+  border-radius: var(--radius, 8px);
 }
 .privacy,
 .report-status {
@@ -230,14 +219,15 @@ footer {
 }
 footer button {
   padding: 10px 14px;
-  border-radius: 6px;
-  border: 1px solid var(--line, #dbe4e0);
-  font-size: 12px;
+  min-height: 40px;
+  border-radius: var(--radius, 8px);
+  border: 1px solid var(--line);
+  font-size: 13px;
 }
 .primary {
-  background: #458b73;
-  color: white;
-  border-color: transparent !important;
+  background: var(--dialog-action-bg);
+  color: var(--dialog-action-text);
+  border-color: transparent;
 }
 .secondary {
   background: var(--panel, #fff);
@@ -260,8 +250,8 @@ button:disabled {
     right: 16px;
     padding: 16px;
   }
-  .error-dialog {
-    padding: 20px;
+  footer button {
+    min-height: 44px;
   }
   h2 {
     font-size: 21px;
@@ -273,11 +263,10 @@ button:disabled {
   margin: 20px 0 0;
 }
 a {
-  color: var(--text, #17201d);
-  text-decoration-color: #458b73;
+  color: var(--accent-strong, var(--green-ink));
   text-underline-offset: 3px;
 }
 a:focus-visible {
-  outline: 3px solid #458b73;
+  outline: 3px solid var(--focus-ring, var(--focus));
   outline-offset: 3px;
 }

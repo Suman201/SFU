@@ -140,8 +140,8 @@
 
 .form-alert {
   border: 1px solid rgba(242, 96, 118, .28);
-  background: rgba(242, 96, 118, .1);
-  color: #F26076;
+  background: var(--feedback-error-bg);
+  color: var(--feedback-error);
 }
 
 .form-success {

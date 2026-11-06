@@ -238,16 +238,15 @@
     </div>
   }
 
-  @if (linkDialogOpen()) {
-    <div
-      class="link-dialog-backdrop"
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      #linkDialog
+      class="sfu-dialog chat-link-dialog"
       aria-labelledby="chat-link-dialog-title"
       aria-describedby="chat-link-dialog-copy"
-      (click)="cancelLinkAttachment()"
+      (cancel)="$event.preventDefault(); cancelLinkAttachment()"
+      (click)="isBackdropClick($event) ? cancelLinkAttachment() : null"
     >
-      <form class="link-dialog" (submit)="confirmLinkAttachment($event)" (click)="$event.stopPropagation()">
+      <form class="link-dialog" (submit)="confirmLinkAttachment($event)" novalidate>
         <header>
           <p class="eyebrow">Attach link</p>
           <h3 id="chat-link-dialog-title">Add a chat link</h3>
@@ -256,7 +255,7 @@
         <label>
           <span>Link URL</span>
           <input
-            #linkUrlInput
+            autofocus
             type="url"
             autocomplete="off"
             inputmode="url"
@@ -266,13 +265,12 @@
           />
         </label>
         @if (linkDialogError()) {
-          <p class="link-dialog-error" role="alert">{{ linkDialogError() }}</p>
+          <p class="link-dialog-error sfu-error-feedback" role="alert">{{ linkDialogError() }}</p>
         }
         <footer>
           <button class="button ghost" type="button" (click)="cancelLinkAttachment()">Cancel</button>
           <button class="button primary" type="submit">Attach link</button>
         </footer>
       </form>
-    </div>
-  }
+    </dialog>
 </section>

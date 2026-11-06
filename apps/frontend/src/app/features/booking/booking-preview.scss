@@ -635,9 +635,12 @@ h3 {
   margin: 12px 0 14px;
 }
 .payment-error {
-  border-left: 3px solid var(--booking-rose);
+  border: 1px solid var(--feedback-error-line);
+  border-inline-start: 3px solid var(--feedback-error);
+  border-radius: var(--radius);
   padding: 12px 14px;
-  background: color-mix(in srgb, var(--booking-rose) 7%, var(--panel));
+  background: var(--feedback-error-bg);
+  color: var(--feedback-error);
   font-size: 12px;
   line-height: 1.75;
   margin: 15px 0 20px;

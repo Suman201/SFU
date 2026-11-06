@@ -330,6 +330,8 @@ describe('Whiteboard collaboration and classroom controls', () => {
     expect(event.defaultPrevented).toBeTrue();
     expect((harness(fixture).selectedElementIds as unknown as (() => string[]))()).toEqual(['first', 'second']);
     harness(fixture).selectedElementIds.set([]);
+    fixture.nativeElement.querySelector('button[aria-label="Slide Deck & Manager"]').click();
+    fixture.detectChanges();
     const input = fixture.nativeElement.querySelector('input[aria-label="Rename current board page"]') as HTMLInputElement;
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, bubbles: true }));
     expect((harness(fixture).selectedElementIds as unknown as (() => string[]))()).toEqual([]);
@@ -351,21 +353,27 @@ describe('Whiteboard collaboration and classroom controls', () => {
     expect(emitted).not.toHaveBeenCalled();
   });
 
-  it('keeps thirty page titles readable even when teacher controls and an import status fill the header', () => {
+  it('keeps thirty slide titles readable in a scrollable slide deck', () => {
     const fixture = createBoard();
     const state = structuredClone(initial);
-    state.pages = Array.from({ length: 30 }, (_, index) => ({ ...structuredClone(initial.pages[0]!), id: `page-${index + 1}`, title: `Lesson ${index + 1}`, order: index }));
-    fixture.componentInstance.importBoardState(state); fixture.detectChanges();
-    const strip = fixture.nativeElement.querySelector('.page-tab-list') as HTMLElement;
-    const tab = strip.querySelector('button')!;
-    expect(tab.getBoundingClientRect().width).toBeGreaterThan(75);
-    expect(strip.scrollWidth).toBeGreaterThan(strip.clientWidth);
-    expect(getComputedStyle(tab).flexShrink).toBe('0');
-    (fixture.componentInstance as unknown as { assetImportStatus: { set(status: unknown): void } }).assetImportStatus.set({ type: 'success', message: 'Classroom image added as an object.' });
+    state.pages = Array.from({ length: 30 }, (_, index) => ({
+      ...structuredClone(initial.pages[0]!),
+      id: `page-${index + 1}`,
+      title: `Lesson ${index + 1}`,
+      order: index
+    }));
+    fixture.componentInstance.importBoardState(state);
     fixture.detectChanges();
-    expect(strip.getBoundingClientRect().width).toBeGreaterThanOrEqual(100);
-    const tools = fixture.nativeElement.querySelector('.page-tools') as HTMLElement;
-    expect(tools.scrollWidth).toBeGreaterThan(tools.clientWidth);
+    fixture.nativeElement.querySelector('button[aria-label="Slide Deck & Manager"]').click();
+    fixture.detectChanges();
+
+    const list = fixture.nativeElement.querySelector('.page-manager-thumbnails') as HTMLElement;
+    const cards = list.querySelectorAll<HTMLElement>('.page-card');
+    expect(cards.length).toBe(30);
+    expect(cards[0]?.textContent).toContain('Lesson 1');
+    expect(cards[29]?.textContent).toContain('Lesson 30');
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    expect(getComputedStyle(cards[0]!).flexShrink).toBe('0');
   });
 
   it('snaps shape starts and endpoints to the grid and existing object points', () => {

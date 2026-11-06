@@ -179,8 +179,8 @@
 }
 
 .library-state.danger {
-  color: #f26076;
-  background: color-mix(in srgb, #f26076 10%, var(--panel-elevated));
+  color: var(--feedback-error);
+  background: var(--feedback-error-bg);
 }
 
 @media (max-width: 760px) {

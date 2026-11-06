@@ -309,7 +309,7 @@ h3 {
 
 .analytics-state.danger {
   border-color: rgb(242 96 118 / 0.35);
-  color: #f26076;
+  color: var(--feedback-error);
 }
 
 @media (max-width: 1100px) {

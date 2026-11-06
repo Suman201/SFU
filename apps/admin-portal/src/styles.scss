@@ -1,3 +1,4 @@
+@use '../../frontend/src/styles/overlays';
 @use './styles/workspace';
 @layer admin-pages;
 :root {
@@ -22,6 +23,16 @@
   --coral-ink: #99521f;
   --amber-ink: #795b14;
   --action: #326c54;
+  --dialog-surface: var(--panel-elevated);
+  --feedback-error: var(--rose-ink);
+  --feedback-error-bg: color-mix(in srgb, var(--product-rose) 12%, var(--panel));
+  --feedback-error-line: color-mix(in srgb, var(--rose-ink) 36%, var(--line));
+  --dialog-action-bg: var(--action);
+  --dialog-action-text: var(--bg);
+  --dialog-warning-text: var(--amber-ink);
+  --dialog-warning-bg: var(--product-amber);
+  --dialog-danger-bg: var(--product-rose);
+  --dialog-danger-text: #29131a;
   --action-hover: #26553f;
   --focus: #458b73;
   --shadow-sm: 0 1px 2px #19262405;

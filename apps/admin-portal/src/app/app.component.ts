@@ -34,7 +34,7 @@ import { ConfirmDialogComponent } from './shared/confirm-dialog/confirm-dialog.c
     }
     <router-outlet />
     <sapiovian-error-center />
-    <sfu-admin-confirm-dialog />
+    <sfu-confirm-dialog />
   `,
 })
 export class AppComponent {
