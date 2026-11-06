@@ -2,10 +2,20 @@ import { createServer, request } from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 /** Serves the built admin app and proxies API calls to a real backend. */
-export async function startAdminTestServer(backend: string) {
-  const root = path.resolve('apps/admin-portal/dist/admin-portal/browser');
+export function startAdminTestServer(backend: string) {
+  return startBuiltUiTestServer(
+    backend,
+    path.resolve('apps/admin-portal/dist/admin-portal/browser'),
+  );
+}
+
+export async function startBuiltUiTestServer(
+  backend: string,
+  root: string,
+  port = 0,
+) {
   if (!existsSync(path.join(root, 'index.html')))
-    throw new Error('Build the admin portal before acceptance.');
+    throw new Error(`Build the app before running acceptance tests: ${root}`);
   const server = createServer((req, res) => {
     if (req.url?.startsWith('/api/')) {
       const upstream = request(
@@ -37,8 +47,10 @@ export async function startAdminTestServer(backend: string) {
     const types: Record<string, string> = {
       '.html': 'text/html',
       '.js': 'application/javascript',
+      '.mjs': 'application/javascript',
       '.css': 'text/css',
       '.png': 'image/png',
+      '.webp': 'image/webp',
       '.svg': 'image/svg+xml',
       '.woff2': 'font/woff2',
       '.ico': 'image/x-icon',
@@ -49,7 +61,10 @@ export async function startAdminTestServer(backend: string) {
     );
     createReadStream(file).pipe(res);
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
   return {
     origin: `http://127.0.0.1:${(server.address() as any).port}`,
     stop: () => new Promise<void>((resolve) => server.close(() => resolve())),

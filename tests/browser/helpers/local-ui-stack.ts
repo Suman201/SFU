@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { startBuiltUiTestServer } from './admin-test-server';
 
 type ManagedProcess = {
   name: string;
@@ -12,6 +13,7 @@ type ManagedProcess = {
 
 export type LocalUiStackOptions = {
   frontendPort: number;
+  frontendDir?: string;
   nodePorts: [number] | [number, number];
   workerMode: 'in-process' | 'worker';
   operationsToken?: string;
@@ -36,6 +38,7 @@ export async function startLocalUiStack(options: LocalUiStackOptions): Promise<L
   const nodeUrls = options.nodePorts.map((port) => `http://127.0.0.1:${port}`);
   const operationsToken = options.operationsToken ?? 'u2a-local-operations-token';
   const managed: ManagedProcess[] = [];
+  let stopFrontend: (() => Promise<void>) | undefined;
 
   try {
     for (const [index, port] of options.nodePorts.entries()) {
@@ -72,17 +75,26 @@ export async function startLocalUiStack(options: LocalUiStackOptions): Promise<L
       managed.push(processHandle);
     }
 
-    const frontend = spawnManagedProcess({
-      name: 'frontend-dev-server',
-      command: nodeBin,
-      args: ['../../node_modules/@angular/cli/bin/ng.js', 'serve', '--host', '127.0.0.1', '--port', String(options.frontendPort), '--proxy-config', 'proxy.conf.cjs'],
-      cwd: path.join(repoRoot, 'apps/frontend'),
-      env: {
-        ...process.env,
-        SFU_BACKEND_ORIGIN: nodeUrls[0]!
-      }
-    });
-    managed.push(frontend);
+    if (options.frontendDir) {
+      const frontend = await startBuiltUiTestServer(
+        nodeUrls[0]!,
+        path.resolve(options.frontendDir),
+        options.frontendPort,
+      );
+      stopFrontend = frontend.stop;
+    } else {
+      const frontend = spawnManagedProcess({
+        name: 'frontend-dev-server',
+        command: nodeBin,
+        args: ['../../node_modules/@angular/cli/bin/ng.js', 'serve', '--host', '127.0.0.1', '--port', String(options.frontendPort), '--proxy-config', 'proxy.conf.cjs'],
+        cwd: path.join(repoRoot, 'apps/frontend'),
+        env: {
+          ...process.env,
+          SFU_BACKEND_ORIGIN: nodeUrls[0]!
+        }
+      });
+      managed.push(frontend);
+    }
 
     await Promise.all(nodeUrls.map((url) => waitForHttpOk(`${url}/health/live`, managed)));
     await runManagedCommand({
@@ -106,12 +118,14 @@ export async function startLocalUiStack(options: LocalUiStackOptions): Promise<L
       operationsToken,
       getLogs: () => managed.map((entry) => `[${entry.name}]\n${entry.output.slice(-100).join('\n').slice(-60_000)}`).join('\n\n'),
       stop: async () => {
+        await stopFrontend?.();
         for (const processHandle of managed.reverse()) {
           await stopManagedProcess(processHandle);
         }
       }
     };
   } catch (error) {
+    await stopFrontend?.();
     for (const processHandle of managed.reverse()) {
       await stopManagedProcess(processHandle);
     }

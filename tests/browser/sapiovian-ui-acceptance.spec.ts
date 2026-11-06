@@ -18,6 +18,7 @@ test('global discovery and teacher/student UI work with the real backend', async
   await mkdir(evidence, { recursive: true });
   const stack = await startAcceptanceStack({
     frontendPort: 4462,
+    frontendDir: 'apps/frontend/dist/frontend/browser',
     backendPort: 3362,
   });
   const context = await browser.newContext({
@@ -31,7 +32,9 @@ test('global discovery and teacher/student UI work with the real backend', async
   const page = await context.newPage();
   const errors: string[] = [];
   const checks: string[] = [];
-  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('pageerror', (error) =>
+    errors.push(`${page.url()}: ${error.message}`),
+  );
   const capture = async (name: string) => {
     await page.screenshot({
       path: path.join(evidence, `${name}.png`),
@@ -328,6 +331,9 @@ test('global discovery and teacher/student UI work with the real backend', async
     );
 
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Student login', level: 1 }),
+    ).toBeVisible();
     await page.goto(`${stack.frontendBaseUrl}/teacher/login`);
     await page
       .getByLabel('Email', { exact: true })
@@ -375,6 +381,9 @@ test('global discovery and teacher/student UI work with the real backend', async
       'Teacher workspace and mobile notification panels fit the shared layout',
     );
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Teacher login', level: 1 }),
+    ).toBeVisible();
 
     await page.goto(`${stack.frontendBaseUrl}/register`);
     await expect(page.getByLabel('Your name')).toHaveValue('');

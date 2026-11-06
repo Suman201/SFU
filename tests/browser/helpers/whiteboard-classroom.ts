@@ -14,6 +14,7 @@ const studentEmail = 'student.one@example.com';
 export async function startAcceptanceStack(
   options: {
     frontendPort?: number;
+    frontendDir?: string;
     backendPort?: number;
     secondBackendPort?: number;
     localSmtpPort?: number;
@@ -57,6 +58,7 @@ export async function startAcceptanceStack(
     Object.assign(process.env, overrides);
     stack = await startLocalUiStack({
       frontendPort: options.frontendPort ?? 4440,
+      frontendDir: options.frontendDir,
       nodePorts: options.secondBackendPort
         ? [options.backendPort ?? 3340, options.secondBackendPort]
         : [options.backendPort ?? 3340],
