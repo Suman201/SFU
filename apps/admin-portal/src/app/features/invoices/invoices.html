@@ -38,10 +38,11 @@
       <div class="data-table-filters">
         <input
           type="search"
+          class="data-table-search"
           aria-label="Search invoices"
           name="q"
           [(ngModel)]="search"
-          placeholder="Search invoice, customer or email"
+          placeholder="Invoice, customer or email"
           maxlength="100"
         /><select
           aria-label="Invoice status"
@@ -54,7 +55,7 @@
           <option value="issued">Issued</option>
           <option value="paid">Paid</option>
           <option value="void">Void</option></select
-        ><button class="secondary-button" type="submit">Search</button>
+        ><button class="table-action" type="submit">Search</button>
       </div>
       <span class="result-count">{{data().total}} invoices</span>
     </form>

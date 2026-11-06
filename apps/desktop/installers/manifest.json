@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-06T11:48:45.610306+00:00",
+  "generatedAt": "2026-11-06T12:15:20.096931+00:00",
   "product": "Sapiovian Classroom",
   "version": "0.1.0",
   "signed": false,
@@ -19,7 +19,7 @@
     "macDmgIntegrityPassed": true,
     "macZipCrcPassed": true
   },
-  "sourceDigestSha256": "f7642d517a0f2ad0dc7e3868c466d286125af4c4319b035f602e9de2cf30691e",
+  "sourceDigestSha256": "92d29ba393d24f9f166d029bc7ef1de65c94872a8831e5e4a873f09d801d9b66",
   "sourceFiles": 324,
   "sourceDigestPaths": [
     "apps/desktop/src",
@@ -42,73 +42,73 @@
   "artifacts": [
     {
       "name": "Sapiovian Classroom-0.1.0-mac-arm64.dmg",
-      "bytes": 125669768,
-      "sha256": "fc09a6a505145dbc0b6d7e5394edb5f6e1f384b5e30de69142c8798a8a701920"
+      "bytes": 125672902,
+      "sha256": "f48154874dcd3dd07a99d8373084328c14c3ca13b850775395a10073fe7d25f6"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-arm64.dmg.blockmap",
-      "bytes": 132874,
-      "sha256": "a779723aa2df5794772877310599aad264bf64aebe20dc0d5745dd43ca248685"
+      "bytes": 132839,
+      "sha256": "d525e5e81bfab64a22e244b362a70e88e5f9605b9555a364727206069494563d"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-arm64.zip",
-      "bytes": 122099779,
-      "sha256": "6b8e6e532871ef680982e00de2333a16f9708ba4a420744fbb63e4a4751f6dab"
+      "bytes": 122099799,
+      "sha256": "d1c624d71b9f23999b137349b5e45fc8229d8e18ab28b2dc82e45dc26a4c19e0"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-arm64.zip.blockmap",
-      "bytes": 129498,
-      "sha256": "a58f02b0f06dbe2c982f84e254f54796261512f85322ec9dadc37b4df14a7fb9"
+      "bytes": 129457,
+      "sha256": "59b5762fd8623be8d4601a6dee18f08f2fd41d7a7d1cd9fec3986fa85823f1ff"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-x64.dmg",
-      "bytes": 129920169,
-      "sha256": "90156cd797c1bfa571b5e7757f8a6117c00c8a58304c390b2e56d5462a20a8db"
+      "bytes": 129925464,
+      "sha256": "b7a8cb4b84480143c1114dade1bb3121b80be7441d31af80d3b4848212b8bc09"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-x64.dmg.blockmap",
-      "bytes": 136392,
-      "sha256": "89092261598fbca3cdfb7a518261d550f0ccfbb151b3e041f5645c3c59a26015"
+      "bytes": 136391,
+      "sha256": "71a73c36c0a6ca813da62079dea7415ccd6338c696bc30f28b92c2f2b09e669d"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-x64.zip",
-      "bytes": 126347869,
-      "sha256": "081828f82cb4ce1d084a0ffc6945de3f2f1c8631ba0b117104aabb34ef0543af"
+      "bytes": 126347889,
+      "sha256": "2b198bd518e9116214f54b07db49ba3e35257a569d19ab3999c06d13e6f66785"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-x64.zip.blockmap",
-      "bytes": 133198,
-      "sha256": "92dca7f7bb7656840706cd39df1f0b9191b15cf2c996c32063d35367eca77931"
+      "bytes": 133265,
+      "sha256": "f16a1f3dbe27ce3275b0daa2e724e3d4b9221ff387ce9f1e5fad8046cea37f90"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win-arm64.exe",
-      "bytes": 120297592,
-      "sha256": "3115a889ee2e767c5cfee584ea83039ee32682b2bb60468faa331e6f7cf0c68b"
+      "bytes": 120297694,
+      "sha256": "e9b8cb7dccf6227acf4fd03003447a2f4c05f88703e0b4c3323306ada6671415"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win-arm64.exe.blockmap",
-      "bytes": 125583,
-      "sha256": "a416517c53251db9e6cb6391a7fbfd83e4442c77db51565baafc2bf485231350"
+      "bytes": 125502,
+      "sha256": "8d426ac05127bab7501b6a020c10a1aae983c281d29cc0ba7bc5f7137326e201"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win-x64.exe",
-      "bytes": 126180859,
-      "sha256": "770f9860cebf146e615c820e4affcc342870261ddd19840b89f6dd3155172cfe"
+      "bytes": 126180947,
+      "sha256": "09008ca4ca40ca055e511e1f7e87e7e826baf0dcdbc33b91a3d6f098dd38ab5a"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win-x64.exe.blockmap",
-      "bytes": 133542,
-      "sha256": "a696be6aa9d6289db88d75dd2afdf0d5ba87a536edcf6dac54d151d38a656ef0"
+      "bytes": 133480,
+      "sha256": "6c849554bca99318c3c136dcbaa2c4ccd4fb4128c16c97e1ff3b2c62a454a83b"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win.exe",
-      "bytes": 245894071,
-      "sha256": "372585d2b8a0865696bde47fd98504c3cc2699f2100d7e33c503fe3ced620f25"
+      "bytes": 245894214,
+      "sha256": "f01df930acd40d7605c2e982cf134ea43671cd36c3162bdd1975719c3a6fa0e7"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win.exe.blockmap",
-      "bytes": 256744,
-      "sha256": "a9cb80207de262707889fc4b300a44f7e2b3a469e44961654bce1089b4007b9a"
+      "bytes": 256704,
+      "sha256": "e81123128fd628810cd883a08227b05f1eaa10f3ea015553c7c2892f47235a63"
     }
   ],
   "adminPortal": "http://localhost:4300"

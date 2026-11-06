@@ -15,6 +15,10 @@ const password = 'Password@12345';
 
 test.use({ actionTimeout: 12_000 });
 const themes = ['light', 'dark'] as const;
+const responsiveViews = [
+  { size: 'phone', viewport: { width: 390, height: 844 } },
+  { size: 'tablet', viewport: { width: 820, height: 1180 } },
+].flatMap((view) => themes.map((theme) => ({ ...view, theme })));
 
 async function checkBounds(panel: Locator) {
   await expect(panel).toBeVisible();
@@ -76,6 +80,7 @@ test('web and admin dialogs and failures stay readable in both themes', async ({
   const capture = (page: Page, label: string) =>
     page.screenshot({
       path: path.join(output, `${info.project.name}-${label}.png`),
+      animations: 'disabled',
     });
   const stack = await startAcceptanceStack({
     frontendPort: 4489,
@@ -151,12 +156,9 @@ test('web and admin dialogs and failures stay readable in both themes', async ({
     await guest.getByRole('button', { name: 'Log in', exact: true }).click();
     const notice = guest.getByRole('region', { name: 'Error information' });
     await expect(notice).toContainText('SAP2001');
-    for (const theme of themes) {
+    for (const { size, viewport, theme } of responsiveViews) {
       await guest.emulateMedia({ colorScheme: theme });
-      await guest.setViewportSize({
-        width: theme === 'light' ? 1440 : 390,
-        height: 844,
-      });
+      await guest.setViewportSize(viewport);
       await checkPanel(notice, theme);
       await notice.getByRole('button', { name: 'View details' }).click();
       const details = guest.getByRole('dialog', {
@@ -167,7 +169,7 @@ test('web and admin dialogs and failures stay readable in both themes', async ({
         details.getByRole('button', { name: 'Close error details' }),
       ).toBeFocused();
       await expect(details).toContainText('SAP2001');
-      await capture(guest, `error-details-${theme}`);
+      await capture(guest, `error-details-${size}-${theme}`);
       await guest.keyboard.press('Escape');
       await expect(details).toBeHidden();
     }
@@ -204,12 +206,9 @@ test('web and admin dialogs and failures stay readable in both themes', async ({
       teacher.accessToken,
     );
     await workspace.goto(stack.frontendBaseUrl + '/teacher/dashboard');
-    for (const theme of themes) {
+    for (const { size, viewport, theme } of responsiveViews) {
       await workspace.emulateMedia({ colorScheme: theme });
-      await workspace.setViewportSize({
-        width: theme === 'light' ? 1440 : 390,
-        height: 844,
-      });
+      await workspace.setViewportSize(viewport);
       const open = workspace
         .getByRole('button', { name: 'Create a class group', exact: true })
         .first();
@@ -228,13 +227,17 @@ test('web and admin dialogs and failures stay readable in both themes', async ({
       await expect(
         drawer.getByRole('button', { name: 'Close add batch form' }),
       ).toBeFocused();
-      await capture(workspace, `batch-drawer-${theme}`);
-      const monday = drawer.getByRole('checkbox', { name: 'Monday', exact: true });
+      await capture(workspace, `batch-drawer-${size}-${theme}`);
+      const monday = drawer.getByRole('checkbox', {
+        name: 'Monday',
+        exact: true,
+      });
       await monday.click();
       await expect(monday).toBeChecked();
       await monday.click();
       await expect(monday).not.toBeChecked();
-      if (theme === 'light') await workspace.mouse.click(30, 60);
+      if (size === 'tablet' && theme === 'light')
+        await workspace.mouse.click(30, 60);
       else await workspace.keyboard.press('Escape');
       await expect(drawer).toBeHidden();
     }
@@ -246,16 +249,15 @@ test('web and admin dialogs and failures stay readable in both themes', async ({
       .locator(`[data-class-id="${fixture.sessionId}"]`)
       .first()
       .click();
-    for (const theme of themes) {
+    for (const { size, viewport, theme } of responsiveViews) {
       await workspace.emulateMedia({ colorScheme: theme });
       await workspace
         .getByRole('button', { name: 'Reschedule', exact: true })
         .click();
       const dialog = workspace.getByRole('dialog', { name: 'Find a new time' });
-      if (theme === 'dark')
-        await workspace.setViewportSize({ width: 390, height: 844 });
+      await workspace.setViewportSize(viewport);
       await checkPanel(dialog, theme);
-      await capture(workspace, `calendar-reschedule-${theme}`);
+      await capture(workspace, `calendar-reschedule-${size}-${theme}`);
       await workspace.keyboard.press('Escape');
       await expect(dialog).toBeHidden();
     }
@@ -273,7 +275,8 @@ test('web and admin dialogs and failures stay readable in both themes', async ({
       admin.accessToken,
     );
     await operator.goto(adminServer.origin + '/users');
-    for (const theme of themes) {
+    for (const { size, viewport, theme } of responsiveViews) {
+      await operator.setViewportSize(viewport);
       if ((await operator.locator('html').getAttribute('data-theme')) !== theme)
         await operator
           .getByRole('button', { name: `Switch to ${theme} mode` })
@@ -293,7 +296,7 @@ test('web and admin dialogs and failures stay readable in both themes', async ({
         exact: true,
       });
       await expect(cancel).toBeFocused();
-      await capture(operator, `admin-confirm-${theme}`);
+      await capture(operator, `admin-confirm-${size}-${theme}`);
       await cancel.press('Enter');
       await expect(dialog).toBeHidden();
       await expect(deactivate).toBeFocused();
@@ -404,7 +407,10 @@ test('classroom dialogs honor both themes and Enter cancels when Cancel has focu
         name: 'End class for everyone?',
       });
       await checkPanel(end, theme);
-      const cancel = end.getByRole('button', { name: 'Keep class live', exact: true });
+      const cancel = end.getByRole('button', {
+        name: 'Keep class live',
+        exact: true,
+      });
       await expect(cancel).toBeFocused();
       await capture(teacher, `classroom-confirm-${theme}`);
       await cancel.press('Enter');

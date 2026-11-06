@@ -553,6 +553,9 @@
       min-height: 38px;
       font-size: 14px;
     }
+    .data-table-filters input.data-table-search {
+      flex-basis: 100%;
+    }
     .data-table-filters label {
       flex: 1 1 130px;
     }

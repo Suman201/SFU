@@ -24,6 +24,7 @@ test('global discovery and teacher/student UI work with the real backend', async
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1050 },
     colorScheme: 'light',
+    reducedMotion: 'reduce',
   });
   await context.addInitScript(() => {
     if (!localStorage.getItem('native-sfu-theme'))
@@ -49,17 +50,20 @@ test('global discovery and teacher/student UI work with the real backend', async
     ).toBe(true);
   const checkRoutes = async (routes: Array<[string, string, string]>) => {
     for (const [url, heading, name] of routes) {
-      for (const [width, theme] of [
-        [1440, 'dark'],
-        [768, 'light'],
-        [390, 'dark'],
+      await page.evaluate(() =>
+        localStorage.setItem('native-sfu-theme', 'system'),
+      );
+      await page.goto(stack.frontendBaseUrl + url);
+      for (const [size, width, height, theme] of [
+        ['phone', 390, 844, 'light'],
+        ['phone', 390, 844, 'dark'],
+        ['tablet', 820, 1180, 'light'],
+        ['tablet', 820, 1180, 'dark'],
+        ['compact', 320, 720, 'light'],
+        ['landscape', 1024, 640, 'dark'],
       ] as const) {
-        await page.setViewportSize({ width, height: 1000 });
+        await page.setViewportSize({ width, height });
         await page.emulateMedia({ colorScheme: theme });
-        await page.evaluate(() =>
-          localStorage.setItem('native-sfu-theme', 'system'),
-        );
-        await page.goto(stack.frontendBaseUrl + url);
         await expect(
           page.getByRole('heading', { level: 1, name: heading }),
         ).toBeVisible();
@@ -74,15 +78,37 @@ test('global discovery and teacher/student UI work with the real backend', async
             }),
           )
           .toBe(true);
-        try {
-          await noOverflow();
-        } catch (error) {
-          throw new Error(`${url} overflows at ${width}px`, { cause: error });
+        const widthUsed = await page.evaluate(
+          () => document.documentElement.scrollWidth,
+        );
+        expect
+          .soft(widthUsed, `${url} at ${width}×${height} in ${theme} mode`)
+          .toBeLessThanOrEqual(width + 1);
+        if (name === 'teacher-profile-editor' && width <= 390) {
+          await expect(
+            page.getByRole('button', { name: 'Change photo' }),
+          ).toBeVisible();
+          for (const label of ['Profile sections', 'Edit teaching profile']) {
+            const navigation = page.getByRole('navigation', { name: label });
+            await expect(navigation).toBeVisible();
+            const fits = await navigation.evaluate(
+              (element) => element.scrollWidth <= element.clientWidth + 1,
+            );
+            expect
+              .soft(fits, `${label} fits at ${width}px in ${theme} mode`)
+              .toBe(true);
+          }
         }
-        if (testInfo.project.name === 'chromium' && width !== 768)
+        if (
+          testInfo.project.name === 'chromium' &&
+          (size === 'phone' || size === 'tablet')
+        ) {
+          await expect(page.locator('.auth-loading')).toHaveCount(0);
           await page.screenshot({
-            path: path.join(evidence, `${name}-${width}.png`),
+            path: path.join(evidence, `${name}-${size}-${theme}.png`),
+            animations: 'disabled',
           });
+        }
       }
     }
     await page.setViewportSize({ width: 1440, height: 1050 });
@@ -327,7 +353,7 @@ test('global discovery and teacher/student UI work with the real backend', async
       ['/calendar', 'Class calendar.', 'calendar'],
     ]);
     checks.push(
-      'Student workspace routes fit desktop, tablet and mobile in both themes',
+      'Student workspace routes fit tablet and phone viewports in both themes',
     );
 
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
@@ -357,24 +383,44 @@ test('global discovery and teacher/student UI work with the real backend', async
       ['/teacher/profile', 'Your teaching profile', 'teacher-profile-editor'],
       ['/teacher/live-settings', 'Live settings', 'teacher-settings'],
     ]);
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole('button', { name: 'Menu', exact: true }).click();
-    for (const [trigger, panel] of [
-      ['Class notifications', 'Class notifications'],
-      ['Application updates', 'Application notifications'],
-    ]) {
-      const button = page.getByRole('button', { name: trigger, exact: true });
-      await button.click();
-      await expect(page.getByRole('region', { name: panel })).toBeVisible();
-      await expect
-        .poll(() =>
-          page.getByRole('region', { name: panel }).evaluate((element) => {
-            const rect = element.getBoundingClientRect();
-            return rect.left >= 0 && rect.right <= innerWidth;
-          }),
+    await page.setViewportSize({ width: 820, height: 550 });
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      const menu = page.getByRole('button', { name: 'Menu', exact: true });
+      await menu.click();
+      for (const [trigger, panel] of [
+        ['Class notifications', 'Class notifications'],
+        ['Application updates', 'Application notifications'],
+      ]) {
+        const button = page.getByRole('button', { name: trigger, exact: true });
+        const region = page.getByRole('region', { name: panel });
+        if (!(await region.isVisible())) await button.click();
+        await expect(region).toBeVisible();
+      }
+      const header = page.locator('sfu-header .site-header');
+      expect
+        .soft(
+          await header.evaluate(
+            (element) => element.getBoundingClientRect().bottom <= innerHeight,
+          ),
+          `Expanded landscape menu fits in ${theme} mode`,
         )
         .toBe(true);
-      await button.click();
+      const signOut = header.getByRole('button', {
+        name: 'Sign out',
+        exact: true,
+      });
+      await signOut.scrollIntoViewIfNeeded();
+      await expect(signOut).toBeInViewport({ ratio: 1 });
+      if (testInfo.project.name === 'chromium') {
+        await page.screenshot({
+          path: path.join(evidence, `teacher-menu-landscape-${theme}.png`),
+          animations: 'disabled',
+        });
+      }
+      await signOut.press('Escape');
+      await expect(menu).toBeFocused();
     }
     await page.setViewportSize({ width: 1440, height: 1050 });
     checks.push(
@@ -394,6 +440,7 @@ test('global discovery and teacher/student UI work with the real backend', async
     checks.push('Account creation has no prefilled demo identity or password');
 
     await checkRoutes([
+      ['/', 'Find the right teacher. Learn from anywhere.', 'home'],
       [teacherProfilePath, 'Avery Morgan', 'public-teacher-profile'],
       ['/teachers?q=English', 'Find a teacher', 'teacher-directory'],
       ['/booking', 'Start with the right lesson.', 'booking'],

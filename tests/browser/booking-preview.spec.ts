@@ -196,12 +196,13 @@ test('static lesson, timezone, declined card, retry and confirmation without ser
   await assertNoOverflow(page);
 });
 
-test('mobile and dark payment UI validates fields and keeps billing data out of storage', async ({
+test('responsive payment UI validates fields and keeps billing data out of storage', async ({
   page,
 }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.addInitScript(() =>
-    localStorage.setItem('native-sfu-theme', 'dark'),
+    localStorage.setItem('native-sfu-theme', 'system'),
   );
   await page.goto(origin + '/booking');
   await assertNoOverflow(page);
@@ -212,8 +213,18 @@ test('mobile and dark payment UI validates fields and keeps billing data out of 
     .first()
     .click();
   await page.getByRole('button', { name: /Continue to payment/ }).click();
-  await assertNoOverflow(page);
-  await shots(page, '05-mobile-payment-dark', info.project.name);
+  for (const [size, width, height] of [
+    ['tablet', 820, 1180],
+    ['phone', 390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await assertNoOverflow(page);
+      await shots(page, `05-${size}-payment-${theme}`, info.project.name);
+    }
+  }
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('');
   await page.getByRole('button', { name: /Preview payment/ }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(

@@ -26,6 +26,7 @@ test('real backend: compact admin workspace, navigation, records, editors and re
     throw Error('Use isolated local acceptance MongoDB.');
   const stack = await startAcceptanceStack({
     frontendPort: 4488,
+    frontendDir: 'apps/frontend/dist/frontend/browser',
     backendPort: 3388,
   });
   const connection = await mongoose
@@ -67,18 +68,16 @@ test('real backend: compact admin workspace, navigation, records, editors and re
       },
       { upsert: true },
     );
-    await db
-      .collection('users')
-      .updateOne(
-        { _id },
-        {
-          $set: {
-            name: 'Elena Martins',
-            displayName: 'Elena Martins',
-            phone: '',
-          },
+    await db.collection('users').updateOne(
+      { _id },
+      {
+        $set: {
+          name: 'Elena Martins',
+          displayName: 'Elena Martins',
+          phone: '',
         },
-      );
+      },
+    );
     for (const name of [
       'batches',
       'class_sessions',
@@ -228,7 +227,17 @@ test('real backend: compact admin workspace, navigation, records, editors and re
       path: path.join(output, `${info.project.name}-invoice-editor.png`),
       fullPage: true,
     });
+    for (const width of [820, 390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      const scrollWidth = await page.evaluate(
+        () => document.documentElement.scrollWidth,
+      );
+      expect
+        .soft(scrollWidth, `Invoice editor at ${width}px`)
+        .toBeLessThanOrEqual(width + 1);
+    }
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 960 });
     await expect(
       page.getByRole('heading', { name: 'Invoice draft', exact: true }),
     ).toBeVisible();
@@ -289,6 +298,8 @@ test('real backend: compact admin workspace, navigation, records, editors and re
       fullPage: true,
     });
     const routes = [
+      '/dashboard',
+      '/users',
       '/class-sessions',
       '/courses',
       '/batches',
@@ -376,28 +387,74 @@ test('real backend: compact admin workspace, navigation, records, editors and re
     await expect(
       page.getByRole('button', { name: 'Open navigation', exact: true }),
     ).toBeFocused();
-    for (const route of [
-      '/dashboard',
-      '/users',
-      '/teaching-catalog',
-      '/invoices',
-      '/batches',
-    ]) {
-      await page.goto(server.origin + route);
-      await expect(page.locator('.page-content h1').first()).toBeVisible();
-      expect(
-        await page.evaluate(
-          () => document.documentElement.scrollWidth <= innerWidth + 1,
-        ),
-        route,
-      ).toBe(true);
-      await page.screenshot({
-        path: path.join(
-          output,
-          `${info.project.name}-mobile-${route.slice(1)}.png`,
-        ),
-        fullPage: false,
-      });
+    for (const theme of ['light', 'dark'] as const) {
+      if ((await page.locator('html').getAttribute('data-theme')) !== theme) {
+        await page
+          .getByRole('button', { name: `Switch to ${theme} mode`, exact: true })
+          .click();
+      }
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      for (const route of routes) {
+        await page.goto(server.origin + route);
+        await expect(page.locator('.page-content h1').first()).toBeVisible();
+        await expect(page.locator('.table-error,[role="alert"]')).toHaveCount(
+          0,
+        );
+        for (const [size, width, height] of [
+          ['phone', 390, 844],
+          ['tablet', 820, 1180],
+          ['compact', 320, 720],
+          ['landscape', 1024, 640],
+        ] as const) {
+          await page.setViewportSize({ width, height });
+          const scrollWidth = await page.evaluate(
+            () => document.documentElement.scrollWidth,
+          );
+          expect
+            .soft(
+              scrollWidth,
+              `${route} at ${width}×${height} in ${theme} mode`,
+            )
+            .toBeLessThanOrEqual(width + 1);
+          if (width <= 390) {
+            for (const search of await page
+              .locator('.data-table-filters input.data-table-search')
+              .all()) {
+              const fillsRow = await search.evaluate((element) => {
+                const parent = element.parentElement!;
+                const { paddingLeft, paddingRight } = getComputedStyle(parent);
+                const rowWidth =
+                  parent.clientWidth -
+                  parseFloat(paddingLeft) -
+                  parseFloat(paddingRight);
+                return (
+                  Math.abs(element.getBoundingClientRect().width - rowWidth) <=
+                  1
+                );
+              });
+              expect
+                .soft(fillsRow, `${route} search fills its row at ${width}px`)
+                .toBe(true);
+            }
+          }
+          if (
+            info.project.name === 'chromium' &&
+            (size === 'phone' || size === 'tablet') &&
+            [
+              '/dashboard',
+              '/users',
+              '/teaching-catalog',
+              '/invoices',
+              '/batches',
+            ].includes(route)
+          ) {
+            await page.screenshot({
+              path: path.join(output, `${route.slice(1)}-${size}-${theme}.png`),
+              animations: 'disabled',
+            });
+          }
+        }
+      }
     }
     expect(errors).toEqual([]);
     await page.getByRole('button', { name: 'Log out', exact: true }).click();

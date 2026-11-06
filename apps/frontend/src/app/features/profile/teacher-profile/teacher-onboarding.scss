@@ -803,16 +803,16 @@
   }
   .profile-identity-panel {
     align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
     margin: 22px 0;
   }
   .identity-copy h1 {
     font-size: 26px;
   }
-  .profile-person {
-    display: none;
-  }
   .profile-sections {
-    gap: 22px;
+    flex-wrap: wrap;
+    gap: 0 18px;
     margin-bottom: 20px;
   }
   .profile-panel.edit-panel {
@@ -829,13 +829,15 @@
     display: none;
   }
   .editor-steps {
-    flex-direction: row;
-    overflow-x: auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 4px;
   }
   .editor-steps button {
-    padding: 9px;
-    font-size: 11px;
+    min-height: 44px;
+    padding: 7px;
+    gap: 6px;
+    white-space: normal;
   }
   .editor-workspace {
     padding: 22px 20px 0;
