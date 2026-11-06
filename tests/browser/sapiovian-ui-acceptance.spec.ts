@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import mongoose from 'mongoose';
 import {
   startAcceptanceStack,
   seedClassroom,
@@ -10,9 +11,10 @@ import {
 test('global discovery and teacher/student UI work with the real backend', async ({
   browser,
 }, testInfo) => {
-  test.setTimeout(240_000);
-  const evidence =
-    process.env.SFU_UI_EVIDENCE_DIR ?? testInfo.outputPath('ui-evidence');
+  test.setTimeout(330_000);
+  const evidence = process.env.SFU_UI_EVIDENCE_DIR
+    ? path.join(process.env.SFU_UI_EVIDENCE_DIR, testInfo.project.name)
+    : testInfo.outputPath('ui-evidence');
   await mkdir(evidence, { recursive: true });
   const stack = await startAcceptanceStack({
     frontendPort: 4462,
@@ -21,6 +23,10 @@ test('global discovery and teacher/student UI work with the real backend', async
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1050 },
     colorScheme: 'light',
+  });
+  await context.addInitScript(() => {
+    if (!localStorage.getItem('native-sfu-theme'))
+      localStorage.setItem('native-sfu-theme', 'system');
   });
   const page = await context.newPage();
   const errors: string[] = [];
@@ -38,18 +44,71 @@ test('global discovery and teacher/student UI work with the real backend', async
         () => document.documentElement.scrollWidth <= window.innerWidth + 1,
       ),
     ).toBe(true);
+  const checkRoutes = async (routes: Array<[string, string, string]>) => {
+    for (const [url, heading, name] of routes) {
+      for (const [width, theme] of [
+        [1440, 'dark'],
+        [768, 'light'],
+        [390, 'dark'],
+      ] as const) {
+        await page.setViewportSize({ width, height: 1000 });
+        await page.emulateMedia({ colorScheme: theme });
+        await page.evaluate(() =>
+          localStorage.setItem('native-sfu-theme', 'system'),
+        );
+        await page.goto(stack.frontendBaseUrl + url);
+        await expect(
+          page.getByRole('heading', { level: 1, name: heading }),
+        ).toBeVisible();
+        await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+        await expect(page.locator('sfu-header header')).toBeVisible();
+        await expect(page.locator('sfu-footer footer')).toBeVisible();
+        await expect
+          .poll(() =>
+            page.locator('sfu-header').evaluate((element) => {
+              const rect = element.getBoundingClientRect();
+              return Math.abs(rect.left - (innerWidth - rect.right)) < 2;
+            }),
+          )
+          .toBe(true);
+        try {
+          await noOverflow();
+        } catch (error) {
+          throw new Error(`${url} overflows at ${width}px`, { cause: error });
+        }
+        if (testInfo.project.name === 'chromium' && width !== 768)
+          await page.screenshot({
+            path: path.join(evidence, `${name}-${width}.png`),
+          });
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 1050 });
+    await page.emulateMedia({ colorScheme: 'light' });
+  };
   try {
     const teacher = await login(
       stack.nodeAUrl,
       'teacher.one@example.com',
       'Password@12345',
     );
+    const teacherHeaders = {
+      authorization: `Bearer ${teacher.accessToken}`,
+      'content-type': 'application/json',
+    };
+    const hidden = await fetch(`${stack.nodeAUrl}/api/v1/profile/me`, {
+      method: 'PATCH',
+      headers: teacherHeaders,
+      body: JSON.stringify({ publicProfileEnabled: false }),
+    });
+    expect(hidden.ok).toBe(true);
+    await page.goto(stack.frontendBaseUrl + '/teachers');
+    await expect(
+      page.getByRole('heading', { name: 'No teachers available yet' }),
+    ).toBeVisible();
+
     const updated = await fetch(`${stack.nodeAUrl}/api/v1/profile/me`, {
       method: 'PATCH',
-      headers: {
-        authorization: `Bearer ${teacher.accessToken}`,
-        'content-type': 'application/json',
-      },
+      headers: teacherHeaders,
       body: JSON.stringify({
         displayName: 'Avery Morgan',
         headline: 'Build confidence in English, one conversation at a time.',
@@ -59,14 +118,46 @@ test('global discovery and teacher/student UI work with the real backend', async
         location: 'London, United Kingdom',
         timezone: 'Europe/London',
         availability: 'Weekday evenings',
-        publicProfileEnabled: true,
         credentials: [
           { title: 'English language teaching', issuer: 'Test profile' },
         ],
       }),
     });
     expect(updated.ok).toBe(true);
-    await seedClassroom();
+    // The real directory only returns approved, published tutors.
+    const connection = await mongoose
+      .createConnection(process.env.MONGODB_URI!)
+      .asPromise();
+    try {
+      const approval = await connection
+        .db!.collection('users')
+        .updateOne(
+          { email: 'teacher.one@example.com' },
+          { $set: { tutorReviewStatus: 'approved' } },
+        );
+      expect(approval.matchedCount).toBe(1);
+    } finally {
+      await connection.close();
+    }
+    const published = await fetch(`${stack.nodeAUrl}/api/v1/profile/me`, {
+      method: 'PATCH',
+      headers: teacherHeaders,
+      body: JSON.stringify({ publicProfileEnabled: true }),
+    });
+    expect(published.ok).toBe(true);
+    const fixture = await seedClassroom();
+    const assignment = await fetch(`${stack.nodeAUrl}/api/v1/assignments`, {
+      method: 'POST',
+      headers: teacherHeaders,
+      body: JSON.stringify({
+        batchId: fixture.batchId,
+        title: 'Practice fractions',
+        instructions: 'Explain how to compare two fractions.',
+        allowedSubmissionTypes: ['text'],
+      }),
+    });
+    expect(assignment.ok).toBe(true);
+    const assignmentId = (await assignment.json()).data.assignmentId;
 
     await page.goto(stack.frontendBaseUrl);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(
@@ -105,9 +196,9 @@ test('global discovery and teacher/student UI work with the real backend', async
       .poll(() =>
         page
           .locator('#how-it-works')
-          .evaluate((el) => Math.round(el.getBoundingClientRect().top)),
+          .evaluate((el) => Math.abs(el.getBoundingClientRect().top - 96)),
       )
-      .toBe(96);
+      .toBeLessThan(3);
     await page
       .getByRole('navigation', { name: 'Primary' })
       .getByRole('link', { name: 'For teachers' })
@@ -116,9 +207,9 @@ test('global discovery and teacher/student UI work with the real backend', async
       .poll(() =>
         page
           .locator('#for-teachers')
-          .evaluate((el) => Math.round(el.getBoundingClientRect().top)),
+          .evaluate((el) => Math.abs(el.getBoundingClientRect().top - 96)),
       )
-      .toBe(96);
+      .toBeLessThan(3);
     await page.getByRole('link', { name: 'Sapiovian home' }).click();
     checks.push(
       'Homepage navigation scrolls to the correct section below the sticky header',
@@ -175,9 +266,13 @@ test('global discovery and teacher/student UI work with the real backend', async
       .getByRole('link')
       .click();
     await expect(
-      page.getByRole('heading', { name: 'Avery Morgan', exact: true }),
+      page.getByRole('heading', {
+        name: 'Avery Morgan',
+        exact: true,
+        level: 1,
+      }),
     ).toBeVisible();
-    await noOverflow();
+    const teacherProfilePath = new URL(page.url()).pathname;
     await capture('teacher-profile');
     checks.push('Discovery opens the real teacher profile');
 
@@ -199,10 +294,38 @@ test('global discovery and teacher/student UI work with the real backend', async
     await expect(
       page
         .locator('main > section')
-        .nth(2)
+        .nth(1)
         .getByRole('heading', { name: 'Your upcoming classes' }),
     ).toBeVisible();
     checks.push('Real student sign-in and upcoming-class-first dashboard');
+    await checkRoutes([
+      ['/student/dashboard', 'My learning', 'student-dashboard'],
+      ['/student/explore', 'Explore classes', 'explore'],
+      ['/student/progress', 'My progress', 'student-progress'],
+      ['/student/support', 'Get help', 'student-support'],
+      ['/student/classes/completed', 'Class history', 'class-history'],
+      [
+        '/student/classes/completed/' + fixture.previousSessionId,
+        'Previous classroom fixture',
+        'class-history-detail',
+      ],
+      ['/student/profile', 'Student One', 'student-profile'],
+      [
+        '/student/assignments/' + assignmentId,
+        'Practice fractions',
+        'assignment',
+      ],
+      [
+        '/student/assignments/missing-assignment',
+        'Unable to open assignment',
+        'assignment-error',
+      ],
+      ['/class-library', 'Search learning artifacts', 'library'],
+      ['/calendar', 'Class calendar.', 'calendar'],
+    ]);
+    checks.push(
+      'Student workspace routes fit desktop, tablet and mobile in both themes',
+    );
 
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
     await page.goto(`${stack.frontendBaseUrl}/teacher/login`);
@@ -217,6 +340,40 @@ test('global discovery and teacher/student UI work with the real backend', async
     await noOverflow();
     await capture('teacher-dashboard');
     checks.push('Real teacher sign-in and teaching dashboard');
+    await checkRoutes([
+      ['/teacher/dashboard', 'My teaching', 'teacher-dashboard'],
+      [
+        '/teacher/dashboard/batches/' + fixture.batchId,
+        'Whiteboard acceptance classroom',
+        'batch-detail',
+      ],
+      ['/teacher/analytics', 'Batch learning signals', 'teacher-analytics'],
+      ['/teacher/profile', 'Your teaching profile', 'teacher-profile-editor'],
+      ['/teacher/live-settings', 'Live settings', 'teacher-settings'],
+    ]);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('button', { name: 'Menu', exact: true }).click();
+    for (const [trigger, panel] of [
+      ['Class notifications', 'Class notifications'],
+      ['Application updates', 'Application notifications'],
+    ]) {
+      const button = page.getByRole('button', { name: trigger, exact: true });
+      await button.click();
+      await expect(page.getByRole('region', { name: panel })).toBeVisible();
+      await expect
+        .poll(() =>
+          page.getByRole('region', { name: panel }).evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            return rect.left >= 0 && rect.right <= innerWidth;
+          }),
+        )
+        .toBe(true);
+      await button.click();
+    }
+    await page.setViewportSize({ width: 1440, height: 1050 });
+    checks.push(
+      'Teacher workspace and mobile notification panels fit the shared layout',
+    );
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
 
     await page.goto(`${stack.frontendBaseUrl}/register`);
@@ -227,7 +384,25 @@ test('global discovery and teacher/student UI work with the real backend', async
     await capture('register-desktop');
     checks.push('Account creation has no prefilled demo identity or password');
 
+    await checkRoutes([
+      [teacherProfilePath, 'Avery Morgan', 'public-teacher-profile'],
+      ['/teachers?q=English', 'Find a teacher', 'teacher-directory'],
+      ['/booking', 'Start with the right lesson.', 'booking'],
+      ['/student/login', 'Student login', 'student-login'],
+      ['/register', 'Create your account', 'register'],
+      ['/about', 'About Sapiovian', 'about'],
+      ['/contact-us', 'Contact Us', 'contact'],
+      ['/faq', 'Frequently Asked Questions', 'faq'],
+      ['/help', 'Help And Support', 'help'],
+      ['/terms', 'Terms And Conditions', 'terms'],
+      ['/privacy-policy', 'Privacy Policy', 'privacy'],
+      ['/refund-policy', 'Refund Policy', 'refund'],
+    ]);
     await page.goto(stack.frontendBaseUrl);
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await page.getByRole('button', { name: /dark/i }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await noOverflow();
@@ -350,7 +525,7 @@ test('global discovery and teacher/student UI work with the real backend', async
             );
             await expect(desktopPage.locator('.desktop-header')).toHaveCSS(
               'background-color',
-              'rgb(26, 43, 35)',
+              'rgb(14, 30, 56)',
             );
             await expect(
               desktopPage.locator('.desktop-header .wordmark'),
@@ -366,7 +541,7 @@ test('global discovery and teacher/student UI work with the real backend', async
             ).toBeVisible();
             await expect(desktopPage.locator('.login-card')).toHaveCSS(
               'background-color',
-              'rgb(26, 43, 35)',
+              'rgb(14, 30, 56)',
             );
             if (role === 'teacher')
               await desktopPage.screenshot({

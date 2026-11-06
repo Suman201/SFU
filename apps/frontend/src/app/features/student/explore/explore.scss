@@ -2,8 +2,6 @@
   display: grid;
   gap: 24px;
   align-content: start;
-  min-height: calc(100vh - 132px);
-  padding: 28px 32px 36px;
 }
 
 .page-heading {
@@ -22,7 +20,7 @@
 
 .page-heading h1 {
   color: var(--text);
-  font-size: 36px;
+  font-size: var(--page-title-size);
   line-height: 1.05;
 }
 
@@ -30,7 +28,7 @@
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--panel-elevated);
-  color: var(--accent);
+  color: var(--accent-strong);
   padding: 11px 14px;
   text-decoration: none;
   font-weight: 650;
@@ -94,7 +92,7 @@
 
 .level,
 .eyebrow {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
@@ -109,7 +107,7 @@
   border: 1px solid var(--accent-border);
   border-radius: 999px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   font-weight: 650;
 }
 
@@ -128,7 +126,7 @@
 }
 
 .teacher-row:hover strong {
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .teacher-row > span {
@@ -138,7 +136,7 @@
   place-items: center;
   border-radius: 50%;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   font-weight: 700;
 }
 
@@ -204,7 +202,7 @@
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   padding: 10px 12px;
   text-decoration: none;
   font-weight: 650;
@@ -248,7 +246,7 @@
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--panel-elevated);
-  color: var(--accent);
+  color: var(--accent-strong);
   cursor: pointer;
   font: inherit;
   font-weight: 650;
@@ -256,10 +254,6 @@
 }
 
 @media (max-width: 700px) {
-  .student-page-shell {
-    padding: 20px 16px 28px;
-  }
-
   .page-heading {
     align-items: start;
     flex-direction: column;
@@ -270,8 +264,8 @@
   }
 
   .page-heading h1 {
-    font-size: 32px;
+    font-size: var(--page-title-size);
   }
 }
 
-.student-page-shell { max-width: 1280px; margin-inline: auto; padding: 38px 28px 55px; }.page-heading h1 { font-size: 36px; font-weight: 650; letter-spacing: -.04em; }.page-description { margin: 12px 0 0; color: var(--muted); font-size: 14px; }.batch-card { box-shadow: none; }.batch-card h2 { font-size: 23px; font-weight: 650; letter-spacing: -.025em; }.batch-meta span { font-weight: 500; font-size: 12px; }.dashboard-link { font-size: 12px; font-weight: 550; box-shadow: none; }@media(max-width:650px) { .student-page-shell { padding: 26px 18px 40px; } }
+.page-heading h1 { font-size: var(--page-title-size); font-weight: 650; letter-spacing: -.04em; }.page-description { margin: 12px 0 0; color: var(--muted); font-size: 14px; }.batch-card { box-shadow: none; }.batch-card h2 { font-size: 23px; font-weight: 650; letter-spacing: -.025em; }.batch-meta span { font-weight: 500; font-size: 12px; }.dashboard-link { font-size: 12px; font-weight: 550; box-shadow: none; }@media(max-width:650px) {  }

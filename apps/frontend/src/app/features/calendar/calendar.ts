@@ -31,10 +31,11 @@ import { CalendarApi } from '../../core/services/calendar.service';
 import { AuthService } from '../../core/services/auth.service';
 import { isDesktopSession } from '../../core/services/desktop-bridge';
 import { Header } from '../../shared/header/header';
+import { Footer } from '../../shared/footer/footer';
 @Component({
   selector: 'sfu-calendar',
   standalone: true,
-  imports: [FormsModule, RouterLink, Header, WtsCalendarAngularComponent],
+  imports: [FormsModule, RouterLink, Header, Footer, WtsCalendarAngularComponent],
   templateUrl: './calendar.html',
   styleUrl: './calendar.scss',
   changeDetection: ChangeDetectionStrategy.Eager,

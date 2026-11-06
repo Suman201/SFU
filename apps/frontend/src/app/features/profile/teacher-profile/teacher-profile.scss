@@ -1,10 +1,6 @@
 .profile-shell {
   display: grid;
   gap: 20px;
-  min-height: calc(100vh - 132px);
-  min-height: calc(100svh - 132px);
-  min-height: calc(100dvh - 132px);
-  padding: 28px 32px 36px;
 }
 
 .back-link,
@@ -18,7 +14,7 @@
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--panel-elevated);
-  color: var(--accent);
+  color: var(--accent-strong);
   text-decoration: none;
   font-weight: 650;
   box-shadow: var(--shadow-sm);
@@ -154,7 +150,7 @@ p {
 }
 
 .eyebrow {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
@@ -163,7 +159,7 @@ p {
 
 h1 {
   color: var(--text);
-  font-size: clamp(34px, 4vw, 52px);
+  font-size: var(--page-title-size);
   line-height: 1;
 }
 
@@ -442,7 +438,7 @@ h3 {
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
@@ -472,7 +468,7 @@ h3 {
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 12px;
   font-weight: 650;
 }
@@ -578,7 +574,7 @@ h3 {
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 13px;
   font-weight: 650;
 }
@@ -637,7 +633,7 @@ h3 {
 .profile-tabs button.is-active {
   border-color: var(--accent-border);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .profile-tabs strong {
@@ -698,7 +694,7 @@ h3 {
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 12px;
   font-weight: 650;
 }
@@ -731,7 +727,7 @@ h3 {
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   font-weight: 700;
 }
 
@@ -782,7 +778,7 @@ h3 {
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   padding: 10px 12px;
   text-decoration: none;
   font-weight: 650;
@@ -841,10 +837,6 @@ h3 {
 }
 
 @media (max-width: 720px) {
-  .profile-shell {
-    padding: 20px 16px 28px;
-  }
-
   .profile-cover {
     min-height: 230px;
   }

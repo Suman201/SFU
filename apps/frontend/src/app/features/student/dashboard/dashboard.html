@@ -1,5 +1,5 @@
 <sfu-header />
-<main class="student-dashboard-shell">
+<main class="student-dashboard-shell site-page">
   <section class="dashboard-heading">
     <div>
       <p class="eyebrow">Student workspace</p>
@@ -14,31 +14,6 @@
       <a routerLink="/student/explore">Explore classes</a>
     </div>
   </section>
-
-  <section class="summary-grid" aria-label="Student dashboard summary">
-    <article>
-      <span>{{ enrolledBatches().length }}</span>
-      <p>Class groups</p>
-    </article>
-    <article>
-      <span>{{ totalWeeks() }}</span>
-      <p>Total weeks</p>
-    </article>
-    <article>
-      <a class="summary-link" routerLink="/student/progress">Open</a>
-      <p>Progress dashboard</p>
-    </article>
-    <article>
-      @if (nextBatch(); as batch) {
-        <a class="summary-link" [routerLink]="['/teachers', batch.teacherId]">{{ batch.teacherName }}</a>
-      } @else {
-        <span>None</span>
-      }
-      <p>Next teacher</p>
-    </article>
-  </section>
-
-
 
   <section class="enrolled-panel">
     <header>
@@ -128,6 +103,29 @@
         <a routerLink="/student/explore">Browse classes</a>
       </div>
     }
+  </section>
+
+  <section class="summary-grid" aria-label="Student dashboard summary">
+    <article>
+      <span>{{ enrolledBatches().length }}</span>
+      <p>Class groups</p>
+    </article>
+    <article>
+      <span>{{ totalWeeks() }}</span>
+      <p>Total weeks</p>
+    </article>
+    <article>
+      <a class="summary-link" routerLink="/student/progress">Open</a>
+      <p>Progress dashboard</p>
+    </article>
+    <article>
+      @if (nextBatch(); as batch) {
+        <a class="summary-link" [routerLink]="['/teachers', batch.teacherId]">{{ batch.teacherName }}</a>
+      } @else {
+        <span>None</span>
+      }
+      <p>Next teacher</p>
+    </article>
   </section>
 
   <section class="enrolled-panel assignment-panel">

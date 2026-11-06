@@ -33,7 +33,7 @@ h1 {
 }
 
 .eyebrow {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-weight: 700;
   text-transform: uppercase;
   font-size: 12px;
@@ -139,7 +139,7 @@ label {
 }
 
 .status.ready {
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .error {

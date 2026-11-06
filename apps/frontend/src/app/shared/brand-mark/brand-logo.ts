@@ -28,9 +28,9 @@ import { BrandMark } from './brand-mark';
         white-space: nowrap;
       }
       sfu-brand-mark {
-        flex: 0 0 36px;
-        width: 36px;
-        height: 48px;
+        flex: 0 0 var(--brand-mark-width, 36px);
+        width: var(--brand-mark-width, 36px);
+        height: var(--brand-mark-height, 48px);
       }
       .brand-copy {
         display: grid;
@@ -38,7 +38,7 @@ import { BrandMark } from './brand-mark';
       }
       .wordmark {
         display: block;
-        width: 166px;
+        width: var(--brand-wordmark-width, 166px);
         height: auto;
       }
       .tagline {
@@ -56,12 +56,12 @@ import { BrandMark } from './brand-mark';
           gap: 6px;
         }
         sfu-brand-mark {
-          flex-basis: 31px;
-          width: 31px;
-          height: 42px;
+          flex-basis: var(--brand-mark-width, 31px);
+          width: var(--brand-mark-width, 31px);
+          height: var(--brand-mark-height, 42px);
         }
         .wordmark {
-          width: 152px;
+          width: var(--brand-wordmark-width, 152px);
         }
         .tagline {
           font-size: 9px;

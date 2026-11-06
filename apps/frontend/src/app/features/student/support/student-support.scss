@@ -1,8 +1,6 @@
 .student-support-shell {
   display: grid;
   gap: 22px;
-  min-height: calc(100vh - 132px);
-  padding: 28px 32px 36px;
 }
 
 .support-heading,
@@ -24,7 +22,7 @@
 
 .support-heading h1 {
   color: var(--text);
-  font-size: 36px;
+  font-size: var(--page-title-size);
   line-height: 1.05;
 }
 
@@ -114,7 +112,7 @@
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--panel-elevated);
-  color: var(--accent);
+  color: var(--accent-strong);
   padding: 11px 14px;
   text-decoration: none;
   font-weight: 650;
@@ -124,8 +122,8 @@
 
 .button.primary {
   border-color: rgba(242, 96, 118, .35);
-  background: #F26076;
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .button:disabled {
@@ -184,7 +182,7 @@
 }
 
 .eyebrow {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
@@ -203,10 +201,6 @@
 }
 
 @media (max-width: 900px) {
-  .student-support-shell {
-    padding: 20px 16px 28px;
-  }
-
   .support-grid {
     grid-template-columns: 1fr;
   }
@@ -219,7 +213,7 @@
 
 @media (max-width: 560px) {
   .support-heading h1 {
-    font-size: 30px;
+    font-size: var(--page-title-size);
   }
 
   .context-grid {

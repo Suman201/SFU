@@ -5,11 +5,7 @@
   color: var(--text, #17201d);
 }
 
-.student-history-shell {
-  width: min(1180px, calc(100% - 32px));
-  margin: 0 auto;
-  padding: 32px 0 56px;
-}
+
 
 .history-heading {
   display: flex;
@@ -42,8 +38,8 @@
 .button,
 .table-action.primary {
   border-color: rgba(242, 96, 118, 0.34);
-  background: #f26076;
-  color: white;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .history-alert,
@@ -83,7 +79,6 @@
 
 @media (max-width: 760px) {
   .student-history-shell {
-    width: min(100% - 20px, 1180px);
     padding-top: 20px;
   }
 

@@ -5,8 +5,8 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ProfileService } from '../../core/services/profile.service';
-import { ThemeService } from '../../core/services/theme.service';
-import { BrandLogo } from '../../shared/brand-mark/brand-logo';
+import { Header } from '../../shared/header/header';
+import { Footer } from '../../shared/footer/footer';
 
 interface LessonOption {
   id: string;
@@ -25,7 +25,7 @@ interface BookingTeacher {
 @Component({
   selector: 'sfu-booking-preview',
   standalone: true,
-  imports: [FormsModule, RouterLink, BrandLogo],
+  imports: [FormsModule, RouterLink, Header, Footer],
   templateUrl: './booking-preview.html',
   styleUrl: './booking-preview.scss',
 })
@@ -34,7 +34,6 @@ export class BookingPreview {
   private readonly profiles = inject(ProfileService);
   private readonly destroy = inject(DestroyRef);
   private readonly document = inject(DOCUMENT);
-  protected readonly theme = inject(ThemeService);
   private profileRequest?: Subscription;
   private paymentTimer?: ReturnType<typeof setTimeout>;
   protected readonly teacherId = signal('');

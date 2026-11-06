@@ -1,7 +1,6 @@
 .class-library-shell {
   display: grid;
   gap: 18px;
-  padding: 24px;
   color: var(--text);
 }
 
@@ -185,10 +184,6 @@
 }
 
 @media (max-width: 760px) {
-  .class-library-shell {
-    padding: 16px;
-  }
-
   .library-hero,
   .library-result-card {
     grid-template-columns: 1fr;

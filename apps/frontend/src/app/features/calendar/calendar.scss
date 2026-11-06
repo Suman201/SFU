@@ -36,9 +36,6 @@ select:focus-visible {
 }
 .calendar-page {
   background: var(--bg);
-  max-width: 1560px;
-  margin: auto;
-  padding: 42px 36px 70px;
 }
 .page-heading {
   display: flex;
@@ -55,7 +52,7 @@ select:focus-visible {
   margin: 0 0 12px;
 }
 h1 {
-  font-size: clamp(30px, 3vw, 44px);
+  font-size: var(--page-title-size);
   letter-spacing: -1.8px;
   line-height: 1.15;
   margin: 0 0 12px;
@@ -490,9 +487,7 @@ dd {
   .tools {
     gap: 6px;
   }
-  .calendar-page {
-    padding: 30px 22px;
-  }
+
 }
 @media (max-width: 950px) {
   .calendar-layout {
@@ -505,9 +500,7 @@ dd {
   .day {
     min-height: 125px;
   }
-  .calendar-page {
-    padding: 28px 18px;
-  }
+
   .page-heading {
     align-items: flex-start;
   }
@@ -603,9 +596,7 @@ dd {
     padding: 15px;
     gap: 15px;
   }
-  .calendar-page {
-    padding: 25px 14px;
-  }
+
   .detail-card {
     padding: 20px;
   }

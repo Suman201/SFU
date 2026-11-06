@@ -81,18 +81,19 @@ import { isDesktopSession } from '../core/services/desktop-bridge';
         border-radius: 20px;
       }
       .panel {
-        position: absolute;
+        position: var(--notice-position, absolute);
         right: 0;
         top: 46px;
-        width: min(370px, calc(100vw - 36px));
-        max-height: 65vh;
+        width: var(--notice-width, min(370px, calc(100vw - 36px)));
+        max-height: var(--notice-max-height, 65vh);
+        margin-top: var(--notice-margin, 0);
         overflow: auto;
         background: var(--panel, #fff);
         border: 1px solid var(--line, #dce4de);
         color: var(--text, #173f35);
         border-radius: 12px;
         padding: 18px;
-        box-shadow: 0 12px 35px #173f351a;
+        box-shadow: var(--shadow-sm);
         z-index: 100;
       }
       header,

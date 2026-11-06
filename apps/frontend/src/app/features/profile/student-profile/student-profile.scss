@@ -1,10 +1,6 @@
 .profile-shell {
   display: grid;
   gap: 22px;
-  min-height: calc(100vh - 132px);
-  min-height: calc(100svh - 132px);
-  min-height: calc(100dvh - 132px);
-  padding: 28px 32px 36px;
 }
 
 .profile-hero,
@@ -27,7 +23,7 @@
   border: 1px solid var(--accent-border);
   border-radius: 50%;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 20px;
   font-weight: 700;
   box-shadow: var(--shadow-sm);
@@ -48,7 +44,7 @@
 
 .profile-hero h1 {
   color: var(--text);
-  font-size: 36px;
+  font-size: var(--page-title-size);
   line-height: 1.05;
 }
 
@@ -64,7 +60,7 @@
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--panel-elevated);
-  color: var(--accent);
+  color: var(--accent-strong);
   padding: 11px 14px;
   text-decoration: none;
   cursor: pointer;
@@ -87,7 +83,7 @@
 }
 
 .eyebrow {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
@@ -293,7 +289,7 @@
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 13px;
   font-weight: 650;
 }
@@ -344,10 +340,6 @@
 }
 
 @media (max-width: 760px) {
-  .profile-shell {
-    padding: 20px 16px 28px;
-  }
-
   .profile-hero {
     align-items: start;
     flex-direction: column;

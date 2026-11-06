@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-29T10:49:53.402409+00:00",
+  "generatedAt": "2026-11-06T10:17:22.175176+00:00",
   "product": "Sapiovian Classroom",
   "version": "0.1.0",
   "signed": false,
@@ -8,36 +8,19 @@
   "currentInstallersLaunched": false,
   "physicalWhiteboardTested": false,
   "validation": {
-    "errorModuleChecksPassed": 17,
-    "desktopRuntimeChecksPassed": 26,
-    "publicCodeGuides": 20,
-    "encyclopediaBrowserChecksPassed": 6,
-    "encyclopediaBrowserProjects": [
-      "chromium",
-      "firefox",
-      "webkit"
-    ],
-    "publicGuidesMakeNoApiRequests": true,
-    "privateIncidentLogRequiresAuthentication": true,
     "macPackageBuildPassed": true,
     "windowsPackageBuildPassed": true,
     "bundledFrontendIdenticalAcrossArchitectures": true,
-    "bundledFrontendFiles": 59,
+    "bundledFrontendFiles": 60,
+    "desktopRuntimeChecksPassed": 26,
     "nativeApplicationLaunched": false,
     "publicDeploymentConfigured": false,
     "allInstallerChecksumsPassed": true,
     "macDmgIntegrityPassed": true,
-    "macZipCrcPassed": true,
-    "socketClientChecksPassed": 7,
-    "backendErrorAndGatewayChecksPassed": 69,
-    "realBackendBrowserChecksPassed": 2,
-    "visibleCodesInNotices": true,
-    "signalingPublicCodeAndReference": true,
-    "numberedCodesMatchApiAndUi": true,
-    "legacyGuideAliasesAndIncidentReads": true
+    "macZipCrcPassed": true
   },
-  "sourceDigestSha256": "42a155eb389f257b5ae846ce6e3fe0fed14bb7432586a4e8cfbc64cddeb8fec3",
-  "sourceFiles": 300,
+  "sourceDigestSha256": "f88340d85b0e63aaceb07ff621d87e0cce4777dfa5075ea3292da01650adffca",
+  "sourceFiles": 322,
   "sourceDigestPaths": [
     "apps/desktop/src",
     "apps/desktop/resources",
@@ -45,6 +28,7 @@
     "apps/desktop/package.json",
     "apps/desktop/electron-builder.cjs",
     "apps/frontend/src",
+    "apps/frontend/public",
     "apps/frontend/angular.json",
     "apps/frontend/tsconfig.json",
     "apps/frontend/tsconfig.desktop.json",
@@ -58,73 +42,73 @@
   "artifacts": [
     {
       "name": "Sapiovian Classroom-0.1.0-mac-arm64.dmg",
-      "bytes": 125670060,
-      "sha256": "265feff05aac3ca47ee3ac9037aafa261f6c31ad17f6f7888aa56f2216b64869"
+      "bytes": 125672601,
+      "sha256": "7bfa3bf3d93281eeb0c3acd9e0d894b8afb7327b1707e7851c8a09c81cc99981"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-arm64.dmg.blockmap",
-      "bytes": 132766,
-      "sha256": "17acbd6b8579de8d80f08100e0292a89a43d1ba213cf1b9c900f1a64e2621321"
+      "bytes": 132906,
+      "sha256": "d63cffc68eaccda469d805438497409b3053c81f097adaefd7dfa3a87220eebd"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-arm64.zip",
-      "bytes": 122099292,
-      "sha256": "95269de2a6f4c2358f46f427b5661681f154491c23680be2b02a4cd4dcfb7330"
+      "bytes": 122099980,
+      "sha256": "16fcf4312ca7c11633c10608ef0324ee5f80f7b6a39bfaa541d3ad6614ebd807"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-arm64.zip.blockmap",
-      "bytes": 129402,
-      "sha256": "689bef1b0e22694c8b2494733973eca54b319c900fcecbba807d2dfbd786c9cb"
+      "bytes": 129601,
+      "sha256": "7066e4d57866e28141c774f5c72533f3a750d0054f7dc9f6446c71dd2ccf5430"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-x64.dmg",
-      "bytes": 129923905,
-      "sha256": "a1d3dd1f671f826ab5c70f3182020603bd556dfe396164a37bd0f2764cfb7d88"
+      "bytes": 129924325,
+      "sha256": "78e26aaf802add3a9bbddbf2689d9bc2d4609e8661f6fcb9d5a48c05712db33f"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-x64.dmg.blockmap",
-      "bytes": 136425,
-      "sha256": "09c2b900179f5a5ef6f61b34e99bd7fb04af64a7f9e85f09c1e964681d2a6ff2"
+      "bytes": 136574,
+      "sha256": "3bb803e4e34440e50799284577a35275fe55ae5d4346b50ecdc3e6a57023783f"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-x64.zip",
-      "bytes": 126347382,
-      "sha256": "d4c3782cb175bfdb676ef55e79e2321e737307be1df284d58a39faf1e3257a5d"
+      "bytes": 126348070,
+      "sha256": "9d136fd3dda5c29a632d1291e690957240c2b794f36d7289bdeaf3ab49c67885"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-mac-x64.zip.blockmap",
-      "bytes": 133181,
-      "sha256": "acae86bdc9d04febc5420762da812d157236a34509a9f310f06493257e84834b"
+      "bytes": 133295,
+      "sha256": "de0ef12874c26d25e88da3a3331cb2c28bbc2c641b70b2ddcfc6fd7203f7328b"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win-arm64.exe",
-      "bytes": 120297487,
-      "sha256": "760631e5560c5920866be71dc4e62fdbe58c4abf7b6763796750bbe2597a8c0a"
+      "bytes": 120297778,
+      "sha256": "ff5ff9860792545dd33deb279ed123d084b8337ecfbbfe375ac8999bbd6a7f1a"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win-arm64.exe.blockmap",
-      "bytes": 125498,
-      "sha256": "4ab6de3fbe8de4d9c5d86bf9d3f152670db38ca0b7921b2945b44d634f2d9d90"
+      "bytes": 125520,
+      "sha256": "fa7c09017bdb5b73b375c63d3317a25f9fa842ea4d15f804a7faf8f2e275d665"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win-x64.exe",
-      "bytes": 126180750,
-      "sha256": "44ccd2b9e3e9210ba3321596115719a54732f01f10fba7b0ab0c9136de5f79cb"
+      "bytes": 126180965,
+      "sha256": "41754ed5ceb5d4e136387a5f445f06945e6cc29bf8e100e07348ea677b9215a3"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win-x64.exe.blockmap",
-      "bytes": 133447,
-      "sha256": "68a94a37d0f4dc1d6b37461584a26c0e4cd20bb43eb17cfd5aba7a733b6b53dd"
+      "bytes": 133545,
+      "sha256": "6aa21076511cdf0a942061341cd102de84f22ebc3aa769dd6778ebdb2d8f5285"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win.exe",
-      "bytes": 245893856,
-      "sha256": "e29fd8aa4e3ec4e488a96f55ffac2e09c08d1116057f3ae354c98ae6e1626c7f"
+      "bytes": 245894298,
+      "sha256": "4012d6bdec4b37d00bc52fc0bef9d192cb35fa5d6a4676a11f2241066430671a"
     },
     {
       "name": "Sapiovian Classroom-0.1.0-win.exe.blockmap",
-      "bytes": 256601,
-      "sha256": "f0a3c0579a8102ca4189206a5d4a281724d5541fdbc42b5f8acb9fe86b362f5e"
+      "bytes": 256721,
+      "sha256": "6e12aa2ca71c5373ae003f3b3396593b7c116d4a0deb5eb9f8913f770643359c"
     }
   ],
   "adminPortal": "http://localhost:4300"

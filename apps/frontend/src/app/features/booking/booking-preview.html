@@ -1,18 +1,5 @@
-<header class="checkout-header">
-  <a routerLink="/" aria-label="Sapiovian home"><sfu-brand-logo /></a>
-  <div class="header-tools">
-    <span class="preview-badge">Booking preview</span
-    ><button
-      type="button"
-      class="theme-button"
-      [attr.aria-label]="theme.label()"
-      (click)="theme.toggle()"
-    >
-      {{theme.isDark()?'Light mode':'Dark mode'}}
-    </button>
-  </div>
-</header>
-<main class="booking-shell" id="main-content">
+<sfu-header />
+<main class="booking-shell site-page" id="main-content">
   <a class="back-link" [routerLink]="backLink()"
     ><span aria-hidden="true">←</span> {{teacherId()?'Back to teacher':'Find a
     teacher'}}</a
@@ -400,8 +387,5 @@
     </aside>
   </div>
   }
-  <footer class="checkout-footer">
-    <span>Learning starts with a conversation.</span
-    ><a routerLink="/help">Need help?</a>
-  </footer>
 </main>
+<sfu-footer />

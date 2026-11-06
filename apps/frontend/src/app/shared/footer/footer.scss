@@ -3,31 +3,19 @@
   background: transparent;
   padding-bottom: 32px;
   padding-top: 20px;
-  width: min(1200px, calc(100% - 48px));
+  width: var(--site-content-width);
   margin-inline: auto;
 
   @media (max-width: 640px) {
-    width: calc(100% - 24px);
     padding-bottom: 20px;
   }
 }
 
 .site-footer {
-  padding: 44px 32px 24px;
-  border-radius: 24px;
-  background: rgba(10, 25, 48, 0.72);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-}
-
-:root[data-theme='light'] & {
-  .site-footer {
-    background: rgba(255, 255, 255, 0.85);
-    border-color: rgba(0, 0, 0, 0.08);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
-  }
+  padding: 28px 28px 20px;
+  border-radius: var(--surface-radius);
+  background: var(--panel);
+  border: 1px solid var(--line);
 }
 
 .footer-inner {
@@ -44,39 +32,17 @@ a {
   transition: color 0.15s ease;
 
   &:hover {
-    color: var(--brand-rose);
+    color: var(--accent-strong);
     text-decoration: none;
   }
 }
 
 .footer-logo {
   display: inline-flex;
-  color: var(--text);
   margin-bottom: 12px;
-
-  &:hover {
-    text-decoration: none;
-  }
-
-  ::ng-deep sfu-brand-logo {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-
-    sfu-brand-mark {
-      width: 22px !important;
-      height: 29px !important;
-    }
-
-    .wordmark, img {
-      width: 100px !important;
-      height: auto !important;
-    }
-
-    .tagline {
-      display: none !important;
-    }
-  }
+  --brand-mark-width: 28px;
+  --brand-mark-height: 36px;
+  --brand-wordmark-width: 136px;
 }
 
 .footer-brand p {
@@ -99,7 +65,7 @@ h2 {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin: 0 0 4px;
-  color: var(--brand-green);
+  color: var(--success-ink);
 }
 
 .footer-bottom {

@@ -20,7 +20,7 @@ h1 {
 
 .eyebrow {
   margin: 0 0 6px;
-  color: var(--brand-green);
+  color: var(--success-ink);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -28,7 +28,7 @@ h1 {
 }
 
 a {
-  color: var(--brand-rose);
+  color: var(--accent-strong);
   font-size: 13px;
   font-weight: 650;
   text-decoration: none;
@@ -55,8 +55,8 @@ label {
 
 input:not([type="checkbox"]) {
   min-height: 44px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius);
+  background: var(--control-bg);
   border: 1px solid var(--line);
   color: var(--text);
   padding: 0 14px;
@@ -64,7 +64,7 @@ input:not([type="checkbox"]) {
   transition: border-color 0.15s ease;
 
   &:focus {
-    border-color: var(--brand-rose);
+    border-color: var(--accent-strong);
     outline: none;
   }
 }
@@ -85,9 +85,11 @@ input:not([type="checkbox"]) {
 
 .password-toggle {
   position: absolute;
-  top: 50%;
-  right: 12px;
-  transform: translateY(-50%);
+  inset-block: 0;
+  right: 8px;
+  margin-block: auto;
+  height: 32px;
+  min-height: 0;
   border: none;
   background: transparent;
   color: var(--muted);
@@ -119,7 +121,7 @@ input:not([type="checkbox"]) {
 .checkbox-row input {
   width: 18px;
   height: 18px;
-  accent-color: var(--brand-rose);
+  accent-color: var(--accent-strong);
 }
 
 .error {
@@ -138,18 +140,5 @@ input:not([type="checkbox"]) {
 
 .auth-panel > .primary {
   min-height: 46px;
-  font-weight: 650;
   font-size: 14px;
-  border-radius: 9999px;
-  background: linear-gradient(135deg, var(--brand-rose) 0%, var(--brand-coral) 100%);
-  border: none;
-  color: #ffffff;
-  box-shadow: 0 4px 16px rgba(242, 96, 118, 0.4);
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-
-  &:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 22px rgba(242, 96, 118, 0.6);
-  }
 }

@@ -1,8 +1,6 @@
 .assignment-detail-shell {
   display: grid;
   gap: 20px;
-  min-height: calc(100vh - 132px);
-  padding: 28px 32px 36px;
 }
 
 .assignment-state,
@@ -126,15 +124,15 @@ button {
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--panel-elevated);
-  color: var(--accent);
+  color: var(--accent-strong);
   padding: 11px 14px;
   text-decoration: none;
   font-weight: 650;
 }
 
 .button.primary {
-  background: #F26076;
-  color: white;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .status-pill {
@@ -151,7 +149,7 @@ button {
 }
 
 .eyebrow {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
@@ -159,10 +157,6 @@ button {
 }
 
 @media (max-width: 760px) {
-  .assignment-detail-shell {
-    padding: 18px;
-  }
-
   .assignment-heading,
   .assignment-grid,
   .link-grid {

@@ -1,8 +1,6 @@
 .live-settings-shell {
   display: grid;
   gap: 18px;
-  min-height: calc(100vh - 132px);
-  padding: 24px 32px 28px;
 }
 
 .back-link,
@@ -16,7 +14,7 @@
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--panel-elevated);
-  color: var(--accent);
+  color: var(--accent-strong);
   cursor: pointer;
   font: inherit;
   font-weight: 650;
@@ -30,8 +28,8 @@
 
 .primary {
   border-color: #f26076;
-  background: #f26076;
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .button:disabled,
@@ -73,7 +71,7 @@ p {
 }
 
 .eyebrow {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
@@ -82,7 +80,7 @@ p {
 
 h1 {
   color: var(--text);
-  font-size: clamp(30px, 4vw, 46px);
+  font-size: var(--page-title-size);
   line-height: 1;
 }
 
@@ -203,7 +201,7 @@ h2 {
   border: 1px solid rgb(69 139 115 / 0.34);
   border-radius: 999px;
   background: rgb(69 139 115 / 0.12);
-  color: #2d6a56;
+  color: var(--success-ink);
   font-size: 11px;
   font-weight: 650;
   white-space: nowrap;
@@ -212,7 +210,7 @@ h2 {
 .inheritance-pill.override {
   border-color: rgb(242 96 118 / 0.34);
   background: rgb(242 96 118 / 0.12);
-  color: #a12f43;
+  color: var(--danger);
 }
 
 .setting-control {
@@ -355,10 +353,6 @@ select {
 }
 
 @media (max-width: 760px) {
-  .live-settings-shell {
-    padding: 18px 14px 24px;
-  }
-
   .settings-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

@@ -1,8 +1,6 @@
 .teacher-analytics-shell {
   display: grid;
   gap: 22px;
-  min-height: calc(100vh - 132px);
-  padding: 24px 32px 28px;
 }
 
 .analytics-hero,
@@ -31,7 +29,7 @@ p {
 }
 
 .eyebrow {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
@@ -40,7 +38,7 @@ p {
 
 h1 {
   color: var(--text);
-  font-size: clamp(32px, 4vw, 46px);
+  font-size: var(--page-title-size);
   line-height: 1;
 }
 
@@ -82,7 +80,7 @@ h3 {
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--panel-elevated);
-  color: var(--accent);
+  color: var(--accent-strong);
   cursor: pointer;
   font: inherit;
   font-weight: 650;
@@ -325,10 +323,6 @@ h3 {
 }
 
 @media (max-width: 860px) {
-  .teacher-analytics-shell {
-    padding: 18px;
-  }
-
   .analytics-hero,
   .analytics-grid,
   .risk-card,
@@ -346,10 +340,6 @@ h3 {
 }
 
 @media (max-width: 640px) {
-  .teacher-analytics-shell {
-    padding: 14px;
-  }
-
   .analytics-hero,
   .panel {
     padding: 14px;

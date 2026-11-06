@@ -1,8 +1,6 @@
 .student-progress-shell {
   display: grid;
   gap: 22px;
-  min-height: calc(100vh - 132px);
-  padding: 28px 32px 36px;
 }
 
 .progress-heading,
@@ -37,7 +35,7 @@
 
 .progress-heading h1 {
   color: var(--text);
-  font-size: 36px;
+  font-size: var(--page-title-size);
   line-height: 1.05;
 }
 
@@ -61,7 +59,7 @@
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--panel-elevated);
-  color: var(--accent);
+  color: var(--accent-strong);
   padding: 10px 14px;
   text-decoration: none;
   font: inherit;
@@ -79,7 +77,7 @@
 }
 
 .eyebrow {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
@@ -169,7 +167,7 @@
   border: 1px solid rgb(69 139 115 / .32);
   border-radius: var(--radius);
   background: rgb(69 139 115 / .12);
-  color: #2d6a56;
+  color: var(--success-ink);
   padding: 8px 10px;
   font-size: 13px;
   font-weight: 650;
@@ -304,7 +302,7 @@
 .signal-row > span {
   border-radius: var(--radius);
   background: rgb(69 139 115 / .12);
-  color: #2d6a56;
+  color: var(--success-ink);
   padding: 6px 8px;
   font-size: 12px;
   font-weight: 700;
@@ -319,7 +317,7 @@
 
 .signal-row.danger > span {
   background: rgb(242 96 118 / .12);
-  color: #a12f43;
+  color: var(--danger);
 }
 
 .signal-row strong,
@@ -341,7 +339,7 @@
   border: 1px solid rgb(69 139 115 / .22);
   border-radius: 999px;
   background: rgb(69 139 115 / .08);
-  color: #2d6a56;
+  color: var(--success-ink);
   padding: 0 8px;
   font-size: 12px;
   font-weight: 650;
@@ -396,10 +394,6 @@
 }
 
 @media (max-width: 760px) {
-  .student-progress-shell {
-    padding: 20px 16px 28px;
-  }
-
   .progress-heading {
     align-items: start;
     flex-direction: column;
@@ -410,7 +404,7 @@
   }
 
   .progress-heading h1 {
-    font-size: 32px;
+    font-size: var(--page-title-size);
   }
 
   .metric-grid,
@@ -426,10 +420,6 @@
 }
 
 @media (max-width: 430px) {
-  .student-progress-shell {
-    padding: 18px 12px calc(24px + env(safe-area-inset-bottom, 0px));
-  }
-
   .metric-grid,
   .batch-stats,
   .attendance-strip,

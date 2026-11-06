@@ -4,7 +4,7 @@
   background: var(--bg, #f7f9f5);
   color: var(--text);
   --booking-green: #458b73;
-  --booking-green-text: #326c57;
+  --booking-green-text: var(--success-ink);
   --booking-rose: #f26076;
   --booking-amber: #ffd150;
 }
@@ -56,7 +56,7 @@ h1:focus {
   outline: none;
 }
 h1 {
-  font-size: 36px;
+  font-size: var(--page-title-size);
   letter-spacing: -1.2px;
   line-height: 1.17;
   font-weight: 650;
@@ -69,26 +69,6 @@ h3 {
   font-size: 13px;
   font-weight: 600;
 }
-.checkout-header {
-  height: 88px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 max(28px, calc((100vw - 1160px) / 2));
-  gap: 20px;
-}
-.checkout-header > a {
-  display: flex;
-  text-decoration: none;
-}
-.header-tools {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-.preview-badge,
 .sample-label {
   font-size: 11px;
   line-height: 1.3;
@@ -98,18 +78,7 @@ h3 {
   border-radius: 5px;
   font-weight: 500;
 }
-.theme-button {
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font-size: 12px;
-  padding: 8px;
-}
-.booking-shell {
-  max-width: 1160px;
-  margin: auto;
-  padding: 27px 28px 0;
-}
+
 .back-link {
   display: inline-flex;
   align-items: center;
@@ -673,16 +642,6 @@ h3 {
   line-height: 1.75;
   margin: 15px 0 20px;
 }
-.checkout-footer {
-  border-top: 1px solid var(--line);
-  padding: 22px 0 25px;
-  margin-top: 65px;
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  font-size: 10px;
-  color: var(--muted);
-}
 .completion-mark {
   display: grid;
   place-items: center;
@@ -744,7 +703,7 @@ h3 {
     grid-template-columns: minmax(0, 1fr) 310px;
   }
   h1 {
-    font-size: 30px;
+    font-size: var(--page-title-size);
   }
   .option-title small {
     display: none;
@@ -758,23 +717,7 @@ h3 {
   .order-summary {
     position: static;
   }
-  .checkout-header {
-    height: 79px;
-    padding: 0 20px;
-  }
-  .booking-shell {
-    padding: 22px 20px 0;
-  }
-  .header-tools {
-    gap: 8px;
-  }
-  .theme-button {
-    font-size: 10px;
-    padding: 6px;
-  }
-  .preview-badge {
-    font-size: 9px;
-  }
+
   .preview-notice {
     margin: 22px 0 26px;
     align-items: flex-start;
@@ -793,9 +736,6 @@ h3 {
   .step-nav button {
     font-size: 11px;
     gap: 7px;
-  }
-  .checkout-footer {
-    margin-top: 37px;
   }
   .order-summary {
     padding: 21px;
@@ -824,21 +764,6 @@ h3 {
   }
 }
 @media (max-width: 440px) {
-  .checkout-header {
-    padding: 0 16px;
-  }
-  .booking-shell {
-    padding-right: 16px;
-    padding-left: 16px;
-  }
-  .theme-button {
-    display: none;
-  }
-  .preview-badge {
-    max-width: 62px;
-    text-align: center;
-    font-size: 9px;
-  }
   .step-actions {
     gap: 12px;
   }
@@ -854,11 +779,4 @@ h3 {
     grid-template-columns: 86px minmax(0, 1fr);
     gap: 12px;
   }
-  .checkout-footer > span {
-    max-width: 220px;
-  }
-}
-
-:host-context([data-theme='dark']) {
-  --booking-green-text: #9bcdb6;
 }

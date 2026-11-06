@@ -1,4 +1,4 @@
-<header class="site-header" [class.scrolled]="isScrolled()" (keydown.escape)="escapeMenu()">
+<header class="site-header" (keydown.escape)="escapeMenu()">
   <a
     class="brand"
     routerLink="/"
@@ -23,29 +23,80 @@
   </button>
   <div class="navigation" id="site-navigation" [class.open]="menuOpen()">
     <nav class="primary-nav" aria-label="Primary" (click)="closeMenu()">
-      @if (auth.authenticated()) {<a routerLink="/calendar" routerLinkActive="active">Calendar</a>}
-      @if (auth.role() === 'teacher') {
-      <a routerLink="/teacher/dashboard" routerLinkActive="active"
+      @if (auth.authenticated()) {<a
+        routerLink="/calendar"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
+        >Calendar</a
+      >} @if (auth.role() === 'teacher') {
+      <a
+        routerLink="/teacher/dashboard"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
         >My teaching</a
       >
-      <a routerLink="/class-library" routerLinkActive="active">Library</a>
-      <a routerLink="/teacher/analytics" routerLinkActive="active">Insights</a>
-      <a routerLink="/teacher/live-settings" routerLinkActive="active"
+      <a
+        routerLink="/class-library"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
+        >Library</a
+      >
+      <a
+        routerLink="/teacher/analytics"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
+        >Insights</a
+      >
+      <a
+        routerLink="/teacher/live-settings"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
         >Class settings</a
       >
-      <a routerLink="/teacher/profile" routerLinkActive="active">Profile</a>
+      <a
+        routerLink="/teacher/profile"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
+        >Profile</a
+      >
       } @else if (auth.role() === 'student') {
-      <a routerLink="/student/dashboard" routerLinkActive="active"
+      <a
+        routerLink="/student/dashboard"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
         >My learning</a
       >
-      <a routerLink="/teachers" routerLinkActive="active">Find a teacher</a>
-      <a routerLink="/student/explore" routerLinkActive="active"
+      <a
+        routerLink="/teachers"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
+        >Find a teacher</a
+      >
+      <a
+        routerLink="/student/explore"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
         >Explore classes</a
       >
-      <a routerLink="/class-library" routerLinkActive="active">Library</a>
-      <a routerLink="/student/profile" routerLinkActive="active">Profile</a>
+      <a
+        routerLink="/class-library"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
+        >Library</a
+      >
+      <a
+        routerLink="/student/profile"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
+        >Profile</a
+      >
       } @else {
-      <a routerLink="/teachers" routerLinkActive="active">Find a teacher</a>
+      <a
+        routerLink="/teachers"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
+        >Find a teacher</a
+      >
       <a routerLink="/" fragment="how-it-works">How it works</a>
       <a routerLink="/" fragment="for-teachers">For teachers</a>
       }
@@ -76,7 +127,10 @@
       <a class="login-link" routerLink="/student/login" (click)="closeMenu()"
         >Log in</a
       >
-      <a class="signup-link" routerLink="/register" (click)="closeMenu()"
+      <a
+        class="signup-link action-primary"
+        routerLink="/register"
+        (click)="closeMenu()"
         >Get started <span aria-hidden="true">↗</span></a
       >
       } @else {

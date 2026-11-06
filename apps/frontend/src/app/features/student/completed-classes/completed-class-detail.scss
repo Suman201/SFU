@@ -5,11 +5,7 @@
   color: var(--text, #17201d);
 }
 
-.post-class-shell {
-  width: min(1180px, calc(100% - 32px));
-  margin: 0 auto;
-  padding: 32px 0 56px;
-}
+
 
 .detail-heading {
   display: flex;
@@ -250,8 +246,8 @@
 
 .button.primary {
   border-color: rgba(242, 96, 118, 0.34);
-  background: #f26076;
-  color: white;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .button.ghost {
@@ -266,7 +262,6 @@
 
 @media (max-width: 780px) {
   .post-class-shell {
-    width: min(100% - 20px, 1180px);
     padding-top: 20px;
   }
 

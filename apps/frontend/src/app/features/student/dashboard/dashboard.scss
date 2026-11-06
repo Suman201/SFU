@@ -1,8 +1,6 @@
 .student-dashboard-shell {
   display: grid;
   gap: 22px;
-  min-height: calc(100vh - 132px);
-  padding: 28px 32px 36px;
 }
 
 .dashboard-heading,
@@ -38,7 +36,7 @@
 
 .dashboard-heading h1 {
   color: var(--text);
-  font-size: 36px;
+  font-size: var(--page-title-size);
   line-height: 1.05;
 }
 
@@ -49,7 +47,7 @@
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
   background: var(--panel-elevated);
-  color: var(--accent);
+  color: var(--accent-strong);
   padding: 11px 14px;
   text-decoration: none;
   font-weight: 650;
@@ -100,7 +98,7 @@
 
 .summary-link:hover,
 .batch-main small a:hover {
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .summary-grid p {
@@ -142,7 +140,7 @@
 }
 
 .eyebrow {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
@@ -212,7 +210,7 @@
   place-items: center;
   border-radius: 50%;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-strong);
   font-weight: 700;
 }
 
@@ -285,19 +283,19 @@
 .session-pill.status-live {
   border-color: rgb(255 151 96 / 0.45);
   background: rgb(255 151 96 / 0.15);
-  color: #b55321;
+  color: var(--live-ink);
 }
 
 .session-pill.status-scheduled {
   border-color: rgb(69 139 115 / 0.36);
   background: rgb(69 139 115 / 0.12);
-  color: #2d6a56;
+  color: var(--success-ink);
 }
 
 .session-pill.status-error {
   border-color: rgb(242 96 118 / 0.32);
   background: rgb(242 96 118 / 0.1);
-  color: #a12f43;
+  color: var(--danger);
 }
 
 .batch-session-error {
@@ -331,7 +329,8 @@
 
 @media (max-width: 980px) {
   .summary-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
 
   .enrolled-row {
@@ -346,17 +345,9 @@
 }
 
 @media (max-width: 700px) {
-  .student-dashboard-shell {
-    padding: 20px 16px 28px;
-  }
-
   .dashboard-heading {
     align-items: start;
     flex-direction: column;
-  }
-
-  .dashboard-heading h1 {
-    font-size: 32px;
   }
 
   .batch-details {
@@ -369,12 +360,9 @@
 }
 
 @media (max-width: 430px) {
-  .student-dashboard-shell {
-    padding: 18px 12px calc(24px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .dashboard-heading h1 {
-    font-size: 29px;
+  .summary-grid article {
+    padding: 14px;
+    overflow-wrap: anywhere;
   }
 
   .enrolled-panel {
@@ -397,10 +385,9 @@
 
   .batch-actions .button,
   .batch-actions button,
-  .dashboard-heading a,
   .empty-state a {
     width: 100%;
   }
 }
 
-.student-dashboard-shell { max-width: 1280px; margin-inline: auto; padding: 35px 28px 55px; }.dashboard-heading h1 { font-size: 34px; font-weight: 650; letter-spacing: -.04em; }.dashboard-description { margin-top: 10px !important; color: var(--muted); font-size: 14px; line-height: 1.6; }.heading-actions { gap: 8px; }.dashboard-heading a { font-size: 12px; font-weight: 550; box-shadow: none; padding: 9px 12px; }.summary-grid article { box-shadow: none; min-height: 96px; }.summary-grid span,.summary-link { font-size: 25px; font-weight: 650; }.summary-grid p { font-size: 12px; font-weight: 500; }.enrolled-panel { padding: 22px; box-shadow: none; }.enrolled-panel h2 { font-size: 22px; font-weight: 650; letter-spacing: -.025em; }.enrolled-row { box-shadow: none; }.panel-count { font-weight: 500; font-size: 12px; }@media(max-width:760px) { .student-dashboard-shell { padding: 24px 18px 40px; }.dashboard-heading { align-items: start; flex-direction: column; }.heading-actions { justify-content: start; }.enrolled-panel { padding: 16px; } }
+.dashboard-heading h1 { font-size: var(--page-title-size); font-weight: 650; letter-spacing: -.04em; }.dashboard-description { margin-top: 10px !important; color: var(--muted); font-size: 14px; line-height: 1.6; }.heading-actions { gap: 8px; }.dashboard-heading a { font-size: 12px; font-weight: 550; box-shadow: none; padding: 9px 12px; }.summary-grid article { box-shadow: none; min-height: 96px; }.summary-grid span,.summary-link { font-size: 25px; font-weight: 650; }.summary-grid p { font-size: 12px; font-weight: 500; }.enrolled-panel { padding: 22px; box-shadow: none; }.enrolled-panel h2 { font-size: 22px; font-weight: 650; letter-spacing: -.025em; }.enrolled-row { box-shadow: none; }.panel-count { font-weight: 500; font-size: 12px; }@media(max-width:760px) { .dashboard-heading { align-items: start; flex-direction: column; }.heading-actions { justify-content: start; }.enrolled-panel { padding: 16px; } }
