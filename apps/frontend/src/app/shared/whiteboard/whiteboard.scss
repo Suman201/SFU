@@ -53,7 +53,8 @@
   gap: 6px;
   width: 52px;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
   background:
     linear-gradient(180deg, var(--wb-rail-bg), color-mix(in srgb, var(--panel) 88%, var(--wb-base) 12%));
   border-right: 1px solid var(--wb-control-border);
@@ -83,15 +84,14 @@ h1 {
 
 .board-actions {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
   align-items: center;
   gap: 5px;
   width: 100%;
   min-height: 0;
-  overflow-y: auto;
   background: transparent;
   padding: 0;
-  scrollbar-width: thin;
 }
 
 .tool-divider {
@@ -2407,7 +2407,7 @@ h1 {
 
 .canvas-hud {
   position: absolute;
-  right: 14px;
+  left: 14px;
   bottom: 14px;
   z-index: 4;
   display: flex;
@@ -3249,7 +3249,8 @@ h1 {
   .whiteboard-toolbar {
     width: 100%;
     height: auto;
-    flex-direction: row;
+    flex-direction: column;
+    align-items: stretch;
     padding: 8px;
     border-right: none;
     border-bottom: 1px solid var(--wb-control-border);
@@ -3257,19 +3258,33 @@ h1 {
   }
 
   .whiteboard-toolbar::before {
-    width: 3px;
-    height: 26px;
+    display: none;
   }
 
   .board-actions {
     flex-direction: row;
-    justify-content: start;
-    max-width: 100%;
+    min-width: 0;
+  }
+
+  .primary-tools {
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+
+  .primary-tools .tool-divider {
+    display: none;
+  }
+
+  .additional-tools {
     overflow-x: auto;
-    overflow-y: visible;
     overscroll-behavior-inline: contain;
     padding-bottom: 2px;
+    scrollbar-width: thin;
     touch-action: pan-x;
+  }
+
+  .additional-tools > * {
+    flex-shrink: 0;
   }
 
   .tool-divider {
@@ -3344,6 +3359,14 @@ h1 {
     overscroll-behavior-inline: contain;
   }
 
+  .whiteboard-pane:not(.presentation-mode) .page-tabs.teaching-slide-bar {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    padding: 6px 8px;
+    overflow: visible;
+  }
+
   .whiteboard-pane.presentation-mode .page-tabs {
     align-items: center;
     gap: 6px;
@@ -3380,11 +3403,10 @@ h1 {
   }
 
   .canvas-hud {
-    right: 10px;
+    left: 10px;
     bottom: 10px;
-    max-width: calc(100% - 20px);
+    max-width: calc(100% - 190px);
     flex-wrap: wrap;
-    justify-content: end;
   }
 
   .pan {
@@ -3428,6 +3450,7 @@ h1 {
   .whiteboard-pane .icon-button,
   .whiteboard-pane .tool-button,
   .whiteboard-pane .menu-button,
+  .whiteboard-pane .history-button,
   .whiteboard-pane .color-swatch {
     min-width: 40px;
     min-height: 40px;
@@ -3629,6 +3652,12 @@ h1 {
   gap: 5px;
   padding: 4px 0;
   width: 100%;
+
+  @media (max-width: 900px) {
+    flex-direction: row;
+    width: auto;
+    padding: 0 3px;
+  }
 
   .teaching-color-dot {
     position: relative;
@@ -3906,6 +3935,7 @@ h1 {
       flex-direction: column;
       gap: 2px;
       padding: 8px 10px;
+      text-align: start;
       border-radius: 8px;
       border: 1px solid var(--line-soft);
       background: var(--control-bg);
@@ -3915,6 +3945,11 @@ h1 {
       &:hover {
         border-color: var(--wb-primary);
         background: color-mix(in srgb, var(--wb-primary) 6%, var(--control-bg));
+      }
+
+      &:focus-visible {
+        outline: 2px solid var(--accent-strong);
+        outline-offset: -2px;
       }
 
       &.active {

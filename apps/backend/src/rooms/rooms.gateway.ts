@@ -121,6 +121,7 @@ function uniqueNonEmpty(values: readonly (string | undefined)[]): string[] {
 })
 export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(RoomsGateway.name);
+  private readonly pendingRoomJoins = new Map<string, Promise<JoinRoomResponse>>();
   private readonly connectionAttempts = new Map<string, { count: number; resetAt: number }>();
   private readonly eventAttempts = new Map<string, { count: number; resetAt: number }>();
 
@@ -289,42 +290,56 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   @SubscribeMessage('room:join')
   joinRoom(@ConnectedSocket() socket: SfuSocket, @MessageBody() request: JoinRoomRequest, @WsAck() ack: SocketAck<JoinRoomResponse>): Promise<void> {
     return socketAck(ack, async () => {
-      const { closedProducerIds = [], ...response } = await this.rooms.joinRoom(this.requireUser(socket), socket.id, request);
-      for (const producerId of closedProducerIds) await this.emitRoomEvent(request.roomId, 'producer:closed', producerId);
-      socket.data.roomId = request.roomId;
-      socket.data.participantId = response.participantId;
-      if (response.admitted) {
-        await socket.join(request.roomId);
-        const participant = response.room.participants.find((item) => item.id === response.participantId);
-        if (participant && !response.rejoined) {
-          await this.emitRoomEvent(request.roomId, 'participant:joined', participant);
-        } else if (participant) {
-          await this.emitRoomEvent(request.roomId, 'participant:updated', participant.id, { connected: true, socketId: participant.socketId });
-        }
-        await this.emitRoomEvent(request.roomId, 'room:updated', response.room);
-        const whiteboardControl = await this.rooms.whiteboardControlForParticipant(request.roomId, response.participantId);
-        if (whiteboardControl) {
-          await this.emitTargetedRoomEvent(
-            request.roomId,
-            whiteboardControl.targets,
-            'whiteboard:control-granted',
-            whiteboardControl.event
-          );
-        }
-        const whiteboardLock = await this.rooms.whiteboardLockForParticipant(request.roomId, response.participantId);
-        if (whiteboardLock) {
-          await this.emitTargetedRoomEvent(
-            request.roomId,
-            whiteboardLock.targets,
-            'whiteboard:lock-changed',
-            whiteboardLock.event
-          );
-        }
-      } else {
-        await this.emitRoomEvent(request.roomId, 'waiting-room:pending', response.room.participants.find((item) => item.id === response.participantId)!);
+      const key = JSON.stringify([socket.id, request.roomId]);
+      const pending = this.pendingRoomJoins.get(key);
+      if (pending) return pending;
+
+      const join = this.joinSocketToRoom(socket, request);
+      this.pendingRoomJoins.set(key, join);
+      try {
+        return await join;
+      } finally {
+        this.pendingRoomJoins.delete(key);
       }
-      return response;
     });
+  }
+
+  private async joinSocketToRoom(socket: SfuSocket, request: JoinRoomRequest): Promise<JoinRoomResponse> {
+    const { closedProducerIds = [], ...response } = await this.rooms.joinRoom(this.requireUser(socket), socket.id, request);
+    for (const producerId of closedProducerIds) await this.emitRoomEvent(request.roomId, 'producer:closed', producerId);
+    socket.data.roomId = request.roomId;
+    socket.data.participantId = response.participantId;
+    if (response.admitted) {
+      await socket.join(request.roomId);
+      const participant = response.room.participants.find((item) => item.id === response.participantId);
+      if (participant && !response.rejoined) {
+        await this.emitRoomEvent(request.roomId, 'participant:joined', participant);
+      } else if (participant) {
+        await this.emitRoomEvent(request.roomId, 'participant:updated', participant.id, { connected: true, socketId: participant.socketId });
+      }
+      await this.emitRoomEvent(request.roomId, 'room:updated', response.room);
+      const whiteboardControl = await this.rooms.whiteboardControlForParticipant(request.roomId, response.participantId);
+      if (whiteboardControl) {
+        await this.emitTargetedRoomEvent(
+          request.roomId,
+          whiteboardControl.targets,
+          'whiteboard:control-granted',
+          whiteboardControl.event
+        );
+      }
+      const whiteboardLock = await this.rooms.whiteboardLockForParticipant(request.roomId, response.participantId);
+      if (whiteboardLock) {
+        await this.emitTargetedRoomEvent(
+          request.roomId,
+          whiteboardLock.targets,
+          'whiteboard:lock-changed',
+          whiteboardLock.event
+        );
+      }
+    } else {
+      await this.emitRoomEvent(request.roomId, 'waiting-room:pending', response.room.participants.find((item) => item.id === response.participantId)!);
+    }
+    return response;
   }
 
   @SubscribeMessage('room:leave')

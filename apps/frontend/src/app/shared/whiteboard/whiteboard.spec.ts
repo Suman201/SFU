@@ -301,6 +301,55 @@ describe('Whiteboard collaboration and classroom controls', () => {
     expect(teacher.componentInstance.exportBoardState().pages[0]!.elements[1]!['from']).toEqual({ x: 280, y: 130 });
   });
 
+  it('paints a burst of pen moves once per frame and commits every point before the next frame', async () => {
+    const fixture = createBoard();
+    const board = harness(fixture);
+    const canvas = fixture.nativeElement.querySelector('canvas') as HTMLCanvasElement;
+    const surface = fixture.nativeElement.querySelector('.whiteboard-surface') as HTMLElement;
+    const bounds = surface.getBoundingClientRect();
+    const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const pointer = (type: string, offset: number) => new PointerEvent(type, {
+      pointerId: 1,
+      clientX: bounds.left + 30 + offset,
+      clientY: bounds.top + 30 + offset,
+      buttons: type === 'pointerup' ? 0 : 1
+    });
+    spyOn(canvas, 'setPointerCapture').and.stub();
+    board.selectTool('pen');
+    await nextFrame();
+    board.startDrawing(pointer('pointerdown', 0));
+
+    const clearCanvas = spyOn(canvas.getContext('2d')!, 'clearRect').and.callThrough();
+    for (let i = 1; i <= 12; i++) {
+      board.draw(pointer('pointermove', i * 4));
+    }
+    expect(clearCanvas).not.toHaveBeenCalled();
+    await nextFrame();
+    expect(clearCanvas).toHaveBeenCalledTimes(1);
+
+    board.draw(pointer('pointermove', 52));
+    board.stopDrawing(pointer('pointerup', 52));
+    const elements = fixture.componentInstance.exportBoardState().pages[0]!.elements;
+    expect(elements.length).toBe(1);
+    expect((elements[0]!['points'] as unknown[]).length).toBe(14);
+
+    clearCanvas.calls.reset();
+    await nextFrame();
+    expect(clearCanvas).not.toHaveBeenCalled();
+  });
+
+  it('keeps a secondary click from leaving an ink dot', () => {
+    const fixture = createBoard();
+    const board = harness(fixture);
+    const canvas = fixture.nativeElement.querySelector('canvas') as HTMLCanvasElement;
+    const capturePointer = spyOn(canvas, 'setPointerCapture').and.stub();
+    board.selectTool('pen');
+    board.startDrawing(new PointerEvent('pointerdown', { pointerId: 1, button: 2, buttons: 2 }));
+    board.stopDrawing(new PointerEvent('pointerup', { pointerId: 1, button: 2 }));
+    expect(capturePointer).not.toHaveBeenCalled();
+    expect(elementIds(fixture.componentInstance)).toEqual([]);
+  });
+
   it('keeps dropdown triggers clickable and lets Escape dismiss menus while a slider has focus', () => {
     const fixture = createBoard();
     const trigger = fixture.nativeElement.querySelector('button[aria-label="Pen settings"]') as HTMLButtonElement;

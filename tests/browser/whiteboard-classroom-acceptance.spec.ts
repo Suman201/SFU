@@ -12,6 +12,22 @@ test.describe('Real classroom whiteboard acceptance', () => {
     const harness = await createClassroomHarness();
     const { stack, fixture, teacherTokens, teacherContext, studentContext, teacher, student, urlFor } = harness;
     const evidence: Array<Record<string, unknown>> = [{ step: 'fixture', backend: harness.stack.nodeAUrl, materialDirectory: harness.stack.materialDirectory }];
+    let studentRoomJoins = 0;
+    student.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
+      if (payload.toString().includes('["room:join",')) studentRoomJoins++;
+    }));
+    const studentControls = teacher.locator('.participant-list .whiteboard-control');
+    async function assertReconnectedStudent() {
+      await expect.poll(async () => {
+        const local = await classroomState(student, 'student');
+        const remote = await classroomState(teacher, 'teacher');
+        const studentUserId = local.roomParticipants?.find((p: { id: string }) => p.id === local.localParticipantId)?.userId;
+        const matches = remote.roomParticipants?.filter((p: { userId: string }) => p.userId === studentUserId);
+        return Boolean(local.localParticipantId && studentUserId && matches?.length === 1 &&
+          matches[0].connected && matches[0].id === local.localParticipantId);
+      }, { message: 'The teacher sees one connected record matching the rejoined student', timeout: 15_000 }).toBe(true);
+      await expect(studentControls).toHaveCount(1);
+    }
     try {
       for (const [role, page] of [['teacher', teacher], ['student', student]] as const) {
         page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => { const text = String(payload); if (text.includes('\"ok\":false')) evidence.push({ role, failedSocketAck: text.slice(0, 6000) }); }));
@@ -32,7 +48,7 @@ test.describe('Real classroom whiteboard acceptance', () => {
       await step('student joins and opens the read-only saved board', async () => {
         await enterStudentClassroom(student, urlFor('student'));
         await assertRenderedBoard(student);
-        await expect(student!.getByRole('button', { name: 'Pen: solid', exact: true })).toHaveCount(0);
+        await expect(student!.getByRole('button', { name: 'Writing Pen', exact: true })).toHaveCount(0);
       });
       await step('teacher pointer drawing, undo and redo converge on the student', async () => {
         for (const [role, page] of [['teacher', teacher], ['student', student]] as const) {
@@ -51,7 +67,7 @@ test.describe('Real classroom whiteboard acceptance', () => {
         await assertBoardsEqual(teacher!, student!);
       });
       await step('page creation and rename are synchronized', async () => {
-        await teacher!.getByRole('button', { name: 'Add board page', exact: true }).click();
+        await teacher!.getByRole('button', { name: 'Add new blank slide', exact: true }).click();
         await renameBoardPage(teacher, 'Classroom exercise');
         await draw(teacher!, 1);
         await expect.poll(async () => (await board(student!)).pages.length).toBe(2);
@@ -62,22 +78,22 @@ test.describe('Real classroom whiteboard acceptance', () => {
         if (pane) { await teacher.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2); await teacher.mouse.wheel(0, 550); }
         evidence.push({ step: 'grant-control-layout', boxes: await teacher.locator('.session-sidebar, .participants-pane, .participant-list').evaluateAll((elements) => elements.map((element) => ({ class: element.className, rect: element.getBoundingClientRect().toJSON(), scrollHeight: element.scrollHeight, clientHeight: element.clientHeight, scrollTop: element.scrollTop, overflowY: getComputedStyle(element).overflowY }))) });
         await teacher!.getByRole('button', { name: /^Allow .+ to control the whiteboard$/ }).click();
-        await expect(student!.getByRole('button', { name: 'Pen: solid', exact: true })).toBeEnabled();
+        await expect(student!.getByRole('button', { name: 'Writing Pen', exact: true })).toBeEnabled();
         await draw(student!, 2);
         await expect.poll(() => elementCount(teacher!)).toBe(3);
         await assertBoardsEqual(teacher!, student!);
         await teacher!.getByRole('button', { name: 'Lock board', exact: true }).click();
-        await expect(student!.getByRole('button', { name: 'Pen: solid', exact: true })).toHaveCount(0);
+        await expect(student!.getByRole('button', { name: 'Writing Pen', exact: true })).toHaveCount(0);
         const locked = await board(student!);
         await pointerStroke(student!, 3);
         expect(await board(student!)).toEqual(locked);
         await teacher!.getByRole('button', { name: 'Unlock board', exact: true }).click();
-        await expect(student!.getByRole('button', { name: 'Pen: solid', exact: true })).toBeEnabled();
+        await expect(student!.getByRole('button', { name: 'Writing Pen', exact: true })).toBeEnabled();
         await teacher!.getByRole('button', { name: /^Revoke whiteboard control for / }).click();
         await expect(student.locator('.student-whiteboard-drawer')).toHaveCount(0);
         await student.locator('.student-whiteboard-button').click();
         await expect(student.locator('sfu-whiteboard')).toBeVisible();
-        await expect(student!.getByRole('button', { name: 'Pen: solid', exact: true })).toHaveCount(0);
+        await expect(student!.getByRole('button', { name: 'Writing Pen', exact: true })).toHaveCount(0);
       });
       await step('closed student drawer receives teacher changes when reopened', async () => {
         await student!.getByRole('button', { name: 'Close whiteboard', exact: true }).click();
@@ -94,19 +110,27 @@ test.describe('Real classroom whiteboard acceptance', () => {
         await studentContext.setOffline(false);
         await waitJoined(student!, 'student');
         await assertBoardsEqual(teacher!, student!);
+        await assertReconnectedStudent();
+        await expect(studentControls).toHaveAccessibleName(/^Allow .+ to control the whiteboard$/);
+        expect(studentRoomJoins).toBe(2);
         evidence.push({ step: 'student-reconnect', count: await elementCount(student!) });
       });
       await step('student reconnect replays active grant and locked state', async () => {
         await teacher.getByRole('button', { name: /^Allow .+ to control the whiteboard$/ }).click();
-        await expect(student.getByRole('button', { name: 'Pen: solid', exact: true })).toBeEnabled();
+        await expect(student.getByRole('button', { name: 'Writing Pen', exact: true })).toBeEnabled();
         await takeOffline(student, studentContext, 'student');
         await teacher.getByRole('button', { name: 'Lock board', exact: true }).click();
         await studentContext.setOffline(false);
         await waitJoined(student, 'student');
         await expect(student.locator('.student-whiteboard-drawer')).toBeVisible();
-        await expect(student.getByRole('button', { name: 'Pen: solid', exact: true })).toHaveCount(0);
+        await expect(student.getByRole('button', { name: 'Writing Pen', exact: true })).toHaveCount(0);
+        await assertReconnectedStudent();
+        await expect(studentControls).toHaveAccessibleName(/^Revoke whiteboard control for /);
+        expect(studentRoomJoins).toBe(3);
+        await studentControls.scrollIntoViewIfNeeded();
+        await teacher.locator('.participants-pane').screenshot({ path: testInfo.outputPath('reconnected-whiteboard-controls.png') });
         await teacher.getByRole('button', { name: 'Unlock board', exact: true }).click();
-        await expect(student.getByRole('button', { name: 'Pen: solid', exact: true })).toBeEnabled();
+        await expect(student.getByRole('button', { name: 'Writing Pen', exact: true })).toBeEnabled();
         await assertBoardsEqual(teacher, student);
         await expect.poll(async () => (await classroomState(teacher, 'teacher')).controllerParticipantId).toBe((await classroomState(student, 'student')).localParticipantId);
         await teacher.getByRole('button', { name: /^Revoke whiteboard control for / }).click();
@@ -117,7 +141,7 @@ test.describe('Real classroom whiteboard acceptance', () => {
       });
       await step('teacher reconnect catches up with permitted student edits', async () => {
         await teacher!.getByRole('button', { name: /^Allow .+ to control the whiteboard$/ }).click();
-        await expect(student!.getByRole('button', { name: 'Pen: solid', exact: true })).toBeEnabled();
+        await expect(student!.getByRole('button', { name: 'Writing Pen', exact: true })).toBeEnabled();
         const grantedPermission = await teacher.locator('.whiteboard-permission-panel select').inputValue();
         await takeOffline(teacher!, teacherContext, 'teacher');
         const before = await elementCount(student!);

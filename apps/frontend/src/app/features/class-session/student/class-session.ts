@@ -1416,10 +1416,11 @@ export class StudentClassSession implements OnInit, OnDestroy {
       if (this.destroyed || this.isBrowserOffline()) {
         return;
       }
-      if (this.sessionLive()) {
-        this.mediaError.set(reason === 'online' ? 'Network restored. Recovering classroom media...' : '');
+      if (reason === 'online' && this.sessionLive()) {
+        this.mediaError.set(this.socket.connect().connected ? '' : 'Network restored. Waiting for the classroom connection...');
       }
-      this.refreshSessionSnapshot({ allowMediaJoin: true, forceMediaRejoin: Boolean(this.joinedRoomId), silent: true });
+      // Socket reconnect owns the room join. A tab can become visible or online before that socket is ready.
+      this.refreshSessionSnapshot({ silent: true });
     }, 600);
   }
 

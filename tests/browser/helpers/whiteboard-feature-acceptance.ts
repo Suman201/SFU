@@ -52,7 +52,7 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
   };
   const newPage = async (name: string) => {
     await closeMath();
-    await button('Add board page').click();
+    await button('Add new blank slide').click();
     await renameBoardPage(teacher, name);
     await sync(`new page: ${name}`);
   };
@@ -83,7 +83,7 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
     await runStep('feature fixture resets through visible page controls after large-board proof', async () => {
       const revoke = teacher.getByRole('button', { name: /^Revoke whiteboard control for / });
       if (await revoke.isVisible()) await revoke.click();
-      await expect(student.getByRole('button', { name: /^Pen:/ })).toHaveCount(0);
+      await expect(student.getByRole('button', { name: 'Writing Pen', exact: true })).toHaveCount(0);
       while ((await board(teacher)).pages.length > 1) { await button('Remove current board page').click(); await sync('remove large-fixture page'); }
       await button('Clear whiteboard').click(); await sync('clear remaining fixture page');
       await checkTeacherPageTabs('with normal controls');
@@ -102,7 +102,7 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
       expect(await board(teacher)).toEqual(teacherBefore);
       expect((await studentActive()).elements).toEqual(studentBefore.pages.find((page: any) => page.id === studentBefore.activePageId)!.elements);
       const localView = (await studentActive()).view;
-      await root.getByRole('button', { name: /^Pen:/ }).click(); await drag(120, 130, 100, 35);
+      await root.getByRole('button', { name: 'Writing Pen', exact: true }).click(); await drag(120, 130, 100, 35);
       await expect.poll(async () => (await studentActive()).elements.length).toBe((await active()).elements.length);
       expect((await studentActive()).view).toEqual(localView);
       await studentRoot.getByRole('button', { name: 'Menu', exact: true }).click();
@@ -472,7 +472,7 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
         const firstTitle = await studentTabs.first().innerText();
         await studentTabs.first().scrollIntoViewIfNeeded(); await studentTabs.first().click();
         await expect.poll(async () => { const state = await board(student); return state.pages.find((page: any) => page.id === state.activePageId)?.title; }).toBe(firstTitle);
-        await expect(student.getByRole('button', { name: /^Pen:/ })).toHaveCount(0);
+        await expect(student.getByRole('button', { name: 'Writing Pen', exact: true })).toHaveCount(0);
         const teacherBoard = (await root.boundingBox())!; const teacherCanvas = (await root.locator('canvas.whiteboard-canvas').boundingBox())!;
         const sidebar = (await teacher.locator('.session-sidebar').boundingBox())!;
         evidence.push({ feature: 'teacher phone vertical layout', teacherBoard, teacherCanvas, sidebar });

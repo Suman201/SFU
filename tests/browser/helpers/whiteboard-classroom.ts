@@ -143,7 +143,7 @@ export async function enterTeacherClassroom(page: Page, url: string) {
   await page.getByRole('button', { name: 'Start Live Class', exact: true }).click();
   await expect(page.locator('.teacher-preflight-backdrop')).toHaveCount(0, { timeout: 45_000 });
   await waitJoined(page, 'teacher');
-  await expect(page.getByRole('button', { name: 'Pen: solid', exact: true })).toBeEnabled({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'Writing Pen', exact: true })).toBeEnabled({ timeout: 20_000 });
 }
 
 export async function enterStudentClassroom(page: Page, url: string) {
@@ -186,7 +186,7 @@ export async function classroomState(page: Page, role: string) {
   });
 }
 export async function draw(page: Page, index: number) {
-  await page.getByRole('button', { name: 'Pen: solid', exact: true }).click();
+  await page.getByRole('button', { name: 'Writing Pen', exact: true }).click();
   await pointerStroke(page, index);
 }
 export async function pointerStroke(page: Page, index: number) {
@@ -231,13 +231,16 @@ export async function login(baseUrl: string, email: string, password: string): P
 }
 
 export async function renameBoardPage(page: Page, title: string) {
-  const input = page.getByRole('textbox', { name: 'Rename current board page' });
+  const deck = page.getByRole('dialog', { name: 'Slide Deck', exact: true });
+  await page.getByRole('button', { name: 'Slide Deck & Manager', exact: true }).click();
+  const input = deck.getByRole('textbox', { name: 'Rename current board page', exact: true });
   const initial = await board(page);
   const currentTitle = initial.pages.find((item: any) => item.id === initial.activePageId)?.title;
   await expect(input).toHaveValue(currentTitle);
   await input.fill(title);
   await expect(input).toHaveValue(title);
-  await page.getByLabel('Search board pages', { exact: true }).click();
+  await input.press('Tab');
+  await deck.getByRole('button', { name: 'Close slide deck', exact: true }).click();
   await expect.poll(async () => { const snapshot = await board(page); return snapshot.pages.find((item: any) => item.id === snapshot.activePageId)?.title; }).toBe(title);
 }
 

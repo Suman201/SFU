@@ -1,6 +1,6 @@
 <section class="whiteboard-pane" [class.presentation-mode]="presentationModeEnabled()" aria-label="Class whiteboard">
   <div class="whiteboard-toolbar">
-    <div class="board-actions" aria-label="Whiteboard tools">
+    <div class="board-actions primary-tools" role="group" aria-label="Drawing and history">
       <div class="menu-group-container">
         <button class="history-button" type="button" aria-label="Menu" [attr.aria-expanded]="menuOpen()"
           (mouseenter)="showTooltip($event, 'Menu')" (mouseleave)="hideTooltip()"
@@ -282,15 +282,6 @@
         </div>
         }
       </div>
-      <button class="icon-button tool-button highlighter-tool-btn" [class.active]="isHighlighterActive()" type="button"
-        aria-label="Highlighter" [attr.aria-pressed]="isHighlighterActive()"
-        [disabled]="!canUseTool('pen')" (click)="selectHighlighter(); hideTooltip()"
-        (mouseenter)="showTooltip($event, 'Highlighter', 'M')" (mouseleave)="hideTooltip()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="m9 11-6 6v3h3l6-6"/>
-          <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>
-        </svg>
-      </button>
       <button class="icon-button tool-button" [class.active]="activeTool() === 'eraser'" type="button"
         aria-label="Eraser" [attr.aria-pressed]="activeTool() === 'eraser'"
         [disabled]="!canUseTool('eraser')"
@@ -312,27 +303,11 @@
           <line x1="12" y1="4" x2="12" y2="20"/>
         </svg>
       </button>
-      <button class="icon-button tool-button sticky-tool-btn" type="button"
-        aria-label="Sticky Note" (click)="insertStickyNote(); hideTooltip()"
-        (mouseenter)="showTooltip($event, 'Sticky Note', 'N')" (mouseleave)="hideTooltip()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z"/>
-          <path d="M15 3v6h6"/>
-        </svg>
-      </button>
-      <button class="icon-button tool-button" [class.active]="activeTool() === 'laser'" type="button"
-        aria-label="Laser pointer" [attr.aria-pressed]="activeTool() === 'laser'"
-        [disabled]="!canUseTool('laser')"
-        (click)="selectTool('laser'); hideTooltip()"
-        (mouseenter)="showTooltip($event, 'Laser Pointer', 'L')" (mouseleave)="hideTooltip()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="3" fill="currentColor"/>
-          <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
-        </svg>
-      </button>
+      }
+    </div>
 
-      <span class="tool-divider short" aria-hidden="true"></span>
-
+    <div class="board-actions additional-tools" role="group" aria-label="More whiteboard tools">
+      @if (!readOnly()) {
       <div class="shape-group-container">
         <button class="icon-button tool-button main-shape-btn" [class.active]="isShapeTool(activeTool())" type="button"
           [attr.aria-label]="activeShapeTool()" [disabled]="!canUseTool(activeShapeTool())"
@@ -360,9 +335,9 @@
         @if (shapeMenuOpen()) {
         <div class="shape-dropdown-overlay" (click)="shapeMenuOpen.set(false)"></div>
         <div class="shape-dropdown">
-          <button class="icon-button tool-button" [class.active]="activeTool() === 'line'" type="button" title="Line (L)"
+          <button class="icon-button tool-button" [class.active]="activeTool() === 'line'" type="button" title="Line"
             aria-label="Line" [disabled]="!canUseTool('line')" (click)="selectShapeTool('line'); hideTooltip()"
-            (mouseenter)="showTooltip($event, 'Line', 'L')" (mouseleave)="hideTooltip()">
+            (mouseenter)="showTooltip($event, 'Line')" (mouseleave)="hideTooltip()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>
           </button>
           <button class="icon-button tool-button" [class.active]="activeTool() === 'arrow'" type="button" title="Arrow (A)"
@@ -388,6 +363,69 @@
         </div>
         }
       </div>
+
+      <button class="icon-button tool-button" type="button" aria-label="Open math tools"
+        aria-haspopup="dialog" [attr.aria-expanded]="mathPopoverOpen()"
+        (click)="mathPopoverOpen() ? closeMathTools() : openMathTools(); hideTooltip()"
+        (mouseenter)="showTooltip($event, 'Math tools')" (mouseleave)="hideTooltip()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 4H6l7 8-7 8h12"/>
+        </svg>
+      </button>
+      <div class="color-group-container">
+        <button class="color-swatch main-color-btn" [style.background]="strokeColor()" type="button"
+          title="Drawing color" aria-label="Drawing color" [attr.aria-expanded]="colorMenuOpen()"
+          (mouseenter)="showTooltip($event, 'Color Palette')" (mouseleave)="hideTooltip()"
+          (click)="toggleColorMenu($event); hideTooltip()">
+          <span class="chevron-icon"></span>
+        </button>
+
+        @if (colorMenuOpen()) {
+        <div class="shape-dropdown-overlay" (click)="colorMenuOpen.set(false)"></div>
+        <div class="color-dropdown">
+          @for (color of colors; track color) {
+          <button class="color-swatch" [class.active]="strokeColor() === color" [style.background]="color" type="button"
+            title="Drawing color" [attr.aria-label]="'Drawing color ' + color" [attr.aria-pressed]="strokeColor() === color" (click)="selectColor(color)"></button>
+          }
+          @for (color of customRecentColors(); track color) {
+          <button class="color-swatch recent-color" [class.active]="strokeColor() === color" [style.background]="color" type="button"
+            title="Recent drawing color" [attr.aria-label]="'Recent drawing color ' + color" [attr.aria-pressed]="strokeColor() === color" (click)="selectColor(color)"></button>
+          }
+          <label class="custom-color-picker" title="Custom drawing color" aria-label="Custom drawing color">
+            <input type="color" [value]="strokeColor()" (change)="setCustomStrokeColor($event)" />
+            <span aria-hidden="true"></span>
+          </label>
+        </div>
+        }
+      </div>
+
+      <button class="icon-button tool-button highlighter-tool-btn" [class.active]="isHighlighterActive()" type="button"
+        aria-label="Highlighter" [attr.aria-pressed]="isHighlighterActive()"
+        [disabled]="!canUseTool('pen')" (click)="selectHighlighter(); hideTooltip()"
+        (mouseenter)="showTooltip($event, 'Highlighter', 'M')" (mouseleave)="hideTooltip()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m9 11-6 6v3h3l6-6"/>
+          <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>
+        </svg>
+      </button>
+      <button class="icon-button tool-button sticky-tool-btn" type="button"
+        aria-label="Sticky Note" (click)="insertStickyNote(); hideTooltip()"
+        (mouseenter)="showTooltip($event, 'Sticky Note', 'N')" (mouseleave)="hideTooltip()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z"/>
+          <path d="M15 3v6h6"/>
+        </svg>
+      </button>
+      <button class="icon-button tool-button" [class.active]="activeTool() === 'laser'" type="button"
+        aria-label="Laser pointer" [attr.aria-pressed]="activeTool() === 'laser'"
+        [disabled]="!canUseTool('laser')"
+        (click)="selectTool('laser'); hideTooltip()"
+        (mouseenter)="showTooltip($event, 'Laser Pointer', 'L')" (mouseleave)="hideTooltip()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" fill="currentColor"/>
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+        </svg>
+      </button>
 
       <div class="shape-group-container diagram-group-container">
         <button class="icon-button tool-button main-diagram-btn" [class.active]="isDiagramTool(activeTool())" type="button"
@@ -531,33 +569,6 @@
           <span class="color-dot-indicator"></span>
           }
         </button>
-        }
-      </div>
-
-      <div class="color-group-container">
-        <button class="color-swatch main-color-btn" [style.background]="strokeColor()" type="button"
-          title="Drawing color" aria-label="Drawing color" [attr.aria-expanded]="colorMenuOpen()"
-          (mouseenter)="showTooltip($event, 'Color Palette')" (mouseleave)="hideTooltip()"
-          (click)="toggleColorMenu($event); hideTooltip()">
-          <span class="chevron-icon"></span>
-        </button>
-
-        @if (colorMenuOpen()) {
-        <div class="shape-dropdown-overlay" (click)="colorMenuOpen.set(false)"></div>
-        <div class="color-dropdown">
-          @for (color of colors; track color) {
-          <button class="color-swatch" [class.active]="strokeColor() === color" [style.background]="color" type="button"
-            title="Drawing color" [attr.aria-label]="'Drawing color ' + color" [attr.aria-pressed]="strokeColor() === color" (click)="selectColor(color)"></button>
-          }
-          @for (color of customRecentColors(); track color) {
-          <button class="color-swatch recent-color" [class.active]="strokeColor() === color" [style.background]="color" type="button"
-            title="Recent drawing color" [attr.aria-label]="'Recent drawing color ' + color" [attr.aria-pressed]="strokeColor() === color" (click)="selectColor(color)"></button>
-          }
-          <label class="custom-color-picker" title="Custom drawing color" aria-label="Custom drawing color">
-            <input type="color" [value]="strokeColor()" (change)="setCustomStrokeColor($event)" />
-            <span aria-hidden="true"></span>
-          </label>
-        </div>
         }
       </div>
 
@@ -1066,21 +1077,21 @@
       @if (canManagePages()) {
       <div class="teaching-bg-group" aria-label="Teaching background template">
         <button class="teaching-bg-btn" [class.active]="activeTemplate() === 'blank'" type="button"
-          title="Blank Canvas" aria-label="Blank Canvas"
+          title="Blank Canvas" aria-label="Blank Canvas" [attr.aria-pressed]="activeTemplate() === 'blank'"
           (mouseenter)="showTooltip($event, 'Blank Background', undefined, 'bottom')" (mouseleave)="hideTooltip()"
           (click)="selectTemplate('blank'); hideTooltip()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
           <span>Blank</span>
         </button>
         <button class="teaching-bg-btn" [class.active]="activeTemplate() === 'ruled'" type="button"
-          title="Ruled Lines (Notebook writing)" aria-label="Ruled Lines"
+          title="Ruled Lines (Notebook writing)" aria-label="Ruled Lines" [attr.aria-pressed]="activeTemplate() === 'ruled'"
           (mouseenter)="showTooltip($event, 'Ruled Lines (Notebook)', undefined, 'bottom')" (mouseleave)="hideTooltip()"
           (click)="selectTemplate('ruled'); hideTooltip()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
           <span>Ruled</span>
         </button>
         <button class="teaching-bg-btn" [class.active]="activeTemplate() === 'grid'" type="button"
-          title="Math Grid (Geometry & Equations)" aria-label="Math Grid"
+          title="Math Grid (Geometry & Equations)" aria-label="Math Grid" [attr.aria-pressed]="activeTemplate() === 'grid'"
           (mouseenter)="showTooltip($event, 'Math Grid Paper', undefined, 'bottom')" (mouseleave)="hideTooltip()"
           (click)="selectTemplate('grid'); hideTooltip()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
@@ -1098,8 +1109,9 @@
           [class.info]="status.type === 'info'">{{ status.message }}</span>
         }
         <!-- Slide Deck Popover Toggle for Advanced Page Organization -->
-        <button class="slide-manager-btn" [class.active]="pageManagerOpen()" type="button"
+        <button #slideDeckButton class="slide-manager-btn" [class.active]="pageManagerOpen()" type="button"
           title="Slide Deck & Manager" aria-label="Slide Deck & Manager"
+          aria-haspopup="dialog" [attr.aria-expanded]="pageManagerOpen()"
           (mouseenter)="showTooltip($event, 'Slide Deck & Manager', undefined, 'bottom')" (mouseleave)="hideTooltip()"
           (click)="togglePageManager($event); hideTooltip()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1122,7 +1134,8 @@
       <div class="page-manager-popover" role="dialog" aria-label="Slide Deck">
         <div class="page-manager-header">
           <strong>Slide Deck ({{ pages().length }})</strong>
-          <button type="button" class="close-btn" aria-label="Close slide deck" (click)="pageManagerOpen.set(false)">&times;</button>
+          <button type="button" class="close-btn" aria-label="Close slide deck"
+            (click)="pageManagerOpen.set(false); slideDeckButton.focus()">&times;</button>
         </div>
         <div class="page-manager-search">
           <input class="page-search-input" type="search" [value]="pageSearchQuery()" aria-label="Search slides"
@@ -1130,10 +1143,12 @@
         </div>
         <div class="page-manager-thumbnails">
           @for (page of filteredPages(); track page.id) {
-          <div class="page-card" [class.active]="page.id === activePageId()" (click)="selectPage(page.id); pageManagerOpen.set(false)">
+          <button class="page-card" type="button" [class.active]="page.id === activePageId()"
+            [attr.aria-current]="page.id === activePageId() ? 'page' : null"
+            (click)="selectPage(page.id); pageManagerOpen.set(false); slideDeckButton.focus()">
             <span class="page-card-title">{{ page.title }}</span>
             <span class="page-card-meta">{{ page.elements.length }} items &bull; {{ page.template || 'grid' }}</span>
-          </div>
+          </button>
           }
         </div>
         @if (canManagePages()) {
@@ -1398,7 +1413,6 @@
 
       <div class="canvas-hud" aria-label="Whiteboard status">
         <span>{{ activeToolLabel() }}</span>
-        <span>{{ zoomPercent() }}</span>
         <span>{{ activeTemplateLabel() }}</span>
         <span>{{ elementCount() }} objects</span>
       </div>

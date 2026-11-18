@@ -1338,6 +1338,32 @@ describe('RoomsGateway', () => {
       expect(ack.mock.calls[0]![0]?.data?.admitted).toBe(false);
     });
 
+    it('acknowledges overlapping reconnect joins with one participant and one room broadcast', async () => {
+      const { gateway, rooms, emissions } = createGatewayHarness();
+      const socket = {
+        id: 'student-socket',
+        data: { user: { id: 'student', email: 'student@example.test', roles: ['participant'] } },
+        join: jest.fn()
+      };
+      const request = { roomId: 'room-1', displayName: 'Student' };
+      const participant = { id: 'participant-1', socketId: socket.id, admitted: true };
+      const response = { room: { id: request.roomId, participants: [participant] }, participantId: participant.id, admitted: true };
+      rooms.joinRoom.mockResolvedValue(response);
+      const firstAck = jest.fn();
+      const secondAck = jest.fn();
+      await Promise.all([
+        gateway.joinRoom(socket as never, request, firstAck),
+        gateway.joinRoom(socket as never, request, secondAck)
+      ]);
+      expect(rooms.joinRoom).toHaveBeenCalledTimes(1);
+      expect(firstAck).toHaveBeenCalledWith({ ok: true, data: response });
+      expect(secondAck).toHaveBeenCalledWith({ ok: true, data: response });
+      expect(emissions.map(({ event }) => event)).toEqual(['participant:joined', 'room:updated']);
+
+      await gateway.joinRoom(socket as never, request, jest.fn());
+      expect(rooms.joinRoom).toHaveBeenCalledTimes(2);
+    });
+
     it('does not rebroadcast reused room joins as new participants', async () => {
       const { gateway, rooms, emissions, signals } = createGatewayHarness();
       const participant = {

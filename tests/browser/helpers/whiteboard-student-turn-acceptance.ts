@@ -22,7 +22,7 @@ export async function runStudentTurnAcceptance(teacher: Page, student: Page, tes
     await teacher.getByRole('button', { name: /^Allow .+ to control the whiteboard$/ }).click();
     await ensureStudentBoard();
     await expect.poll(() => student.locator('sfu-student-class-session').evaluate((element) => (window as any).ng.getComponent(element).whiteboardPermissionLevel())).toBe(mode);
-    if (mode !== 'view_only') await expect(studentBoard.getByRole('button', { name: /^Pen:/ })).toBeEnabled();
+    if (mode !== 'view_only') await expect(studentBoard.getByRole('button', { name: 'Writing Pen', exact: true })).toBeEnabled();
     await assertBoardsEqual(teacher, student);
   };
   const point = async (page: Page, x: number, y: number) => {
@@ -52,7 +52,7 @@ export async function runStudentTurnAcceptance(teacher: Page, student: Page, tes
       await revoke();
       const unlock = teacher.getByRole('button', { name: 'Unlock board', exact: true });
       if (await unlock.isVisible()) await unlock.click();
-      await teacherBoard.getByRole('button', { name: 'Add board page', exact: true }).click();
+      await teacherBoard.getByRole('button', { name: 'Add new blank slide', exact: true }).click();
       await renameBoardPage(teacher, 'Student turn acceptance');
       await teacherBoard.getByRole('button', { name: 'Pen settings', exact: true }).click();
       await teacherBoard.locator('.pen-style-grid button').filter({ has: teacher.locator('strong', { hasText: /^Solid$/ }) }).click();
@@ -105,21 +105,21 @@ export async function runStudentTurnAcceptance(teacher: Page, student: Page, tes
       await student.mouse.click(p.x, p.y); await student.keyboard.press('Delete');
       await expect.poll(async () => (await allElements(teacher)).some((item: any) => item.id === disposable.id)).toBe(false);
       await preserve(teacherBaseline);
-      await teacherBoard.getByRole('button', { name: 'Add board page', exact: true }).click();
+      await teacherBoard.getByRole('button', { name: 'Add new blank slide', exact: true }).click();
       await assertBoardsEqual(teacher, student);
-      await expect(studentBoard.getByRole('button', { name: /^Pen:/ })).toHaveCount(0);
+      await expect(studentBoard.getByRole('button', { name: 'Writing Pen', exact: true })).toHaveCount(0);
       const readOnlyElements = await allElements(student); await pointerStroke(student, 1);
       expect(await allElements(student)).toEqual(readOnlyElements);
       await teacherBoard.locator('.page-tab-list').getByRole('button', { name: 'Student turn acceptance', exact: true }).click();
       await expect.poll(async () => (await board(student)).activePageId).toBe(permittedPageId);
-      await expect(studentBoard.getByRole('button', { name: /^Pen:/ })).toBeEnabled();
+      await expect(studentBoard.getByRole('button', { name: 'Writing Pen', exact: true })).toBeEnabled();
       await revoke(); await assertBoardsEqual(teacher, student);
       evidence.push({ feature: 'current-page edit and page restriction', permittedPageId, removedDisposableId: disposable.id });
     });
 
     await test.step('view-only grant cannot add whiteboard content', async () => {
       await grant('view_only');
-      await expect(studentBoard.getByRole('button', { name: /^Pen:/ })).toHaveCount(0);
+      await expect(studentBoard.getByRole('button', { name: 'Writing Pen', exact: true })).toHaveCount(0);
       const before = await allElements(student); await pointerStroke(student, 1);
       expect(await allElements(student)).toEqual(before); await revoke();
       evidence.push({ feature: 'view-only grant', unchangedObjects: before.length });

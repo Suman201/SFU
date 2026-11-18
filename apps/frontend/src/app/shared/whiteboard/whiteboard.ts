@@ -1884,6 +1884,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   private pendingCommands: WhiteboardCommand[] = [];
   private resizeObserver?: ResizeObserver;
   private resizeFrame = 0;
+  private pointerRenderFrame: number | null = null;
   private imageCache = new Map<string, HTMLImageElement>();
   private pageSizeCache = new WeakMap<WhiteboardPage, Map<number, number>>();
   private clipboardElements: WhiteboardElement[] = [];
@@ -1925,6 +1926,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (this.resizeFrame) {
       window.cancelAnimationFrame(this.resizeFrame);
     }
+    this.cancelPointerRender();
     if (this.laserTimeout) {
       window.clearTimeout(this.laserTimeout);
     }
@@ -2006,7 +2008,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (event.key === 'Escape') {
       event.preventDefault();
       const trigger = this.whiteboardCanvas?.nativeElement.closest('.whiteboard-pane')
-        ?.querySelector<HTMLButtonElement>('.whiteboard-toolbar button[aria-expanded="true"]');
+        ?.querySelector<HTMLButtonElement>('.whiteboard-toolbar button[aria-expanded="true"], .slide-manager-btn[aria-expanded="true"]');
       if (this.mathPopoverOpen()) this.closeMathTools();
       if (this.presentationModeEnabled()) this.exitPresentationMode();
       this.cancelKeyboardState();
@@ -4122,6 +4124,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.penMenuOpen.set(false);
     this.brushMenuOpen.set(false);
     this.menuOpen.set(false);
+    this.pageManagerOpen.set(false);
     this.contextMenu.set(null);
     this.textDraft.set(null);
     this.graphDraft.set(null);
@@ -4378,7 +4381,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   protected startDrawing(event: PointerEvent): void {
     const canvas = this.whiteboardCanvas?.nativeElement;
-    if (!canvas || !this.context) {
+    if (!canvas || !this.context || (event.button !== 0 && event.button !== 1)) {
       return;
     }
     event.preventDefault();
@@ -4571,7 +4574,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (this.activeTool() === 'eraser') {
       this.eraserCursor.set(point);
       if (!this.erasing) {
-        this.render();
+        this.schedulePointerRender();
       }
     }
 
@@ -4584,7 +4587,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (this.selectionMarquee()) {
       event.preventDefault();
       this.updateSelectionMarquee(point);
-      this.render();
+      this.schedulePointerRender();
       return;
     }
 
@@ -4592,14 +4595,14 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       event.preventDefault();
       this.eraseAlongPath(this.lastPoint, point);
       this.lastPoint = point;
-      this.render();
+      this.schedulePointerRender();
       return;
     }
 
     if (this.transformStart) {
       event.preventDefault();
       this.applyTransform(point, event.shiftKey);
-      this.render();
+      this.schedulePointerRender();
       return;
     }
 
@@ -4608,7 +4611,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       const delta = this.adjustMoveDelta(point.x - this.lastPoint.x, point.y - this.lastPoint.y);
       this.moveSelected(delta.x, delta.y);
       this.lastPoint = { x: this.lastPoint.x + delta.x, y: this.lastPoint.y + delta.y };
-      this.render();
+      this.schedulePointerRender();
       return;
     }
 
@@ -4658,24 +4661,24 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
           points: [firstPoint, straightPoint]
         };
         this.lastPoint = straightPoint;
-        this.render();
+        this.schedulePointerRender();
         return;
       }
       const previousStrokePoint = this.previewElement.points[this.previewElement.points.length - 1];
       const nextStrokePoint = this.getStrokePoint(event, nextPoint, previousStrokePoint);
-      this.previewElement = {
-        ...this.previewElement,
-        points: [...this.previewElement.points, nextStrokePoint]
-      };
+      this.previewElement.points.push(nextStrokePoint);
       this.lastPoint = nextStrokePoint;
-      this.render();
+      this.schedulePointerRender();
       return;
     }
     this.lastPoint = nextPoint;
-    this.render();
+    this.schedulePointerRender();
   }
 
   protected stopDrawing(event: PointerEvent): void {
+    if (event.type === 'pointerup' && event.button > 1) {
+      return;
+    }
     const canvas = this.whiteboardCanvas?.nativeElement;
     if (canvas?.hasPointerCapture(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
@@ -4757,7 +4760,24 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.render();
   }
 
+  private schedulePointerRender(): void {
+    if (this.pointerRenderFrame === null) {
+      this.pointerRenderFrame = window.requestAnimationFrame(() => {
+        this.pointerRenderFrame = null;
+        this.render();
+      });
+    }
+  }
+
+  private cancelPointerRender(): void {
+    if (this.pointerRenderFrame !== null) {
+      window.cancelAnimationFrame(this.pointerRenderFrame);
+      this.pointerRenderFrame = null;
+    }
+  }
+
   private render(includeOverlays = true): void {
+    this.cancelPointerRender();
     const canvas = this.whiteboardCanvas?.nativeElement;
     const context = this.context;
     if (!canvas || !context) {
