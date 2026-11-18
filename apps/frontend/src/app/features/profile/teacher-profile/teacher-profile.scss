@@ -335,7 +335,7 @@ h3 {
 
 .promotion-layout {
   display: grid;
-  grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, 1.55fr) minmax(250px, 0.85fr);
   gap: 14px;
   align-items: start;
 }
@@ -371,6 +371,117 @@ h3 {
 .promotion-history {
   display: grid;
   gap: 10px;
+}
+
+.promotion-intro,
+.price-note,
+.placement-copy > span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.promotion-intro {
+  margin-top: 6px;
+}
+
+.placement-picker,
+.promotion-extras,
+.promotion-checkout {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.placement-picker {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.placement-picker legend {
+  padding: 0;
+  font-weight: 700;
+}
+
+.promotion-form .placement-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.promotion-form .placement-option:has(input:checked) {
+  border-color: var(--brand-green);
+  background: var(--brand-green-soft);
+}
+
+.promotion-form .placement-option:has(input:focus-visible) {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.placement-option input[type='radio'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--brand-green);
+}
+
+.placement-copy,
+.promotion-checkout {
+  display: grid;
+  gap: 4px;
+}
+
+.placement-copy strong {
+  font-size: 15px;
+}
+
+.placement-price {
+  color: var(--text);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.promotion-extras summary {
+  width: fit-content;
+  padding: 10px 0;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.promotion-extras label {
+  margin-top: 12px;
+}
+
+.promotion-checkout {
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.fee-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.promotion-checkout button {
+  margin-top: 4px;
+  min-height: 44px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 650;
 }
 
 .promotion-history article {

@@ -89,8 +89,8 @@
   >
     <header class="edit-header">
       <div>
-        <p class="eyebrow">Public visibility</p>
-        <h2>Profile promotion</h2>
+        <h2>Paid profile promotions</h2>
+        <p class="promotion-intro">Choose a placement and the dates you want to promote your profile.</p>
       </div>
       <span class="status-pill"
         >{{ profile.publicProfileEnabled ? 'Public profile enabled' : 'Public
@@ -110,27 +110,25 @@
 
     <div class="promotion-layout">
       <div class="form-grid promotion-form">
+        <fieldset class="placement-picker">
+          <legend>Placement</legend>
+          <p class="price-note">Example prices per campaign</p>
+          @for (placement of placementChoices; track placement) {
+            @let plan = promotionPlans[placement];
+            <label class="placement-option">
+              <input type="radio" name="promotion-placement" [value]="placement"
+                [checked]="promotionForm().placement === placement"
+                (change)="updatePromotionForm('placement', placement)" />
+              <span class="placement-copy">
+                <strong>{{ plan.label }}</strong>
+                <span>{{ plan.description }}</span>
+              </span>
+              <strong class="placement-price">{{ plan.price }}</strong>
+            </label>
+          }
+        </fieldset>
         <label>
-          <span>Placement</span>
-          <select
-            [value]="promotionForm().placement"
-            (change)="updatePromotionForm('placement', promotionPlacementValue($event))"
-          >
-            <option value="marketplace_featured">Marketplace featured</option>
-            <option value="search_boost">Search boost</option>
-            <option value="profile_badge">Profile badge</option>
-          </select>
-        </label>
-        <label>
-          <span>Payment reference</span>
-          <input
-            [value]="promotionForm().paymentReference"
-            (input)="updatePromotionForm('paymentReference', inputValue($event))"
-            placeholder="Optional invoice or manual ref"
-          />
-        </label>
-        <label>
-          <span>Start</span>
+          <span>Start date and time</span>
           <input
             type="datetime-local"
             [value]="promotionForm().startsAt"
@@ -138,30 +136,41 @@
           />
         </label>
         <label>
-          <span>End</span>
+          <span>End date and time</span>
           <input
             type="datetime-local"
             [value]="promotionForm().endsAt"
             (input)="updatePromotionForm('endsAt', inputValue($event))"
           />
         </label>
-        <label class="wide">
-          <span>Request note</span>
-          <textarea
-            rows="3"
-            [value]="promotionForm().reason"
-            (input)="updatePromotionForm('reason', inputValue($event))"
-            placeholder="Campaign goal or admin context"
-          ></textarea>
-        </label>
-        <footer class="editor-actions wide">
+        <details class="promotion-extras">
+          <summary>Add a note or payment reference</summary>
+          <label>
+            <span>Request note (optional)</span>
+            <textarea rows="2" [value]="promotionForm().reason"
+              (input)="updatePromotionForm('reason', inputValue($event))"
+              placeholder="What would you like to promote?"></textarea>
+          </label>
+          <label>
+            <span>Payment reference (optional)</span>
+            <input [value]="promotionForm().paymentReference"
+              (input)="updatePromotionForm('paymentReference', inputValue($event))"
+              placeholder="Existing invoice or payment reference" />
+          </label>
+        </details>
+        <footer class="promotion-checkout">
+          <div class="fee-line" aria-live="polite" aria-atomic="true">
+            <strong>Estimated campaign fee</strong>
+            <strong class="placement-price">{{ promotionPlans[promotionForm().placement].price }}</strong>
+          </div>
+          <p class="price-note">An admin reviews your request and handles payment separately.</p>
           <button
             class="primary-link button-link"
             type="button"
             [disabled]="requestingPromotion() || !canRequestPromotion(profile)"
             (click)="requestPromotion()"
           >
-            {{ requestingPromotion() ? 'Requesting...' : 'Request promotion' }}
+            {{ requestingPromotion() ? 'Submitting…' : 'Request paid promotion' }}
           </button>
         </footer>
       </div>
@@ -174,7 +183,7 @@
         track promotion.promotionId) {
         <article>
           <div>
-            <strong>{{ promotionPlacementLabel(promotion.placement) }}</strong>
+            <strong>{{ promotionPlans[promotion.placement].label }}</strong>
             <span class="status-pill"
               >{{ promotionStatusLabel(promotion) }}</span
             >

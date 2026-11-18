@@ -341,6 +341,24 @@ const EMPTY_PUBLIC_CONTENT_FORM: PublicContentForm = {
   sortOrder: 0,
 };
 
+const PROMOTION_PLANS = {
+  marketplace_featured: {
+    label: 'Marketplace featured',
+    description: 'Feature your teaching profile in the marketplace.',
+    price: '€29',
+  },
+  search_boost: {
+    label: 'Search boost',
+    description: 'Give your profile more visibility in teacher searches.',
+    price: '€15',
+  },
+  profile_badge: {
+    label: 'Profile badge',
+    description: 'Show a promoted badge alongside your name.',
+    price: '€5',
+  },
+} satisfies Record<TeacherPromotionPlacement, { label: string; description: string; price: string }>;
+
 const EMPTY_PROMOTION_FORM: PromotionForm = {
   placement: 'marketplace_featured',
   startsAt: dateTimeInputValue(new Date()),
@@ -737,6 +755,8 @@ export class TeacherProfile implements OnInit {
   });
   protected readonly editingPublicContentId = signal<string | null>(null);
   protected readonly promotions = signal<TeacherPromotion[]>([]);
+  protected readonly promotionPlans = PROMOTION_PLANS;
+  protected readonly placementChoices = Object.keys(PROMOTION_PLANS) as TeacherPromotionPlacement[];
   protected readonly promotionForm = signal<PromotionForm>({
     ...EMPTY_PROMOTION_FORM,
   });
@@ -1201,14 +1221,6 @@ export class TeacherProfile implements OnInit {
       : 'image';
   }
 
-  protected promotionPlacementValue(event: Event): TeacherPromotionPlacement {
-    const value = this.selectValue(event);
-    if (value === 'search_boost' || value === 'profile_badge') {
-      return value;
-    }
-    return 'marketplace_featured';
-  }
-
   protected profileImage(): string {
     const profile = this.profile();
     if (profile?.avatarUrl) {
@@ -1265,19 +1277,6 @@ export class TeacherProfile implements OnInit {
       return 'Published';
     }
     return item.publishStatus === 'unpublished' ? 'Unpublished' : 'Draft';
-  }
-
-  protected promotionPlacementLabel(
-    placement: TeacherPromotionPlacement,
-  ): string {
-    switch (placement) {
-      case 'marketplace_featured':
-        return 'Marketplace featured';
-      case 'profile_badge':
-        return 'Profile badge';
-      default:
-        return 'Search boost';
-    }
   }
 
   protected promotionStatusLabel(promotion: TeacherPromotion): string {
