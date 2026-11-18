@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { chromium, expect, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, expect, type BrowserContext, type BrowserContextOptions, type Page } from '@playwright/test';
 import mongoose from 'mongoose';
 import { startLocalUiStack, runtimeUrl, type LocalUiStack } from './local-ui-stack';
 
@@ -87,7 +87,7 @@ export async function startAcceptanceStack(
   };
 }
 
-export async function createClassroomHarness(options: { stack?: LocalUiStack; frontendPort?: number; backendPort?: number; enrollStudent?: boolean } = {}) {
+export async function createClassroomHarness(options: { stack?: LocalUiStack; frontendPort?: number; backendPort?: number; enrollStudent?: boolean; teacherDevice?: Pick<BrowserContextOptions, 'viewport' | 'hasTouch' | 'deviceScaleFactor' | 'isMobile'> } = {}) {
   const stack = options.stack ?? await startAcceptanceStack(options);
   const browser = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] }).catch(async (error) => { if (!options.stack) await stack.stop(); throw error; });
   const contexts: BrowserContext[] = [];
@@ -100,15 +100,15 @@ export async function createClassroomHarness(options: { stack?: LocalUiStack; fr
     const fixture = await seedClassroom({enrollStudent:options.enrollStudent ?? true});
     const teacherTokens = await login(stack.nodeAUrl, teacherEmail, password);
     const studentTokens = await login(stack.nodeAUrl, studentEmail, password);
-    const teacherContext = await authenticatedContext(teacherTokens.accessToken);
+    const teacherContext = await authenticatedContext(teacherTokens.accessToken, options.teacherDevice);
     const studentContext = await authenticatedContext(studentTokens.accessToken);
     const teacher = await teacherContext.newPage();
     const student = await studentContext.newPage();
     const urlFor = (role: string) => `${runtimeUrl(stack.frontendBaseUrl, stack.nodeAUrl, `/class-session/${role}`)}&sessionId=${fixture.sessionId}&batchId=${fixture.batchId}`;
     return { stack, browser, fixture, teacherTokens, studentTokens, teacherContext, studentContext, teacher, student, urlFor, close };
   } catch (error) { await close(); throw error; }
-  async function authenticatedContext(token: string) {
-    const context = await browser.newContext({ viewport: { width: 1680, height: 1100 }, permissions: ['camera', 'microphone'] });
+  async function authenticatedContext(token: string, device?: BrowserContextOptions) {
+    const context = await browser.newContext({ viewport: { width: 1680, height: 1100 }, permissions: ['camera', 'microphone'], ...device });
     context.setDefaultTimeout(20_000);
     context.setDefaultNavigationTimeout(30_000);
     contexts.push(context);

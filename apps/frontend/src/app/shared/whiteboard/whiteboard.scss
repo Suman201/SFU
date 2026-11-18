@@ -33,9 +33,11 @@
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
+  height: 100%;
   min-height: 100%;
   overflow: hidden;
   display: flex;
+  flex-direction: column;
   border: 1px solid var(--line-soft);
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--panel-elevated) 92%, var(--wb-base) 8%), var(--panel-elevated) 44%, color-mix(in srgb, var(--panel) 92%, var(--wb-primary) 8%)),
@@ -46,28 +48,112 @@
 }
 
 .whiteboard-toolbar {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  width: 52px;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  background:
-    linear-gradient(180deg, var(--wb-rail-bg), color-mix(in srgb, var(--panel) 88%, var(--wb-base) 12%));
-  border-right: 1px solid var(--wb-control-border);
-  padding: 8px 7px;
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.18);
+  flex: none;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--wb-control-border);
+  background: var(--wb-menu-bg);
 }
 
-.whiteboard-toolbar::before {
-  width: 26px;
-  height: 3px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--wb-primary), var(--wb-live), var(--wb-attention), var(--wb-base));
-  content: '';
+.tool-ribbon, .ribbon-row, .tool-cluster, .tool-tray {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tool-ribbon, .ribbon-row {
+  gap: 3px 6px;
+}
+
+.tool-cluster {
+  gap: 2px;
+}
+
+.tool-cluster + .tool-cluster {
+  padding-inline-start: 5px;
+  border-inline-start: 1px solid var(--wb-control-border);
+}
+
+.tool-tray {
+  gap: 5px;
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--wb-control-border);
+}
+
+.tool-tray[hidden] { display: none; }
+
+.whiteboard-toolbar :is(.tool-cluster, .tool-tray) :is(.tool-button, .history-button):has(.tool-caption),
+.whiteboard-toolbar .tray-toggle {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 3px;
+  min-width: 40px;
+  width: auto;
+  min-height: 44px;
+  padding: 3px 5px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.tool-caption {
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.whiteboard-toolbar .tray-toggle {
+  padding-inline: 7px;
+  border-color: var(--wb-control-border);
+  background: var(--panel);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.1;
+  font-weight: 650;
+}
+
+.tray-toggle svg { width: 18px; height: 18px; }
+
+.whiteboard-toolbar :is(.tool-cluster, .tool-tray) button:has(.tool-caption):is([aria-pressed='true'], [aria-expanded='true']),
+.whiteboard-toolbar .tray-toggle[aria-expanded='true'] {
+  color: var(--text);
+  border-color: var(--wb-base);
+  background: var(--wb-base-soft);
+}
+
+.whiteboard-toolbar .tool-cluster button:has(.tool-caption):disabled,
+.whiteboard-toolbar .tool-tray button:has(.tool-caption):disabled {
+  opacity: .44;
+  cursor: not-allowed;
+}
+
+.whiteboard-toolbar .tool-cluster .history-button { min-height: 44px; }
+.whiteboard-toolbar .ink-sample { width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--line-strong); }
+.whiteboard-toolbar .main-brush-btn .brush-preview { max-width: 18px; max-height: 18px; }
+.whiteboard-toolbar .main-brush-btn > .chevron-icon { display: none; }
+.whiteboard-toolbar .color-dropdown { flex-wrap: wrap; gap: 6px; }
+
+.canvas-hud .touch-navigation-hint { display: none; }
+@media (pointer: coarse) {
+  .canvas-hud .touch-navigation-hint { display: inline-flex; }
+}
+
+@media (pointer: coarse) {
+  .whiteboard-toolbar :is(.tool-cluster, .tool-tray) .tool-button:has(.tool-caption),
+  .whiteboard-toolbar .tool-cluster .history-button { min-width: 44px; min-height: 44px; }
+}
+
+@media (max-width: 480px) {
+  .tool-ribbon, .ribbon-row { gap: 3px; }
+  .tool-cluster { gap: 0; }
+  .tool-cluster + .tool-cluster { padding-inline-start: 2px; }
+  .whiteboard-toolbar .tray-toggle { padding-inline: 6px; }
 }
 
 .eyebrow,
@@ -80,32 +166,6 @@ h1 {
   font-size: 28px;
   line-height: 1.15;
   letter-spacing: 0;
-}
-
-.board-actions {
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  min-height: 0;
-  background: transparent;
-  padding: 0;
-}
-
-.tool-divider {
-  width: 24px;
-  height: 1px;
-  margin: 1px 0;
-  border-radius: 999px;
-  background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
-  opacity: 0.7;
-}
-
-.tool-divider.short {
-  width: 18px;
-  opacity: 0.48;
 }
 
 .shape-group-container,
@@ -975,8 +1035,8 @@ h1 {
   text-align: center;
 
   .tool-icon {
-    width: 22px;
-    height: 22px;
+    min-width: 30px;
+    min-height: 30px;
     color: var(--wb-base);
   }
 
@@ -2065,7 +2125,8 @@ h1 {
 
 .whiteboard-surface {
   position: relative;
-  height: calc(100% - 46px);
+  flex: 1 0 auto;
+  min-height: min(520px, 55dvh);
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: none;
@@ -2103,7 +2164,7 @@ h1 {
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 520px;
+  min-height: 0;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
@@ -3246,69 +3307,6 @@ h1 {
     overscroll-behavior: contain;
   }
 
-  .whiteboard-toolbar {
-    width: 100%;
-    height: auto;
-    flex-direction: column;
-    align-items: stretch;
-    padding: 8px;
-    border-right: none;
-    border-bottom: 1px solid var(--wb-control-border);
-    overflow: visible;
-  }
-
-  .whiteboard-toolbar::before {
-    display: none;
-  }
-
-  .board-actions {
-    flex-direction: row;
-    min-width: 0;
-  }
-
-  .primary-tools {
-    flex-wrap: wrap;
-    gap: 3px;
-  }
-
-  .primary-tools .tool-divider {
-    display: none;
-  }
-
-  .additional-tools {
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-    padding-bottom: 2px;
-    scrollbar-width: thin;
-    touch-action: pan-x;
-  }
-
-  .additional-tools > * {
-    flex-shrink: 0;
-  }
-
-  .tool-divider {
-    width: 1px;
-    height: 24px;
-    background: linear-gradient(180deg, transparent, var(--line-strong), transparent);
-  }
-
-  .shape-dropdown,
-  .color-dropdown,
-  .brush-dropdown,
-  .pen-dropdown,
-  .menu-dropdown {
-    position: fixed;
-    top: max(64px, calc(env(safe-area-inset-top, 0px) + 64px));
-    right: 12px;
-    left: 12px;
-    margin-left: 0;
-    width: auto;
-    max-width: none;
-    max-height: min(320px, calc(100dvh - 96px - env(safe-area-inset-bottom, 0px)));
-    z-index: 80;
-  }
-
   .math-tools-popover {
     top: auto;
     right: 10px;
@@ -3463,7 +3461,10 @@ h1 {
 }
 
 .pan {
-  width: calc(100% - 52px);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
   min-width: 0;
 }
 
@@ -3532,8 +3533,25 @@ h1 {
   }
 }
 
+// Anchor each palette beside the control that opened it. Leave room to scroll
+// on small screens and when the classroom itself is partway down the page.
+.whiteboard-toolbar :is(.menu-dropdown, .shape-dropdown, .color-dropdown, .brush-dropdown, .pen-dropdown) {
+  --menu-width: min(304px, calc(100vw - 16px));
+  --menu-top: clamp(8px, var(--menu-y, 62px), max(8px, calc(100dvh - 180px)));
+  top: var(--menu-top);
+  left: clamp(8px, var(--menu-x, 8px), calc(100vw - var(--menu-width) - 8px));
+  right: auto;
+  width: var(--menu-width);
+  max-width: var(--menu-width);
+  max-height: calc(100dvh - var(--menu-top) - 8px);
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.whiteboard-toolbar .shape-dropdown { flex-wrap: wrap; }
+
 // Keep the open menu's own toggle reachable above its dismiss backdrop.
-.whiteboard-toolbar button[aria-expanded='true'] {
+.whiteboard-toolbar button[aria-expanded='true']:not(.tray-toggle) {
   position: relative;
   z-index: 81;
 }
@@ -3647,17 +3665,11 @@ h1 {
 // 1-Click Teaching Color Strip (Pen Rail)
 .teaching-color-strip {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 0;
+  flex-direction: row;
+  gap: 6px;
   width: 100%;
-
-  @media (max-width: 900px) {
-    flex-direction: row;
-    width: auto;
-    padding: 0 3px;
-  }
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--wb-control-border);
 
   .teaching-color-dot {
     position: relative;

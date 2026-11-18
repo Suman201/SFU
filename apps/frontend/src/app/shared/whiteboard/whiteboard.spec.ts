@@ -241,6 +241,8 @@ describe('Whiteboard collaboration and classroom controls', () => {
   });
   it('exposes keyboard-focusable shape and diagram option menus', () => {
     const fixture = createBoard();
+    fixture.nativeElement.querySelector('button[aria-label="Insert"]').click();
+    fixture.detectChanges();
     for (const label of ['Shape options', 'Diagram options']) {
       const button = fixture.nativeElement.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement;
       expect(button).toBeTruthy();
@@ -299,6 +301,57 @@ describe('Whiteboard collaboration and classroom controls', () => {
     harness(teacher).undo();
     expect(teacher.componentInstance.exportBoardState().pages[0]!.elements[0]!['from']).toEqual({ x: 140, y: 130 });
     expect(teacher.componentInstance.exportBoardState().pages[0]!.elements[1]!['from']).toEqual({ x: 280, y: 130 });
+  });
+
+  it('keeps the pen in control when a palm lands before or during a stroke', () => {
+    const fixture = createBoard();
+    const canvas = fixture.nativeElement.querySelector('canvas') as HTMLCanvasElement;
+    const bounds = canvas.getBoundingClientRect();
+    spyOn(canvas, 'setPointerCapture');
+    const send = (type: string, pointerType: string, pointerId: number, x: number) => {
+      canvas.dispatchEvent(new PointerEvent(type, { pointerType, pointerId, button: 0,
+        clientX: bounds.left + x, clientY: bounds.top + 40, buttons: type === 'pointerup' ? 0 : 1 }));
+    };
+    harness(fixture).selectTool('pen');
+    send('pointerdown', 'touch', 1, 200);
+    send('pointerdown', 'pen', 2, 20);
+    send('pointermove', 'pen', 2, 30);
+    send('pointerdown', 'touch', 3, 220);
+    send('pointermove', 'touch', 3, 240);
+    send('pointerup', 'touch', 3, 240);
+    send('pointermove', 'pen', 2, 60);
+    send('pointerup', 'pen', 2, 60);
+    send('pointerup', 'touch', 1, 200);
+    const elements = fixture.componentInstance.exportBoardState().pages[0]!.elements;
+    expect(elements.length).toBe(1);
+    const points = elements[0]!['points'] as Array<{ x: number }>;
+    expect(points.length).toBe(3);
+    expect(points[0]!.x).toBeCloseTo(20);
+    expect(points[2]!.x).toBeGreaterThan(points[1]!.x);
+    expect(Math.max(...points.map(p => p.x))).toBeLessThanOrEqual(60);
+  });
+
+  it('retains intermediate stylus samples and discards cancelled ink', () => {
+    const fixture = createBoard();
+    const canvas = fixture.nativeElement.querySelector('canvas') as HTMLCanvasElement;
+    const bounds = canvas.getBoundingClientRect();
+    spyOn(canvas, 'setPointerCapture');
+    harness(fixture).selectTool('pen');
+    const pen = (type: string, offset: number) => new PointerEvent(type, {
+      pointerId: 4, pointerType: 'pen', button: 0, buttons: type === 'pointerup' ? 0 : 1,
+      clientX: bounds.left + offset, clientY: bounds.top + 55
+    });
+    canvas.dispatchEvent(pen('pointerdown', 20));
+    canvas.dispatchEvent(pen('pointermove', 30));
+    canvas.dispatchEvent(pen('pointercancel', 30));
+    expect(elementIds(fixture.componentInstance)).toEqual([]);
+    canvas.dispatchEvent(pen('pointerdown', 20));
+    const move = pen('pointermove', 70);
+    Object.defineProperty(move, 'getCoalescedEvents', { value: () => [pen('pointermove', 35), pen('pointermove', 55), pen('pointermove', 70)] });
+    canvas.dispatchEvent(move);
+    canvas.dispatchEvent(pen('pointerup', 70));
+    const stroke = fixture.componentInstance.exportBoardState().pages[0]!.elements[0]!;
+    expect((stroke['points'] as unknown[]).length).toBe(4);
   });
 
   it('paints a burst of pen moves once per frame and commits every point before the next frame', async () => {
@@ -363,6 +416,7 @@ describe('Whiteboard collaboration and classroom controls', () => {
     expect(fixture.nativeElement.querySelector('.shape-dropdown-overlay')).toBeNull();
     expect(trigger.getAttribute('aria-expanded')).toBe('false');
     expect(document.activeElement).toBe(trigger);
+    fixture.nativeElement.querySelector('button[aria-label="Insert"]').click(); fixture.detectChanges();
     const diagram = fixture.nativeElement.querySelector('button[aria-label="Diagram options"]') as HTMLButtonElement;
     diagram.click(); fixture.detectChanges();
     diagram.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); fixture.detectChanges();
@@ -429,6 +483,7 @@ describe('Whiteboard collaboration and classroom controls', () => {
     const fixture = createBoard(); const board = harness(fixture);
     (fixture.componentInstance as unknown as { angleSnapDegrees: { set(value: number): void } }).angleSnapDegrees.set(0);
     const canvas = fixture.nativeElement.querySelector('canvas') as HTMLCanvasElement; spyOn(canvas, 'setPointerCapture').and.stub();
+    fixture.nativeElement.querySelector('button[aria-label="Board tools"]').click(); fixture.detectChanges();
     const bounds = (fixture.nativeElement.querySelector('.whiteboard-surface') as HTMLElement).getBoundingClientRect();
     const drawShape = (from: { x: number; y: number }, to: { x: number; y: number }) => {
       board.startDrawing(new PointerEvent('pointerdown', { pointerId: 1, button: 0, buttons: 1, clientX: bounds.left + from.x, clientY: bounds.top + from.y }));

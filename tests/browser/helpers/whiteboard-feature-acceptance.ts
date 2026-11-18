@@ -41,6 +41,12 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
     expect(width, 'Page controls and status must leave room to navigate pages').toBeGreaterThanOrEqual(100);
   });
   const button = (name: string) => root.getByRole('button', { name, exact: true });
+  const trayTool = async (tray: 'Insert' | 'Board tools', name: string) => {
+    const trigger = button(tray);
+    if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
+    return root.getByRole('group', { name: tray === 'Insert' ? 'Insert objects' : 'Board options', exact: true })
+      .getByRole('button', { name, exact: true });
+  };
   const closeMath = async () => { if (await button('Close math tools').isVisible()) { await button('Close math tools').click(); await expect(button('Close math tools')).toHaveCount(0); } };
   const menu = async (name: string) => {
     // Wait for the preceding click to render without dismissing the current object selection.
@@ -85,7 +91,7 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
       if (await revoke.isVisible()) await revoke.click();
       await expect(student.getByRole('button', { name: 'Writing Pen', exact: true })).toHaveCount(0);
       while ((await board(teacher)).pages.length > 1) { await button('Remove current board page').click(); await sync('remove large-fixture page'); }
-      await button('Clear whiteboard').click(); await sync('clear remaining fixture page');
+      await (await trayTool('Board tools', 'Clear whiteboard')).click(); await sync('clear remaining fixture page');
       await checkTeacherPageTabs('with normal controls');
     });
     await runStep('read-only student can pan, zoom and reset without changing teacher content', async () => {
@@ -159,15 +165,15 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
     await runStep('every shape, diagram and geometry tool emits a matching shared object', async () => {
       await newPage('Acceptance shapes');
       for (const [index, shape] of ['Line', 'Arrow', 'Rectangle', 'Ellipse', 'Star'].entries()) {
-        await button('Shape options').focus(); await teacher.keyboard.press('Enter');
+        await (await trayTool('Insert', 'Shape options')).focus(); await teacher.keyboard.press('Enter');
         await root.locator('.shape-dropdown:not(.diagram-dropdown)').getByRole('button', { name: shape, exact: true }).click();
         const before = (await active()).elements.length;
         await drag(80 + index * 35, 90 + index * 25, 140, 80);
         expect((await active()).elements.length).toBe(before + 1); expect((await active()).elements.at(-1).shape).toBe(shape.toLowerCase()); await sync(`shape: ${shape}`);
       }
-      await button('Fill shape').click(); expect((await active()).elements.at(-1).fillColor).toBeTruthy(); await sync('shape fill');
+      await (await trayTool('Board tools', 'Fill shape')).click(); expect((await active()).elements.at(-1).fillColor).toBeTruthy(); await sync('shape fill');
       for (const diagram of ['Venn', 'Nodes', 'Tree', 'Flow', 'Probability']) {
-        await button('Diagram options').focus(); await teacher.keyboard.press('Enter');
+        await (await trayTool('Insert', 'Diagram options')).focus(); await teacher.keyboard.press('Enter');
         await root.locator('.diagram-dropdown').getByRole('button', { name: diagram, exact: true }).click();
         const before = (await active()).elements.length;
         const start = await point(200, 160); await teacher.mouse.click(start.x, start.y);
@@ -185,18 +191,18 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
       }
       await newPage('Acceptance snapping');
       await button('Menu').click(); await root.getByRole('combobox', { name: 'Angle snap increment', exact: true }).selectOption('0'); await teacher.keyboard.press('Escape'); await expect(root.locator('.menu-dropdown')).toHaveCount(0);
-      await button('Snap to grid').click(); await expect(button('Snap to grid')).toHaveAttribute('aria-pressed', 'true');
-      await button('Shape options').click(); await root.locator('.shape-dropdown:not(.diagram-dropdown)').getByRole('button', { name: 'Rectangle', exact: true }).click();
+      await (await trayTool('Board tools', 'Snap to grid')).click(); await expect(button('Snap to grid')).toHaveAttribute('aria-pressed', 'true');
+      await (await trayTool('Insert', 'Shape options')).click(); await root.locator('.shape-dropdown:not(.diagram-dropdown)').getByRole('button', { name: 'Rectangle', exact: true }).click();
       await drag(341, 311, 89, 65); const snapped = (await active()).elements.at(-1);
       for (const value of [snapped.from.x, snapped.from.y, snapped.to.x, snapped.to.y]) expect(value % 24).toBeCloseTo(0, 5);
-      await sync('grid snap positions'); await button('Snap to grid').click();
-      await button('Snap to points').click(); await expect(button('Snap to points')).toHaveAttribute('aria-pressed', 'true');
-      await button('Shape options').click(); await root.locator('.shape-dropdown:not(.diagram-dropdown)').getByRole('button', { name: 'Line', exact: true }).click();
+      await sync('grid snap positions'); await (await trayTool('Board tools', 'Snap to grid')).click();
+      await (await trayTool('Board tools', 'Snap to points')).click(); await expect(button('Snap to points')).toHaveAttribute('aria-pressed', 'true');
+      await (await trayTool('Insert', 'Shape options')).click(); await root.locator('.shape-dropdown:not(.diagram-dropdown)').getByRole('button', { name: 'Line', exact: true }).click();
       await drag(snapped.from.x + 4, snapped.from.y + 4, 140, 80);
-      expect((await active()).elements.at(-1).from).toEqual(snapped.from); await sync('point snap positions'); await button('Snap to points').click();
+      expect((await active()).elements.at(-1).from).toEqual(snapped.from); await sync('point snap positions'); await (await trayTool('Board tools', 'Snap to points')).click();
       await button('Menu').click(); await root.getByRole('combobox', { name: 'Angle snap increment', exact: true }).selectOption('45'); await teacher.keyboard.press('Escape'); await expect(root.locator('.menu-dropdown')).toHaveCount(0);
-      await button('Snap to grid').click(); await drag(501, 411, 110, 60); const angled = (await active()).elements.at(-1);
-      expect(Math.abs(angled.to.x - angled.from.x)).toBeCloseTo(Math.abs(angled.to.y - angled.from.y), 4); await sync('angle snap'); await button('Snap to grid').click();
+      await (await trayTool('Board tools', 'Snap to grid')).click(); await drag(501, 411, 110, 60); const angled = (await active()).elements.at(-1);
+      expect(Math.abs(angled.to.x - angled.from.x)).toBeCloseTo(Math.abs(angled.to.y - angled.from.y), 4); await sync('angle snap'); await (await trayTool('Board tools', 'Snap to grid')).click();
       await menu('Hide measurements'); await teacher.keyboard.press('Escape'); await expect(root.locator('.menu-dropdown')).toHaveCount(0);
       await math('Geometry'); await root.locator('.math-tool-grid').getByRole('button', { name: 'Ruler', exact: true }).click(); await closeMath();
       await drag(150, 200, 140, 70); expect((await active()).elements.at(-1).showMeasurement).toBe(false); await sync('measurement visibility');
@@ -300,7 +306,7 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
     });
     await runStep('selection context actions, clipboard and pan/zoom work without losing shared objects', async () => {
       await newPage('Acceptance selection');
-      await button('Shape options').click(); await root.locator('.shape-dropdown').getByRole('button', { name: 'Rectangle', exact: true }).click();
+      await (await trayTool('Insert', 'Shape options')).click(); await root.locator('.shape-dropdown').getByRole('button', { name: 'Rectangle', exact: true }).click();
       await drag(140, 130, 100, 70); await sync('selection fixture');
       await context('Duplicate'); expect((await active()).elements.length).toBe(2);
       await button('Select and move').click();
@@ -344,7 +350,7 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
     await runStep('image object, page background, slide images and PDF page imports synchronize and export', async () => {
       await newPage('Acceptance imports');
       const image = { name: 'classroom.png', mimeType: 'image/png', buffer: pngFixture() };
-      await button('Import image or PDF object').click(); await root.locator('input[type=file]').setInputFiles(image);
+      await (await trayTool('Insert', 'Import image or PDF object')).click(); await root.locator('input[type=file]').setInputFiles(image);
       await expect.poll(async () => (await active()).elements.length).toBe(1); await sync('image object import');
       await checkTeacherPageTabs('after import status');
       await runStep('fit selected image', async () => {
@@ -385,7 +391,7 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
       await menu('Reset page background'); await sync('remove background');
       await runStep('import a PDF document object', async () => {
         const beforePdfObject = (await active()).elements.length;
-        await button('Import image or PDF object').click();
+        await (await trayTool('Insert', 'Import image or PDF object')).click();
         await root.locator('input[type=file]').setInputFiles({ name: 'reference.pdf', mimeType: 'application/pdf', buffer: pdfFixture() });
         await expect.poll(async () => (await active()).elements.length).toBe(beforePdfObject + 1); await sync('PDF document object import');
       });
@@ -442,7 +448,7 @@ export async function runWhiteboardFeatureAcceptance(teacher: Page, student: Pag
       await button('Next page').click(); await sync('presentation next page');
       await button('Exit presentation mode').click();
       await teacher.setViewportSize({ width: 1366, height: 768 });
-      await button('Shape options').focus(); await teacher.keyboard.press('Enter');
+      await (await trayTool('Insert', 'Shape options')).focus(); await teacher.keyboard.press('Enter');
       await expect(root.getByRole('button', { name: 'Star', exact: true })).toBeVisible();
       await root.getByRole('button', { name: 'Star', exact: true }).click();
       await math('Matrices'); await root.getByRole('button', { name: 'Insert object', exact: true }).scrollIntoViewIfNeeded();

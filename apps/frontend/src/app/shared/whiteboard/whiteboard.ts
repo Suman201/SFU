@@ -1642,6 +1642,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   protected readonly diagramMenuOpen = signal(false);
   protected readonly colorMenuOpen = signal(false);
   protected readonly fillColorMenuOpen = signal(false);
+  protected readonly toolTray = signal<'insert' | 'board' | null>(null);
   protected readonly penMenuOpen = signal(false);
   protected readonly brushMenuOpen = signal(false);
   protected readonly menuOpen = signal(false);
@@ -1873,6 +1874,10 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
 
   private context: CanvasRenderingContext2D | null = null;
   private previewElement: WhiteboardElement | null = null;
+  private activePointer: { id: number; type: string } | null = null;
+  private readonly touches = new Map<number, WhiteboardPoint>();
+  private pendingTouch: PointerEvent | null = null;
+  private pinch: { distance: number; zoom: number; anchor: WhiteboardPoint } | null = null;
   private drawing = false;
   private erasing = false;
   private eraseHistoryPushed = false;
@@ -2008,7 +2013,14 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (event.key === 'Escape') {
       event.preventDefault();
       const trigger = this.whiteboardCanvas?.nativeElement.closest('.whiteboard-pane')
-        ?.querySelector<HTMLButtonElement>('.whiteboard-toolbar button[aria-expanded="true"], .slide-manager-btn[aria-expanded="true"]');
+        ?.querySelector<HTMLButtonElement>('.whiteboard-toolbar button[aria-expanded="true"]:not(.tray-toggle), .slide-manager-btn[aria-expanded="true"]');
+      if (!trigger && this.toolTray() && !this.mathPopoverOpen()) {
+        const trayButton = this.whiteboardCanvas?.nativeElement.closest('.whiteboard-pane')
+          ?.querySelector<HTMLButtonElement>('.tray-toggle[aria-expanded="true"]');
+        this.toolTray.set(null);
+        trayButton?.focus();
+        return;
+      }
       if (this.mathPopoverOpen()) this.closeMathTools();
       if (this.presentationModeEnabled()) this.exitPresentationMode();
       this.cancelKeyboardState();
@@ -2037,6 +2049,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       if (key === 'h') { this.selectTool('pan'); return; }
     }
 
+    if (event.code === 'Space' && event.target instanceof Element && event.target.closest('button')) return;
     if (event.code === 'Space' && !this.isSpacePressed && !this.textDraft()) {
       event.preventDefault();
       this.isSpacePressed = true;
@@ -2414,7 +2427,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   protected toggleShapeMenu(event: MouseEvent): void {
-    event.stopPropagation();
+    this.anchorToolMenu(event);
     this.penMenuOpen.set(false);
     this.shapeMenuOpen.update((open) => !open);
   }
@@ -2448,7 +2461,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   protected toggleDiagramMenu(event: MouseEvent): void {
-    event.stopPropagation();
+    this.anchorToolMenu(event);
     this.penMenuOpen.set(false);
     this.shapeMenuOpen.set(false);
     this.geometryMenuOpen.set(false);
@@ -2487,7 +2500,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   protected toggleColorMenu(event: MouseEvent): void {
-    event.stopPropagation();
+    this.anchorToolMenu(event);
     this.penMenuOpen.set(false);
     this.fillColorMenuOpen.set(false);
     this.colorMenuOpen.update((open) => !open);
@@ -2497,7 +2510,7 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     if (this.readOnly() || !this.canUseTool('select')) {
       return;
     }
-    event.stopPropagation();
+    this.anchorToolMenu(event);
     this.penMenuOpen.set(false);
     this.colorMenuOpen.set(false);
     this.fillColorMenuOpen.update((open) => !open);
@@ -2521,13 +2534,13 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   protected toggleBrushMenu(event: MouseEvent): void {
-    event.stopPropagation();
+    this.anchorToolMenu(event);
     this.penMenuOpen.set(false);
     this.brushMenuOpen.update((open) => !open);
   }
 
   protected togglePenMenu(event: MouseEvent): void {
-    event.stopPropagation();
+    this.anchorToolMenu(event);
     if (!this.canUseTool('pen')) {
       return;
     }
@@ -2574,8 +2587,21 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.penAutoCloseThreshold.set(value);
   }
 
-  protected toggleMenu(event: MouseEvent): void {
+  private anchorToolMenu(event: MouseEvent): void {
     event.stopPropagation();
+    if (!(event.currentTarget instanceof HTMLElement)) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const toolbar = event.currentTarget.closest<HTMLElement>('.whiteboard-toolbar');
+    toolbar?.style.setProperty('--menu-x', Math.round(bounds.left) + 'px');
+    toolbar?.style.setProperty('--menu-y', Math.round(bounds.bottom + 5) + 'px');
+  }
+
+  protected toggleToolTray(tray: 'insert' | 'board'): void {
+    this.toolTray.update(current => current === tray ? null : tray);
+  }
+
+  protected toggleMenu(event: MouseEvent): void {
+    this.anchorToolMenu(event);
     this.penMenuOpen.set(false);
     this.menuOpen.update((open) => !open);
   }
@@ -4385,8 +4411,51 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
       return;
     }
     event.preventDefault();
+    if (event.pointerType === 'touch') {
+      if ((this.activePointer && this.activePointer.type !== 'touch') || this.touches.size >= 2) return;
+      canvas.setPointerCapture(event.pointerId);
+      this.touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (this.touches.size === 2) {
+        this.interruptTouch();
+        const { center, distance } = this.touchPair();
+        this.pinch = {
+          distance, zoom: this.zoom(),
+          anchor: { x: (center.x - this.panX()) / this.zoom(), y: (center.y - this.panY()) / this.zoom() }
+        };
+        return;
+      }
+      this.pendingTouch = event;
+    } else {
+      if (event.pointerType === 'pen' && this.touches.size) {
+        this.interruptTouch();
+        this.touches.clear();
+        if (this.pinch) this.persistActivePageView();
+        this.pinch = null;
+      }
+      if (this.activePointer) return;
+      canvas.setPointerCapture(event.pointerId);
+    }
+    this.activePointer = { id: event.pointerId, type: event.pointerType };
     this.closeContextMenu();
-    canvas.setPointerCapture(event.pointerId);
+    if (!this.pendingTouch) this.beginBoardAction(event);
+  }
+
+  private touchPair(): { center: WhiteboardPoint; distance: number } {
+    const [a, b] = [...this.touches.values()] as [WhiteboardPoint, WhiteboardPoint];
+    const bounds = this.whiteboardSurface!.nativeElement.getBoundingClientRect();
+    return {
+      center: { x: (a.x + b.x) / 2 - bounds.left, y: (a.y + b.y) / 2 - bounds.top },
+      distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y))
+    };
+  }
+
+  private interruptTouch(): void {
+    if (this.activePointer?.type === 'touch' && !this.pendingTouch) this.finishBoardAction(false);
+    this.pendingTouch = null;
+    this.activePointer = null;
+  }
+
+  private beginBoardAction(event: PointerEvent): void {
 
     if (this.activeTool() === 'pan' || event.button === 1 || this.isSpacePressed) {
       this.panStart = {
@@ -4561,6 +4630,29 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   protected draw(event: PointerEvent): void {
+    if (event.pointerType === 'touch') {
+      if (!this.touches.has(event.pointerId)) return;
+      this.touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (this.pinch) {
+        event.preventDefault();
+        if (this.touches.size === 2) {
+          const { center, distance } = this.touchPair();
+          const zoom = this.clampNumber(this.pinch.zoom * distance / this.pinch.distance, 0.3, 3);
+          this.zoom.set(zoom);
+          this.panX.set(center.x - this.pinch.anchor.x * zoom);
+          this.panY.set(center.y - this.pinch.anchor.y * zoom);
+        }
+        return;
+      }
+      if (this.pendingTouch) {
+        const start = this.pendingTouch;
+        // Wait for a deliberate drag or tap before first-contact tools modify the board.
+        if (Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) < 3) return;
+        this.pendingTouch = null;
+        this.beginBoardAction(start);
+      }
+    }
+    if (this.pinch || (this.activePointer && this.activePointer.id !== event.pointerId)) return;
     if (this.panStart) {
       event.preventDefault();
       this.panX.set(this.panStart.panX + event.clientX - this.panStart.clientX);
@@ -4664,10 +4756,17 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
         this.schedulePointerRender();
         return;
       }
-      const previousStrokePoint = this.previewElement.points[this.previewElement.points.length - 1];
-      const nextStrokePoint = this.getStrokePoint(event, nextPoint, previousStrokePoint);
-      this.previewElement.points.push(nextStrokePoint);
-      this.lastPoint = nextStrokePoint;
+      const samples = event.getCoalescedEvents?.() ?? [];
+      const points = this.previewElement.points;
+      for (const sample of samples) {
+        const position = this.snapPoint(this.getCanvasPoint(sample));
+        points.push(this.getStrokePoint(sample, position, points.at(-1)));
+      }
+      const lastSample = samples.at(-1);
+      if (!lastSample || lastSample.clientX !== event.clientX || lastSample.clientY !== event.clientY || lastSample.pressure !== event.pressure) {
+        points.push(this.getStrokePoint(event, nextPoint, points.at(-1)));
+      }
+      this.lastPoint = points[points.length - 1]!;
       this.schedulePointerRender();
       return;
     }
@@ -4676,19 +4775,39 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
   }
 
   protected stopDrawing(event: PointerEvent): void {
-    if (event.type === 'pointerup' && event.button > 1) {
+    if (event.type === 'pointerup' && event.button > 1) return;
+    if (event.pointerType === 'touch' && this.touches.delete(event.pointerId) && this.pinch) {
+      if (this.touches.size === 0) {
+        this.persistActivePageView();
+        this.pinch = null;
+      }
       return;
     }
-    const canvas = this.whiteboardCanvas?.nativeElement;
-    if (canvas?.hasPointerCapture(event.pointerId)) {
-      canvas.releasePointerCapture(event.pointerId);
+    if (this.activePointer?.id !== event.pointerId) return;
+    this.activePointer = null;
+    const completed = event.type === 'pointerup';
+    if (this.pendingTouch) {
+      const start = this.pendingTouch;
+      this.pendingTouch = null;
+      if (!completed) return;
+      this.beginBoardAction(start);
     }
+    this.finishBoardAction(completed);
+  }
 
+  protected leaveDrawingSurface(): void {
+    if (!this.activePointer && this.eraserCursor()) {
+      this.eraserCursor.set(null);
+      this.schedulePointerRender();
+    }
+  }
+
+  private finishBoardAction(commitPreview: boolean): void {
     if (this.selectionMarquee()) {
       this.selectionMarquee.set(null);
     } else if (this.movingSelection || this.transformStart) {
       this.emitSelectionUpserts();
-    } else if (this.previewElement && !this.isTinyElement(this.previewElement)) {
+    } else if (commitPreview && this.previewElement && !this.isTinyElement(this.previewElement)) {
       this.previewElement = this.finalizePreviewElement(this.previewElement);
       this.pushHistory();
       this.addElement(this.previewElement, this.activePageId(), false);
