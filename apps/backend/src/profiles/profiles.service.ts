@@ -110,6 +110,7 @@ const PUBLIC_CONTENT_MEDIA_TYPES = new Map<string, { extension: string; mediaTyp
 const TEACHER_PUBLIC_CONTENT_ITEM_TYPES = new Set<TeacherPublicContentItemType>(['gallery', 'demo_class']);
 const TEACHER_PUBLIC_CONTENT_MEDIA_TYPES = new Set<TeacherPublicContentMediaType>(['image', 'video', 'pdf', 'document', 'slides', 'link']);
 const TEACHER_PROMOTION_STATUSES = new Set<TeacherPromotionStatus>(['requested', 'scheduled', 'active', 'paused', 'expired', 'cancelled', 'rejected']);
+const TIMED_PROMOTION_STATUSES: TeacherPromotionStatus[] = ['scheduled', 'active'];
 const TEACHER_PROMOTION_PLACEMENTS = new Set<TeacherPromotionPlacement>(['marketplace_featured', 'search_boost', 'profile_badge']);
 const TEACHER_PROMOTION_BILLING_STATUSES = new Set<TeacherPromotionBillingStatus>(['not_required', 'pending', 'paid', 'failed', 'refunded', 'manual']);
 export const SYSTEM_LIVE_CLASS_SETTINGS: LiveClassSettings = {
@@ -647,8 +648,17 @@ export class ProfilesService {
       .find({ teacherId: teacher.id, deletedAt: { $exists: false } })
       .sort({ createdAt: -1 })
       .exec();
+    const now = new Date();
+    let nextChange = Infinity;
+    const history = items.map(item => {
+      const promotion = this.toPromotion(item, now);
+      if (promotion.status === 'scheduled') nextChange = Math.min(nextChange, item.startsAt.getTime());
+      if (promotion.status === 'active') nextChange = Math.min(nextChange, item.endsAt.getTime());
+      return promotion;
+    });
     return {
-      items: items.map((item) => this.toPromotion(item)),
+      items: history,
+      ...this.promotionRefreshDelay(nextChange),
       page: 1,
       limit: items.length,
       total: items.length
@@ -659,10 +669,8 @@ export class ProfilesService {
     this.assertAdmin(actor);
     const page = this.normalizePage(query.page);
     const limit = this.normalizeLimit(query.limit);
+    const now = new Date();
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
-    if (query.status && query.status !== 'all') {
-      filter.status = this.promotionStatus(query.status);
-    }
     if (query.placement && query.placement !== 'all') {
       filter.placement = this.promotionPlacement(query.placement);
     }
@@ -674,16 +682,48 @@ export class ProfilesService {
       const expression = this.searchRegex(search);
       filter.$or = [{ teacherName: expression }, { teacherId: expression }, { promotionId: expression }, { paymentReference: expression }];
     }
-    const [items, total] = await Promise.all([
+    const status = query.status && query.status !== 'all' ? this.promotionStatus(query.status) : undefined;
+    const filtered = status ? { ...filter, $and: [this.promotionStatusFilter(status, now)] } : filter;
+    const [items, total, nextChange] = await Promise.all([
       this.promotions
-        .find(filter)
-        .sort({ createdAt: -1 })
+        .find(filtered)
+        .sort({ createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .exec(),
-      this.promotions.countDocuments(filter).exec()
+      this.promotions.countDocuments(filtered).exec(),
+      this.nextAdminPromotionChange(filter, status, now)
     ]);
-    return { items: items.map((item) => this.toPromotion(item)), page, limit, total };
+    return { items: items.map(item => this.toPromotion(item, now)), page, limit, total, ...this.promotionRefreshDelay(nextChange) };
+  }
+
+  private promotionStatusFilter(status: TeacherPromotionStatus, now: Date): Record<string, unknown> {
+    const timed = { status: { $in: TIMED_PROMOTION_STATUSES } };
+    switch (status) {
+      case 'scheduled': return { ...timed, startsAt: { $gt: now } };
+      case 'active': return { ...timed, startsAt: { $lte: now }, endsAt: { $gt: now } };
+      case 'expired': return { $or: [{ status }, { ...timed, endsAt: { $lte: now } }] };
+      default: return { status };
+    }
+  }
+
+  private async nextAdminPromotionChange(filter: Record<string, unknown>, status: TeacherPromotionStatus | undefined, now: Date): Promise<number> {
+    // A campaign outside this status filter or page can enter the result at its next boundary.
+    const next = async (field: 'startsAt' | 'endsAt') => {
+      const row = await this.promotions.findOne({
+        ...filter, status: { $in: TIMED_PROMOTION_STATUSES }, [field]: { $gt: now }
+      }).sort({ [field]: 1 }).select(field).exec();
+      return row?.[field].getTime() ?? Infinity;
+    };
+    if (status === 'scheduled') return next('startsAt');
+    if (status === 'expired') return next('endsAt');
+    if (status && status !== 'active') return Infinity;
+    const [start, end] = await Promise.all([next('startsAt'), next('endsAt')]);
+    return Math.min(start, end);
+  }
+
+  private promotionRefreshDelay(nextChange: number): Pick<TeacherPromotionListResponse, 'refreshAfterMs'> {
+    return Number.isFinite(nextChange) ? { refreshAfterMs: Math.max(0, nextChange - Date.now()) } : {};
   }
 
   async confirmPromotionPayment(
@@ -737,7 +777,7 @@ export class ProfilesService {
     if (promotion.billingStatus !== 'paid' || !promotion.paymentConfirmedAt) {
       throw new ConflictException('Confirm receipt of the campaign fee before approving the promotion.');
     }
-    if (!['requested', 'paused', 'scheduled', 'active'].includes(promotion.status)) {
+    if (!['requested', 'paused', 'scheduled', 'active'].includes(this.effectivePromotionStatus(promotion))) {
       throw new ConflictException('This campaign can no longer be approved.');
     }
     const teacher = await this.findPromotionTeacher(promotion.teacherId);
@@ -746,7 +786,7 @@ export class ProfilesService {
     await this.assertNoOverlappingPromotion(promotion.teacherId, promotion.placement, range.startsAt, range.endsAt, promotion.promotionId);
     promotion.startsAt = range.startsAt;
     promotion.endsAt = range.endsAt;
-    promotion.status = this.activeOrScheduledStatus(range.startsAt, range.endsAt);
+    promotion.status = this.promotionWindowStatus(range.startsAt, range.endsAt);
     promotion.approvedByUserId = actor.sub;
     if ((request.billingStatus && request.billingStatus !== 'paid') ||
         (request.paymentReference !== undefined && request.paymentReference !== promotion.paymentReference)) {
@@ -1957,7 +1997,7 @@ export class ProfilesService {
     const now = new Date();
     return {
       placement,
-      status: { $in: ['active', 'scheduled'] },
+      status: { $in: TIMED_PROMOTION_STATUSES },
       billingStatus: 'paid',
       paymentConfirmedAt: { $type: 'date' as const },
       approvedByUserId: { $type: 'string' as const },
@@ -2090,7 +2130,8 @@ export class ProfilesService {
   ): Promise<TeacherPromotion> {
     this.assertAdmin(actor);
     const promotion = await this.findPromotion(promotionId);
-    if (['cancelled', 'rejected', 'expired'].includes(promotion.status) && status !== promotion.status) {
+    const currentStatus = this.effectivePromotionStatus(promotion);
+    if (['cancelled', 'rejected', 'expired'].includes(currentStatus) && status !== currentStatus) {
       throw new ConflictException('This campaign is already closed.');
     }
     if (request.billingStatus === 'paid' && (!promotion.paymentConfirmedAt || promotion.billingStatus !== 'paid')) {
@@ -2144,12 +2185,17 @@ export class ProfilesService {
     return date;
   }
 
-  private activeOrScheduledStatus(startsAt: Date, endsAt: Date): TeacherPromotionStatus {
-    const now = Date.now();
-    if (endsAt.getTime() <= now) {
+  private effectivePromotionStatus(promotion: TeacherPromotionMongoDocument, now = new Date()): TeacherPromotionStatus {
+    return TIMED_PROMOTION_STATUSES.includes(promotion.status)
+      ? this.promotionWindowStatus(promotion.startsAt, promotion.endsAt, now)
+      : this.promotionStatus(promotion.status);
+  }
+
+  private promotionWindowStatus(startsAt: Date, endsAt: Date, now = new Date()): TeacherPromotionStatus {
+    if (endsAt <= now) {
       return 'expired';
     }
-    return startsAt.getTime() <= now ? 'active' : 'scheduled';
+    return startsAt <= now ? 'active' : 'scheduled';
   }
 
   private promotionPlacement(value: TeacherPromotionPlacement | undefined): TeacherPromotionPlacement {
@@ -2173,12 +2219,12 @@ export class ProfilesService {
     return value;
   }
 
-  private toPromotion(promotion: TeacherPromotionMongoDocument): TeacherPromotion {
+  private toPromotion(promotion: TeacherPromotionMongoDocument, now = new Date()): TeacherPromotion {
     return {
       promotionId: promotion.promotionId,
       teacherId: promotion.teacherId,
       ...(promotion.teacherName ? { teacherName: promotion.teacherName } : {}),
-      status: this.promotionStatus(promotion.status),
+      status: this.effectivePromotionStatus(promotion, now),
       placement: this.promotionPlacement(promotion.placement),
       startsAt: this.dateIso(promotion.startsAt),
       endsAt: this.dateIso(promotion.endsAt),

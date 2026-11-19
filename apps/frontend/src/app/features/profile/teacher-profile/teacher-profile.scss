@@ -501,6 +501,32 @@ h3 {
   justify-content: space-between;
 }
 
+.campaign-window {
+  display: grid;
+}
+
+.promotion-history .status-pill::first-letter {
+  text-transform: uppercase;
+}
+
+.status-pill[data-status='active'] {
+  color: var(--success-ink);
+  background: var(--success-soft);
+  border-color: var(--success-border);
+}
+
+.status-pill[data-status='scheduled'] {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--brand-amber) 14%, var(--panel));
+  border-color: color-mix(in srgb, var(--warning) 34%, var(--line));
+}
+
+.status-pill[data-status='expired'] {
+  color: var(--muted);
+  background: var(--panel-soft);
+  border-color: var(--line);
+}
+
 .public-content-layout {
   display: grid;
   grid-template-columns: minmax(300px, 0.75fr) minmax(0, 1.25fr);

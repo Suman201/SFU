@@ -46,6 +46,9 @@
   @if (error()) {
     <p class="table-error" role="alert">{{ error() }}</p>
   }
+  @if (historyError()) {
+    <p class="table-error" role="alert">{{ historyError() }}</p>
+  }
   @if (success()) {
     <p class="table-success" role="status">{{ success() }}</p>
   }
@@ -68,7 +71,7 @@
           <tr>
             <td colspan="7" class="empty-state">Loading teacher promotions...</td>
           </tr>
-        } @else if (!rows().length) {
+        } @else if (!rows().length && !historyError()) {
           <tr>
             <td colspan="7" class="empty-state">No teacher promotions match these filters.</td>
           </tr>
@@ -90,8 +93,8 @@
               </td>
               <td><span class="data-pill {{ statusClass(row.status) }}">{{ statusLabel(row) }}</span></td>
               <td>
-                <strong>{{ row.startsAt | date: 'mediumDate' }}</strong>
-                <small>to {{ row.endsAt | date: 'mediumDate' }}</small>
+                <strong>{{ row.startsAt | date: 'medium' }}</strong>
+                <small>to {{ row.endsAt | date: 'medium' }}</small>
               </td>
               <td>
                 <strong>@if (row.feeCents !== undefined) { {{ row.feeCents / 100 | currency:row.currency:'symbol':'1.0-2' }} } @else { Fee not recorded }</strong>

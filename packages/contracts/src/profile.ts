@@ -218,6 +218,8 @@ export interface TeacherPromotionListQuery {
 
 export interface TeacherPromotionListResponse {
   items: TeacherPromotion[];
+  /** Server-relative delay until a campaign can enter, leave or change status in this view. */
+  refreshAfterMs?: number;
   page: number;
   limit: number;
   total: number;

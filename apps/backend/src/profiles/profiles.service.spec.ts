@@ -461,6 +461,46 @@ describe('ProfilesService', () => {
     expect(result.teachers[0]?.promotionLabel).toBe('Featured');
   });
 
+  it('uses the same inclusive start and exclusive end in teacher history, admin history and counts', async () => {
+    const startsAt = new Date('2030-05-01T10:00:00Z');
+    const endsAt = new Date('2030-05-01T11:00:00Z');
+    const teacher = authUser('teacher-1', ['TEACHER']);
+    const admin = authUser('admin', ['ADMIN']);
+    const paid = { startsAt, endsAt, billingStatus: 'paid', paymentConfirmedAt: startsAt };
+    const fixedStatuses = ['requested', 'paused', 'cancelled', 'rejected', 'expired'];
+    const scheduled = promotionDoc({ ...paid, status: 'scheduled', approvedByUserId: admin.sub });
+    const { service } = createHarness({
+      findUser: userDoc({ id: teacher.sub, roles: teacher.roles }),
+      promotions: [scheduled, ...fixedStatuses.map(status => promotionDoc({ ...paid, status, promotionId: status }))]
+    });
+    jest.useFakeTimers();
+    try {
+      for (const [time, expectedStatus, delay] of [
+        [startsAt.getTime() - 1, 'scheduled', 1],
+        [startsAt.getTime(), 'active', 3_600_000],
+        [endsAt.getTime() - 1, 'active', 1],
+        [endsAt.getTime(), 'expired', undefined],
+      ] as const) {
+        jest.setSystemTime(time);
+        const history = await service.listMyPromotions(teacher);
+        expect(history.items.map(item => item.status)).toEqual([expectedStatus, ...fixedStatuses]);
+        expect(history.refreshAfterMs).toBe(delay);
+        for (const status of ['scheduled', 'active', 'expired'] as const) {
+          const filtered = await service.listAdminPromotions({ status, teacherId: teacher.sub, search: 'Ada' }, admin);
+          const expected = history.items.filter(item => item.status === status);
+          expect(filtered.items).toEqual(expected);
+          expect(filtered.total).toBe(expected.length);
+        }
+      }
+      await expect(service.pausePromotion('promotion-1', {}, admin)).rejects.toThrow('closed');
+      await expect(service.cancelPromotion('promotion-1', {}, admin)).rejects.toThrow('closed');
+      await expect(service.approvePromotion('promotion-1', {}, admin)).rejects.toThrow('can no longer be approved');
+      expect(scheduled.save).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('reconciles an older approved campaign only after an admin verifies the received amount', async () => {
     const teacher = userDoc({ id: 'teacher-1', roles: ['TEACHER'], displayName: 'Teacher', publicProfileEnabled: true });
     const legacy = promotionDoc({

@@ -1,7 +1,8 @@
 import { TutorVerification } from '../../../shared/tutor-verification/tutor-verification';
 import { TeachingAreasEditor } from '../../../shared/teaching-areas/teaching-areas-editor';
 import { DestroyRef } from '@angular/core';
-import { CurrencyPipe } from '@angular/common';
+import { CurrencyPipe, DatePipe } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   EUROPEAN_MARKETS,
   PROMOTION_CURRENCY,
@@ -18,7 +19,7 @@ import {
   type TutorApplication,
 } from '@native-sfu/contracts';
 import { FormsModule } from '@angular/forms';
-import { finalize } from 'rxjs';
+import { finalize, Subscription } from 'rxjs';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -374,6 +375,7 @@ const EMPTY_PROMOTION_FORM: PromotionForm = {
   standalone: true,
   imports: [
     CurrencyPipe,
+    DatePipe,
     Footer,
     Header,
     RouterLink,
@@ -390,6 +392,9 @@ export class TeacherProfile implements OnInit {
   private readonly theme = inject(ThemeService);
 
   private readonly destroyRef = inject(DestroyRef);
+  private historyRequest?: Subscription;
+  private historyTimer?: number;
+  protected readonly historyError = signal('');
   protected readonly videoBusy = signal(false);
   protected readonly videoPreview = signal('');
   private clearVideoPreview() {
@@ -794,13 +799,15 @@ export class TeacherProfile implements OnInit {
   });
 
   ngOnInit(): void {
-    this.destroyRef.onDestroy(() => this.clearVideoPreview());
+    this.destroyRef.onDestroy(() => {
+      this.clearVideoPreview();
+      this.stopPromotionHistory();
+    });
     this.loadProfile();
     this.loadCatalogue();
     this.loadApplication();
     this.loadLiveSettings();
     this.loadPublicContent();
-    this.loadPromotions();
   }
 
   protected loadProfile(): void {
@@ -913,16 +920,38 @@ export class TeacherProfile implements OnInit {
     });
   }
 
-  protected loadPromotions(): void {
-    this.loadingPromotions.set(true);
-    this.profiles.listMyPromotions().subscribe({
-      next: (response) => this.promotions.set(response.items),
-      error: (error) => {
-        this.error.set(this.profiles.errorMessage(error));
-        this.loadingPromotions.set(false);
+  protected selectSection(section: string): void {
+    this.section.set(section);
+    if (section === 'promotions') this.loadPromotions();
+    else this.stopPromotionHistory();
+  }
+
+  private stopPromotionHistory(): void {
+    window.clearTimeout(this.historyTimer);
+    this.historyRequest?.unsubscribe();
+  }
+
+  private loadPromotions(background = false): void {
+    this.stopPromotionHistory();
+    this.loadingPromotions.set(!background);
+    this.historyRequest = this.profiles.listMyPromotions().pipe(
+      finalize(() => this.loadingPromotions.set(false)),
+    ).subscribe({
+      next: response => {
+        this.historyError.set('');
+        this.promotions.set(response.items);
+        this.scheduleHistoryRefresh(response.refreshAfterMs);
       },
-      complete: () => this.loadingPromotions.set(false),
+      error: error => {
+        this.historyError.set(this.profiles.errorMessage(error));
+        this.scheduleHistoryRefresh();
+      },
     });
+  }
+
+  private scheduleHistoryRefresh(delay = 60_000): void {
+    // Also pick up approvals made by an admin while the teacher is viewing history.
+    this.historyTimer = window.setTimeout(() => this.loadPromotions(true), Math.min(delay, 60_000));
   }
 
   protected requestPromotion(): void {
@@ -936,7 +965,7 @@ export class TeacherProfile implements OnInit {
     this.requestingPromotion.set(true);
     this.error.set('');
     this.notice.set('');
-    this.profiles.requestMyPromotion(request).subscribe({
+    this.profiles.requestMyPromotion(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (promotion) => {
         this.promotions.update((items) => [
           promotion,
@@ -947,6 +976,7 @@ export class TeacherProfile implements OnInit {
           placement: this.promotionForm().placement,
         });
         this.notice.set('Request submitted. Your fee is saved. Arrange payment with the admin team and quote your campaign ID.');
+        if (this.section() === 'promotions') this.loadPromotions(true);
       },
       error: (error) => {
         this.error.set(this.profiles.errorMessage(error));

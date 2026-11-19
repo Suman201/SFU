@@ -78,7 +78,7 @@
       type="button"
       [class.active]="section()===item.id"
       [attr.aria-current]="section()===item.id?'page':null"
-      (click)="section.set(item.id)"
+      (click)="selectSection(item.id)"
     >
       {{item.label}}</button
     >}
@@ -177,6 +177,7 @@
 
       <div class="promotion-history">
         <h3>Promotion history</h3>
+        @if (historyError()) { <p class="form-alert" role="alert">{{ historyError() }}</p> }
         @if (loadingPromotions()) {
         <p class="muted-line">Loading promotion requests...</p>
         } @else if (promotions().length) { @for (promotion of promotions();
@@ -184,13 +185,12 @@
         <article>
           <div>
             <strong>{{ promotionPlans[promotion.placement].label }}</strong>
-            <span class="status-pill"
-              >{{ promotionStatusLabel(promotion) }}</span
-            >
+            @let statusLabel = promotionStatusLabel(promotion);
+            <span class="status-pill" [attr.data-status]="statusLabel">{{ statusLabel }}</span>
           </div>
-          <p>
-            {{ formatDate(promotion.startsAt) }} to {{
-            formatDate(promotion.endsAt) }}
+          <p class="campaign-window">
+            <time [attr.datetime]="promotion.startsAt">Starts {{ promotion.startsAt | date:'medium' }}</time>
+            <time [attr.datetime]="promotion.endsAt">Ends {{ promotion.endsAt | date:'medium' }}</time>
           </p>
           <p><strong>@if (promotion.feeCents !== undefined) {
             {{ promotion.feeCents / 100 | currency:promotion.currency:'symbol':'1.0-2' }}
@@ -199,7 +199,7 @@
           @if (promotion.paymentReference) { <small>Payment reference {{ promotion.paymentReference }}</small> }
           @if (promotion.adminNote) { <small>{{ promotion.adminNote }}</small> }
         </article>
-        } } @else {
+        } } @else if (!historyError()) {
         <div class="empty-state compact">
           <h3>No promotion requests</h3>
           <p>

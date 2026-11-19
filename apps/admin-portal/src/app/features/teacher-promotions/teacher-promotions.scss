@@ -1,4 +1,14 @@
 @layer admin-pages {
+  .primary-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  td small {
+    display: block;
+  }
+
   .payment-dialog {
     width: min(420px, calc(100% - 32px));
     margin: auto;

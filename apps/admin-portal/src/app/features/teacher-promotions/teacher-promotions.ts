@@ -1,6 +1,7 @@
 import { CurrencyPipe, DatePipe } from '@angular/common';
 import { PROMOTION_CURRENCY, promotionPaymentLabel, promotionStatusLabel } from '@native-sfu/contracts';
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import type {
@@ -9,7 +10,7 @@ import type {
   TeacherPromotionPlacement,
   TeacherPromotionStatus
 } from '@native-sfu/contracts';
-import { finalize } from 'rxjs';
+import { finalize, Subscription } from 'rxjs';
 import { AdminApiService } from '../../core/services/admin-api.service';
 
 type PromotionStatusFilter = TeacherPromotionStatus | 'all';
@@ -27,11 +28,16 @@ type PromotionAction = 'approve' | 'pause' | 'cancel' | 'reject';
 export class TeacherPromotions implements OnInit {
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
+  private readonly destroyRef = inject(DestroyRef);
+  private historyRequest?: Subscription;
+  private historyTimer?: number;
+  private appliedQuery: TeacherPromotionListQuery = {};
 
   protected readonly rows = signal<TeacherPromotion[]>([]);
   protected readonly loading = signal(false);
   protected readonly savingPromotionId = signal<string | null>(null);
   protected readonly error = signal('');
+  protected readonly historyError = signal('');
   protected readonly success = signal('');
   protected readonly page = signal(1);
   protected readonly limit = signal(25);
@@ -81,23 +87,27 @@ export class TeacherPromotions implements OnInit {
     this.error.set('');
     this.success.set('');
     this.api.confirmPromotionPayment(row.promotionId, { feeCents, paymentReference: reference.trim() })
-      .pipe(finalize(() => this.savingPromotionId.set(null)))
+      .pipe(takeUntilDestroyed(this.destroyRef), finalize(() => this.savingPromotionId.set(null)))
       .subscribe({
         next: updated => {
-          this.rows.update(rows => rows.map(item => item.promotionId === updated.promotionId ? updated : item));
           this.success.set(`Payment confirmed for ${updated.teacherName || updated.teacherId}.`);
           dialog.close();
+          this.load(this.appliedQuery, true);
         },
         error: error => this.paymentError.set(this.api.apiErrorMessage(error))
       });
   }
 
   ngOnInit(): void {
-    this.load();
+    this.destroyRef.onDestroy(() => {
+      window.clearTimeout(this.historyTimer);
+      this.historyRequest?.unsubscribe();
+    });
+    this.applyFilters();
   }
 
   protected applyFilters(): void {
-    this.load(1);
+    this.load(this.toQuery(1));
   }
 
   protected resetFilters(): void {
@@ -107,18 +117,18 @@ export class TeacherPromotions implements OnInit {
       search: '',
       teacherId: ''
     });
-    this.load(1);
+    this.applyFilters();
   }
 
   protected nextPage(): void {
     if (this.page() * this.limit() < this.total()) {
-      this.load(this.page() + 1);
+      this.load({ ...this.appliedQuery, page: this.page() + 1 });
     }
   }
 
   protected previousPage(): void {
     if (this.page() > 1) {
-      this.load(this.page() - 1);
+      this.load({ ...this.appliedQuery, page: this.page() - 1 });
     }
   }
 
@@ -139,10 +149,10 @@ export class TeacherPromotions implements OnInit {
             ? this.api.cancelTeacherPromotion(row.promotionId, request)
             : this.api.rejectTeacherPromotion(row.promotionId, request);
 
-    call.pipe(finalize(() => this.savingPromotionId.set(null))).subscribe({
+    call.pipe(takeUntilDestroyed(this.destroyRef), finalize(() => this.savingPromotionId.set(null))).subscribe({
       next: (updated) => {
-        this.rows.update((rows) => rows.map((item) => (item.promotionId === updated.promotionId ? updated : item)));
         this.success.set(`${this.actionLabel(action)} saved for ${updated.teacherName || updated.teacherId}.`);
+        this.load(this.appliedQuery, true);
       },
       error: (error: unknown) => this.error.set(this.api.apiErrorMessage(error))
     });
@@ -199,21 +209,38 @@ export class TeacherPromotions implements OnInit {
     return row.promotionId;
   }
 
-  private load(page = this.page()): void {
-    this.loading.set(true);
-    this.error.set('');
-    this.api
-      .listTeacherPromotions(this.toQuery(page))
+  private load(query: TeacherPromotionListQuery, background = false): void {
+    window.clearTimeout(this.historyTimer);
+    this.historyRequest?.unsubscribe();
+    this.appliedQuery = query;
+    this.loading.set(!background);
+    if (!background) this.error.set('');
+    this.historyRequest = this.api
+      .listTeacherPromotions(query)
       .pipe(finalize(() => this.loading.set(false)))
       .subscribe({
         next: (response) => {
+          this.historyError.set('');
+          const lastPage = Math.max(1, Math.ceil(response.total / response.limit));
+          if (response.page > lastPage) {
+            this.load({ ...query, page: lastPage }, background);
+            return;
+          }
           this.rows.set(response.items);
           this.page.set(response.page);
           this.limit.set(response.limit);
           this.total.set(response.total);
+          this.scheduleRefresh(response.refreshAfterMs);
         },
-        error: (error: unknown) => this.error.set(this.api.apiErrorMessage(error))
+        error: (error: unknown) => {
+          this.historyError.set(this.api.apiErrorMessage(error));
+          this.scheduleRefresh();
+        }
       });
+  }
+
+  private scheduleRefresh(delay = 60_000): void {
+    this.historyTimer = window.setTimeout(() => this.load(this.appliedQuery, true), Math.min(delay, 60_000));
   }
 
   private toQuery(page: number): TeacherPromotionListQuery {
