@@ -2,7 +2,7 @@
   <div>
     <p class="eyebrow">Teacher discovery</p>
     <h1>Profile promotions</h1>
-    <p>Approve, pause, cancel, and inspect paid-visibility placeholders without changing public profile privacy rules.</p>
+    <p>Check the campaign fee against your payment records, confirm receipt, then approve the placement.</p>
   </div>
 </section>
 
@@ -88,14 +88,19 @@
                 <strong>{{ placementLabel(row.placement) }}</strong>
                 <small>{{ row.promotionId }}</small>
               </td>
-              <td><span class="data-pill {{ statusClass(row.status) }}">{{ statusLabel(row.status) }}</span></td>
+              <td><span class="data-pill {{ statusClass(row.status) }}">{{ statusLabel(row) }}</span></td>
               <td>
                 <strong>{{ row.startsAt | date: 'mediumDate' }}</strong>
                 <small>to {{ row.endsAt | date: 'mediumDate' }}</small>
               </td>
               <td>
-                <strong>{{ row.billingStatus }}</strong>
+                <strong>@if (row.feeCents !== undefined) { {{ row.feeCents / 100 | currency:row.currency:'symbol':'1.0-2' }} } @else { Fee not recorded }</strong>
+                <small>{{ paymentLabel(row) }}</small>
                 <small>{{ row.paymentReference || 'No payment reference' }}</small>
+                @if (row.paymentConfirmedAt) { <small>Confirmed {{ row.paymentConfirmedAt | date:'mediumDate' }}</small> }
+                @if (canConfirm(row)) {
+                  <button type="button" class="table-action primary" [disabled]="!!savingPromotionId()" (click)="openPayment(row, paymentDialog)">Confirm payment</button>
+                }
               </td>
               <td>
                 <strong>{{ row.reason || 'No request reason' }}</strong>
@@ -125,3 +130,33 @@
     </div>
   </footer>
 </section>
+
+<dialog #paymentDialog aria-labelledby="payment-title" class="payment-dialog">
+  @if (paymentRow(); as row) {
+    <form [formGroup]="paymentForm" (ngSubmit)="confirmPayment(paymentDialog)">
+      <h2 id="payment-title">Confirm payment received</h2>
+      <p>{{ row.teacherName || row.teacherId }} · {{ placementLabel(row.placement) }}</p>
+      @if (row.feeCents !== undefined) {
+        <p class="payment-total">Campaign fee <strong>{{ row.feeCents / 100 | currency:row.currency }}</strong></p>
+      } @else {
+        <label>Amount received ({{ currency }})
+          <input formControlName="amount" inputmode="decimal" placeholder="0.00" required />
+        </label>
+        <small>This older campaign has no saved fee. Enter the amount on the receipt.</small>
+      }
+      <label>Payment reference
+        <input formControlName="reference" maxlength="160" required placeholder="Bank transfer or receipt number" />
+      </label>
+      <p>@if (row.status === 'active' || row.status === 'scheduled') {
+        This campaign was already approved. Confirming payment enables its placement during the scheduled dates.
+      } @else {
+        Confirm once you have received the full fee. Campaign approval is a separate step.
+      }</p>
+      @if (paymentError()) { <p role="alert" class="table-error">{{ paymentError() }}</p> }
+      <footer>
+        <button class="table-action" type="button" (click)="paymentDialog.close()">Back</button>
+        <button class="table-action primary" type="submit" [disabled]="!!savingPromotionId()">Confirm receipt</button>
+      </footer>
+    </form>
+  }
+</dialog>

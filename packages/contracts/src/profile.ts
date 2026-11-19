@@ -57,6 +57,12 @@ export type TeacherPromotionPlacement =
   | 'marketplace_featured'
   | 'search_boost'
   | 'profile_badge';
+export const PROMOTION_CURRENCY = 'EUR';
+export const PROMOTION_FEES_CENTS: Record<TeacherPromotionPlacement, number> = {
+  marketplace_featured: 2900,
+  search_boost: 1500,
+  profile_badge: 500,
+};
 export type TeacherPromotionBillingStatus =
   | 'not_required'
   | 'pending'
@@ -152,6 +158,10 @@ export interface TeacherPromotion {
   approvedByUserId?: string;
   cancelledByUserId?: string;
   billingStatus: TeacherPromotionBillingStatus;
+  feeCents?: number;
+  currency?: string;
+  paymentConfirmedAt?: string;
+  paymentConfirmedByUserId?: string;
   paymentReference?: string;
   reason?: string;
   adminNote?: string;
@@ -161,6 +171,7 @@ export interface TeacherPromotion {
 
 export interface TeacherPromotionRequest {
   placement: TeacherPromotionPlacement;
+  quotedFeeCents?: number;
   startsAt: string;
   endsAt: string;
   reason?: string;
@@ -174,6 +185,26 @@ export interface AdminTeacherPromotionUpdateRequest {
   paymentReference?: string;
   adminNote?: string;
   reason?: string;
+}
+
+export interface ConfirmPromotionPaymentRequest {
+  feeCents: number;
+  paymentReference: string;
+}
+
+export function promotionPaymentLabel(promotion: TeacherPromotion): string {
+  if (promotion.billingStatus === 'refunded') return 'Refunded';
+  if (promotion.billingStatus === 'failed') return 'Payment failed';
+  if (promotion.billingStatus === 'paid' && promotion.paymentConfirmedAt) return 'Payment confirmed';
+  if (promotion.feeCents === undefined) return 'Payment unverified';
+  return 'Awaiting payment';
+}
+
+export function promotionStatusLabel(promotion: TeacherPromotion): string {
+  const confirmed = !!promotion.paymentConfirmedAt && promotion.billingStatus === 'paid';
+  if (promotion.status === 'requested' && confirmed) return 'Awaiting approval';
+  if (!confirmed && (promotion.status === 'scheduled' || promotion.status === 'active')) return 'Awaiting payment verification';
+  return promotion.status;
 }
 
 export interface TeacherPromotionListQuery {

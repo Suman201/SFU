@@ -1,4 +1,5 @@
-import { DatePipe } from '@angular/common';
+import { CurrencyPipe, DatePipe } from '@angular/common';
+import { PROMOTION_CURRENCY, promotionPaymentLabel, promotionStatusLabel } from '@native-sfu/contracts';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -18,7 +19,7 @@ type PromotionAction = 'approve' | 'pause' | 'cancel' | 'reject';
 @Component({
   selector: 'sfu-admin-teacher-promotions',
   standalone: true,
-  imports: [DatePipe, ReactiveFormsModule, RouterLink],
+  imports: [CurrencyPipe, DatePipe, ReactiveFormsModule, RouterLink],
   templateUrl: './teacher-promotions.html',
   styleUrl: './teacher-promotions.scss',
   changeDetection: ChangeDetectionStrategy.Eager
@@ -46,6 +47,50 @@ export class TeacherPromotions implements OnInit {
   protected readonly noteForm = this.formBuilder.nonNullable.group({
     adminNote: ['']
   });
+
+  protected readonly paymentLabel = promotionPaymentLabel;
+  protected readonly currency = PROMOTION_CURRENCY;
+  protected readonly paymentRow = signal<TeacherPromotion | null>(null);
+  protected readonly paymentError = signal('');
+  protected readonly paymentForm = this.formBuilder.nonNullable.group({ reference: '', amount: '' });
+
+  protected canConfirm(row: TeacherPromotion): boolean {
+    return !row.paymentConfirmedAt && row.billingStatus !== 'refunded' &&
+      ['requested', 'paused', 'scheduled', 'active'].includes(row.status) && Date.parse(row.endsAt) > Date.now();
+  }
+
+  protected openPayment(row: TeacherPromotion, dialog: HTMLDialogElement): void {
+    this.paymentRow.set(row);
+    this.paymentError.set('');
+    this.paymentForm.reset({ reference: row.paymentReference ?? '', amount: '' });
+    dialog.showModal();
+  }
+
+  protected confirmPayment(dialog: HTMLDialogElement): void {
+    const row = this.paymentRow();
+    if (!row || this.savingPromotionId()) return;
+    const { amount, reference } = this.paymentForm.getRawValue();
+    const feeCents = row.feeCents ?? Math.round(Number(amount) * 100);
+    if (!reference.trim() || (row.feeCents === undefined && !/^\d+(\.\d{1,2})?$/.test(amount.trim())) ||
+        !Number.isSafeInteger(feeCents) || feeCents < 1) {
+      this.paymentError.set('Enter the received amount and a payment reference.');
+      return;
+    }
+    this.savingPromotionId.set(row.promotionId);
+    this.paymentError.set('');
+    this.error.set('');
+    this.success.set('');
+    this.api.confirmPromotionPayment(row.promotionId, { feeCents, paymentReference: reference.trim() })
+      .pipe(finalize(() => this.savingPromotionId.set(null)))
+      .subscribe({
+        next: updated => {
+          this.rows.update(rows => rows.map(item => item.promotionId === updated.promotionId ? updated : item));
+          this.success.set(`Payment confirmed for ${updated.teacherName || updated.teacherId}.`);
+          dialog.close();
+        },
+        error: error => this.paymentError.set(this.api.apiErrorMessage(error))
+      });
+  }
 
   ngOnInit(): void {
     this.load();
@@ -87,7 +132,7 @@ export class TeacherPromotions implements OnInit {
     this.success.set('');
     const call =
       action === 'approve'
-        ? this.api.approveTeacherPromotion(row.promotionId, { ...request, billingStatus: row.billingStatus })
+        ? this.api.approveTeacherPromotion(row.promotionId, request)
         : action === 'pause'
           ? this.api.pauseTeacherPromotion(row.promotionId, request)
           : action === 'cancel'
@@ -104,7 +149,8 @@ export class TeacherPromotions implements OnInit {
   }
 
   protected canApprove(row: TeacherPromotion): boolean {
-    return row.status === 'requested' || row.status === 'paused' || row.status === 'scheduled';
+    return !!row.paymentConfirmedAt && row.billingStatus === 'paid' &&
+      (['requested', 'paused', 'scheduled'].includes(row.status) || (row.status === 'active' && !row.approvedByUserId));
   }
 
   protected canPause(row: TeacherPromotion): boolean {
@@ -134,9 +180,7 @@ export class TeacherPromotions implements OnInit {
     }
   }
 
-  protected statusLabel(status: string): string {
-    return status.replace(/_/g, ' ');
-  }
+  protected readonly statusLabel = promotionStatusLabel;
 
   protected statusClass(status: string): string {
     return `status-${status.replace(/_/g, '-')}`;

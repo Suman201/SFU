@@ -17,6 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type {
   AdminTeacherPromotionUpdateRequest,
+  ConfirmPromotionPaymentRequest,
   CreateTeacherPublicContentRequest,
   LiveClassSettingsPatch,
   ProfileMediaUploadResponse,
@@ -273,6 +274,16 @@ export class AdminTeacherPromotionsController {
   @ApiOperation({ summary: 'List teacher profile promotions for administrators' })
   listPromotions(@Query() query: TeacherPromotionListQuery, @CurrentUser() user: AuthenticatedUser): Promise<TeacherPromotionListResponse> {
     return this.profiles.listAdminPromotions(this.toListQuery(query), user);
+  }
+
+  @Post(':promotionId/confirm-payment')
+  @ApiOperation({ summary: 'Confirm receipt of a manual promotion payment' })
+  confirmPayment(
+    @Param('promotionId') promotionId: string,
+    @Body() body: ConfirmPromotionPaymentRequest,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<TeacherPromotion> {
+    return this.profiles.confirmPromotionPayment(promotionId, body, user);
   }
 
   @Post(':promotionId/approve')

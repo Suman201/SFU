@@ -1,4 +1,4 @@
-import { teachingCategoryIds } from '@native-sfu/contracts';
+import { PROMOTION_CURRENCY, PROMOTION_FEES_CENTS, teachingCategoryIds } from '@native-sfu/contracts';
 import { normalizeTeachingAreas } from '../teaching-catalog/teaching-areas';
 import { normalizeIntroVideoUrl } from '../teaching-catalog/intro-video-url';
 import { IntroVideoService } from '../teaching-catalog/intro-video.service';
@@ -6,6 +6,7 @@ import { TeachingCatalogService } from '../teaching-catalog/catalog.service';
 import { invalidateTutorReview, saveTutorProfile } from '../teaching-catalog/tutor-profile-state';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -17,6 +18,7 @@ import type {
   BatchLiveClassSettingsResponse,
   CreateTeacherPublicContentRequest,
   AdminTeacherPromotionUpdateRequest,
+  ConfirmPromotionPaymentRequest,
   LiveClassSettings,
   LiveClassSettingsPatch,
   ProfileBatchAssociation,
@@ -51,7 +53,7 @@ import { createReadStream, type ReadStream } from 'node:fs';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { Model } from 'mongoose';
+import { Error as MongooseError, Model } from 'mongoose';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import {
   BatchDocument,
@@ -606,6 +608,10 @@ export class ProfilesService {
     this.assertPromotionEligibleTeacher(teacher);
     const range = this.promotionDateRange(request.startsAt, request.endsAt);
     const placement = this.promotionPlacement(request.placement);
+    const feeCents = PROMOTION_FEES_CENTS[placement];
+    if (request.quotedFeeCents !== undefined && request.quotedFeeCents !== feeCents) {
+      throw new ConflictException('The promotion fee has changed. Reload the page to review the current fee.');
+    }
     await this.assertNoOverlappingPromotion(teacher.id, placement, range.startsAt, range.endsAt);
     const promotion = await this.promotions.create({
       promotionId: randomUUID(),
@@ -616,7 +622,9 @@ export class ProfilesService {
       startsAt: range.startsAt,
       endsAt: range.endsAt,
       requestedByUserId: user.sub,
-      billingStatus: 'manual',
+      billingStatus: 'pending',
+      feeCents,
+      currency: PROMOTION_CURRENCY,
       ...(request.paymentReference ? { paymentReference: this.shortTrim(request.paymentReference, 160) } : {}),
       ...(request.reason ? { reason: this.shortTrim(request.reason, 500) } : {})
     });
@@ -670,6 +678,47 @@ export class ProfilesService {
     return { items: items.map((item) => this.toPromotion(item)), page, limit, total };
   }
 
+  async confirmPromotionPayment(
+    promotionId: string,
+    request: ConfirmPromotionPaymentRequest,
+    actor: AuthenticatedUser
+  ): Promise<TeacherPromotion> {
+    this.assertAdmin(actor);
+    const reference = typeof request?.paymentReference === 'string' ? request.paymentReference.trim() : '';
+    if (!reference || reference.length > 160 || !Number.isSafeInteger(request?.feeCents) || request.feeCents < 1) {
+      throw new BadRequestException('Enter the amount received and a payment reference of up to 160 characters.');
+    }
+    const promotion = await this.findPromotion(promotionId);
+    const samePayment = (record: TeacherPromotionMongoDocument) =>
+      record.paymentConfirmedAt && record.billingStatus === 'paid' &&
+      record.paymentReference === reference && record.feeCents === request.feeCents;
+    if (samePayment(promotion)) return this.toPromotion(promotion);
+    if (promotion.paymentConfirmedAt || promotion.billingStatus === 'refunded' ||
+        !['requested', 'scheduled', 'active', 'paused'].includes(promotion.status) || promotion.endsAt.getTime() <= Date.now()) {
+      throw new ConflictException('This campaign can no longer accept a payment confirmation.');
+    }
+    if (promotion.feeCents !== undefined && promotion.feeCents !== request.feeCents) {
+      throw new BadRequestException('The amount received must match the saved campaign fee.');
+    }
+    // Only legacy campaigns lack a quote. The admin supplies their actual received amount.
+    promotion.feeCents = request.feeCents;
+    promotion.currency = PROMOTION_CURRENCY;
+    promotion.billingStatus = 'paid';
+    promotion.paymentReference = reference;
+    promotion.paymentConfirmedByUserId = actor.sub;
+    promotion.paymentConfirmedAt = new Date();
+    try {
+      await this.savePromotion(promotion);
+    } catch (error) {
+      if (!(error instanceof ConflictException)) throw error;
+      const current = await this.findPromotion(promotionId);
+      if (samePayment(current)) return this.toPromotion(current);
+      throw error;
+    }
+    await this.recordPromotionAudit('teacher_promotions.payment_confirmed', actor, promotion);
+    return this.toPromotion(promotion);
+  }
+
   async approvePromotion(
     promotionId: string,
     request: AdminTeacherPromotionUpdateRequest,
@@ -677,6 +726,12 @@ export class ProfilesService {
   ): Promise<TeacherPromotion> {
     this.assertAdmin(actor);
     const promotion = await this.findPromotion(promotionId);
+    if (promotion.billingStatus !== 'paid' || !promotion.paymentConfirmedAt) {
+      throw new ConflictException('Confirm receipt of the campaign fee before approving the promotion.');
+    }
+    if (!['requested', 'paused', 'scheduled', 'active'].includes(promotion.status)) {
+      throw new ConflictException('This campaign can no longer be approved.');
+    }
     const teacher = await this.findPromotionTeacher(promotion.teacherId);
     this.assertPromotionEligibleTeacher(teacher);
     const range = this.promotionDateRange(request.startsAt ?? promotion.startsAt.toISOString(), request.endsAt ?? promotion.endsAt.toISOString());
@@ -685,10 +740,12 @@ export class ProfilesService {
     promotion.endsAt = range.endsAt;
     promotion.status = this.activeOrScheduledStatus(range.startsAt, range.endsAt);
     promotion.approvedByUserId = actor.sub;
-    if (request.billingStatus) promotion.billingStatus = this.promotionBillingStatus(request.billingStatus);
-    if (request.paymentReference !== undefined) promotion.paymentReference = this.optionalTrim(request.paymentReference);
+    if ((request.billingStatus && request.billingStatus !== 'paid') ||
+        (request.paymentReference !== undefined && request.paymentReference !== promotion.paymentReference)) {
+      throw new BadRequestException('Approval cannot change the confirmed payment.');
+    }
     if (request.adminNote !== undefined) promotion.adminNote = this.optionalTrim(request.adminNote);
-    await promotion.save();
+    await this.savePromotion(promotion);
     await this.recordPromotionAudit('teacher_promotions.approved', actor, promotion);
     return this.toPromotion(promotion);
   }
@@ -1893,6 +1950,9 @@ export class ProfilesService {
     const promotions = await this.promotions
       .find({
         status: { $in: ['active', 'scheduled'] },
+        billingStatus: 'paid',
+        paymentConfirmedAt: { $type: 'date' },
+        approvedByUserId: { $type: 'string' },
         startsAt: { $lte: now },
         endsAt: { $gt: now },
         deletedAt: { $exists: false }
@@ -2032,6 +2092,19 @@ export class ProfilesService {
   ): Promise<TeacherPromotion> {
     this.assertAdmin(actor);
     const promotion = await this.findPromotion(promotionId);
+    if (['cancelled', 'rejected', 'expired'].includes(promotion.status) && status !== promotion.status) {
+      throw new ConflictException('This campaign is already closed.');
+    }
+    if (request.billingStatus === 'paid' && (!promotion.paymentConfirmedAt || promotion.billingStatus !== 'paid')) {
+      throw new BadRequestException('Use payment confirmation to record a received payment.');
+    }
+    if (promotion.paymentConfirmedAt && request.billingStatus &&
+        request.billingStatus !== promotion.billingStatus && request.billingStatus !== 'refunded') {
+      throw new BadRequestException('A confirmed receipt can only be updated to record a refund.');
+    }
+    if (promotion.paymentConfirmedAt && request.paymentReference !== undefined && request.paymentReference !== promotion.paymentReference) {
+      throw new BadRequestException('The confirmed payment reference cannot be changed.');
+    }
     promotion.status = status;
     if (status === 'cancelled') {
       promotion.cancelledByUserId = actor.sub;
@@ -2040,9 +2113,20 @@ export class ProfilesService {
     if (request.reason !== undefined) promotion.reason = this.optionalTrim(request.reason);
     if (request.billingStatus) promotion.billingStatus = this.promotionBillingStatus(request.billingStatus);
     if (request.paymentReference !== undefined) promotion.paymentReference = this.optionalTrim(request.paymentReference);
-    await promotion.save();
+    await this.savePromotion(promotion);
     await this.recordPromotionAudit(action, actor, promotion);
     return this.toPromotion(promotion);
+  }
+
+  private async savePromotion(promotion: TeacherPromotionMongoDocument): Promise<void> {
+    try {
+      await promotion.save();
+    } catch (error) {
+      if (error instanceof MongooseError.VersionError) {
+        throw new ConflictException('The promotion changed. Refresh the queue and try again.');
+      }
+      throw error;
+    }
   }
 
   private promotionDateRange(startsAtValue: string, endsAtValue: string): { startsAt: Date; endsAt: Date } {
@@ -2115,6 +2199,9 @@ export class ProfilesService {
       ...(promotion.approvedByUserId ? { approvedByUserId: promotion.approvedByUserId } : {}),
       ...(promotion.cancelledByUserId ? { cancelledByUserId: promotion.cancelledByUserId } : {}),
       billingStatus: this.promotionBillingStatus(promotion.billingStatus),
+      ...(promotion.feeCents !== undefined ? { feeCents: promotion.feeCents, currency: promotion.currency } : {}),
+      ...(promotion.paymentConfirmedAt ? { paymentConfirmedAt: this.dateIso(promotion.paymentConfirmedAt) } : {}),
+      ...(promotion.paymentConfirmedByUserId ? { paymentConfirmedByUserId: promotion.paymentConfirmedByUserId } : {}),
       ...(promotion.paymentReference ? { paymentReference: promotion.paymentReference } : {}),
       ...(promotion.reason ? { reason: promotion.reason } : {}),
       ...(promotion.adminNote ? { adminNote: promotion.adminNote } : {}),
@@ -2136,7 +2223,9 @@ export class ProfilesService {
         status: promotion.status,
         startsAt: this.dateIso(promotion.startsAt),
         endsAt: this.dateIso(promotion.endsAt),
-        billingStatus: promotion.billingStatus
+        billingStatus: promotion.billingStatus,
+        feeCents: promotion.feeCents,
+        currency: promotion.currency
       }
     });
   }

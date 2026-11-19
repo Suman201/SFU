@@ -342,7 +342,7 @@ export const TeacherPublicContentSchema = SchemaFactory.createForClass(TeacherPu
 TeacherPublicContentSchema.index({ teacherId: 1, itemType: 1, publishStatus: 1, deletedAt: 1, sortOrder: 1 });
 TeacherPublicContentSchema.index({ teacherId: 1, contentId: 1, deletedAt: 1 }, { unique: true });
 
-@Schema({ collection: 'teacher_promotions', timestamps: true })
+@Schema({ collection: 'teacher_promotions', timestamps: true, optimisticConcurrency: true })
 export class TeacherPromotionDocument {
   @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
   promotionId!: string;
@@ -374,8 +374,20 @@ export class TeacherPromotionDocument {
   @Prop({ index: true })
   cancelledByUserId?: string;
 
-  @Prop({ required: true, enum: TEACHER_PROMOTION_BILLING_STATUSES, default: 'manual', index: true })
+  @Prop({ required: true, enum: TEACHER_PROMOTION_BILLING_STATUSES, default: 'pending', index: true })
   billingStatus!: TeacherPromotionBillingStatus;
+
+  @Prop({ type: Number, min: 1 })
+  feeCents?: number;
+
+  @Prop({ type: String })
+  currency?: string;
+
+  @Prop({ type: Date })
+  paymentConfirmedAt?: Date;
+
+  @Prop({ type: String })
+  paymentConfirmedByUserId?: string;
 
   @Prop({ trim: true, maxlength: 160 })
   paymentReference?: string;

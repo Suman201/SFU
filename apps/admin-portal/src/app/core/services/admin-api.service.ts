@@ -48,6 +48,7 @@ import type {
   AdminRecordingPlaybackResponse,
   AdminRecordingRetentionUpdateRequest,
   AdminTeacherPromotionUpdateRequest,
+  ConfirmPromotionPaymentRequest,
   AdminUpdateEnrollmentRequest,
   AdminUserActionResponse,
   AdminUserDetail,
@@ -371,6 +372,10 @@ export class AdminApiService {
 
   approveTeacherPromotion(promotionId: string, request: AdminTeacherPromotionUpdateRequest = {}): Observable<TeacherPromotion> {
     return this.teacherPromotionAction(promotionId, 'approve', request);
+  }
+
+  confirmPromotionPayment(promotionId: string, request: ConfirmPromotionPaymentRequest): Observable<TeacherPromotion> {
+    return this.teacherPromotionAction(promotionId, 'confirm-payment', request);
   }
 
   pauseTeacherPromotion(promotionId: string, request: AdminTeacherPromotionUpdateRequest = {}): Observable<TeacherPromotion> {
@@ -704,8 +709,8 @@ export class AdminApiService {
 
   private teacherPromotionAction(
     promotionId: string,
-    action: 'approve' | 'pause' | 'cancel' | 'reject',
-    request: AdminTeacherPromotionUpdateRequest
+    action: 'approve' | 'pause' | 'cancel' | 'reject' | 'confirm-payment',
+    request: AdminTeacherPromotionUpdateRequest | ConfirmPromotionPaymentRequest
   ): Observable<TeacherPromotion> {
     return this.http
       .post<TeacherPromotion | ApiEnvelope<TeacherPromotion>>(

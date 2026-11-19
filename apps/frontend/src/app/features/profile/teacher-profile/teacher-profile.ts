@@ -1,8 +1,13 @@
 import { TutorVerification } from '../../../shared/tutor-verification/tutor-verification';
 import { TeachingAreasEditor } from '../../../shared/teaching-areas/teaching-areas-editor';
 import { DestroyRef } from '@angular/core';
+import { CurrencyPipe } from '@angular/common';
 import {
   EUROPEAN_MARKETS,
+  PROMOTION_CURRENCY,
+  PROMOTION_FEES_CENTS,
+  promotionPaymentLabel,
+  promotionStatusLabel,
   TEACHING_LEVELS,
   legacyTeachingAreas,
   type TeacherTeachingArea,
@@ -345,19 +350,16 @@ const PROMOTION_PLANS = {
   marketplace_featured: {
     label: 'Marketplace featured',
     description: 'Feature your teaching profile in the marketplace.',
-    price: '€29',
   },
   search_boost: {
     label: 'Search boost',
     description: 'Give your profile more visibility in teacher searches.',
-    price: '€15',
   },
   profile_badge: {
     label: 'Profile badge',
     description: 'Show a promoted badge alongside your name.',
-    price: '€5',
   },
-} satisfies Record<TeacherPromotionPlacement, { label: string; description: string; price: string }>;
+} satisfies Record<TeacherPromotionPlacement, { label: string; description: string }>;
 
 const EMPTY_PROMOTION_FORM: PromotionForm = {
   placement: 'marketplace_featured',
@@ -371,6 +373,7 @@ const EMPTY_PROMOTION_FORM: PromotionForm = {
   selector: 'sfu-teacher-profile',
   standalone: true,
   imports: [
+    CurrencyPipe,
     Footer,
     Header,
     RouterLink,
@@ -756,6 +759,9 @@ export class TeacherProfile implements OnInit {
   protected readonly editingPublicContentId = signal<string | null>(null);
   protected readonly promotions = signal<TeacherPromotion[]>([]);
   protected readonly promotionPlans = PROMOTION_PLANS;
+  protected readonly promotionFees = PROMOTION_FEES_CENTS;
+  protected readonly promotionCurrency = PROMOTION_CURRENCY;
+  protected readonly paymentLabel = promotionPaymentLabel;
   protected readonly placementChoices = Object.keys(PROMOTION_PLANS) as TeacherPromotionPlacement[];
   protected readonly promotionForm = signal<PromotionForm>({
     ...EMPTY_PROMOTION_FORM,
@@ -940,7 +946,7 @@ export class TeacherProfile implements OnInit {
           ...EMPTY_PROMOTION_FORM,
           placement: this.promotionForm().placement,
         });
-        this.notice.set('Promotion request submitted for admin review.');
+        this.notice.set('Request submitted. Your fee is saved. Arrange payment with the admin team and quote your campaign ID.');
       },
       error: (error) => {
         this.error.set(this.profiles.errorMessage(error));
@@ -1279,9 +1285,7 @@ export class TeacherProfile implements OnInit {
     return item.publishStatus === 'unpublished' ? 'Unpublished' : 'Draft';
   }
 
-  protected promotionStatusLabel(promotion: TeacherPromotion): string {
-    return promotion.status.replace(/_/g, ' ');
-  }
+  protected readonly promotionStatusLabel = promotionStatusLabel;
 
   protected canRequestPromotion(profile: ProfileUser): boolean {
     return Boolean(
@@ -1414,6 +1418,7 @@ export class TeacherProfile implements OnInit {
     }
     return {
       placement: form.placement,
+      quotedFeeCents: PROMOTION_FEES_CENTS[form.placement],
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
       ...(form.reason.trim() ? { reason: form.reason.trim() } : {}),

@@ -112,7 +112,7 @@
       <div class="form-grid promotion-form">
         <fieldset class="placement-picker">
           <legend>Placement</legend>
-          <p class="price-note">Example prices per campaign</p>
+          <p class="price-note">One-time fee per campaign</p>
           @for (placement of placementChoices; track placement) {
             @let plan = promotionPlans[placement];
             <label class="placement-option">
@@ -123,7 +123,7 @@
                 <strong>{{ plan.label }}</strong>
                 <span>{{ plan.description }}</span>
               </span>
-              <strong class="placement-price">{{ plan.price }}</strong>
+              <strong class="placement-price">{{ promotionFees[placement] / 100 | currency:promotionCurrency:'symbol':'1.0-2' }}</strong>
             </label>
           }
         </fieldset>
@@ -160,10 +160,10 @@
         </details>
         <footer class="promotion-checkout">
           <div class="fee-line" aria-live="polite" aria-atomic="true">
-            <strong>Estimated campaign fee</strong>
-            <strong class="placement-price">{{ promotionPlans[promotionForm().placement].price }}</strong>
+            <strong>Campaign fee</strong>
+            <strong class="placement-price">{{ promotionFees[promotionForm().placement] / 100 | currency:promotionCurrency:'symbol':'1.0-2' }}</strong>
           </div>
-          <p class="price-note">An admin reviews your request and handles payment separately.</p>
+          <p class="price-note">Arrange payment with the admin team. Your promotion runs after they confirm receipt and approve your campaign.</p>
           <button
             class="primary-link button-link"
             type="button"
@@ -192,10 +192,12 @@
             {{ formatDate(promotion.startsAt) }} to {{
             formatDate(promotion.endsAt) }}
           </p>
-          <small
-            >{{ promotion.billingStatus }}{{ promotion.adminNote ? ' · ' +
-            promotion.adminNote : '' }}</small
-          >
+          <p><strong>@if (promotion.feeCents !== undefined) {
+            {{ promotion.feeCents / 100 | currency:promotion.currency:'symbol':'1.0-2' }}
+          } @else { Fee not recorded }</strong> · {{ paymentLabel(promotion) }}</p>
+          <small>Campaign ID {{ promotion.promotionId }}</small>
+          @if (promotion.paymentReference) { <small>Payment reference {{ promotion.paymentReference }}</small> }
+          @if (promotion.adminNote) { <small>{{ promotion.adminNote }}</small> }
         </article>
         } } @else {
         <div class="empty-state compact">

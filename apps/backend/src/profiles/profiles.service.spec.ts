@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { expect } from '@jest/globals';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ProfilesService, SYSTEM_LIVE_CLASS_SETTINGS } from './profiles.service';
 
@@ -321,7 +322,13 @@ describe('ProfilesService', () => {
     expect(promotion.teacherId).toBe('teacher-1');
     expect(promotion.status).toBe('requested');
     expect(promotion.placement).toBe('marketplace_featured');
-    expect(promotion.billingStatus).toBe('manual');
+    expect(promotion).toMatchObject({ feeCents: 2900, currency: 'EUR', billingStatus: 'pending' });
+    expect(promotions.create).toHaveBeenCalledWith(expect.objectContaining({ feeCents: 2900, currency: 'EUR' }));
+    await expect(service.requestMyPromotion(authUser('teacher-1', ['TEACHER']), {
+      placement: 'marketplace_featured', quotedFeeCents: 1,
+      startsAt: promotion.startsAt, endsAt: promotion.endsAt
+    })).rejects.toThrow('fee has changed');
+    expect(promotions.create).toHaveBeenCalledTimes(1);
   });
 
   it('rejects promotion requests for private or non-teacher profiles', async () => {
@@ -398,7 +405,7 @@ describe('ProfilesService', () => {
     expect(thrown).toBeInstanceOf(BadRequestException);
   });
 
-  it('lets admins approve promotions and boosts active promoted teachers in marketplace results', async () => {
+  it('requires a matching manual payment and a separate approval before boosting a teacher', async () => {
     const promotedTeacher = userDoc({
       id: 'teacher-1',
       roles: ['TEACHER'],
@@ -419,16 +426,32 @@ describe('ProfilesService', () => {
       teacherName: 'Ada Teacher',
       placement: 'marketplace_featured',
       status: 'requested',
-      startsAt: new Date('2026-06-01T00:00:00.000Z'),
-      endsAt: new Date('2027-06-01T00:00:00.000Z')
+      feeCents: 2900,
+      currency: 'EUR',
+      billingStatus: 'pending',
+      startsAt: new Date(Date.now() - 3600000),
+      endsAt: new Date(Date.now() + 3600000)
     });
-    const { service } = createHarness({
+    const { service, auditLogs } = createHarness({
       publicTeacher: promotedTeacher,
       publicTeachers: [organicTeacher, promotedTeacher],
       promotions: [pendingPromotion]
     });
 
-    const approved = await service.approvePromotion('promotion-1', { billingStatus: 'manual' }, authUser('admin-1', ['ADMIN']));
+    const admin = authUser('admin-1', ['ADMIN']);
+    const payment = { feeCents: 2900, paymentReference: 'BANK-12' };
+    await expect(service.approvePromotion('promotion-1', { billingStatus: 'paid' }, admin)).rejects.toThrow('Confirm receipt');
+    await expect(service.confirmPromotionPayment('promotion-1', payment, authUser('teacher-1', ['TEACHER']))).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.confirmPromotionPayment('promotion-1', { ...payment, feeCents: 1500 }, admin)).rejects.toThrow('match');
+    await expect(service.confirmPromotionPayment('promotion-1', { ...payment, paymentReference: ' ' }, admin)).rejects.toThrow('reference');
+    const confirmed = await service.confirmPromotionPayment('promotion-1', payment, admin);
+    expect(confirmed).toMatchObject({ status: 'requested', billingStatus: 'paid', paymentReference: 'BANK-12', paymentConfirmedByUserId: 'admin-1' });
+    expect(confirmed.paymentConfirmedAt).toBeTruthy();
+    expect(await service.confirmPromotionPayment('promotion-1', payment, admin)).toEqual(confirmed);
+    expect(auditLogs.record).toHaveBeenCalledTimes(1);
+    await expect(service.confirmPromotionPayment('promotion-1', { ...payment, paymentReference: 'different' }, admin)).rejects.toThrow();
+    expect((await service.listPublicTeachers()).teachers.some(item => item.promoted)).toBe(false);
+    const approved = await service.approvePromotion('promotion-1', {}, admin);
     const result = await service.listPublicTeachers({ page: 1, limit: 12 });
 
     expect(approved.status).toBe('active');
@@ -436,6 +459,21 @@ describe('ProfilesService', () => {
     expect(result.teachers.map((teacher) => teacher.teacherId)).toEqual(['teacher-1', 'teacher-2']);
     expect(result.teachers[0]?.promoted).toBe(true);
     expect(result.teachers[0]?.promotionLabel).toBe('Featured');
+  });
+
+  it('reconciles an older approved campaign only after an admin verifies the received amount', async () => {
+    const teacher = userDoc({ id: 'teacher-1', roles: ['TEACHER'], displayName: 'Teacher', publicProfileEnabled: true });
+    const legacy = promotionDoc({
+      status: 'active', billingStatus: 'paid', approvedByUserId: 'admin-old',
+      startsAt: new Date(Date.now() - 60000), endsAt: new Date(Date.now() + 60000)
+    });
+    const { service } = createHarness({ publicTeacher: teacher, promotions: [legacy] });
+    expect((await service.listPublicTeachers()).teachers[0]?.promoted).toBe(false);
+    const reconciled = await service.confirmPromotionPayment('promotion-1', {
+      feeCents: 1200, paymentReference: 'PREVIOUS-RECEIPT'
+    }, authUser('admin-1', ['ADMIN']));
+    expect(reconciled).toMatchObject({ feeCents: 1200, currency: 'EUR', billingStatus: 'paid' });
+    expect((await service.listPublicTeachers()).teachers[0]?.promoted).toBe(true);
   });
 
   it('does not expose expired or cancelled promotions in marketplace metadata', async () => {
@@ -767,6 +805,8 @@ describe('ProfilesService', () => {
     }
     if (matcher && typeof matcher === 'object' && !Array.isArray(matcher) && !(matcher instanceof Date)) {
       const operator = matcher as Record<string, unknown>;
+      if (operator.$type === 'date') return value instanceof Date;
+      if (operator.$type === 'string') return typeof value === 'string';
       if ('$exists' in operator) {
         return Boolean(operator.$exists) ? value !== undefined : value === undefined;
       }
