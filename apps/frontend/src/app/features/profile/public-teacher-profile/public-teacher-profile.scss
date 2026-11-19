@@ -754,6 +754,20 @@ h3 {
   letter-spacing: -1.5px;
   margin: 5px 0 10px;
 }
+.profile-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.profile-promotion-badge {
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: var(--brand-amber);
+  color: var(--brand-navy-strong);
+  font-size: 12px;
+  font-weight: 650;
+}
 .teacher-overview .eyebrow,
 .public-experience > .eyebrow {
   font-size: 9px;

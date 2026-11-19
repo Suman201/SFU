@@ -407,18 +407,23 @@ export class ProfilesService {
         _id: teacherId,
         deletedAt: { $exists: false },
         disabled: false,
-        status: { $in: ['active', 'scheduled'] },
+        status: 'active',
         roles: 'TEACHER',
         publicProfileEnabled: true,
-      tutorReviewStatus: 'approved'
+        tutorReviewStatus: 'approved'
       })
       .exec();
     if (!teacher) {
       throw new NotFoundException('Teacher profile is not available.');
     }
-    const publicContent = await this.publicContentForTeacher(teacher.id, { publishedOnly: true });
+    const [publicContent, batches, badge] = await Promise.all([
+      this.publicContentForTeacher(teacher.id, { publishedOnly: true }),
+      this.teacherBatchAssociations(teacher.id, { publicOnly: true }),
+      this.promotions.exists({ ...this.livePromotionFilter('profile_badge'), teacherId: teacher.id }).exec()
+    ]);
     return {
       id: teacher.id,
+      hasPromotionBadge: Boolean(badge),
       displayName: teacher.displayName || teacher.name || 'Teacher',
       ...(teacher.headline ? { headline: teacher.headline } : {}),
       ...(teacher.bio ? { bio: teacher.bio } : {}),
@@ -443,7 +448,7 @@ export class ProfilesService {
       ...(teacher.availability ? { availability: teacher.availability } : {}),
       gallery: publicContent.filter((item) => item.itemType === 'gallery'),
       demoClasses: publicContent.filter((item) => item.itemType === 'demo_class'),
-      batches: await this.teacherBatchAssociations(teacher.id, { publicOnly: true })
+      batches
     };
   }
 
@@ -552,8 +557,9 @@ export class ProfilesService {
       filter.$and = andFilters;
     }
 
-    const activePromotionMap = await this.activePromotionMap();
-    const promotedTeacherIds = [...activePromotionMap.keys()];
+    const isSearch = andFilters.length > 0 || teacherIdFilters.length > 0;
+    const placement = isSearch ? 'search_boost' : 'marketplace_featured';
+    const promotedTeacherIds = await this.promotions.distinct('teacherId', this.livePromotionFilter(placement)).exec();
     const promotedFilter = this.withTeacherIdFilter(filter, promotedTeacherIds, 'in');
     const nonPromotedFilter = this.withTeacherIdFilter(filter, promotedTeacherIds, 'not-in');
     const [total, promotedTotal] = await Promise.all([
@@ -566,7 +572,7 @@ export class ProfilesService {
     if (promotedTeacherIds.length && skip < promotedTotal) {
       promotedTeachers = await this.users
         .find(promotedFilter)
-        .sort({ displayName: 1, name: 1 })
+        .sort({ displayName: 1, name: 1, _id: 1 })
         .skip(skip)
         .limit(limit)
         .exec();
@@ -576,7 +582,7 @@ export class ProfilesService {
       const nonPromotedSkip = Math.max(0, skip - promotedTotal);
       nonPromotedTeachers = await this.users
         .find(nonPromotedFilter)
-        .sort({ displayName: 1, name: 1 })
+        .sort({ displayName: 1, name: 1, _id: 1 })
         .skip(nonPromotedSkip)
         .limit(remaining)
         .exec();
@@ -588,7 +594,9 @@ export class ProfilesService {
       this.publicContentSummaryMap(teacherIds)
     ]);
     return {
-      teachers: teachers.map((teacher) => this.toPublicTeacherListItem(teacher, batchSummaryMap, contentSummaryMap, activePromotionMap)),
+      teachers: teachers.map((teacher, index) => this.toPublicTeacherListItem(
+        teacher, batchSummaryMap, contentSummaryMap, index < promotedTeachers.length ? placement : undefined
+      )),
       page,
       limit,
       total,
@@ -1945,27 +1953,18 @@ export class ProfilesService {
     return summaries;
   }
 
-  private async activePromotionMap(): Promise<Map<string, TeacherPromotionMongoDocument>> {
+  private livePromotionFilter(placement: TeacherPromotionPlacement) {
     const now = new Date();
-    const promotions = await this.promotions
-      .find({
-        status: { $in: ['active', 'scheduled'] },
-        billingStatus: 'paid',
-        paymentConfirmedAt: { $type: 'date' },
-        approvedByUserId: { $type: 'string' },
-        startsAt: { $lte: now },
-        endsAt: { $gt: now },
-        deletedAt: { $exists: false }
-      })
-      .sort({ placement: 1, startsAt: 1, createdAt: 1 })
-      .exec();
-    const map = new Map<string, TeacherPromotionMongoDocument>();
-    for (const promotion of promotions) {
-      if (!map.has(promotion.teacherId)) {
-        map.set(promotion.teacherId, promotion);
-      }
-    }
-    return map;
+    return {
+      placement,
+      status: { $in: ['active', 'scheduled'] },
+      billingStatus: 'paid',
+      paymentConfirmedAt: { $type: 'date' as const },
+      approvedByUserId: { $type: 'string' as const },
+      startsAt: { $lte: now },
+      endsAt: { $gt: now },
+      deletedAt: { $exists: false }
+    };
   }
 
   private withTeacherIdFilter(filter: Record<string, unknown>, teacherIds: readonly string[], mode: 'in' | 'not-in'): Record<string, unknown> {
@@ -1990,12 +1989,11 @@ export class ProfilesService {
     teacher: UserMongoDocument,
     batchSummaryMap: Map<string, { activePublicBatchCount: number; nextPublicBatchStartAt?: string }>,
     contentSummaryMap: Map<string, { galleryCount: number; demoClassCount: number }>,
-    activePromotionMap: Map<string, TeacherPromotionMongoDocument>
+    placement?: 'marketplace_featured' | 'search_boost'
   ): PublicTeacherListItem {
     const batchSummary = batchSummaryMap.get(teacher.id) ?? { activePublicBatchCount: 0 };
     const contentSummary = contentSummaryMap.get(teacher.id) ?? { galleryCount: 0, demoClassCount: 0 };
     const highlightedCredential = this.credentials(teacher.credentials)[0];
-    const promotion = activePromotionMap.get(teacher.id);
     return {
       teachingAreas: teacher.teachingAreas,
       teacherSubjectIds: this.stringArray(teacher.teacherSubjectIds),
@@ -2019,8 +2017,8 @@ export class ProfilesService {
       ...(batchSummary.nextPublicBatchStartAt ? { nextPublicBatchStartAt: batchSummary.nextPublicBatchStartAt } : {}),
       galleryCount: contentSummary.galleryCount,
       demoClassCount: contentSummary.demoClassCount,
-      promoted: Boolean(promotion),
-      ...(promotion ? { promotionPlacement: promotion.placement, promotionLabel: this.promotionLabel(promotion.placement) } : {})
+      promoted: Boolean(placement),
+      ...(placement ? { promotionPlacement: placement, promotionLabel: placement === 'marketplace_featured' ? 'Featured' : 'Sponsored' } : {})
     };
   }
 
@@ -2173,17 +2171,6 @@ export class ProfilesService {
       throw new BadRequestException('Promotion billing status is invalid.');
     }
     return value;
-  }
-
-  private promotionLabel(placement: TeacherPromotionPlacement): string {
-    switch (placement) {
-      case 'marketplace_featured':
-        return 'Featured';
-      case 'profile_badge':
-        return 'Promoted profile';
-      default:
-        return 'Promoted';
-    }
   }
 
   private toPromotion(promotion: TeacherPromotionMongoDocument): TeacherPromotion {

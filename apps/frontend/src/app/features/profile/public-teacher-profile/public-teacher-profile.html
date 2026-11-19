@@ -26,7 +26,12 @@
         />
         <div class="identity-copy">
           <p class="eyebrow">MEET YOUR TEACHER</p>
-          <h1>{{teacher.displayName}}</h1>
+          <div class="profile-name">
+            <h1>{{teacher.displayName}}</h1>
+            @if (teacher.hasPromotionBadge) {
+            <span class="profile-promotion-badge">Promoted profile</span>
+            }
+          </div>
           <p>{{teacher.location || 'Online lessons'}}</p>
         </div>
       </section>

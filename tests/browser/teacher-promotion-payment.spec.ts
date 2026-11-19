@@ -32,7 +32,7 @@ test('manual receipt and approval independently gate marketplace visibility', as
     const admin = await login(stack.nodeAUrl, 'admin@example.com', 'Password@12345');
     const api = stack.nodeAUrl + '/api/v1';
     const promoted = async () => {
-      const res = await request.get(api + '/teachers?limit=100&search=Avery');
+      const res = await request.get(api + '/teachers?limit=100&q=Avery');
       expect(res.ok()).toBe(true);
       const body = await res.json();
       const card = (body.data ?? body).teachers.find((item: { teacherId: string }) => item.teacherId === teacherId);
@@ -117,6 +117,10 @@ test('manual receipt and approval independently gate marketplace visibility', as
       expect(scheduled.ok(), await scheduled.text()).toBe(true);
       const scheduledBody = await scheduled.json();
       expect(scheduledBody.data ?? scheduledBody).toMatchObject({ status: 'scheduled', paymentReference: winningRef });
+      const profile = await request.get(api + '/teachers/' + teacherId + '/profile');
+      expect(profile.ok()).toBe(true);
+      const profileBody = await profile.json();
+      expect((profileBody.data ?? profileBody).hasPromotionBadge).toBe(false);
       expect(await promoted()).toBe(false);
     } finally {
       await adminPage.close();

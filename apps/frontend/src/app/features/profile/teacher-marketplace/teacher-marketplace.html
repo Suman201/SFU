@@ -111,7 +111,13 @@
     </div>
     } } @else if (hasResults() && !error()) { @for (teacher of teachers(); track
     teacher.teacherId) {
-    <article class="teacher-card">
+    @if (featuredCount() && $first) {
+    <h2 class="placement-heading">Featured teachers</h2>
+    } @else if (featuredCount() && $index === featuredCount()) {
+    <h2 class="placement-heading">More teachers</h2>
+    }
+    <article class="teacher-card" [class.featured-card]="teacher.promotionPlacement === 'marketplace_featured'"
+      [class.single-featured]="$first && featuredCount() === 1">
       <div class="teacher-intro">
         <img
           [src]="profileImage(teacher)"

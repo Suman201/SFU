@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { expect } from '@jest/globals';
+import { expect, it } from '@jest/globals';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { ProfilesService, SYSTEM_LIVE_CLASS_SETTINGS } from './profiles.service';
 
@@ -476,6 +476,40 @@ describe('ProfilesService', () => {
     expect((await service.listPublicTeachers()).teachers[0]?.promoted).toBe(true);
   });
 
+  it('applies concurrent plans independently in browse, filtered searches and the public profile', async () => {
+    const teacher = userDoc({ id: 'teacher-1', roles: ['TEACHER'], publicProfileEnabled: true,
+      displayName: 'Ada Teacher', skills: ['Algebra'], languages: ['English'] });
+    const live = { status: 'scheduled', approvedByUserId: 'admin', billingStatus: 'paid',
+      paymentConfirmedAt: new Date(), startsAt: new Date(Date.now() - 60000), endsAt: new Date(Date.now() + 60000) };
+    const { service } = createHarness({ publicTeacher: teacher, promotions: [
+      promotionDoc({ ...live, placement: 'marketplace_featured' }),
+      promotionDoc({ ...live, placement: 'search_boost' }),
+      promotionDoc({ ...live, placement: 'profile_badge' })
+    ] });
+    const browse = await service.listPublicTeachers({ q: '  ', page: 1, limit: 5 });
+    expect(browse.teachers[0]?.promotionPlacement).toBe('marketplace_featured');
+    for (const query of [{ q: 'Ada' }, { topic: 'Algebra' }, { language: 'English' }]) {
+      const result = await service.listPublicTeachers(query);
+      expect(result.teachers[0]?.promotionPlacement).toBe('search_boost');
+    }
+    expect((await service.listPublicTeachers({ q: 'Piano' })).teachers).toHaveLength(0);
+    expect((await service.getPublicTeacherProfile('teacher-1')).hasPromotionBadge).toBe(true);
+  });
+
+  it.each([
+    { status: 'requested' }, { status: 'paused' }, { status: 'cancelled' }, { billingStatus: 'refunded' },
+    { paymentConfirmedAt: undefined }, { approvedByUserId: undefined },
+    { startsAt: new Date(Date.now() + 60000) }, { endsAt: new Date(Date.now() - 60000) }
+  ])('hides ineligible profile badges (%j)', async override => {
+    const teacher = userDoc({ id: 'teacher-1', roles: ['TEACHER'], publicProfileEnabled: true, displayName: 'Ada' });
+    const { service } = createHarness({ publicTeacher: teacher, promotions: [promotionDoc({
+      placement: 'profile_badge', status: 'active', approvedByUserId: 'admin', billingStatus: 'paid',
+      paymentConfirmedAt: new Date(), startsAt: new Date(Date.now() - 60000), endsAt: new Date(Date.now() + 60000),
+      ...override
+    })] });
+    expect((await service.getPublicTeacherProfile('teacher-1')).hasPromotionBadge).toBe(false);
+  });
+
   it('does not expose expired or cancelled promotions in marketplace metadata', async () => {
     const teacher = userDoc({
       id: 'teacher-1',
@@ -606,6 +640,12 @@ describe('ProfilesService', () => {
       findOne: jest.fn(() => queryResult(options.publicContentFindOne ?? null))
     };
     const promotions = {
+      distinct: jest.fn((field: string, filter: Record<string, unknown>) =>
+        queryResult([...new Set(promotionValues.filter(p => matchesRecordFilter(p, filter)).map(p => p[field]))])
+      ),
+      exists: jest.fn((filter: Record<string, unknown>) =>
+        queryResult(promotionValues.some(p => matchesRecordFilter(p, filter)) ? { _id: 'promotion' } : null)
+      ),
       create: jest.fn(async (value: Record<string, unknown>) => {
         const doc = promotionDoc(value);
         promotionValues.push(doc);

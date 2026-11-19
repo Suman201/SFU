@@ -123,6 +123,15 @@
   grid-template-columns: 92px minmax(0, 1fr);
   gap: 20px;
 }
+.placement-heading {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 20px;
+  color: var(--text);
+}
+.featured-card {
+  border-color: color-mix(in srgb, var(--brand-amber) 65%, var(--line));
+}
 .teacher-intro img {
   width: 92px;
   height: 106px;
@@ -238,6 +247,27 @@ dd {
 .teacher-card footer a:hover {
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+@media (min-width: 900px) {
+  .single-featured {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+    grid-template-areas: 'intro skills action' 'intro details action';
+    gap: 10px 24px;
+    align-items: center;
+  }
+  .single-featured .teacher-intro { grid-area: intro; }
+  .single-featured .pill-list { grid-area: skills; align-self: end; }
+  .single-featured .teacher-details { grid-area: details; align-self: start; }
+  .single-featured footer {
+    grid-area: action;
+    flex-direction: column;
+    align-items: flex-end;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
 }
 .teacher-skeleton {
   border: 1px solid var(--line);

@@ -307,6 +307,7 @@ export interface ProfileUser {
 }
 
 export interface PublicTeacherProfile {
+  hasPromotionBadge?: boolean;
   introVideoUploaded?: boolean;
   introVideoDurationSeconds?: number;
   introVideoUrl?: string;

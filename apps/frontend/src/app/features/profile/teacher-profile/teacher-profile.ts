@@ -349,15 +349,15 @@ const EMPTY_PUBLIC_CONTENT_FORM: PublicContentForm = {
 const PROMOTION_PLANS = {
   marketplace_featured: {
     label: 'Marketplace featured',
-    description: 'Feature your teaching profile in the marketplace.',
+    description: 'Appear in Featured teachers when learners browse the marketplace.',
   },
   search_boost: {
     label: 'Search boost',
-    description: 'Give your profile more visibility in teacher searches.',
+    description: 'Appear near the top of matching teacher search results.',
   },
   profile_badge: {
     label: 'Profile badge',
-    description: 'Show a promoted badge alongside your name.',
+    description: 'Display a promoted badge beside your name on your public profile.',
   },
 } satisfies Record<TeacherPromotionPlacement, { label: string; description: string }>;
 

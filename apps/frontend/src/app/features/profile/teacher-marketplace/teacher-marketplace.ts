@@ -76,6 +76,9 @@ export class TeacherMarketplace implements OnInit {
   protected readonly filters = signal<MarketplaceFilters>({ ...EMPTY_FILTERS });
   protected readonly cmsIntro = signal<CmsPage | null>(null);
   protected readonly teachers = signal<PublicTeacherListItem[]>([]);
+  protected readonly featuredCount = computed(() =>
+    this.teachers().filter(teacher => teacher.promotionPlacement === 'marketplace_featured').length
+  );
   protected readonly loading = signal(false);
   protected readonly loadingMore = signal(false);
   protected readonly error = signal('');
