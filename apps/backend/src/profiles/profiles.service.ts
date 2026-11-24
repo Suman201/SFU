@@ -1874,6 +1874,7 @@ export class ProfilesService {
   }
 
   private async batchAssociationsFromBatches(batches: BatchMongoDocument[]): Promise<ProfileBatchAssociation[]> {
+    batches = batches.filter(batch => !batch.isPrivateBooking);
     if (!batches.length) {
       return [];
     }
@@ -1953,7 +1954,7 @@ export class ProfilesService {
       return new Map();
     }
     const batches = await this.batches
-      .find({ teacherId: { $in: [...new Set(teacherIds)] }, status: 'ACTIVE', deletedAt: { $exists: false } })
+      .find({ isPrivateBooking: { $ne: true }, teacherId: { $in: [...new Set(teacherIds)] }, status: 'ACTIVE', deletedAt: { $exists: false } })
       .sort({ startDate: 1 })
       .exec();
     const summaries = new Map<string, { activePublicBatchCount: number; nextPublicBatchStartAt?: string }>();

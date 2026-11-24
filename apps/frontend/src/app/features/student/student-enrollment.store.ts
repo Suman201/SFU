@@ -1,3 +1,4 @@
+import { Router } from '@angular/router';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { API_BASE_URL } from '../../core/services/app-environment';
@@ -17,6 +18,7 @@ export interface StudentBatch {
   enrolledCount: number;
   capacity: number;
   feeAmount: number;
+  paymentOrderId?: string;
   feeMinor?: number;
   feeCurrency?: import("@native-sfu/contracts").CurrencyCode;
   startsAt: string;
@@ -32,6 +34,7 @@ interface ApiEnvelope<T> {
 @Injectable({ providedIn: 'root' })
 export class StudentEnrollmentStore {
   private readonly http = inject(HttpClient);
+  private readonly router = inject(Router, { optional: true });
   private readonly remoteAvailableBatches = signal<StudentBatch[]>([]);
   private readonly remoteEnrolledBatches = signal<StudentBatch[]>([]);
   private readonly availableBatchesLoadedSignal = signal(false);
@@ -66,6 +69,11 @@ export class StudentEnrollmentStore {
       return;
     }
 
+    if ((batch.feeMinor ?? 0) > 0 || batch.feeAmount > 0) {
+      if (this.router) void this.router.navigate(['/booking/batches', batchId]);
+      else this.enrollmentErrorSignal.set('Paid classes require checkout.');
+      return;
+    }
     this.enrollmentActionBatchIdSignal.set(batchId);
     this.enrollmentErrorSignal.set('');
     this.http.post<StudentBatch | ApiEnvelope<StudentBatch>>(`${API_BASE_URL}/student-enrollments/me/batches/${encodeURIComponent(batchId)}`, {}).subscribe({
@@ -123,6 +131,8 @@ export class StudentEnrollmentStore {
   }
 
   leave(batchId: string): void {
+    const paidOrderId = this.remoteEnrolledBatches().find(batch => batch.id === batchId)?.paymentOrderId;
+    if (paidOrderId && this.router) { void this.router.navigate(['/bookings', paidOrderId]); return; }
     if (this.enrollmentActionBatchIdSignal()) {
       return;
     }

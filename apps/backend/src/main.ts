@@ -19,7 +19,8 @@ import { MetricsController } from './metrics/metrics.controller';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
-    bufferLogs: true
+    bufferLogs: true,
+    rawBody: true
   });
   app.useLogger(app.get(Logger));
   const config = app.get(ConfigService);

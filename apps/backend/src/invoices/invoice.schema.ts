@@ -10,6 +10,7 @@ import type {
 } from '@native-sfu/contracts';
 @Schema({ collection: 'invoices', timestamps: true })
 export class InvoiceDocument {
+  @Prop({ type: String }) orderId?: string;
   @Prop({ type: String, default: () => randomUUID() }) _id!: string;
   @Prop({ default: 0 }) version!: number;
   @Prop({
@@ -48,6 +49,7 @@ InvoiceSchema.index(
   { number: 1 },
   { unique: true, partialFilterExpression: { number: { $type: 'string' } } },
 );
+InvoiceSchema.index({ orderId: 1 }, { unique: true, partialFilterExpression: { orderId: { $type: 'string' } } });
 InvoiceSchema.index({ createdAt: -1, _id: 1 });
 InvoiceSchema.index({
   'paymentEmail.status': 1,

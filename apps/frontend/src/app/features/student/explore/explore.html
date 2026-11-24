@@ -68,7 +68,7 @@
               <a [routerLink]="desktop?'/desktop/calendar':'/calendar'">Enrolled · View calendar</a>
             } @else {
               <button type="button" class="primary" [disabled]="isEnrollmentPending(batch)" (click)="enroll(batch)">
-                {{ isEnrollmentPending(batch) ? 'Enrolling...' : 'Enroll' }}
+                {{ isEnrollmentPending(batch) ? 'Enrolling...' : ((batch.feeMinor ?? 0)>0 || batch.feeAmount>0) ? 'Book class' : 'Enroll free' }}
               </button>
             }
           </footer>

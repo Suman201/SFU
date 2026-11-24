@@ -1,3 +1,4 @@
+import { BookingCalendarModule } from '../bookings/booking-calendar.module';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
@@ -9,7 +10,7 @@ import { TeacherBatchesController } from './teacher-batches.controller';
 import { TeacherBatchesService } from './teacher-batches.service';
 
 @Module({
-  imports: [AuthModule, DatabaseModule, StudentEnrollmentsModule, AuditLogsModule, ProfilesModule],
+  imports: [BookingCalendarModule, AuthModule, DatabaseModule, StudentEnrollmentsModule, AuditLogsModule, ProfilesModule],
   controllers: [TeacherBatchesController, AdminCoursesController, AdminBatchesController],
   providers: [TeacherBatchesService],
   exports: [TeacherBatchesService]

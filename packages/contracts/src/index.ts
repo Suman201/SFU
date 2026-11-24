@@ -37,6 +37,7 @@ export * from './assessment-tasks.js';
 
 export * from './invoices.js';
 export * from './money.js';
+export * from './bookings.js';
 
 export * from "./calendar";
 

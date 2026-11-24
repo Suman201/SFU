@@ -44,6 +44,7 @@ describe('StudentEnrollmentsService', () => {
 
   it('lets a student self-enroll in an eligible batch', async () => {
     const { service, enrollments, batches, schedules, users } = createService();
+    batches.findOne.mockReturnValueOnce(queryResult(batchDoc({ feeAmount: 0 })));
     enrollments.exists.mockResolvedValueOnce(null);
     enrollments.countDocuments.mockReturnValueOnce(queryResult(0));
     enrollments.find.mockReturnValueOnce(queryResult([enrollmentDoc()]));
@@ -67,7 +68,8 @@ describe('StudentEnrollmentsService', () => {
   });
 
   it('rejects duplicate active self-enrollment', async () => {
-    const { service, enrollments } = createService();
+    const { service, enrollments, batches } = createService();
+    batches.findOne.mockReturnValueOnce(queryResult(batchDoc({ feeAmount: 0 })));
     enrollments.exists.mockResolvedValueOnce({ _id: 'existing-enrollment' });
 
     let thrown: unknown;
@@ -82,7 +84,8 @@ describe('StudentEnrollmentsService', () => {
   });
 
   it('rejects self-enrollment when a batch is full', async () => {
-    const { service, enrollments } = createService();
+    const { service, enrollments, batches } = createService();
+    batches.findOne.mockReturnValueOnce(queryResult(batchDoc({ feeAmount: 0 })));
     enrollments.exists.mockResolvedValueOnce(null);
     enrollments.countDocuments.mockReturnValueOnce(queryResult(30));
 
@@ -94,6 +97,14 @@ describe('StudentEnrollmentsService', () => {
     }
 
     expect(thrown).toBeInstanceOf(ConflictException);
+    expect(enrollments.create).not.toHaveBeenCalled();
+  });
+
+  it('requires verified payment for paid self-enrollment', async () => {
+    const { service, enrollments } = createService();
+    let thrown: unknown;
+    try { await service.selfEnrollStudent(authUser('student-1', ['STUDENT']), 'batch-1'); } catch (error) { thrown = error; }
+    expect(thrown).toBeInstanceOf(ForbiddenException);
     expect(enrollments.create).not.toHaveBeenCalled();
   });
 

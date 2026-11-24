@@ -13,7 +13,7 @@ import type {
   AdminEnrollmentSummary,
   AdminUpdateEnrollmentRequest
 } from '@native-sfu/contracts';
-import { Model } from 'mongoose';
+import { ClientSession, Model } from 'mongoose';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import {
@@ -52,6 +52,7 @@ export interface StudentEnrolledBatch {
   enrolledCount: number;
   capacity: number;
   feeAmount: number;
+  paymentOrderId?: string;
   feeMinor?: number;
   feeCurrency?: import("@native-sfu/contracts").CurrencyCode;
   startsAt: string;
@@ -185,10 +186,26 @@ export class StudentEnrollmentsService {
     if (!student.roles.includes('STUDENT')) {
       throw new BadRequestException('Only student users can be enrolled in a batch.');
     }
-    if (status === 'active') {
+    if (status !== 'active') return this.createEnrollment(input, batch, student, status);
+    return this.withEnrollmentLock(batch.id, async locked => {
+      this.assertBatchOpenForEnrollment(locked);
+      if (locked.isPrivateBooking) throw new ConflictException('Private lesson access is managed by its booking.');
       await this.assertNoActiveEnrollment(input.studentId, input.batchId);
-    }
-    return this.createEnrollment(input, batch, student, status);
+      await this.assertBatchHasCapacity(locked);
+      return this.createEnrollment(input, locked, student, status);
+    });
+  }
+
+  async hasPaidBookings(batchId: string): Promise<boolean> {
+    return Boolean(await this.enrollments.exists({ batchId, status: 'active', paymentOrderId: { $type: 'string' }, deletedAt: { $exists: false } }));
+  }
+
+  private async withEnrollmentLock<T>(batchId: string, handler: (batch: BatchMongoDocument) => Promise<T>): Promise<T> {
+    const token = randomUUID();
+    const locked = await this.batches.findOneAndUpdate({ _id: batchId, status: 'ACTIVE', deletedAt: { $exists: false }, $or: [{ enrollmentLockUntil: { $exists: false } }, { enrollmentLockUntil: { $lt: new Date() } }] }, { $set: { enrollmentLockToken: token, enrollmentLockUntil: new Date(Date.now() + 120000) } }, { new: true }).exec();
+    if (!locked) throw new ConflictException('Enrollment is being updated. Please try again.');
+    try { return await handler(locked); }
+    finally { await this.batches.updateOne({ _id: batchId, enrollmentLockToken: token }, { $unset: { enrollmentLockToken: '', enrollmentLockUntil: '' } }, { timestamps: false }); }
   }
 
   async selfEnrollStudent(user: AuthenticatedUser, batchId: string): Promise<StudentEnrolledBatch> {
@@ -198,6 +215,9 @@ export class StudentEnrollmentsService {
       throw new BadRequestException('Only student users can be enrolled in a batch.');
     }
     this.assertBatchOpenForEnrollment(batch);
+    if (batch.isPrivateBooking || (batch.feeMinor ?? 0) > 0 || (batch.feeAmount ?? 0) > 0) {
+      throw new ForbiddenException('Paid classes require a verified booking payment.');
+    }
     const token = randomUUID();
     const locked = await this.batches.findOneAndUpdate({_id:batch.id,status:'ACTIVE',deletedAt:{$exists:false},$or:[{enrollmentLockUntil:{$exists:false}},{enrollmentLockUntil:{$lt:new Date()}}]},{$set:{enrollmentLockToken:token,enrollmentLockUntil:new Date(Date.now()+120000)}},{new:true}).exec();
     if(!locked) throw new ConflictException('Enrollment is being updated. Please try again.');
@@ -214,6 +234,7 @@ export class StudentEnrollmentsService {
   async selfCancelStudentEnrollment(user: AuthenticatedUser, batchId: string): Promise<Record<string, unknown>> {
     this.assertStudentSelfService(user);
     const existing = await this.enrollments.findOne({ studentId: user.sub, batchId, ...ACTIVE_ACCESS_FILTER }).exec();
+    if (existing?.paymentOrderId) throw new ConflictException('Cancel paid bookings through My bookings so the payment and refund are handled together.');
     if (!existing) {
       throw new NotFoundException('Active student enrollment not found.');
     }
@@ -347,7 +368,7 @@ export class StudentEnrollmentsService {
   }
 
   async listAvailableBatches(studentId?: string): Promise<StudentEnrolledBatch[]> {
-    const batches = await this.batches.find({ status: 'ACTIVE', deletedAt: { $exists: false }, endDate:{$gte:new Date()} }).sort({ startDate: 1, name: 1 }).exec();
+    const batches = await this.batches.find({ isPrivateBooking: { $ne: true }, status: 'ACTIVE', deletedAt: { $exists: false }, endDate:{$gte:new Date()} }).sort({ startDate: 1, name: 1 }).exec();
     if (!batches.length) {
       return [];
     }
@@ -399,8 +420,9 @@ export class StudentEnrollmentsService {
     }
   }
 
-  async countActiveByBatch(batchId: string): Promise<number> {
-    return this.enrollments.countDocuments({ batchId, ...ACTIVE_ACCESS_FILTER }).exec();
+  async countActiveByBatch(batchId: string, session?: ClientSession): Promise<number> {
+    const query = this.enrollments.countDocuments({ batchId, ...ACTIVE_ACCESS_FILTER });
+    return (session ? query.session(session) : query).exec();
   }
 
   async activeCountByBatchIds(batchIds: readonly string[]): Promise<Map<string, number>> {
@@ -429,9 +451,17 @@ export class StudentEnrollmentsService {
       throw new NotFoundException('Student enrollment not found.');
     }
     if (existing.status === status) return this.serialize(existing);
-    if (status === 'active') {
+    if (existing.paymentOrderId && (status === 'cancelled' || (status === 'active' && existing.status === 'cancelled'))) throw new ConflictException('Manage purchased access through its booking and refund.');
+    if (status === 'active') return this.withEnrollmentLock(existing.batchId, async locked => {
       await this.assertNoActiveEnrollment(existing.studentId, existing.batchId, existing.id);
-    }
+      await this.assertBatchHasCapacity(locked);
+      return this.writeEnrollmentStatus(existing, status, actorUserId);
+    });
+    return this.writeEnrollmentStatus(existing, status, actorUserId);
+  }
+
+  private async writeEnrollmentStatus(existing: StudentEnrollmentMongoDocument, status: StudentEnrollmentStatus, actorUserId?: string): Promise<Record<string, unknown>> {
+    const enrollmentId = existing.id;
     const now = new Date();
     const updated = await this.enrollments.findOneAndUpdate(
       { _id: enrollmentId, deletedAt: { $exists: false } },
@@ -589,7 +619,7 @@ export class StudentEnrollmentsService {
 
   private async assertBatchHasCapacity(batch: BatchMongoDocument): Promise<void> {
     const enrolledCount = await this.countActiveByBatch(batch.id);
-    if (enrolledCount >= batch.maxCapacity) {
+    if (enrolledCount + (batch.paymentReservedCount ?? 0) >= batch.maxCapacity) {
       throw new ConflictException('This batch is full.');
     }
   }
@@ -662,7 +692,7 @@ export class StudentEnrollmentsService {
   }
 
   private toStudentBatch(
-    enrollment: Pick<StudentEnrollmentMongoDocument, 'status'> | null,
+    enrollment: Pick<StudentEnrollmentMongoDocument, 'status' | 'paymentOrderId'> | null,
     batch: BatchMongoDocument,
     schedules: BatchScheduleMongoDocument[],
     enrolledCount: number,
@@ -682,6 +712,7 @@ export class StudentEnrollmentsService {
       enrolledCount,
       capacity: batch.maxCapacity,
       feeAmount: this.batchFeeAmount(batch),
+      ...(enrollment?.paymentOrderId ? { paymentOrderId: enrollment.paymentOrderId } : {}),
       ...batchMoneyFields(batch),
       startsAt: nextStart.toISOString(),
       ...(enrollment?.status ? { enrollmentStatus: enrollment.status } : {})

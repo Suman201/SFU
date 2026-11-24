@@ -100,12 +100,32 @@ export const routes: Routes = [
     loadComponent: () => import('./features/profile/teacher-marketplace/teacher-marketplace').then((route) => route.TeacherMarketplace)
   },
   {
+    path: 'bookings', canActivate: [authGuard],
+    loadComponent: () => import('./features/booking/my-bookings').then(route => route.MyBookings)
+  },
+  {
+    path: 'bookings/:orderId', canActivate: [authGuard],
+    loadComponent: () => import('./features/booking/booking-order').then(route => route.BookingOrderPage)
+  },
+  {
+    path: 'teacher/bookings/availability', canActivate: [roleGuard], data: { role: 'teacher' },
+    loadComponent: () => import('./features/booking/teacher-bookings').then(route => route.TeacherBookings)
+  },
+  {
+    path: 'teacher/bookings', canActivate: [roleGuard], data: { role: 'teacher' },
+    loadComponent: () => import('./features/booking/my-bookings').then(route => route.MyBookings)
+  },
+  {
+    path: 'booking/batches/:batchId',
+    loadComponent: () => import('./features/booking/booking').then(route => route.Booking)
+  },
+  {
     path: 'booking',
-    loadComponent: () => import('./features/booking/booking-preview').then((route) => route.BookingPreview)
+    loadComponent: () => import('./features/booking/booking').then((route) => route.Booking)
   },
   {
     path: 'teachers/:teacherId/book',
-    loadComponent: () => import('./features/booking/booking-preview').then((route) => route.BookingPreview)
+    loadComponent: () => import('./features/booking/booking').then((route) => route.Booking)
   },
   {
     path: 'teachers/:teacherId',

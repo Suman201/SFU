@@ -4,9 +4,11 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, ClientSession } from 'mongoose';
+import { BookingCalendarService } from '../bookings/booking-calendar.service';
 import { CalendarClass, utcInstantsForLocal } from '@native-sfu/contracts';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import {
@@ -39,6 +41,7 @@ export class CalendarService {
     @InjectModel(StudentEnrollmentDocument.name)
     readonly enrollments: Model<StudentEnrollmentMongoDocument>,
     @InjectModel(UserDocument.name) readonly users: Model<UserMongoDocument>,
+    @Optional() private readonly bookingCalendar?: BookingCalendarService,
   ) {}
   async list(
     user: AuthenticatedUser,
@@ -135,11 +138,16 @@ export class CalendarService {
       );
     });
   }
-  async change(
+  async change(user: AuthenticatedUser, batchId: string, sessionId: string, request: CalendarChangeDto) {
+    if (this.bookingCalendar?.enabled) return this.bookingCalendar.withTeacherLock(user.sub, session => this.changeLocked(user, batchId, sessionId, request, session));
+    return this.changeLocked(user, batchId, sessionId, request);
+  }
+  private async changeLocked(
     user: AuthenticatedUser,
     batchId: string,
     sessionId: string,
     request: CalendarChangeDto,
+    transaction?: ClientSession,
   ) {
     const batch = await this.batches.findOne({
       _id: batchId,
@@ -151,6 +159,7 @@ export class CalendarService {
       throw new ForbiddenException(
         'Only the batch teacher can change this class.',
       );
+    if (batch.isPrivateBooking) throw new ConflictException('Cancel booked lessons through Bookings so payment and refund records stay consistent.');
     const item = (await this.classesForBatches([batch])).find(
       (c) => c.id === sessionId,
     );
@@ -192,6 +201,7 @@ export class CalendarService {
       scheduledAt = new Date(selected);
       if (scheduledAt.getTime() < Date.now() + 60000)
         throw new BadRequestException('Choose a future class time.');
+      await this.bookingCalendar?.assertFree(user.sub, scheduledAt, new Date(scheduledAt.getTime() + item.durationMinutes * 60000), transaction, undefined, sessionId);
       const peers = await this.batches.find({
         teacherId: user.sub,
         status: 'ACTIVE',
@@ -228,7 +238,7 @@ export class CalendarService {
             ...classSessionChannelIds(sessionId),
           },
         },
-        { upsert: true },
+        { upsert: true, session: transaction },
       );
     const kind = request.action === 'cancel' ? 'cancelled' : 'rescheduled';
     const changed = await this.sessions.findOneAndUpdate(
@@ -262,7 +272,7 @@ export class CalendarService {
           }),
         },
       },
-      { new: true },
+      { new: true, session: transaction },
     );
     if (!changed)
       throw new ConflictException(

@@ -37,6 +37,14 @@ const secretSchema = Joi.string()
   });
 
 const schema = Joi.object({
+  BOOKINGS_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  STRIPE_SECRET_KEY: Joi.string().pattern(/^sk_(test|live)_/).allow('').optional(),
+  STRIPE_WEBHOOK_SECRET: Joi.string().pattern(/^whsec_/).allow('').optional(),
+  BOOKING_CHARGE_CURRENCIES: Joi.string().default('EUR,GBP,USD').custom((value: string, helpers) => value.split(',').every(code => SUPPORTED_CURRENCIES.includes(code.trim() as typeof SUPPORTED_CURRENCIES[number])) ? value : helpers.error('any.invalid')),
+  BOOKING_CANCELLATION_NOTICE_HOURS: Joi.number().integer().min(0).max(720).default(24),
+  BOOKING_TAX_RATE_BPS: Joi.number().integer().min(0).max(10000).optional(),
+  BOOKING_TAX_NOTE: Joi.string().max(500).allow('').default(''),
+  BOOKING_WORKER_POLL_MS: Joi.number().integer().min(200).max(60000).default(2000),
   DEFAULT_CURRENCY: Joi.string().valid(...SUPPORTED_CURRENCIES).default('EUR'),
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   PORT: Joi.number().port().default(3000),

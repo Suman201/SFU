@@ -1,0 +1,175 @@
+<sfu-header />
+<main class="booking-page site-page">
+  <a class="back-link" routerLink="/bookings">← My bookings</a>
+  @if(loading()){
+  <p role="status">Loading your reservation…</p>
+  } @if(error()){
+  <p class="notice error" role="alert">{{error()}}</p>
+  } @if(order(); as item){
+  <header class="page-heading">
+    <p class="eyebrow">YOUR BOOKING</p>
+    <h1>{{statusText(item.status)}}</h1>
+    <p>{{item.title}} with {{item.teacherName}}</p>
+  </header>
+  <div class="booking-layout">
+    <section class="panel">
+      <span class="status">{{statusText(item.status)}}</span>
+      <dl class="facts">
+        <div>
+          <dt>Lesson</dt>
+          <dd>{{item.title}}</dd>
+        </div>
+        <div>
+          <dt>Teacher</dt>
+          <dd>{{item.teacherName}}</dd>
+        </div>
+        <div>
+          <dt>{{item.kind==='batch'?'Next class':'Date and time'}}</dt>
+          <dd>{{date(item.startsAt)}}</dd>
+        </div>
+        <div>
+          <dt>Reservation reference</dt>
+          <dd>{{item.id}}</dd>
+        </div>
+        <div>
+          <dt>Payment total</dt>
+          <dd>{{exact(item.price)}}</dd>
+        </div>
+        <div>
+          <dt>Tax included</dt>
+          <dd>
+            {{exact({amountMinor:item.taxMinor,currency:item.price.currency})}}
+          </dd>
+        </div>
+        <div>
+          <dt>Full-refund cancellation deadline</dt>
+          <dd>{{date(item.cancellationDeadline)}}</dd>
+        </div>
+      </dl>
+      @if(item.status==='awaiting_payment'){
+      <p class="notice">
+        Your place is held until {{date(item.expiresAt)}}. Complete payment to
+        confirm the booking.
+      </p>
+      @if(auth.user()?.id===item.studentId){
+      <div class="actions">
+        <button
+          class="primary"
+          type="button"
+          [disabled]="busy()"
+          (click)="pay()"
+        >
+          {{busy()?'Opening checkout…':'Pay '+exact(item.price)+' securely →'}}
+        </button>
+      </div>
+      } } @else if(item.status==='processing'){
+      <p class="notice" role="status">
+        Your payment is processing. This page updates when the payment provider
+        confirms the result.
+      </p>
+      } @else if(item.status==='confirmed'){
+      <p class="notice" role="status">
+        Your booking is confirmed. Your teacher and class details are saved in
+        your account.
+      </p>
+      <div class="actions">
+        @if(item.sessionId){<a
+          class="primary"
+          [routerLink]="auth.role()==='teacher'?'/class-session/teacher':'/class-session/student'"
+          [queryParams]="{batchId:item.batchId,sessionId:item.sessionId}"
+          >Open lesson →</a
+        >} @else {<a class="primary" routerLink="/calendar"
+          >View class calendar →</a
+        >}
+      </div>
+      } @else if(item.status==='expired'){
+      <p class="notice">
+        The payment window ended and the reservation was released. Choose
+        another available time.
+      </p>
+      <a routerLink="/teachers">Find a lesson</a>} @else
+      if(item.status==='refund_pending'){
+      <p class="notice" role="status">
+        Your cancellation is recorded. The refund is being returned to the
+        original payment method; it is complete only when the status below says
+        succeeded.
+      </p>
+      } @else if(item.status==='payment_review'){
+      <p class="notice">
+        This payment needs support review. No purchased class access has been
+        granted for this order.
+      </p>
+      } @if(item.canCancel){
+      <section style="margin-top: 28px">
+        <h2>
+          {{item.paidAt?'Cancel this booking':'Release this reservation'}}
+        </h2>
+        <label
+          >Reason<textarea
+            [(ngModel)]="reason"
+            name="reason"
+            minlength="5"
+            maxlength="500"
+            rows="3"
+          ></textarea>
+        </label>
+        <div class="actions">
+          <button
+            type="button"
+            class="secondary"
+            [disabled]="busy() || reason.trim().length<5"
+            (click)="cancel()"
+          >
+            {{item.paidAt?'Cancel and request refund':'Cancel reservation'}}
+          </button>
+        </div>
+      </section>
+      } @if(item.refunds.length){
+      <h2 style="margin-top: 28px">Refunds</h2>
+      <ul class="refund-list">
+        @for(refund of item.refunds; track refund.id){
+        <li>
+          <strong
+            >{{exact({amountMinor:refund.amountMinor,currency:refund.currency})}}
+            · {{refund.status}}</strong
+          ><small>{{refund.reason}}</small>@if(refund.creditNoteId){<button
+            type="button"
+            class="secondary"
+            (click)="download(refund.creditNoteId)"
+          >
+            Download credit note</button
+          >}
+        </li>
+        }
+      </ul>
+      }
+    </section>
+    <aside class="panel summary">
+      <p class="eyebrow">PAYMENT SUMMARY</p>
+      <div class="total">
+        <span>Agreed charge currency: {{item.price.currency}}</span
+        ><strong>{{money.display(item.price)}}</strong>
+      </div>
+      <p class="muted">
+        Your payment is for exactly {{exact(item.price)}}. Any equivalent shown
+        in another currency is an estimate.
+      </p>
+      @if(item.invoiceId){<button
+        type="button"
+        class="secondary"
+        (click)="download()"
+      >
+        Download paid invoice</button
+      >}
+      <p class="policy">
+        Invoices and credit notes stay available with your booking. Payments and
+        refunds use the original payment method.
+      </p>
+      <button type="button" class="secondary" (click)="refresh()">
+        Refresh status
+      </button>
+    </aside>
+  </div>
+  }
+</main>
+<sfu-footer />

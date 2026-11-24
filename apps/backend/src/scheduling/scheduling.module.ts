@@ -1,3 +1,4 @@
+import { BookingCalendarModule } from '../bookings/booking-calendar.module';
 import { GoogleCalendarService } from './google-calendar.service';
 import {
   GoogleCalendarController,
@@ -25,6 +26,7 @@ import {
 } from './calendar-notice.schema';
 @Module({
   imports: [
+    BookingCalendarModule,
     AuthModule,
     DatabaseModule,
     NotificationsModule,

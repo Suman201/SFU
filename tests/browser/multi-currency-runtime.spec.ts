@@ -40,6 +40,13 @@ test('real backend: currency preferences, original prices, decimal invoices, leg
     const teacher = await login('teacher.one@example.com');
     const student = await login('student.one@example.com');
     const operator = await login('admin@example.com');
+    // Currency display uses a real published catalogue; the removed checkout
+    // preview no longer supplies sample amounts.
+    const teacherId = teacher.user.id;
+    await connection.db!.collection('users').updateOne({ _id: new mongoose.Types.ObjectId(teacherId) } as never, { $set: { publicProfileEnabled: true, tutorReviewStatus: 'approved' } });
+    await connection.db!.collection('lesson_offers').insertOne({ _id: 'currency-offer', teacherId, value: { teacherId, title: 'Currency learning lesson', description: 'Published lesson price', durationMinutes: 30, price: { amountMinor: 2800, currency: 'EUR' }, netMinor: 2800, taxRateBps: 0, active: true, version: 0 } } as never);
+    await connection.db!.collection('lesson_slots').insertOne({ _id: 'currency-slot', teacherId, offerId: 'currency-offer', startsAt: new Date(now + 72 * 3600000), endsAt: new Date(now + 72 * 3600000 + 30 * 60000), status: 'open' } as never);
+    const bookingPath = '/teachers/' + teacherId + '/book';
     const studentHeaders = { Authorization: 'Bearer ' + student.accessToken };
     const operatorHeaders = { Authorization: 'Bearer ' + operator.accessToken };
     expect((await request.patch(apiUrl + '/currencies/preference', { data: { currency: 'INR' } })).status()).toBe(401);
@@ -50,10 +57,10 @@ test('real backend: currency preferences, original prices, decimal invoices, leg
     const guest = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); contexts.push(guest);
     const page = await guest.newPage(); const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(stack.frontendBaseUrl + '/booking');
+    await page.goto(stack.frontendBaseUrl + bookingPath);
     const selector = page.getByRole('combobox', { name: 'Display currency' });
     await selector.selectOption('INR');
-    const summary = page.getByRole('complementary', { name: 'Lesson summary' });
+    const summary = page.getByRole('complementary', { name: 'Booking summary' });
     await expect(summary).toContainText('2,520.00');
     await expect(summary).toContainText('€28.00 EUR');
     await mkdir(folder, { recursive: true });
@@ -69,7 +76,7 @@ test('real backend: currency preferences, original prices, decimal invoices, leg
 
     const learner = await browser.newContext({ viewport: { width: 1440, height: 1000 } }); contexts.push(learner);
     await learner.addInitScript(({ token }) => sessionStorage.setItem('native-sfu.auth.accessToken', token), { token: student.accessToken });
-    const accountPage = await learner.newPage(); await accountPage.goto(stack.frontendBaseUrl + '/booking');
+    const accountPage = await learner.newPage(); await accountPage.goto(stack.frontendBaseUrl + bookingPath);
     const accountChoice = accountPage.getByRole('combobox', { name: 'Display currency' });
     await expect(accountPage.getByRole('button', { name: 'Sign out' })).toBeVisible();
     await accountChoice.selectOption('JPY');
@@ -80,7 +87,7 @@ test('real backend: currency preferences, original prices, decimal invoices, leg
 
     const fresh = await browser.newContext(); contexts.push(fresh);
     await fresh.addInitScript(({ token }) => sessionStorage.setItem('native-sfu.auth.accessToken', token), { token: student.accessToken });
-    const freshPage = await fresh.newPage(); await freshPage.goto(stack.frontendBaseUrl + '/booking');
+    const freshPage = await fresh.newPage(); await freshPage.goto(stack.frontendBaseUrl + bookingPath);
     await expect(freshPage.getByRole('combobox', { name: 'Display currency' })).toHaveValue('JPY');
 
     const newPrice = { name: 'Kuwaiti accounting price', year: new Date().getUTCFullYear(), maxCapacity: 10, feeMinor: 1234, feeCurrency: 'KWD', schedule: [{ dayOfWeek: 'MONDAY', startTime: '10:00' }] };

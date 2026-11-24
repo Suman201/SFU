@@ -11,6 +11,7 @@ export function safeAuthReturnPath(
     const path = url.pathname.replace(/\/$/, '');
     if (
       path === '/calendar' ||
+      (role === 'student' && (path === '/booking' || /^\/teachers\/[^/]+\/book$/.test(path) || path.startsWith('/booking/batches/') || path.startsWith('/bookings'))) ||
       path === `/class-session/${role}` ||
       path.startsWith(`/${role}/`)
     )

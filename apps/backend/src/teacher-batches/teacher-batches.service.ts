@@ -1,3 +1,4 @@
+import { BookingCalendarService } from '../bookings/booking-calendar.service';
 import { batchMoneyFields, batchPriceWrite } from './batch-money';
 import { validTimeZone } from '@native-sfu/contracts';
 import { scheduleEvent } from '../scheduling/schedule-event';
@@ -64,7 +65,8 @@ export class TeacherBatchesService {
     @InjectConnection() private readonly connection: Connection,
     private readonly studentEnrollments: StudentEnrollmentsService,
     private readonly profiles: ProfilesService,
-    @Optional() private readonly auditLogs?: AuditLogsService
+    @Optional() private readonly auditLogs?: AuditLogsService,
+    @Optional() private readonly bookingCalendar?: BookingCalendarService
   ) {}
 
   async create(teacherId: string, dto: CreateTeacherBatchDto): Promise<Record<string, unknown>> {
@@ -73,6 +75,7 @@ export class TeacherBatchesService {
     const dates = this.yearDates(dto.year);
 
     return this.withTransaction(async (session) => {
+      await this.bookingCalendar?.assertBatchCompatible(teacherId, { name: dto.name, ...dates, startDate: dates.startDate, endDate: dates.endDate, scheduleTimezone: dto.scheduleTimezone ?? 'UTC' }, schedule as BatchScheduleMongoDocument[], session);
       const [batch] = await this.batches.create(
         [
           {
@@ -117,9 +120,11 @@ export class TeacherBatchesService {
 
   async update(teacherId: string, id: string, dto: UpdateTeacherBatchDto): Promise<Record<string, unknown>> {
     const existing = await this.findOwnedBatch(teacherId, id);
+    if (existing.isPrivateBooking) throw new ConflictException('Manage booked lessons through Bookings so payments and refunds stay consistent.');
     const nextName = dto.name?.trim() ?? existing.name;
     const nextYear = dto.year ?? existing.year;
     const schedule = dto.schedule ? this.normalizeSchedule(dto.schedule) : undefined;
+    if (schedule || dto.year !== undefined) await this.assertBookingMutable(existing);
 
     if (nextName !== existing.name || nextYear !== existing.year) {
       await this.assertUniqueBatch(teacherId, nextName, nextYear, id);
@@ -137,7 +142,7 @@ export class TeacherBatchesService {
     }
     if (dto.maxCapacity !== undefined) {
       const enrolledCount = await this.currentEnrolledCount(id);
-      if (dto.maxCapacity < enrolledCount) {
+      if (dto.maxCapacity < enrolledCount + (existing.paymentReservedCount ?? 0)) {
         throw new BadRequestException('Max capacity cannot be less than enrolled student count.');
       }
       update.maxCapacity = dto.maxCapacity;
@@ -145,6 +150,7 @@ export class TeacherBatchesService {
     Object.assign(update, batchPriceWrite(dto, existing));
 
     return this.withTransaction(async (session) => {
+      await this.assertCapacityUpdate(id, update.maxCapacity, session);
       if (Object.keys(update).length) {
         await this.batches.updateOne({ _id: id, teacherId, deletedAt: { $exists: false } }, { $set: update }, { session });
       }
@@ -160,6 +166,7 @@ export class TeacherBatchesService {
     next: BatchScheduleDto[],
     transaction: ClientSession | undefined
   ): Promise<void> {
+    await this.bookingCalendar?.assertBatchCompatible(batch.teacherId, batch, next as BatchScheduleMongoDocument[], transaction);
     const previous = await this.schedules.find({ batchId: batch.id }).session(transaction ?? null);
     const changedAt = new Date();
     const replacement = withScheduleHistory(next, previous, changedAt);
@@ -189,6 +196,7 @@ export class TeacherBatchesService {
   }
 
   async updateStatus(teacherId: string, id: string, status: BatchStatus): Promise<Record<string, unknown>> {
+    await this.assertBookingMutable(await this.findOwnedBatch(teacherId, id));
     if (status === 'CANCELLED' || status === 'COMPLETED') await this.cancelFutureClasses(teacherId, id);
     const batch = await this.batches.findOneAndUpdate(
       { _id: id, teacherId, deletedAt: { $exists: false } },
@@ -202,6 +210,7 @@ export class TeacherBatchesService {
   }
 
   async remove(teacherId: string, id: string): Promise<void> {
+    await this.assertBookingMutable(await this.findOwnedBatch(teacherId, id));
     await this.cancelFutureClasses(teacherId, id);
     const batch = await this.batches.findOneAndUpdate(
       { _id: id, teacherId, deletedAt: { $exists: false } },
@@ -315,6 +324,7 @@ export class TeacherBatchesService {
     await this.assertUniqueBatch(teacher.id, request.name, request.year);
     const dates = this.yearDates(request.year);
     const detail = await this.withTransaction(async (session) => {
+      await this.bookingCalendar?.assertBatchCompatible(teacher.id, { name: request.name, startDate: dates.startDate, endDate: dates.endDate, scheduleTimezone: teacher.timezone ?? 'UTC' }, schedule as BatchScheduleMongoDocument[], session);
       const [batch] = await this.batches.create(
         [
           {
@@ -357,10 +367,12 @@ export class TeacherBatchesService {
   async updateAdminBatch(batchId: string, request: AdminBatchUpdateRequest, user: AuthenticatedUser): Promise<AdminBatchDetail> {
     this.assertAdmin(user);
     const existing = await this.findAdminBatch(batchId);
+    if (existing.isPrivateBooking) throw new ConflictException('Manage booked lessons through Bookings so payments and refunds stay consistent.');
     const nextTeacherId = request.teacherId?.trim() || existing.teacherId;
     const nextName = request.name?.trim() || existing.name;
     const nextYear = request.year ?? existing.year;
     const schedule = request.schedule ? this.normalizeSchedule(request.schedule) : undefined;
+    if (schedule || request.year !== undefined || request.teacherId !== undefined || request.status === 'CANCELLED' || request.status === 'COMPLETED') await this.assertBookingMutable(existing);
     const structuralChange = Boolean(
       schedule || (request.year !== undefined && nextYear !== existing.year) || (request.teacherId !== undefined && nextTeacherId !== existing.teacherId)
     );
@@ -375,7 +387,7 @@ export class TeacherBatchesService {
     }
     if (request.maxCapacity !== undefined) {
       const enrolledCount = await this.currentEnrolledCount(batchId);
-      if (request.maxCapacity < enrolledCount) {
+      if (request.maxCapacity < enrolledCount + (existing.paymentReservedCount ?? 0)) {
         throw new BadRequestException('Max capacity cannot be less than enrolled student count.');
       }
     }
@@ -395,6 +407,7 @@ export class TeacherBatchesService {
     if (request.status !== undefined) update.status = request.status;
     if(request.status==='CANCELLED'||request.status==='COMPLETED') await this.cancelFutureClasses(existing.teacherId,batchId);
     const detail = await this.withTransaction(async (session) => {
+      await this.assertCapacityUpdate(batchId, update.maxCapacity, session);
       if (Object.keys(update).length) {
         await this.batches.updateOne({ _id: batchId, deletedAt: { $exists: false } }, { $set: update }, { session });
         if (update.teacherId !== undefined) {
@@ -440,6 +453,7 @@ export class TeacherBatchesService {
 
   async updateAdminBatchStatus(batchId: string, status: BatchStatus, user: AuthenticatedUser): Promise<AdminBatchDetail> {
     this.assertAdmin(user);
+    await this.assertBookingMutable(await this.findAdminBatch(batchId));
     if(status==='CANCELLED'||status==='COMPLETED'){const previous=await this.findAdminBatch(batchId);await this.cancelFutureClasses(previous.teacherId,batchId);}
     const batch = await this.batches.findOneAndUpdate({ _id: batchId, deletedAt: { $exists: false } }, { $set: { status } }, { new: true }).exec();
     if (!batch) {
@@ -470,6 +484,19 @@ export class TeacherBatchesService {
     this.assertAdmin(user);
     const detail = await this.adminBatchDetail(batchId);
     return { batchId, items: detail.sessions, total: detail.sessions.length };
+  }
+
+  private async assertCapacityUpdate(batchId: string, capacity: number | undefined, session?: ClientSession): Promise<void> {
+    if (!this.bookingCalendar?.enabled || capacity === undefined) return;
+    const current = await this.batches.findById(batchId).session(session ?? null);
+    if (!current) throw new NotFoundException('Batch not found.');
+    if (current.enrollmentLockUntil && current.enrollmentLockUntil > new Date()) throw new ConflictException('Enrollment is being updated. Try again.');
+    const active = await this.studentEnrollments.countActiveByBatch(batchId, session);
+    if (capacity < active + (current.paymentReservedCount ?? 0)) throw new ConflictException('Capacity cannot be lower than enrolled students and held places.');
+  }
+
+  private async assertBookingMutable(batch: BatchMongoDocument): Promise<void> {
+    if (batch.isPrivateBooking || (batch.paymentReservedCount ?? 0) > 0 || (this.bookingCalendar?.enabled && await this.studentEnrollments.hasPaidBookings(batch.id))) throw new ConflictException('This class has purchased access or payment reservations. Resolve bookings and refunds before changing its schedule or status.');
   }
 
   private async findOwnedBatch(teacherId: string, id: string, session?: ClientSession): Promise<BatchMongoDocument> {

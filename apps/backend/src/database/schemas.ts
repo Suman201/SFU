@@ -639,6 +639,14 @@ export type ClassSessionStatus = (typeof CLASS_SESSION_STATUSES)[number];
 
 @Schema({ collection: 'batches', timestamps: true })
 export class BatchDocument {
+  @Prop({ type: Boolean, default: false })
+  isPrivateBooking!: boolean;
+
+  @Prop({ type: String })
+  bookingOrderId?: string;
+
+  @Prop({ type: Number, default: 0, min: 0 })
+  paymentReservedCount!: number;
   @Prop({ type: String, default: () => randomUUID() })
   _id!: string;
 
@@ -700,7 +708,7 @@ export class BatchDocument {
 export const BatchSchema = SchemaFactory.createForClass(BatchDocument);
 BatchSchema.index(
   { teacherId: 1, name: 1, year: 1 },
-  { unique: true, partialFilterExpression: { deletedAt: { $exists: false } } }
+  { unique: true, partialFilterExpression: { deletedAt: null } }
 );
 BatchSchema.index({ teacherId: 1, deletedAt: 1, createdAt: -1 });
 
@@ -729,6 +737,8 @@ export const SUPPORT_REQUEST_STATUSES: SupportRequestStatus[] = ['open', 'in_rev
 
 @Schema({ collection: 'student_enrollments', timestamps: true })
 export class StudentEnrollmentDocument {
+  @Prop({ type: String, index: true })
+  paymentOrderId?: string;
   @Prop({ type: String, default: () => randomUUID() })
   _id!: string;
 
@@ -790,7 +800,7 @@ StudentEnrollmentSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      deletedAt: { $exists: false },
+      deletedAt: null,
       status: 'active'
     }
   }
@@ -1540,7 +1550,7 @@ export class AssignmentSubmissionDocument {
 export const AssignmentSubmissionSchema = SchemaFactory.createForClass(AssignmentSubmissionDocument);
 AssignmentSubmissionSchema.index(
   { assignmentId: 1, studentId: 1 },
-  { unique: true, partialFilterExpression: { deletedAt: { $exists: false } } }
+  { unique: true, partialFilterExpression: { deletedAt: null } }
 );
 AssignmentSubmissionSchema.index({ batchId: 1, studentId: 1, status: 1, updatedAt: -1 });
 AssignmentSubmissionSchema.index({ assignmentId: 1, status: 1, updatedAt: -1 });
@@ -2619,7 +2629,7 @@ export class ParticipantDocument {
 export const ParticipantSchema = SchemaFactory.createForClass(ParticipantDocument);
 ParticipantSchema.index({ roomId: 1, userId: 1, leftAt: 1 });
 ParticipantSchema.index({ roomId: 1, nodeId: 1, leftAt: 1 });
-ParticipantSchema.index({ roomId: 1, socketId: 1 }, { unique: true, partialFilterExpression: { leftAt: { $exists: false } } });
+ParticipantSchema.index({ roomId: 1, socketId: 1 }, { unique: true, partialFilterExpression: { leftAt: null } });
 ParticipantSchema.index({ roomId: 1, role: 1 });
 ParticipantSchema.index({ roomId: 1, admitted: 1, leftAt: 1 });
 ParticipantSchema.index({ roomId: 1, handRaised: 1, handRaisedAt: 1 });

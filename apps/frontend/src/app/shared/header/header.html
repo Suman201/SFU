@@ -103,7 +103,7 @@
     </nav>
     <div class="header-actions">
       <sfu-currency-selector />
-      @if(auth.authenticated()){<sfu-class-notices />}
+      @if(auth.authenticated()){<a class="login-link" [routerLink]="auth.role()==='teacher'?'/teacher/bookings':'/bookings'" (click)="closeMenu()">Bookings</a><sfu-class-notices />}
       @if(auth.role()==='teacher'){<sfu-tutor-notices />}
       <button
         class="theme-toggle"

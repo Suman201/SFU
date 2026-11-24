@@ -11,7 +11,7 @@ Open **Admin → Invoices**. The module uses the existing backend, MongoDB, admi
 5. Download or send the invoice PDF to the saved customer email. Delivery state is recorded; failed manual sends can be retried. An SMTP-disabled result is never displayed as sent.
 6. Record a full payment received outside the portal using its date and reference. The payment update atomically queues the invoice email. The worker sends the invoice automatically and retries failures. This operation does not collect money or grant class enrollment.
 
-Unpaid invoices can be voided with a reason. Their number is retained and subsequent PDF downloads are marked VOID. Paid invoices cannot be voided; credit notes, partial payments and refunds are outside this module. The payment gateway and real booking backend remain separate work. A future verified gateway event must create/issue the corresponding invoice idempotently and invoke the payment workflow; the current static checkout never does so.
+Unpaid invoices can be voided with a reason. Their number is retained and subsequent PDF downloads are marked VOID. Paid invoices cannot be voided. [Booking payments](booking-preview.md) now create immutable paid invoices after provider verification and separate credit notes after confirmed partial or full refunds. Manual invoices continue to use the existing issue/payment workflow; they do not charge a card.
 
 ## Amounts and tax
 

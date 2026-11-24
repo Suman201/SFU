@@ -1,0 +1,345 @@
+:host {
+  display: block;
+  color: var(--text);
+}
+.booking-page {
+  width: var(--site-content-width);
+  margin: 34px auto 64px;
+  min-height: 55vh;
+}
+.back-link {
+  display: inline-block;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 24px;
+  text-decoration: none;
+}
+.page-heading {
+  margin-bottom: 28px;
+}
+.eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--brand-green, #458b73);
+  margin: 0 0 12px;
+}
+h1 {
+  font-size: clamp(26px, 3vw, 38px);
+  letter-spacing: -0.04em;
+  margin: 0 0 12px;
+}
+h2 {
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  margin: 0 0 18px;
+}
+p {
+  line-height: 1.7;
+  margin: 8px 0;
+  font-size: 13px;
+}
+small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.muted,
+.page-heading > p:last-child {
+  color: var(--muted);
+}
+.booking-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 26px;
+  align-items: start;
+}
+.booking-main {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--surface-radius, 12px);
+  padding: 24px;
+  min-width: 0;
+}
+.summary {
+  position: sticky;
+  top: 100px;
+}
+.summary small {
+  display: block;
+}
+.summary .total {
+  display: grid;
+  gap: 10px;
+  border-block: 1px solid var(--line);
+  padding-block: 18px;
+  margin-block: 22px;
+}
+.total strong {
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+.total span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.policy {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.offer-card {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 17px;
+  margin-top: 12px;
+  cursor: pointer;
+}
+.offer-card input {
+  width: 16px;
+  margin-top: 3px;
+  accent-color: var(--brand-green, #458b73);
+}
+.offer-card strong {
+  font-size: 15px;
+}
+.offer-card small {
+  display: block;
+  margin-top: 5px;
+}
+.offer-card .price {
+  grid-column: 2;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.selected {
+  border-color: var(--brand-green, #458b73) !important;
+  background: color-mix(
+    in srgb,
+    var(--brand-green, #458b73) 7%,
+    var(--panel)
+  ) !important;
+}
+.section-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+.compact {
+  font-size: 11px;
+  max-width: 230px;
+}
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 18px;
+}
+.slot-grid button {
+  padding: 12px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+.billing-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 17px;
+}
+label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+input,
+textarea,
+select {
+  font: inherit;
+  font-size: 13px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+textarea {
+  resize: vertical;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--brand-green, #458b73);
+  outline-offset: 3px;
+}
+.wide {
+  grid-column: 1/-1;
+}
+.primary {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  background: var(--brand-rose, #f26076);
+  color: #191f27;
+  border: 0;
+  border-radius: 8px;
+  padding: 13px 18px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+}
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 15px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: none;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.notice {
+  padding: 13px 16px;
+  background: color-mix(in srgb, var(--brand-amber, #ffd150) 10%, var(--panel));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.notice.error {
+  border-color: var(--brand-rose, #f26076);
+}
+.empty {
+  text-align: left;
+  padding: 38px;
+}
+.empty .primary {
+  margin-top: 20px;
+}
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+.facts {
+  display: grid;
+  gap: 0;
+  margin: 24px 0;
+}
+.facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  border-top: 1px solid var(--line);
+  padding: 14px 0;
+  font-size: 12px;
+}
+.facts dt {
+  color: var(--muted);
+}
+.facts dd {
+  margin: 0;
+  max-width: 65%;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.status {
+  display: inline-flex;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  font-size: 11px;
+  color: var(--brand-green, #458b73);
+}
+.list-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.data-table-shell {
+  margin-top: 24px;
+}
+.refund-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+}
+.refund-list li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+.refund-list small {
+  display: block;
+  margin-top: 6px;
+}
+@media (max-width: 900px) {
+  .booking-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .summary {
+    position: static;
+  }
+  .booking-page {
+    margin-top: 24px;
+  }
+  .summary .total {
+    max-width: 100%;
+  }
+}
+@media (max-width: 520px) {
+  .panel {
+    padding: 19px;
+  }
+  .billing-form,
+  .slot-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .facts > div {
+    gap: 14px;
+  }
+  .facts dd {
+    max-width: 62%;
+  }
+  .empty {
+    padding: 24px;
+  }
+  .page-heading {
+    margin-bottom: 22px;
+  }
+}

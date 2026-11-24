@@ -20,6 +20,7 @@ export const routes: Routes = [
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
       { path: 'errors', loadComponent: () => import('./features/errors/errors').then(m => m.ErrorsAdmin) },
+      { path: 'bookings', loadComponent: () => import('./features/bookings/bookings').then(route => route.AdminBookings) },
       { path: 'invoices', loadComponent: () => import('./features/invoices/invoices').then(m => m.InvoicesAdmin) },
       { path: 'invoices/:id', loadComponent: () => import('./features/invoices/invoices').then(m => m.InvoicesAdmin) },
       { path: 'teaching-catalog', loadComponent: () => import('./features/teaching-catalog/teaching-catalog').then(m => m.TeachingCatalogAdmin) },

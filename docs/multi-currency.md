@@ -34,7 +34,7 @@ Invoices support the shared currencies. Editors, PDF generation and emails respe
 
 Promotion prices remain the existing EUR price schedule; reference equivalents can be displayed without changing the payable EUR amount. Promotion confirmation remains an administrator's record of an external payment.
 
-Booking remains an explicit sample preview. Currency selection changes sample display amounts only. It creates no order, payment, booking or enrollment. Real checkout must create a server-owned order, lock the exact charge amount/currency and any applied FX quote, verify provider webhooks idempotently, and preserve original payment amounts for refunds, invoices and teacher earnings. Never submit the client reference conversion as an authorised charge or refund amount.
+[Real bookings](booking-preview.md) use published server-owned prices and expiring reservations. The original amount, currency, billing details and tax treatment are frozen on the order. Verified provider payments create enrollment and invoices; confirmed refunds create credit notes in the original currency. Display currency changes only indicative equivalents. Client reference conversions are never authorized charge or refund amounts.
 
 ## Verification
 

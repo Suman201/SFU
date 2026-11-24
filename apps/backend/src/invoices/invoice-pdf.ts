@@ -6,7 +6,10 @@ import {
   type InvoiceRecord,
 } from '@native-sfu/contracts';
 
-export function renderInvoicePdf(invoice: InvoiceRecord): Promise<Buffer> {
+export function renderInvoicePdf(
+  invoice: InvoiceRecord,
+  kind: 'invoice' | 'credit_note' = 'invoice',
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const assets = join(__dirname, '../../assets/invoices');
     const doc = new PDFDocument({
@@ -15,7 +18,7 @@ export function renderInvoicePdf(invoice: InvoiceRecord): Promise<Buffer> {
       bufferPages: true,
       font: join(assets, 'DejaVuSans.ttf'),
       info: {
-        Title: `Invoice ${invoice.number || 'Draft'}`,
+        Title: `${kind === 'credit_note' ? 'Credit note' : 'Invoice'} ${invoice.number || 'Draft'}`,
         Author: invoice.seller.name,
       },
     });
@@ -69,11 +72,13 @@ export function renderInvoicePdf(invoice: InvoiceRecord): Promise<Buffer> {
     doc.image(join(assets, 'sapiovian-mark.png'), 44, 41, { fit: [25, 35] });
     doc.image(join(assets, 'sapiovian-wordmark.png'), 76, 44, { width: 115 });
     text(
-      invoice.status === 'draft'
-        ? 'DRAFT INVOICE'
-        : invoice.status === 'void'
-          ? 'VOID INVOICE'
-          : 'INVOICE',
+      kind === 'credit_note'
+        ? 'CREDIT NOTE'
+        : invoice.status === 'draft'
+          ? 'DRAFT INVOICE'
+          : invoice.status === 'void'
+            ? 'VOID INVOICE'
+            : 'INVOICE',
       300,
       43,
       251,
@@ -219,7 +224,21 @@ export function renderInvoicePdf(invoice: InvoiceRecord): Promise<Buffer> {
       y += h - 12;
     };
     block('TAX INFORMATION', invoice.taxNote);
-    block('PAYMENT INFORMATION', invoice.seller.paymentInstructions);
+    block(
+      kind === 'credit_note' ? 'REFUND INFORMATION' : 'PAYMENT INFORMATION',
+      kind === 'credit_note'
+        ? 'Refunded to the original payment method. This credit note refers to invoice ' +
+            invoice.reference +
+            '.'
+        : invoice.status === 'paid'
+          ? 'Paid' +
+            (invoice.paidAt ? ' on ' + invoice.paidAt.slice(0, 10) : '') +
+            '. No balance due.' +
+            (invoice.paymentReference
+              ? '\nPayment reference: ' + invoice.paymentReference
+              : '')
+          : invoice.seller.paymentInstructions,
+    );
     block('NOTES', invoice.notes);
     if (invoice.status === 'void')
       block(

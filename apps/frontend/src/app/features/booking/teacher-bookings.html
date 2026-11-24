@@ -1,0 +1,190 @@
+<sfu-header />
+<main class="booking-page site-page">
+  <a class="back-link" routerLink="/teacher/bookings">← Lesson bookings</a>
+  <header class="page-heading">
+    <p class="eyebrow">TEACH ON YOUR TERMS</p>
+    <h1>Lessons and availability.</h1>
+    <p>Publish real lesson offers and the times students can reserve.</p>
+  </header>
+  @if(error()){
+  <p class="notice error" role="alert">{{error()}}</p>
+  }@if(notice()){
+  <p class="notice" role="status">{{notice()}}</p>
+  }
+  <div class="booking-layout">
+    <section class="booking-main">
+      <section class="panel">
+        <h2>Add a lesson offer</h2>
+        <form class="billing-form" (ngSubmit)="createOffer($event)">
+          <label class="wide"
+            >Lesson title<input
+              name="title"
+              [(ngModel)]="title"
+              required
+              minlength="3"
+              maxlength="120" /></label
+          ><label class="wide"
+            >Description<textarea
+              name="description"
+              [(ngModel)]="description"
+              maxlength="1000"
+              rows="3"
+            ></textarea></label
+          ><label
+            >Duration in minutes<input
+              name="duration"
+              type="number"
+              [(ngModel)]="duration"
+              min="15"
+              max="180"
+              step="5"
+              required /></label
+          ><label
+            >Price before tax<input
+              name="amount"
+              type="number"
+              [(ngModel)]="amount"
+              min="0"
+              [step]="step()"
+              required /></label
+          ><label
+            >Price currency<select name="currency" [(ngModel)]="currency">
+              @for(code of data()?.chargeCurrencies||['EUR','GBP','USD'];track
+              code){
+              <option [value]="code">{{code}}</option>
+              }
+            </select></label
+          ><button class="primary wide" [disabled]="busy()" type="submit">
+            Publish lesson offer
+          </button>
+        </form>
+      </section>
+      <section class="panel">
+        <h2>Publish an available time</h2>
+        <form class="billing-form" (ngSubmit)="publish($event)">
+          <label class="wide"
+            >Lesson offer<select name="offerId" [(ngModel)]="offerId" required>
+              <option value="">Choose a lesson</option>
+              @for(offer of data()?.offers;track offer.id){@if(offer.active){
+              <option [value]="offer.id">
+                {{offer.title}} · {{offer.durationMinutes}} minutes
+              </option>
+              }}
+            </select></label
+          ><label
+            >Date and local time<input
+              name="localTime"
+              type="datetime-local"
+              [ngModel]="localTime()"
+              (ngModelChange)="localTime.set($event)"
+              step="300"
+              required /></label
+          ><label
+            >Timezone<input
+              name="timezone"
+              [ngModel]="timezone()"
+              (ngModelChange)="timezone.set($event)"
+              required /></label
+          >@if(instants().length>1){<label class="wide"
+            >This clock time occurs twice. Choose its UTC offset<select
+              name="chosenInstant"
+              [(ngModel)]="chosenInstant"
+              required
+            >
+              <option value="">Choose the intended instant</option>
+              @for(instant of instants();track instant){
+              <option [value]="instant">{{instant}}</option>
+              }
+            </select></label
+          >}
+          <p class="muted wide">
+            Publish five-minute boundaries at least one hour ahead. Existing
+            classes and reservations cannot overlap.
+          </p>
+          <button
+            class="primary wide"
+            type="submit"
+            [disabled]="busy() || !data()?.enabled"
+          >
+            Publish available time
+          </button>
+        </form>
+      </section>
+    </section>
+    <aside class="panel summary">
+      <h2>Your lesson offers</h2>
+      @for(offer of data()?.offers;track offer.id){
+      <div class="offer-card">
+        <span class="wide"
+          ><strong>{{offer.title}}</strong
+          ><small
+            >{{offer.durationMinutes}} minutes ·
+            {{offer.active?'Published':'Paused'}}</small
+          >
+          <p>{{money.display(offer.price)}} including tax</p>
+          <button
+            class="secondary"
+            type="button"
+            [disabled]="busy()"
+            (click)="toggle(offer)"
+          >
+            {{offer.active?'Pause offer':'Publish offer'}}
+          </button></span
+        >
+      </div>
+      }@empty{
+      <p>No lesson offers yet.</p>
+      }@if(data()&&!data()!.enabled){
+      <p class="notice">
+        Online reservations are not enabled yet. You can prepare offers now.
+      </p>
+      }
+    </aside>
+  </div>
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <h2>Upcoming lesson availability</h2>
+      <a class="secondary" routerLink="/teacher/bookings">View reservations</a>
+    </div>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Lesson</th>
+            <th>Starts</th>
+            <th>Ends</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for(slot of data()?.slots;track slot.id){
+          <tr>
+            <td>{{offerTitle(slot.offerId)}}</td>
+            <td>{{date(slot.startsAt)}}</td>
+            <td>{{date(slot.endsAt)}}</td>
+            <td><span class="data-pill">{{slot.status}}</span></td>
+            <td>
+              @if(slot.status==='open'){<button
+                class="table-action"
+                type="button"
+                [disabled]="busy()"
+                (click)="withdraw(slot.id)"
+              >
+                Withdraw</button
+              >}@else{<a class="table-action" routerLink="/teacher/bookings"
+                >View bookings</a
+              >}
+            </td>
+          </tr>
+          }@empty{
+          <tr>
+            <td colspan="5">No upcoming times published.</td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<sfu-footer />

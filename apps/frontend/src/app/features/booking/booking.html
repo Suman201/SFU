@@ -1,0 +1,188 @@
+<sfu-header />
+<main class="booking-page site-page">
+  <a class="back-link" routerLink="/teachers">← Find a teacher</a>
+  @if(loading()){
+  <p role="status">Loading available lessons…</p>
+  } @if(error()){
+  <p class="notice error" role="alert">{{error()}}</p>
+  } @if(!catalogue() && !batch() && !loading()){
+  <section class="empty panel">
+    <p class="eyebrow">PERSONAL LEARNING</p>
+    <h1>Find your next lesson.</h1>
+    <p>Choose a teacher to see their real lesson offers and available times.</p>
+    <a class="primary" routerLink="/teachers">Find a teacher →</a>
+  </section>
+  } @if(catalogue() || batch()){
+  <header class="page-heading">
+    <p class="eyebrow">BOOK YOUR NEXT STEP</p>
+    <h1>{{batch()?'Book your class.':'A lesson that fits your goals.'}}</h1>
+    <p>
+      {{batch()?.teacherName || catalogue()?.teacher?.name}} · {{batch()?.title
+      || catalogue()?.teacher?.headline}}
+    </p>
+  </header>
+  <div class="booking-layout">
+    <section class="booking-main">
+      @if(catalogue(); as data){
+      <section class="panel">
+        <h2>Choose your lesson</h2>
+        @for(item of data.offers; track item.id){
+        <label class="offer-card" [class.selected]="offerId()===item.id"
+          ><input
+            type="radio"
+            name="lesson"
+            [checked]="offerId()===item.id"
+            (change)="selectOffer(item.id)"
+          /><span
+            ><strong>{{item.title}}</strong
+            ><small>{{item.durationMinutes}} minutes · One-to-one</small>
+            <p>{{item.description}}</p></span
+          ><strong class="price">{{money.display(item.price)}}</strong></label
+        >
+        } @empty {
+        <p>
+          No lessons are published yet. Contact the teacher or explore another
+          profile.
+        </p>
+        }
+      </section>
+      <section class="panel">
+        <div class="section-heading">
+          <h2>Choose an available time</h2>
+          <label class="compact"
+            >Your timezone<select
+              [ngModel]="timezone()"
+              (ngModelChange)="timezone.set($event)"
+            >
+              @for(zone of timezones; track zone){
+              <option [value]="zone">{{zone}}</option>
+              }
+            </select></label
+          >
+        </div>
+        <div class="slot-grid">
+          @for(slot of slots(); track slot.id){<button
+            type="button"
+            [attr.aria-pressed]="slotId()===slot.id"
+            [class.selected]="slotId()===slot.id"
+            (click)="slotId.set(slot.id)"
+          >
+            {{format(slot.startsAt)}}</button
+          >} @empty {
+          <p>
+            There are no available times for this lesson. Choose another lesson
+            or check back later.
+          </p>
+          }
+        </div>
+      </section>
+      } @else if(batch(); as item){
+      <section class="panel">
+        <h2>{{item.title}}</h2>
+        <p>Next class: {{format(item.startsAt)}}</p>
+        <p>{{item.placesAvailable}} places available</p>
+      </section>
+      }
+      <section class="panel">
+        <h2>Billing and learning details</h2>
+        @if(!auth.authenticated()){
+        <p>Sign in with a student account to reserve your lesson.</p>
+        <a
+          class="primary"
+          routerLink="/student/login"
+          [queryParams]="{returnUrl:currentPath}"
+          >Sign in to book</a
+        >
+        } @else if(auth.role()!=='student'){
+        <p>Bookings are available from a student account.</p>
+        } @else {
+        <form class="billing-form" (ngSubmit)="reserve($event)">
+          <label
+            >Billing name<input
+              name="billingName"
+              [(ngModel)]="billingName"
+              autocomplete="name"
+              required
+              minlength="2"
+              maxlength="150"
+          /></label>
+          <label>Email<input [value]="auth.user()?.email" readonly /></label>
+          <label class="wide"
+            >Billing address<textarea
+              name="billingAddress"
+              [(ngModel)]="billingAddress"
+              autocomplete="street-address"
+              required
+              minlength="5"
+              maxlength="500"
+              rows="3"
+            ></textarea>
+          </label>
+          <label
+            >Country code<input
+              name="billingCountry"
+              [(ngModel)]="billingCountry"
+              autocomplete="country"
+              required
+              pattern="[A-Za-z]{2}"
+              maxlength="2"
+              placeholder="GB"
+          /></label>
+          <label
+            >Tax / VAT number <small>Optional</small
+            ><input name="billingVat" [(ngModel)]="billingVat" maxlength="50"
+          /></label>
+          <label class="wide"
+            >Learning goal <small>Optional</small
+            ><textarea
+              name="goal"
+              [(ngModel)]="goal"
+              maxlength="1500"
+              rows="3"
+            ></textarea>
+          </label>
+          <p class="wide muted">
+            Your reservation lasts 45 minutes. You’ll review the exact amount
+            before continuing to secure payment.
+          </p>
+          <button
+            class="primary wide"
+            type="submit"
+            [disabled]="busy() || (!batch() && !selectedSlot()) || ((price()?.amountMinor ?? 0)>0 && !payable())"
+          >
+            {{busy()?'Reserving…':'Reserve and review →'}}
+          </button>
+        </form>
+        }
+      </section>
+    </section>
+    <aside class="panel summary" aria-label="Booking summary">
+      <p class="eyebrow">YOUR LESSON</p>
+      <h2>{{batch()?.title || offer()?.title || 'Choose a lesson'}}</h2>
+      <p>{{batch()?.teacherName || catalogue()?.teacher?.name}}</p>
+      @if(selectedSlot()){
+      <p>{{format(selectedSlot()!.startsAt)}}<small>{{timezone()}}</small></p>
+      } @if(price(); as value){
+      <div class="total">
+        <span>Total including tax</span
+        ><strong>{{money.display(value)}}</strong>
+      </div>
+      <p class="muted">
+        Payment currency: {{value.currency}}. The amount charged is
+        {{exactPrice()}}. Other displayed currencies are estimates.
+      </p>
+      }
+      <p class="policy">
+        Cancel at least {{batch()?.cancellationNoticeHours ??
+        catalogue()?.cancellationNoticeHours}} hours before the lesson for a
+        full refund. The exact deadline is shown on your reservation.
+      </p>
+      @if(!payable() && price() && (price()?.amountMinor ?? 0)>0){
+      <p class="notice">Online payment is not available yet.</p>
+      }
+      <a routerLink="/bookings">View my bookings</a>
+    </aside>
+  </div>
+  }
+</main>
+<sfu-footer />

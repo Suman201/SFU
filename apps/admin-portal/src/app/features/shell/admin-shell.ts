@@ -64,6 +64,7 @@ const groups: { label: string; items: NavigationItem[] }[] = [
   {
     label: 'Business',
     items: [
+      { label: 'Bookings and refunds', path: '/bookings', icon: 'receipt' },
       { label: 'Invoices', path: '/invoices', icon: 'receipt' },
       { label: 'Support', path: '/support', icon: 'support' },
       { label: 'Contact inbox', path: '/cms/contact', icon: 'mail' },

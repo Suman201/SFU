@@ -1,3 +1,4 @@
+import { BookingsModule } from './bookings/bookings.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { ErrorsModule } from './errors/errors.module';
 import { errorPath, errorReference } from '@native-sfu/contracts';
@@ -121,6 +122,7 @@ import { UsersModule } from './users/users.module';
     }),
     DatabaseModule,
     CurrenciesModule,
+    BookingsModule,
     ErrorsModule,
     DesktopModule,
     RedisModule,
