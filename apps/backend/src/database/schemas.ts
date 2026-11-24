@@ -1,4 +1,5 @@
 import type { ScheduleEvent } from '../scheduling/schedule-event';
+import { SUPPORTED_CURRENCIES, type CurrencyCode } from '@native-sfu/contracts';
 import { randomUUID } from 'node:crypto';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
@@ -20,7 +21,7 @@ import {
 } from '@native-sfu/contracts';
 import type { LiveClassSettings, LiveClassSettingsPatch } from '@native-sfu/contracts';
 import type { ClassSessionTimelineCategory, ClassSessionTimelineEventVisibility } from '@native-sfu/contracts';
-import type { AssignmentAttachment, AssignmentStatus, AssignmentSubmissionStatus, AssignmentSubmissionType } from '@native-sfu/contracts';
+import type { AssignmentStatus, AssignmentSubmissionStatus, AssignmentSubmissionType } from '@native-sfu/contracts';
 import type { CmsAudience, CmsPageBlock, CmsPageStatus, CmsPageType, CmsSeoMetadata } from '@native-sfu/contracts';
 import type { ContactReplyDeliveryStatus, ContactSubmissionCategory, ContactSubmissionPriority, ContactSubmissionStatus } from '@native-sfu/contracts';
 import type { IngestAuthConfig, IngestRestartPolicy, IngestRuntimeState, IngestSourceType, IngestStatus, IngestTransportProtocol, ParticipantOrigin, ProducerSource } from '@native-sfu/contracts';
@@ -135,6 +136,8 @@ export const UserSettingsSchema = SchemaFactory.createForClass(UserSettingsDocum
 
 @Schema({ collection: 'users', timestamps: true })
 export class UserDocument {
+  @Prop({ type: String, enum: SUPPORTED_CURRENCIES })
+  preferredCurrency?: CurrencyCode;
   @Prop({ trim: true, maxlength: 120 })
   name?: string;
 
@@ -674,6 +677,12 @@ export class BatchDocument {
 
   @Prop({ type: Number, min: 0, default: 0 })
   feeAmount!: number;
+
+  @Prop({ type: Number, min: 0, max: 100_000_000_000 })
+  feeMinor?: number;
+
+  @Prop({ type: String, enum: SUPPORTED_CURRENCIES })
+  feeCurrency?: CurrencyCode;
 
   @Prop({ required: true, enum: BATCH_STATUSES, default: 'ACTIVE', index: true })
   status!: BatchStatus;

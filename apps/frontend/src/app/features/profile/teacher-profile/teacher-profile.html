@@ -123,7 +123,7 @@
                 <strong>{{ plan.label }}</strong>
                 <span>{{ plan.description }}</span>
               </span>
-              <strong class="placement-price">{{ promotionFees[placement] / 100 | currency:promotionCurrency:'symbol':'1.0-2' }}</strong>
+              <strong class="placement-price">{{ money.display({ amountMinor: promotionFees[placement], currency: promotionCurrency }) }}</strong>
             </label>
           }
         </fieldset>
@@ -161,7 +161,7 @@
         <footer class="promotion-checkout">
           <div class="fee-line" aria-live="polite" aria-atomic="true">
             <strong>Campaign fee</strong>
-            <strong class="placement-price">{{ promotionFees[promotionForm().placement] / 100 | currency:promotionCurrency:'symbol':'1.0-2' }}</strong>
+            <strong class="placement-price">{{ money.display({ amountMinor: promotionFees[promotionForm().placement], currency: promotionCurrency }) }}</strong>
           </div>
           <p class="price-note">Arrange payment with the admin team. Your promotion runs after they confirm receipt and approve your campaign.</p>
           <button
@@ -2237,7 +2237,7 @@
           <div class="batch-meta">
             <span>{{ batch.status || 'ACTIVE' }}</span>
             <span>{{ batch.schedule || 'Schedule to be announced' }}</span>
-            <span>{{ feeLabel(batch.feeAmount) }}</span>
+            <span class="money-value">{{ feeLabel(batch) }}</span>
             <span>{{ batchFillLabel(batch) }}</span>
             <span>{{ formatDate(batch.startsAt) }}</span>
           </div>

@@ -1,5 +1,6 @@
+import { SUPPORTED_CURRENCIES, type CurrencyCode } from '@native-sfu/contracts';
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsEnum, IsInt, IsTimeZone, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsIn, IsEnum, IsInt, IsTimeZone, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BATCH_STATUSES, BATCH_WEEKDAYS, BatchStatus, BatchWeekday } from '../../database/schemas';
 
@@ -50,12 +51,20 @@ export class CreateTeacherBatchDto {
   @Max(1000)
   maxCapacity!: number;
 
-  @ApiPropertyOptional({ example: 1200, description: 'Batch fee amount in your default business currency. Use 0 for free batches.' })
+  @ApiPropertyOptional({ example: 1200, description: 'Legacy major-unit fee. Provide feeCurrency for paid batches; prefer feeMinor. Use 0 for free batches.' })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
   feeAmount?: number;
+
+  @ApiPropertyOptional({ enum: SUPPORTED_CURRENCIES })
+  @IsOptional() @IsIn(SUPPORTED_CURRENCIES)
+  feeCurrency?: CurrencyCode;
+
+  @ApiPropertyOptional({ description: 'Integer minor units in feeCurrency.' })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100_000_000_000)
+  feeMinor?: number;
 
   @ApiProperty({ type: [BatchScheduleDto] })
   @IsArray()
@@ -100,12 +109,20 @@ export class UpdateTeacherBatchDto {
   @Max(1000)
   maxCapacity?: number;
 
-  @ApiPropertyOptional({ example: 1200, description: 'Batch fee amount in your default business currency. Use 0 for free batches.' })
+  @ApiPropertyOptional({ example: 1200, description: 'Legacy major-unit fee. Provide feeCurrency for paid batches; prefer feeMinor. Use 0 for free batches.' })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
   feeAmount?: number;
+
+  @ApiPropertyOptional({ enum: SUPPORTED_CURRENCIES })
+  @IsOptional() @IsIn(SUPPORTED_CURRENCIES)
+  feeCurrency?: CurrencyCode;
+
+  @ApiPropertyOptional({ description: 'Integer minor units in feeCurrency.' })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100_000_000_000)
+  feeMinor?: number;
 
   @ApiPropertyOptional({ type: [BatchScheduleDto] })
   @IsOptional()

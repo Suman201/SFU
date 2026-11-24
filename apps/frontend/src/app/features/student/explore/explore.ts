@@ -2,7 +2,7 @@ import { isDesktopSession } from '../../../core/services/desktop-bridge';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { formatBatchFee } from '../../../shared/formatting/batch-fee';
+import { CurrencyService } from '../../../core/services/currency.service';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
 import { StudentEnrollmentStore, type StudentBatch } from '../student-enrollment.store';
@@ -64,7 +64,9 @@ export class StudentExplore implements OnInit {
     }).format(new Date(value));
   }
 
-  protected feeLabel(value: number | null | undefined): string {
-    return formatBatchFee(value);
+  protected readonly money = inject(CurrencyService);
+
+  protected feeLabel(value: import("@native-sfu/contracts").BatchMoneyFields & { feeAmount?: number | null }): string {
+    return this.money.batch(value);
   }
 }

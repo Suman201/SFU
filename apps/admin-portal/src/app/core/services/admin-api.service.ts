@@ -1,6 +1,7 @@
 import { HttpClient, HttpErrorResponse, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import type {
+  CurrencyCatalogue,
   AdminAttendanceQuery,
   AdminAttendanceSessionStudentsResponse,
   AdminAttendanceSessionsResponse,
@@ -77,6 +78,10 @@ interface ApiEnvelope<T> {
 @Injectable({ providedIn: 'root' })
 export class AdminApiService {
   constructor(private readonly http: HttpClient) {}
+
+  getCurrencyCatalogue(): Observable<CurrencyCatalogue> {
+    return this.http.get<CurrencyCatalogue | ApiEnvelope<CurrencyCatalogue>>(`${API_BASE_URL}/currencies`).pipe(map(response => this.unwrapResponse(response)));
+  }
 
   getDashboardSummary(): Observable<AdminDashboardSummary> {
     return this.http.get<AdminDashboardSummary | ApiEnvelope<AdminDashboardSummary>>(`${API_BASE_URL}/admin/dashboard/summary`).pipe(

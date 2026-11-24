@@ -1,3 +1,4 @@
+import { CurrencyService } from '../../core/services/currency.service';
 import { DOCUMENT } from '@angular/common';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -30,6 +31,7 @@ interface BookingTeacher {
   styleUrl: './booking-preview.scss',
 })
 export class BookingPreview {
+  protected readonly moneyService = inject(CurrencyService);
   private readonly route = inject(ActivatedRoute);
   private readonly profiles = inject(ProfileService);
   private readonly destroy = inject(DestroyRef);
@@ -195,10 +197,7 @@ export class BookingPreview {
     this.teacher.update((value) => ({ ...value, image: '' }));
   }
   protected money(cents: number) {
-    return new Intl.NumberFormat('en-IE', {
-      style: 'currency',
-      currency: 'EUR',
-    }).format(cents / 100);
+    return this.moneyService.display({ amountMinor: cents, currency: 'EUR' });
   }
   protected format(instant: string, options: Intl.DateTimeFormatOptions) {
     return new Intl.DateTimeFormat('en-GB', {

@@ -55,7 +55,7 @@ import type {
 import { ProfileService } from '../../../core/services/profile.service';
 import { ThemeService } from '../../../core/services/theme.service';
 import { Footer } from '../../../shared/footer/footer';
-import { formatBatchFee } from '../../../shared/formatting/batch-fee';
+import { CurrencyService } from '../../../core/services/currency.service';
 import { Header } from '../../../shared/header/header';
 
 type TeacherProfileTab = 'credentials' | 'experience' | 'links' | 'batches';
@@ -1283,8 +1283,10 @@ export class TeacherProfile implements OnInit {
     return `${batch.enrolledCount ?? 0}/${batch.capacity ?? 0} students`;
   }
 
-  protected feeLabel(value: number | null | undefined): string {
-    return formatBatchFee(value);
+  protected readonly money = inject(CurrencyService);
+
+  protected feeLabel(value: import("@native-sfu/contracts").BatchMoneyFields & { feeAmount?: number | null }): string {
+    return this.money.batch(value);
   }
 
   protected formatDate(value: string | undefined): string {

@@ -15,7 +15,7 @@ Unpaid invoices can be voided with a reason. Their number is retained and subseq
 
 ## Amounts and tax
 
-Supported currencies use two decimal places. Unit amounts are stored as integer minor units, quantities as thousandths and tax rates as basis points. The backend recalculates totals and rounds half-up per line. The document includes a tax breakdown by rate. Up to 50 line items are supported and long PDFs paginate with repeated table headings.
+Supported currencies use their ISO accounting decimal scale: for example, EUR and INR use two decimal places, JPY uses zero, and KWD uses three. See [multi-currency pricing](multi-currency.md). Unit amounts are stored as integer minor units, quantities as thousandths and tax rates as basis points. The backend recalculates totals and rounds half-up per line. The document includes a tax breakdown by rate. Up to 50 line items are supported and long PDFs paginate with repeated table headings.
 
 Tax is entered by the administrator. A seller tax/VAT number is required before a non-zero tax amount can be issued, and zero-tax items require an explanation. No tax rate, exemption, reverse-charge eligibility or VAT number validity is determined automatically. The invoice fields follow the common information described in the [European Commission invoicing guidance](https://taxation-customs.ec.europa.eu/taxation/vat/vat-businesses/invoicing_en); market-specific tax treatment and structured electronic-invoice requirements still need the appropriate accounting configuration. A PDF is not a country-specific electronic-invoicing integration.
 

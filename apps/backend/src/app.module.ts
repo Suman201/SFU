@@ -1,3 +1,4 @@
+import { CurrenciesModule } from './currencies/currencies.module';
 import { ErrorsModule } from './errors/errors.module';
 import { errorPath, errorReference } from '@native-sfu/contracts';
 import { SchedulingModule } from './scheduling/scheduling.module';
@@ -119,6 +120,7 @@ import { UsersModule } from './users/users.module';
       })
     }),
     DatabaseModule,
+    CurrenciesModule,
     ErrorsModule,
     DesktopModule,
     RedisModule,

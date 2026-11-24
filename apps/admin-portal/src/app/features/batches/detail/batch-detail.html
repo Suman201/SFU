@@ -22,6 +22,7 @@
   }
 
   <section class="detail-grid">
+    <article><span>Fee</span><strong>{{ feeLabel(item) }}</strong></article>
     <article>
       <span>Teacher</span>
       <strong>{{ item.teacherName || item.teacherId }}</strong>
@@ -208,6 +209,12 @@
       <label>
         <span>Capacity</span>
         <input type="number" formControlName="maxCapacity" />
+      </label>
+      <label>
+        <span>Fee</span><input type="number" min="0" [step]="priceStep(form.controls.feeCurrency.value)" formControlName="feeAmount" />
+      </label>
+      <label><span>Price currency</span><select formControlName="feeCurrency"><option value="">Currency not set</option>@for(code of currencies; track code){<option [value]="code">{{code}}</option>}</select>
+        <small>Select the original currency for a legacy fee. Changing currency does not convert the price.</small>
       </label>
       <label>
         <span>Status</span>

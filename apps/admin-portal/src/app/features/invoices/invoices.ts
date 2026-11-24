@@ -12,6 +12,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { finalize, type Observable } from 'rxjs';
 import {
   INVOICE_CURRENCIES,
+  CURRENCY_DECIMALS, majorToMinor, minorToMajor,
   invoiceTotals,
   invoicePostalAddress,
   type InvoiceInput,
@@ -223,7 +224,7 @@ export class InvoicesAdmin {
       lines: value.lines.map((line) => ({
         description: line.description,
         quantity: line.quantityMilli / 1000,
-        price: line.unitPriceMinor / 100,
+        price: minorToMajor(line.unitPriceMinor, value.currency),
         tax: line.taxRateBps / 100,
       })),
       taxNote: value.taxNote,
@@ -255,7 +256,7 @@ export class InvoicesAdmin {
       lines: this.form.lines.map((line) => ({
         description: line.description,
         quantityMilli: Math.round(Number(line.quantity) * 1000),
-        unitPriceMinor: Math.round(Number(line.price) * 100),
+        unitPriceMinor: majorToMinor(line.price, this.form.currency),
         taxRateBps: Math.round(Number(line.tax) * 100),
       })),
     };
@@ -274,11 +275,12 @@ export class InvoicesAdmin {
   protected removeLine(index: number) {
     if (this.form.lines.length > 1) this.form.lines.splice(index, 1);
   }
+  protected priceStep(): number { return 1 / (10 ** CURRENCY_DECIMALS[this.form.currency]); }
   protected money(amount: number, currency = this.form.currency) {
     return new Intl.NumberFormat('en-GB', {
       style: 'currency',
       currency,
-    }).format(amount / 100);
+    }).format(minorToMajor(amount, currency));
   }
   protected save(event: SubmitEvent) {
     event.preventDefault();

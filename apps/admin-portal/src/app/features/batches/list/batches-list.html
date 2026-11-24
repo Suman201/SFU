@@ -84,6 +84,8 @@
       placeholder="Capacity"
       aria-label="Capacity"
     />
+    <input type="number" min="0" [step]="priceStep(createForm.controls.feeCurrency.value)" formControlName="feeAmount" aria-label="Fee" placeholder="Fee" />
+    <select formControlName="feeCurrency" aria-label="Price currency">@for(code of currencies; track code){<option [value]="code">{{code}}</option>}</select>
     <select formControlName="dayOfWeek" aria-label="Weekday">
       <option value="MONDAY">Monday</option>
       <option value="TUESDAY">Tuesday</option>
@@ -222,6 +224,7 @@
           <th>Teacher</th>
           <th>Status</th>
           <th>Schedule</th>
+          <th>Fee</th>
           <th>Students</th>
           <th>Next session</th>
           <th class="row-menu-cell">Actions</th>
@@ -230,11 +233,11 @@
       <tbody>
         @if (loading()) {
         <tr>
-          <td colspan="8" class="empty-state">Loading batches...</td>
+          <td colspan="9" class="empty-state">Loading batches...</td>
         </tr>
         } @else if (!rows().length) {
         <tr>
-          <td colspan="8" class="empty-state">
+          <td colspan="9" class="empty-state">
             No batches match these filters.
           </td>
         </tr>
@@ -260,6 +263,7 @@
             >
           </td>
           <td>{{ scheduleLabel(row) }}</td>
+          <td>{{ feeLabel(row) }}</td>
           <td>{{ row.enrolledCount }} / {{ row.maxCapacity }}</td>
           <td>
             {{ row.nextSessionAt ? (row.nextSessionAt | date: 'short') : 'None

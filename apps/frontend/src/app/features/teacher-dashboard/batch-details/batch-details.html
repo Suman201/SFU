@@ -10,7 +10,7 @@
         <div class="hero-meta">
           <span>{{ batch.courseName }}</span>
           <span>{{ batch.cohortCode }}</span>
-          <span>{{ feeLabel(batch.feeAmount) }}</span>
+          <span class="money-value">{{ feeLabel(batch) }}</span>
           <span>{{ scheduleLabel(batch.schedule) }}</span>
         </div>
       </div>
@@ -69,7 +69,7 @@
         </div>
         <div>
           <strong>Fee</strong>
-          <span>{{ feeLabel(batch.feeAmount) }}</span>
+          <span class="money-value">{{ feeLabel(batch) }}</span>
         </div>
         <div>
           <strong>Next session</strong>

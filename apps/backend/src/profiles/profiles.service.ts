@@ -1,3 +1,4 @@
+import { batchMoneyFields } from '../teacher-batches/batch-money';
 import { PROMOTION_CURRENCY, PROMOTION_FEES_CENTS, teachingCategoryIds } from '@native-sfu/contracts';
 import { normalizeTeachingAreas } from '../teaching-catalog/teaching-areas';
 import { normalizeIntroVideoUrl } from '../teaching-catalog/intro-video-url';
@@ -1892,6 +1893,7 @@ export class ProfilesService {
       enrolledCount: countMap.get(batch.id) ?? 0,
       capacity: batch.maxCapacity,
       feeAmount: this.batchFeeAmount(batch),
+      ...batchMoneyFields(batch),
       startsAt: batch.startDate.toISOString(),
       status: batch.status
     }));

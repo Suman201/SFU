@@ -1,17 +1,6 @@
-export const INVOICE_CURRENCIES = [
-  'EUR',
-  'GBP',
-  'USD',
-  'CHF',
-  'SEK',
-  'NOK',
-  'DKK',
-  'PLN',
-  'CZK',
-  'HUF',
-  'RON',
-] as const;
-export type InvoiceCurrency = (typeof INVOICE_CURRENCIES)[number];
+import { SUPPORTED_CURRENCIES, type CurrencyCode } from './money.js';
+export const INVOICE_CURRENCIES = SUPPORTED_CURRENCIES;
+export type InvoiceCurrency = CurrencyCode;
 export interface InvoiceParty {
   name: string;
   email: string;

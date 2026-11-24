@@ -263,6 +263,8 @@ export interface AdminBatchListItem {
   endDate: string;
   maxCapacity: number;
   feeAmount?: number;
+  feeMinor?: number;
+  feeCurrency?: import("./money.js").CurrencyCode;
   enrolledCount: number;
   status: AdminBatchStatus;
   schedule: AdminBatchScheduleItem[];
@@ -326,6 +328,8 @@ export interface AdminBatchCreateRequest {
   year: number;
   maxCapacity: number;
   feeAmount?: number;
+  feeMinor?: number;
+  feeCurrency?: import("./money.js").CurrencyCode;
   schedule: AdminBatchScheduleItem[];
 }
 
@@ -337,6 +341,8 @@ export interface AdminBatchUpdateRequest {
   year?: number;
   maxCapacity?: number;
   feeAmount?: number;
+  feeMinor?: number;
+  feeCurrency?: import("./money.js").CurrencyCode;
   schedule?: AdminBatchScheduleItem[];
   status?: AdminBatchStatus;
 }

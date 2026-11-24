@@ -1,3 +1,4 @@
+import { minorToMajor } from '@native-sfu/contracts';
 import PDFDocument from 'pdfkit';
 import { join } from 'node:path';
 import {
@@ -158,7 +159,7 @@ export function renderInvoicePdf(invoice: InvoiceRecord): Promise<Buffer> {
       new Intl.NumberFormat('en-GB', {
         style: 'currency',
         currency: invoice.currency,
-      }).format(value / 100);
+      }).format(minorToMajor(value, invoice.currency));
     invoice.lines.forEach((item, index) => {
       const rowHeight = Math.max(39, height(item.description, 222) + 17);
       if (y + rowHeight > 730) {

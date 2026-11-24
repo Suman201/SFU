@@ -3,7 +3,8 @@ import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, signa
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { ConfirmDialogService } from '../../shared/confirm-dialog/confirm-dialog.service';
-import { formatBatchFee } from '../../shared/formatting/batch-fee';
+import { CURRENCY_DECIMALS, majorToMinor } from '@native-sfu/contracts';
+import { CurrencyService } from '../../core/services/currency.service';
 import { Footer } from '../../shared/footer/footer';
 import { Header } from '../../shared/header/header';
 import {
@@ -28,6 +29,7 @@ interface BatchFormModel {
   year: number;
   maxCapacity: number | null;
   feeAmount: number | null;
+  feeCurrency: import("@native-sfu/contracts").CurrencyCode;
   schedule: Partial<Record<BatchDayOfWeek, string>>;
 }
 
@@ -57,6 +59,7 @@ interface NextBatchAction {
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class TeacherDashboard {
+  protected readonly money = inject(CurrencyService);
   protected readonly isBackdropClick = isDialogBackdropClick;
   private readonly router = inject(Router);
   private readonly confirmDialog = inject(ConfirmDialogService);
@@ -196,8 +199,10 @@ export class TeacherDashboard {
     return this.nextSession(batch)?.status === 'live' ? 'Open session' : 'Start session';
   }
 
-  protected feeLabel(feeAmount: number | null | undefined): string {
-    return formatBatchFee(feeAmount);
+  protected priceStep(): number { return 10 ** -CURRENCY_DECIMALS[this.batchModel().feeCurrency]; }
+
+  protected feeLabel(value: import("@native-sfu/contracts").BatchMoneyFields & { feeAmount?: number | null }): string {
+    return this.money.batch(value);
   }
 
   protected nextBatchStatusLabel(item: NextBatchAction): string {
@@ -330,6 +335,7 @@ export class TeacherDashboard {
 
   protected openCreateDrawer(): void {
     this.backendError.set('');
+    if (!this.batchModel().name && this.batchModel().feeAmount === 0) this.batchModel.update(model => ({ ...model, feeCurrency: this.money.defaultCurrency() }));
     const drawer = this.createDrawer()?.nativeElement;
     if (drawer && !drawer.open) drawer.showModal();
   }
@@ -354,6 +360,7 @@ export class TeacherDashboard {
       year,
       maxCapacity: 30,
       feeAmount: 0,
+      feeCurrency: this.money?.defaultCurrency() ?? 'EUR',
       schedule: {}
     };
   }
@@ -367,6 +374,7 @@ export class TeacherDashboard {
       year: Number(value.year),
       maxCapacity: Number(value.maxCapacity),
       feeAmount: Math.max(0, Number(value.feeAmount ?? 0)),
+      feeCurrency: value.feeCurrency,
       scheduleTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       schedule: this.scheduleFromModel(value)
     };
@@ -415,6 +423,7 @@ export class TeacherDashboard {
     if (!model.year || Number(model.year) < 2000) errors.push('Year is required.');
     if (!model.maxCapacity || Number(model.maxCapacity) <= 0) errors.push('Max capacity must be greater than 0.');
     if (model.feeAmount === null || Number(model.feeAmount) < 0) errors.push('Fee must be zero or greater.');
+    try { majorToMinor(model.feeAmount ?? 0, model.feeCurrency); } catch (error) { errors.push(error instanceof Error ? error.message : 'Invalid price.'); }
     if (!schedule.length) errors.push('Select at least one weekday.');
     if (schedule.some((item) => !item.startTime)) errors.push('Every selected weekday must have a start time.');
     return errors;

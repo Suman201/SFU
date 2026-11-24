@@ -24,6 +24,8 @@ export interface CreateTeacherBatchInput {
   year: number;
   maxCapacity: number;
   feeAmount: number;
+  feeMinor?: number;
+  feeCurrency?: import("@native-sfu/contracts").CurrencyCode;
   schedule: TeacherBatchSchedule[];
 }
 
@@ -64,6 +66,8 @@ export interface TeacherBatch {
   maxCapacity: number;
   capacity: number;
   feeAmount: number;
+  feeMinor?: number;
+  feeCurrency?: import("@native-sfu/contracts").CurrencyCode;
   enrolledCount: number;
   status: TeacherBatchStatus;
   schedule: TeacherBatchSchedule[];
@@ -112,6 +116,8 @@ interface BackendTeacherBatch {
   endDate: string;
   maxCapacity: number;
   feeAmount?: number;
+  feeMinor?: number;
+  feeCurrency?: import("@native-sfu/contracts").CurrencyCode;
   enrolledCount: number;
   status: TeacherBatchStatus;
   schedule: TeacherBatchSchedule[];
@@ -456,6 +462,8 @@ export class TeacherDashboardStore {
       endDate: batch.endDate,
       maxCapacity: capacity,
       capacity,
+      feeMinor: batch.feeMinor,
+      feeCurrency: batch.feeCurrency,
       feeAmount: typeof batch.feeAmount === 'number' && Number.isFinite(batch.feeAmount) && batch.feeAmount > 0 ? batch.feeAmount : 0,
       enrolledCount,
       status: batch.status,

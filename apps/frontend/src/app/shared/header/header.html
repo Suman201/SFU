@@ -102,6 +102,7 @@
       }
     </nav>
     <div class="header-actions">
+      <sfu-currency-selector />
       @if(auth.authenticated()){<sfu-class-notices />}
       @if(auth.role()==='teacher'){<sfu-tutor-notices />}
       <button

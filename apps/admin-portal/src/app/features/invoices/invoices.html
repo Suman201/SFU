@@ -273,11 +273,10 @@
                   <input
                     type="number"
                     [attr.aria-label]="'Unit price '+(i+1)"
-                    [name]="'price'+i"
+                    [name]="'price'+i" [step]="priceStep()"
                     [(ngModel)]="line.price"
                     min="0"
                     max="1000000"
-                    step="0.01"
                     required
                   />
                 </td>

@@ -761,3 +761,12 @@ input[type='radio'] {
   .calendar-host .calendar-list-event-copy {grid-area:copy;}
   .calendar-host .calendar-list-event-title {white-space:normal;overflow:visible;text-overflow:clip;font-size:13px;}
 }
+
+/* Converted amounts include the original price; keep both readable in compact cards. */
+.money-value {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}

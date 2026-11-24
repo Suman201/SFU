@@ -1,3 +1,4 @@
+import { SUPPORTED_CURRENCIES, CURRENCY_DECIMALS, isCurrencyCode, formatMoneyWithCode, majorToMinor, type CurrencyCode } from '@native-sfu/contracts';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -26,6 +27,12 @@ type BatchStatusFilter = AdminBatchStatus | 'all';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class BatchesList implements OnInit {
+  protected readonly currencies = SUPPORTED_CURRENCIES;
+  protected priceStep(code: string): number { return isCurrencyCode(code) ? 10 ** -CURRENCY_DECIMALS[code] : 0.01; }
+  protected feeLabel(batch: { feeAmount?: number; feeMinor?: number; feeCurrency?: CurrencyCode }): string {
+    if (batch.feeCurrency && batch.feeMinor !== undefined) return batch.feeMinor === 0 ? 'Free' : formatMoneyWithCode({ amountMinor: batch.feeMinor, currency: batch.feeCurrency });
+    return batch.feeAmount ? String(batch.feeAmount) + ' · currency not set' : 'Free';
+  }
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
@@ -62,11 +69,16 @@ export class BatchesList implements OnInit {
     teacherId: ['', [Validators.required, Validators.maxLength(120)]],
     year: [new Date().getUTCFullYear(), [Validators.required, Validators.min(2000), Validators.max(2100)]],
     maxCapacity: [30, [Validators.required, Validators.min(1), Validators.max(1000)]],
+    feeAmount: [0, [Validators.required, Validators.min(0)]],
+    feeCurrency: ['EUR', [Validators.required]],
     dayOfWeek: ['MONDAY' as AdminBatchWeekday],
     startTime: ['10:00', [Validators.required, Validators.pattern(/^([01]\d|2[0-3]):[0-5]\d$/)]]
   });
 
   ngOnInit(): void {
+    this.api.getCurrencyCatalogue().subscribe({ next: catalogue => {
+      if (this.createForm.controls.feeCurrency.pristine) this.createForm.controls.feeCurrency.setValue(catalogue.defaultCurrency);
+    }, error: () => undefined });
     this.readQueryParams();
     this.lookup.loadCourses();
     this.lookup.loadTeachers();
@@ -97,6 +109,10 @@ export class BatchesList implements OnInit {
     this.saving.set(true);
     this.error.set('');
     this.success.set('');
+    if (!isCurrencyCode(value.feeCurrency)) { this.error.set('Select a price currency.'); this.saving.set(false); return; }
+    let feeMinor: number;
+    try { feeMinor = majorToMinor(value.feeAmount, value.feeCurrency); }
+    catch (error) { this.error.set(error instanceof Error ? error.message : 'Invalid price.'); this.saving.set(false); return; }
     this.api
       .createBatch(value.courseId.trim(), {
         name: value.name.trim(),
@@ -104,6 +120,8 @@ export class BatchesList implements OnInit {
         courseName: value.courseName.trim(),
         year: Number(value.year),
         maxCapacity: Number(value.maxCapacity),
+        feeMinor,
+        feeCurrency: value.feeCurrency,
         schedule: [{ dayOfWeek: value.dayOfWeek, startTime: value.startTime }]
       })
       .pipe(finalize(() => this.saving.set(false)))

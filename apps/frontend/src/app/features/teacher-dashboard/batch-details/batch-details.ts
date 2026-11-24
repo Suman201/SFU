@@ -26,7 +26,7 @@ import type {
 } from '@native-sfu/contracts';
 import { ClassSessionService } from '../../class-session/class-session.service';
 import { Footer } from '../../../shared/footer/footer';
-import { formatBatchFee } from '../../../shared/formatting/batch-fee';
+import { CurrencyService } from '../../../core/services/currency.service';
 import { Header } from '../../../shared/header/header';
 import {
   TeacherDashboardStore,
@@ -679,8 +679,10 @@ export class BatchDetails {
     }).format(new Date(value));
   }
 
-  protected feeLabel(value: number | null | undefined): string {
-    return formatBatchFee(value);
+  protected readonly money = inject(CurrencyService);
+
+  protected feeLabel(value: import("@native-sfu/contracts").BatchMoneyFields & { feeAmount?: number | null }): string {
+    return this.money.batch(value);
   }
 
   protected setCalendarView(view: BatchCalendarView): void {

@@ -1,4 +1,5 @@
 import Joi from 'joi';
+import { SUPPORTED_CURRENCIES } from '@native-sfu/contracts';
 import {
   isLocalOrWildcardHost,
   isSupportedStunUri,
@@ -36,6 +37,7 @@ const secretSchema = Joi.string()
   });
 
 const schema = Joi.object({
+  DEFAULT_CURRENCY: Joi.string().valid(...SUPPORTED_CURRENCIES).default('EUR'),
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   PORT: Joi.number().port().default(3000),
   PUBLIC_URL: Joi.string().uri().default('http://localhost:3000'),

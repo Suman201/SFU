@@ -1,3 +1,4 @@
+import { minorToMajor } from '@native-sfu/contracts';
 import { ConfigService } from '@nestjs/config';
 import {
   BadRequestException,
@@ -506,7 +507,7 @@ export class InvoicesService implements OnModuleInit, OnModuleDestroy {
       const amount = new Intl.NumberFormat('en-GB', {
         style: 'currency',
         currency: doc.input.currency,
-      }).format(doc.totals.totalMinor / 100);
+      }).format(minorToMajor(doc.totals.totalMinor, doc.input.currency));
       const delivered = await this.email.sendEmail({
         to: doc.input.customer.email,
         replyTo: doc.seller.email,

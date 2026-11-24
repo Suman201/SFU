@@ -29,6 +29,8 @@ export interface ProfileBatchAssociation {
   enrolledCount?: number;
   capacity?: number;
   feeAmount?: number;
+  feeMinor?: number;
+  feeCurrency?: import("./money.js").CurrencyCode;
   startsAt?: string;
   status?: string;
 }

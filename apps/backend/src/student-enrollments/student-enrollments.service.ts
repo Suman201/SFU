@@ -1,3 +1,4 @@
+import { batchMoneyFields } from '../teacher-batches/batch-money';
 import { planClassSessions } from '../class-sessions/class-session-planner';
 import { randomUUID } from 'node:crypto';
 import { scheduleEvent } from '../scheduling/schedule-event';
@@ -51,6 +52,8 @@ export interface StudentEnrolledBatch {
   enrolledCount: number;
   capacity: number;
   feeAmount: number;
+  feeMinor?: number;
+  feeCurrency?: import("@native-sfu/contracts").CurrencyCode;
   startsAt: string;
   level?: string;
   enrollmentStatus?: StudentEnrollmentStatus;
@@ -679,6 +682,7 @@ export class StudentEnrollmentsService {
       enrolledCount,
       capacity: batch.maxCapacity,
       feeAmount: this.batchFeeAmount(batch),
+      ...batchMoneyFields(batch),
       startsAt: nextStart.toISOString(),
       ...(enrollment?.status ? { enrollmentStatus: enrollment.status } : {})
     };

@@ -17,6 +17,8 @@ export interface StudentBatch {
   enrolledCount: number;
   capacity: number;
   feeAmount: number;
+  feeMinor?: number;
+  feeCurrency?: import("@native-sfu/contracts").CurrencyCode;
   startsAt: string;
   level?: string;
   enrollmentStatus?: StudentEnrollmentStatus;

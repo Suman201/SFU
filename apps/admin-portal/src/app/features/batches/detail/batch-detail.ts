@@ -1,3 +1,4 @@
+import { SUPPORTED_CURRENCIES, CURRENCY_DECIMALS, isCurrencyCode, formatMoneyWithCode, majorToMinor, type CurrencyCode } from '@native-sfu/contracts';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -43,6 +44,12 @@ interface SchedulePreviewItem {
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class BatchDetail implements OnInit {
+  protected readonly currencies = SUPPORTED_CURRENCIES;
+  protected priceStep(code: string): number { return isCurrencyCode(code) ? 10 ** -CURRENCY_DECIMALS[code] : 0.01; }
+  protected feeLabel(batch: { feeAmount?: number; feeMinor?: number; feeCurrency?: CurrencyCode }): string {
+    if (batch.feeCurrency && batch.feeMinor !== undefined) return batch.feeMinor === 0 ? 'Free' : formatMoneyWithCode({ amountMinor: batch.feeMinor, currency: batch.feeCurrency });
+    return batch.feeAmount ? String(batch.feeAmount) + ' · currency not set' : 'Free';
+  }
   private readonly api = inject(AdminApiService);
   private readonly route = inject(ActivatedRoute);
   private readonly formBuilder = inject(FormBuilder);
@@ -82,6 +89,8 @@ export class BatchDetail implements OnInit {
     teacherId: ['', [Validators.required, Validators.maxLength(120)]],
     year: [new Date().getUTCFullYear(), [Validators.required, Validators.min(2000), Validators.max(2100)]],
     maxCapacity: [30, [Validators.required, Validators.min(1), Validators.max(1000)]],
+    feeAmount: [0, [Validators.required, Validators.min(0)]],
+    feeCurrency: [''],
     status: ['ACTIVE' as AdminBatchStatus],
     schedule: this.formBuilder.array([this.createScheduleGroup()])
   });
@@ -112,6 +121,11 @@ export class BatchDetail implements OnInit {
     if (teacherId !== batch.teacherId) request.teacherId = teacherId;
     if (year !== batch.year) request.year = year;
     if (maxCapacity !== batch.maxCapacity) request.maxCapacity = maxCapacity;
+    if (Number(value.feeAmount) !== (batch.feeAmount ?? 0) || value.feeCurrency !== (batch.feeCurrency ?? '')) {
+      if (!isCurrencyCode(value.feeCurrency)) { this.error.set('Select the currency before changing the fee.'); return; }
+      try { request.feeMinor = majorToMinor(value.feeAmount, value.feeCurrency); request.feeCurrency = value.feeCurrency; }
+      catch (error) { this.error.set(error instanceof Error ? error.message : 'Invalid price.'); return; }
+    }
     if (value.status !== batch.status) request.status = value.status;
     if (scheduleChanged) request.schedule = schedule;
     if (!Object.keys(request).length) {
@@ -314,6 +328,8 @@ export class BatchDetail implements OnInit {
       teacherId: batch.teacherId,
       year: batch.year,
       maxCapacity: batch.maxCapacity,
+      feeAmount: batch.feeAmount ?? 0,
+      feeCurrency: batch.feeCurrency ?? '',
       status: batch.status
     });
     this.patchSchedule(batch.schedule);

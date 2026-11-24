@@ -1,3 +1,4 @@
+import { batchMoneyFields, batchPriceWrite } from './batch-money';
 import { validTimeZone } from '@native-sfu/contracts';
 import { scheduleEvent } from '../scheduling/schedule-event';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
@@ -84,7 +85,7 @@ export class TeacherBatchesService {
             startDate: dates.startDate,
             endDate: dates.endDate,
             maxCapacity: dto.maxCapacity,
-            feeAmount: this.normalizeFeeAmount(dto.feeAmount),
+            ...batchPriceWrite(dto),
             status: 'ACTIVE'
           }
         ],
@@ -141,9 +142,7 @@ export class TeacherBatchesService {
       }
       update.maxCapacity = dto.maxCapacity;
     }
-    if (dto.feeAmount !== undefined) {
-      update.feeAmount = this.normalizeFeeAmount(dto.feeAmount, existing.feeAmount ?? 0);
-    }
+    Object.assign(update, batchPriceWrite(dto, existing));
 
     return this.withTransaction(async (session) => {
       if (Object.keys(update).length) {
@@ -328,7 +327,7 @@ export class TeacherBatchesService {
             startDate: dates.startDate,
             endDate: dates.endDate,
             maxCapacity: request.maxCapacity,
-            feeAmount: this.normalizeFeeAmount(request.feeAmount),
+            ...batchPriceWrite(request),
             status: 'ACTIVE'
           }
         ],
@@ -350,7 +349,7 @@ export class TeacherBatchesService {
       resourceId: detail.id,
       resourceLabel: detail.name,
       metadata: { summary: `Created batch ${detail.name}`, courseId: detail.courseId, teacherId: detail.teacherId },
-      after: { name: detail.name, courseId: detail.courseId, teacherId: detail.teacherId, feeAmount: detail.feeAmount, status: detail.status }
+      after: { name: detail.name, courseId: detail.courseId, teacherId: detail.teacherId, feeAmount: detail.feeAmount, feeMinor: detail.feeMinor, feeCurrency: detail.feeCurrency, status: detail.status }
     });
     return detail;
   }
@@ -392,7 +391,7 @@ export class TeacherBatchesService {
       update.endDate = dates.endDate;
     }
     if (request.maxCapacity !== undefined) update.maxCapacity = request.maxCapacity;
-    if (request.feeAmount !== undefined) update.feeAmount = this.normalizeFeeAmount(request.feeAmount, existing.feeAmount ?? 0);
+    Object.assign(update, batchPriceWrite(request, existing));
     if (request.status !== undefined) update.status = request.status;
     if(request.status==='CANCELLED'||request.status==='COMPLETED') await this.cancelFutureClasses(existing.teacherId,batchId);
     const detail = await this.withTransaction(async (session) => {
@@ -422,6 +421,7 @@ export class TeacherBatchesService {
         year: existing.year,
         maxCapacity: existing.maxCapacity,
         feeAmount: this.normalizeFeeAmount(existing.feeAmount, 0),
+        ...batchMoneyFields(existing),
         status: existing.status
       },
       after: {
@@ -431,7 +431,7 @@ export class TeacherBatchesService {
         teacherId: detail.teacherId,
         year: detail.year,
         maxCapacity: detail.maxCapacity,
-        feeAmount: detail.feeAmount,
+        feeAmount: detail.feeAmount, feeMinor: detail.feeMinor, feeCurrency: detail.feeCurrency,
         status: detail.status
       }
     });
@@ -579,6 +579,7 @@ export class TeacherBatchesService {
       endDate: this.dateOnly(batch.endDate),
       maxCapacity: batch.maxCapacity,
       feeAmount: this.normalizeFeeAmount(batch.feeAmount, 0),
+      ...batchMoneyFields(batch),
       enrolledCount,
       status: batch.status,
       schedule: schedules.map((schedule) => ({
@@ -868,7 +869,7 @@ export class TeacherBatchesService {
     if (!Number.isFinite(value) || value < 0) {
       throw new BadRequestException('Fee amount must be zero or greater.');
     }
-    return Math.round(value * 100) / 100;
+    return value;
   }
 
   private async scheduleMap(batchIds: string[]): Promise<Map<string, BatchScheduleMongoDocument[]>> {
@@ -907,6 +908,7 @@ export class TeacherBatchesService {
       endDate: this.dateOnly(batch.endDate),
       maxCapacity: batch.maxCapacity,
       feeAmount: this.normalizeFeeAmount(batch.feeAmount, 0),
+      ...batchMoneyFields(batch),
       enrolledCount: roster.length,
       status: batch.status,
       schedule: schedules.map((schedule) => ({
