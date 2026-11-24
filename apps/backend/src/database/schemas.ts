@@ -684,6 +684,10 @@ export class BatchDocument {
   @Prop({ type: Object })
   liveSettingsOverrides?: LiveClassSettingsPatch;
 
+  /** ISO 4217 currency of feeAmount. Missing on older batches, which use the finance default currency. */
+  @Prop({ type: String, trim: true, uppercase: true })
+  currency?: string;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
@@ -770,6 +774,10 @@ export class StudentEnrollmentDocument {
 
   @Prop({ type: [Object], default: [] })
   scheduleEvents!: ScheduleEvent[];
+
+  /** Payment that granted this enrollment, when access was bought online. */
+  @Prop({ type: String, index: true })
+  paymentId?: string;
 
   createdAt!: Date;
   updatedAt!: Date;

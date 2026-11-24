@@ -40,3 +40,5 @@ export * from './invoices.js';
 export * from "./calendar";
 
 export * from './errors.js';
+
+export * from './payments.js';

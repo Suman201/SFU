@@ -165,6 +165,18 @@ export const appConfig = () => ({
     maxFileSizeBytes: Number(process.env.CLASS_MATERIAL_MAX_FILE_SIZE_BYTES ?? 10 * 1024 * 1024)
   },
   invoices: { emailPollMs: Number(process.env.INVOICE_EMAIL_POLL_MS ?? 30000) },
+  payments: {
+    enabled: process.env.PAYMENTS_ENABLED === 'true',
+    gateway: (process.env.PAYMENT_GATEWAY?.trim() || ((process.env.NODE_ENV ?? 'development') === 'production' ? 'stripe' : 'test')) as 'stripe' | 'test',
+    webUrl: (process.env.PAYMENTS_WEB_URL?.trim() || process.env.FRONTEND_URL?.trim() || 'http://localhost:4200').replace(/\/+$/, ''),
+    checkoutTtlMinutes: Number(process.env.PAYMENT_CHECKOUT_TTL_MINUTES ?? 30),
+    eventPollMs: Number(process.env.PAYMENT_EVENT_POLL_MS ?? 5000),
+    stripe: {
+      secretKey: envOrSecretFile('STRIPE_SECRET_KEY'),
+      webhookSecret: envOrSecretFile('STRIPE_WEBHOOK_SECRET'),
+      connectEnabled: process.env.STRIPE_CONNECT_ENABLED !== 'false'
+    }
+  },
   tutorVerification: {
     sweepMs: Number(process.env.TUTOR_VERIFICATION_SWEEP_MS ?? 60000),
     pdfinfoPath: process.env.TUTOR_PDFINFO_PATH?.trim() || 'pdfinfo',

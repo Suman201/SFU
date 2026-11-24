@@ -1,7 +1,9 @@
 import { planClassSessions } from '../class-sessions/class-session-planner';
 import { randomUUID } from 'node:crypto';
 import { scheduleEvent } from '../scheduling/schedule-event';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { batchPrice } from '../payments/batch-price';
 import { InjectModel } from '@nestjs/mongoose';
 import type {
   AdminCreateEnrollmentRequest,
@@ -51,10 +53,19 @@ export interface StudentEnrolledBatch {
   enrolledCount: number;
   capacity: number;
   feeAmount: number;
+  /** Price in integer minor units of `currency`. */
+  priceMinor: number;
+  currency: string;
+  /** True when online payment is required before access is granted. */
+  paymentRequired: boolean;
   startsAt: string;
   level?: string;
   enrollmentStatus?: StudentEnrollmentStatus;
 }
+
+export type PaidEnrollmentResult =
+  | { ok: true; enrollmentId: string }
+  | { ok: false; reason: 'full' | 'closed' | 'already_enrolled' | 'not_student' | 'busy' };
 
 export interface EnrollStudentInput {
   studentId: string;
@@ -79,8 +90,67 @@ export class StudentEnrollmentsService {
     @InjectModel(BatchDocument.name) private readonly batches: Model<BatchMongoDocument>,
     @InjectModel(BatchScheduleDocument.name) private readonly schedules: Model<BatchScheduleMongoDocument>,
     @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>,
-    @Optional() private readonly auditLogs?: AuditLogsService
+    @Optional() private readonly auditLogs?: AuditLogsService,
+    @Optional() private readonly config?: ConfigService
   ) {}
+
+  /** Paid batches need a verified payment before access when online payments are enabled. */
+  requiresPayment(batch: Pick<BatchMongoDocument, 'feeAmount' | 'currency'>): boolean {
+    return Boolean(this.config?.get<boolean>('payments.enabled', false)) && batchPrice(batch).amountMinor > 0;
+  }
+
+  /**
+   * Grants access for a verified payment. Idempotent: a repeated call for the
+   * same payment returns the enrollment it already created.
+   */
+  async enrollPaidStudent(input: { studentId: string; batchId: string; paymentId: string }): Promise<PaidEnrollmentResult> {
+    const existing = await this.enrollments.findOne({ studentId: input.studentId, batchId: input.batchId, ...ACTIVE_ACCESS_FILTER }).exec();
+    if (existing) {
+      return existing.paymentId === input.paymentId ? { ok: true, enrollmentId: existing.id } : { ok: false, reason: 'already_enrolled' };
+    }
+    const [batch, student] = await Promise.all([
+      this.batches.findOne({ _id: input.batchId, deletedAt: { $exists: false } }).exec(),
+      this.users.findOne({ _id: input.studentId, deletedAt: { $exists: false } }).exec()
+    ]);
+    if (!student || !student.roles.includes('STUDENT')) return { ok: false, reason: 'not_student' };
+    if (!batch || batch.status !== 'ACTIVE' || (batch.endDate && batch.endDate < new Date())) return { ok: false, reason: 'closed' };
+    const token = randomUUID();
+    const locked = await this.batches.findOneAndUpdate(
+      { _id: batch.id, $or: [{ enrollmentLockUntil: { $exists: false } }, { enrollmentLockUntil: { $lt: new Date() } }] },
+      { $set: { enrollmentLockToken: token, enrollmentLockUntil: new Date(Date.now() + 120000) } },
+      { new: true, timestamps: false }
+    ).exec();
+    if (!locked) return { ok: false, reason: 'busy' };
+    try {
+      // The paying student held a seat while checking out, so only active enrollments count here.
+      if ((await this.countActiveByBatch(batch.id)) >= locked.maxCapacity) return { ok: false, reason: 'full' };
+      try {
+        const created = await this.createEnrollment(
+          { studentId: student.id, batchId: batch.id, status: 'active', actorUserId: student.id },
+          locked,
+          student,
+          'active',
+          input.paymentId
+        );
+        return { ok: true, enrollmentId: String(created.id) };
+      } catch (error) {
+        if (error instanceof ConflictException) {
+          const raced = await this.enrollments.findOne({ studentId: input.studentId, batchId: input.batchId, ...ACTIVE_ACCESS_FILTER }).exec();
+          return raced?.paymentId === input.paymentId ? { ok: true, enrollmentId: raced.id } : { ok: false, reason: 'already_enrolled' };
+        }
+        throw error;
+      }
+    } finally {
+      await this.batches.updateOne({ _id: batch.id, enrollmentLockToken: token }, { $unset: { enrollmentLockToken: '', enrollmentLockUntil: '' } }, { timestamps: false });
+    }
+  }
+
+  /** Removes access that was bought with a payment that has been fully refunded or charged back. */
+  async revokePaidEnrollment(enrollmentId: string, paymentId: string): Promise<void> {
+    const enrollment = await this.enrollments.findOne({ _id: enrollmentId, paymentId, ...ACTIVE_ACCESS_FILTER }).exec();
+    if (!enrollment) return;
+    await this.transitionEnrollment(enrollment.id, 'cancelled', `payment:${paymentId}`);
+  }
 
   async listAdminEnrollments(query: AdminEnrollmentListQuery, user: AuthenticatedUser): Promise<AdminEnrollmentListResponse> {
     this.assertAdmin(user);
@@ -195,6 +265,9 @@ export class StudentEnrollmentsService {
       throw new BadRequestException('Only student users can be enrolled in a batch.');
     }
     this.assertBatchOpenForEnrollment(batch);
+    if (this.requiresPayment(batch)) {
+      throw new HttpException('This class requires payment. Choose Pay and enroll to continue.', HttpStatus.PAYMENT_REQUIRED);
+    }
     const token = randomUUID();
     const locked = await this.batches.findOneAndUpdate({_id:batch.id,status:'ACTIVE',deletedAt:{$exists:false},$or:[{enrollmentLockUntil:{$exists:false}},{enrollmentLockUntil:{$lt:new Date()}}]},{$set:{enrollmentLockToken:token,enrollmentLockUntil:new Date(Date.now()+120000)}},{new:true}).exec();
     if(!locked) throw new ConflictException('Enrollment is being updated. Please try again.');
@@ -221,7 +294,8 @@ export class StudentEnrollmentsService {
     input: EnrollStudentInput,
     batch: BatchMongoDocument,
     student: UserMongoDocument,
-    status: StudentEnrollmentStatus
+    status: StudentEnrollmentStatus,
+    paymentId?: string
   ): Promise<Record<string, unknown>> {
     const now = new Date();
     try {
@@ -238,6 +312,7 @@ export class StudentEnrollmentsService {
         createdBy: input.actorUserId,
         updatedBy: input.actorUserId,
         scheduleEvents: [scheduleEvent('enrollment', {reason: status})],
+        ...(paymentId ? { paymentId } : {}),
         ...this.statusTimestamp(status, now)
       });
       return this.serialize(enrollment);
@@ -679,6 +754,9 @@ export class StudentEnrollmentsService {
       enrolledCount,
       capacity: batch.maxCapacity,
       feeAmount: this.batchFeeAmount(batch),
+      priceMinor: batchPrice(batch).amountMinor,
+      currency: batchPrice(batch).currency,
+      paymentRequired: this.requiresPayment(batch),
       startsAt: nextStart.toISOString(),
       ...(enrollment?.status ? { enrollmentStatus: enrollment.status } : {})
     };

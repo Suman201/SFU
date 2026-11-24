@@ -83,6 +83,14 @@ const schema = Joi.object({
   CLASS_MATERIAL_LOCAL_PATH: Joi.string().default('/app/class-materials'),
   CLASS_MATERIAL_MAX_FILE_SIZE_BYTES: Joi.number().integer().min(1).max(50 * 1024 * 1024).default(10 * 1024 * 1024),
   INVOICE_EMAIL_POLL_MS: Joi.number().integer().min(500).max(60000).default(30000),
+  PAYMENTS_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  PAYMENT_GATEWAY: Joi.string().valid('stripe', 'test').optional(),
+  PAYMENTS_WEB_URL: Joi.string().uri({ scheme: ['http', 'https'] }).optional(),
+  PAYMENT_CHECKOUT_TTL_MINUTES: Joi.number().integer().min(30).max(1440).default(30),
+  PAYMENT_EVENT_POLL_MS: Joi.number().integer().min(500).max(60000).default(5000),
+  STRIPE_SECRET_KEY: Joi.string().pattern(/^(sk|rk)_(test|live)_[A-Za-z0-9]+$/).allow('').optional(),
+  STRIPE_WEBHOOK_SECRET: Joi.string().pattern(/^whsec_[A-Za-z0-9]+$/).allow('').optional(),
+  STRIPE_CONNECT_ENABLED: Joi.boolean().truthy('true').falsy('false').default(true),
   TUTOR_VERIFICATION_SWEEP_MS: Joi.number()
     .integer()
     .min(500)
@@ -266,6 +274,17 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
 
     if (!String(validated.OPERATIONS_TOKEN ?? '').trim()) {
       semanticErrors.push('OPERATIONS_TOKEN is required in production');
+    }
+
+    if (validated.PAYMENTS_ENABLED === true) {
+      if ((validated.PAYMENT_GATEWAY ?? 'stripe') !== 'stripe') {
+        semanticErrors.push('PAYMENT_GATEWAY must be stripe in production; the test gateway never collects money');
+      }
+      requireNonEmpty(validated, ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'], semanticErrors, 'when PAYMENTS_ENABLED=true in production');
+      if (String(validated.STRIPE_SECRET_KEY ?? '').includes('_test_')) {
+        semanticErrors.push('STRIPE_SECRET_KEY must be a live key in production');
+      }
+      validatePublicUrl(validated.PAYMENTS_WEB_URL ?? validated.FRONTEND_URL, 'PAYMENTS_WEB_URL', semanticErrors);
     }
 
     if (validated.WEBHOOK_DELIVERY_ENABLED === true && !String(validated.WEBHOOK_SECRET_ENCRYPTION_KEY ?? '').trim()) {

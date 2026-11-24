@@ -428,3 +428,59 @@ function paginatedQueryResult<T>(value: T): unknown {
     }))
   };
 }
+
+describe('StudentEnrollmentsService paid classes', () => {
+  function withPayments(enabled: boolean) {
+    const base = createService();
+    const config = { get: jest.fn((key: string, fallback?: unknown) => (key === 'payments.enabled' ? enabled : fallback)) };
+    const service = new StudentEnrollmentsService(
+      base.enrollments as never,
+      base.batches as never,
+      base.schedules as never,
+      base.users as never,
+      undefined,
+      config as never
+    );
+    return { ...base, service };
+  }
+
+  it('requires payment for paid classes only when online payments are enabled', () => {
+    expect(withPayments(true).service.requiresPayment({ feeAmount: 49.99 } as never)).toBe(true);
+    expect(withPayments(true).service.requiresPayment({ feeAmount: 0 } as never)).toBe(false);
+    expect(withPayments(false).service.requiresPayment({ feeAmount: 49.99 } as never)).toBe(false);
+  });
+
+  it('blocks free self-enrollment in a paid class with HTTP 402', async () => {
+    const { service, enrollments } = withPayments(true);
+    let thrown: unknown;
+    try {
+      await service.selfEnrollStudent(authUser('student-1', ['STUDENT']), 'batch-1');
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as { getStatus?: () => number })?.getStatus?.()).toBe(402);
+    expect(enrollments.create).not.toHaveBeenCalled();
+  });
+
+  it('grants paid access once and returns the same enrollment for a repeated payment event', async () => {
+    const { service, enrollments } = withPayments(true);
+    const result = await service.enrollPaidStudent({ studentId: 'student-1', batchId: 'batch-1', paymentId: 'payment-1' });
+    expect(result).toEqual({ ok: true, enrollmentId: 'enrollment-1' });
+    const created = enrollments.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect([created.paymentId, created.status]).toEqual(['payment-1', 'active']);
+
+    enrollments.findOne.mockReturnValueOnce(queryResult(enrollmentDoc({ paymentId: 'payment-1' })));
+    expect(await service.enrollPaidStudent({ studentId: 'student-1', batchId: 'batch-1', paymentId: 'payment-1' })).toEqual({ ok: true, enrollmentId: 'enrollment-1' });
+
+    enrollments.findOne.mockReturnValueOnce(queryResult(enrollmentDoc({ paymentId: 'other-payment' })));
+    expect(await service.enrollPaidStudent({ studentId: 'student-1', batchId: 'batch-1', paymentId: 'payment-1' })).toEqual({ ok: false, reason: 'already_enrolled' });
+    expect(enrollments.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a full class instead of over-enrolling after payment', async () => {
+    const { service, enrollments } = withPayments(true);
+    enrollments.countDocuments.mockReturnValueOnce(queryResult(30));
+    expect(await service.enrollPaidStudent({ studentId: 'student-1', batchId: 'batch-1', paymentId: 'payment-1' })).toEqual({ ok: false, reason: 'full' });
+    expect(enrollments.create).not.toHaveBeenCalled();
+  });
+});
