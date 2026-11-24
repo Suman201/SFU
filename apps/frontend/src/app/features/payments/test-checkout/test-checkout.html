@@ -1,0 +1,39 @@
+<main class="site-page result-shell">
+  <section class="result-card" aria-labelledby="test-checkout-title">
+    <p class="test-banner" role="note">TEST MODE · Development payment simulator. No card is charged and no money moves.</p>
+    @if (payment(); as p) {
+      <div>
+        <p class="eyebrow">Sapiovian checkout</p>
+        <h1 id="test-checkout-title">Pay {{ money(p.amountMinor, p.currency) }}</h1>
+      </div>
+      <dl class="summary-list">
+        <div><dt>Class</dt><dd>{{ p.batchName }}</dd></div>
+        <div><dt>Teacher</dt><dd>{{ p.teacherName }}</dd></div>
+        <div class="total"><dt>Total due</dt><dd class="money">{{ money(p.amountMinor, p.currency) }}</dd></div>
+      </dl>
+      @if (error()) {
+        <p class="notice error" role="alert">{{ error() }}</p>
+      }
+      @if (p.status === 'pending') {
+        <div class="button-row">
+          <button type="button" class="action-button" [disabled]="busy() !== null" (click)="complete('succeed')">
+            {{ busy() === 'succeed' ? 'Processing…' : 'Pay with test card' }}
+          </button>
+          <button type="button" class="action-button secondary" [disabled]="busy() !== null" (click)="complete('decline')">
+            {{ busy() === 'decline' ? 'Processing…' : 'Simulate declined card' }}
+          </button>
+          <button type="button" class="action-button secondary" [disabled]="busy() !== null" (click)="back()">Back to Sapiovian</button>
+        </div>
+      } @else {
+        <p class="notice attention">This checkout is no longer open.</p>
+        <a class="action-button secondary" [routerLink]="['/payments', p.id]">View payment</a>
+      }
+    } @else if (error()) {
+      <h1 id="test-checkout-title">Checkout unavailable</h1>
+      <p class="notice error" role="alert">{{ error() }}</p>
+      <a class="action-button secondary" routerLink="/student/payments">My payments</a>
+    } @else {
+      <h1 id="test-checkout-title">Loading checkout…</h1>
+    }
+  </section>
+</main>

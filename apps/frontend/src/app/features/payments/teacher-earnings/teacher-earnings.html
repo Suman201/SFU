@@ -1,0 +1,208 @@
+<sfu-header />
+<main class="pay-shell site-page">
+  <section class="pay-head">
+    <div>
+      <p class="eyebrow">Payouts</p>
+      <h1>Earnings</h1>
+      <p>{{ intro() }}</p>
+    </div>
+    <div class="head-actions">
+      <a class="table-action" routerLink="/teacher/dashboard">My teaching</a>
+      <button type="button" class="table-action" (click)="loadAll()" [disabled]="loading()">Refresh</button>
+    </div>
+  </section>
+
+  @if (error()) { <p class="notice error" role="alert">{{ error() }}</p> }
+  @if (success()) { <p class="notice success" role="status">{{ success() }}</p> }
+
+  @if (balance(); as b) {
+    <section class="stat-grid" aria-label="Balances">
+      <article class="stat tone-rose">
+        <span>Available to withdraw</span>
+        <strong class="money">{{ money(b.availableMinor, b.currency) }}</strong>
+        <small>Ready for a payout request</small>
+      </article>
+      <article class="stat tone-amber">
+        <span>Pending</span>
+        <strong class="money">{{ money(b.pendingMinor, b.currency) }}</strong>
+        <small>Released {{ summary()?.holdDays }} {{ summary()?.holdDays === 1 ? 'day' : 'days' }} after payment</small>
+      </article>
+      <article class="stat tone-coral">
+        <span>In payout</span>
+        <strong class="money">{{ money(b.reservedMinor, b.currency) }}</strong>
+        <small>{{ openPayouts().length }} open {{ openPayouts().length === 1 ? 'request' : 'requests' }}</small>
+      </article>
+      <article class="stat tone-green">
+        <span>Paid out</span>
+        <strong class="money">{{ money(b.paidOutMinor, b.currency) }}</strong>
+        <small>Sent to your payout account</small>
+      </article>
+      @if (b.frozenMinor) {
+        <article class="stat tone-rose">
+          <span>On hold (disputes)</span>
+          <strong class="money">{{ money(b.frozenMinor, b.currency) }}</strong>
+          <small>Returned if the dispute is won</small>
+        </article>
+      }
+    </section>
+
+    <section class="split">
+      <article class="panel-card" aria-labelledby="breakdown-title">
+        <h2 id="breakdown-title">How your earnings add up</h2>
+        <dl class="summary-list">
+          <div><dt>Student payments</dt><dd class="money">{{ money(b.grossMinor, b.currency) }}</dd></div>
+          <div><dt>Platform fee ({{ percent(summary()!.commissionBps) }})</dt><dd class="money">−{{ money(b.commissionMinor, b.currency) }}</dd></div>
+          <div><dt>Refunds and chargebacks (your share)</dt><dd class="money">−{{ money(refundShare(b), b.currency) }}</dd></div>
+          <div class="total">
+            <dt>Your total earnings</dt>
+            <dd class="money">{{ money(totalEarnings(b), b.currency) }}</dd>
+          </div>
+        </dl>
+        <p>Refunds return the platform fee in the same proportion, so you only give back your share.</p>
+      </article>
+
+      <article class="panel-card" aria-labelledby="payout-title">
+        <h2 id="payout-title">Withdraw earnings</h2>
+        @if (!summary()?.payoutsEnabled) {
+          <p class="notice attention">Payouts are not available yet. Your earnings are recorded and will be payable once payouts are switched on.</p>
+        } @else if (!summary()?.payoutAccount?.connected) {
+          <p>Connect a payout account with our payment provider to receive transfers to your bank. Bank details are stored by the provider, not by Sapiovian.</p>
+          <div class="button-row">
+            <button type="button" class="action-button" [disabled]="busy()" (click)="setupPayouts()">Set up payouts</button>
+          </div>
+        } @else if (!summary()?.payoutAccount?.payoutsEnabled) {
+          <p class="notice attention">Your payout account needs more details before it can receive transfers.</p>
+          <div class="button-row">
+            <button type="button" class="action-button" [disabled]="busy()" (click)="setupPayouts()">Continue setup</button>
+          </div>
+        } @else {
+          <p>{{ accountLine(b.currency) }}</p>
+          <form class="field-row" (ngSubmit)="requestPayout()">
+            <label>
+              Amount ({{ b.currency }})
+              <span class="amount-input">
+                <span aria-hidden="true">$</span>
+                <input name="amount" inputmode="decimal" [ngModel]="amount()" (ngModelChange)="amount.set($event)" placeholder="0.00" aria-describedby="payout-limit" />
+              </span>
+            </label>
+            <label style="flex: 1 1 180px">
+              Note (optional)
+              <input name="note" maxlength="500" [ngModel]="note()" (ngModelChange)="note.set($event)" placeholder="e.g. November classes" />
+            </label>
+            <button type="submit" class="action-button" [disabled]="busy() || !canRequest()">Request payout</button>
+          </form>
+          <small id="payout-limit" class="muted">Up to {{ money(b.availableMinor, b.currency) }} available now.</small>
+        }
+      </article>
+    </section>
+  } @else if (loading()) {
+    <p class="muted">Loading earnings…</p>
+  }
+
+  <section class="data-table-shell" aria-label="Earnings history">
+    <div class="data-table-toolbar">
+      <div class="table-view-tabs" role="tablist" aria-label="Earnings history">
+        <button type="button" role="tab" class="filter-chip" [class.active]="tab() === 'transactions'" [attr.aria-selected]="tab() === 'transactions'" (click)="tab.set('transactions')">
+          Transactions · {{ transactionTotal() }}
+        </button>
+        <button type="button" role="tab" class="filter-chip" [class.active]="tab() === 'payouts'" [attr.aria-selected]="tab() === 'payouts'" (click)="tab.set('payouts')">
+          Payouts · {{ payoutTotal() }}
+        </button>
+      </div>
+    </div>
+
+    @if (tab() === 'transactions') {
+      <div class="data-table-wrap" style="--data-table-min-width: 820px">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Activity</th>
+              <th>Class / student</th>
+              <th class="num">Payment</th>
+              <th class="num">Platform fee</th>
+              <th class="num">Your balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of transactions(); track row.id) {
+              <tr>
+                <td>{{ row.occurredAt | date: 'mediumDate' }}</td>
+                <td>
+                  <div class="cell-stack">
+                    <strong>{{ entryLabel(row.type) }}</strong>
+                    <small>{{ row.description }}</small>
+                  </div>
+                </td>
+                <td>
+                  <div class="cell-stack">
+                    <span>{{ row.batchName ?? '—' }}</span>
+                    @if (row.studentName) { <small>{{ row.studentName }}</small> }
+                  </div>
+                </td>
+                <td class="num money">{{ row.grossMinor !== undefined ? money(row.grossMinor, row.currency) : '—' }}</td>
+                <td class="num money">{{ row.commissionMinor !== undefined ? '−' + money(row.commissionMinor, row.currency) : '—' }}</td>
+                <td class="num money" [class.positive]="row.netMinor > 0" [class.negative]="row.netMinor < 0">
+                  {{ row.netMinor !== 0 ? signed(row.netMinor, row.currency) : movement(row) }}
+                </td>
+              </tr>
+            } @empty {
+              <tr class="empty-row"><td colspan="6">No earnings yet. Payments for your paid classes will appear here.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <footer class="data-table-footer">
+        <span>{{ transactionTotal() }} {{ transactionTotal() === 1 ? 'entry' : 'entries' }}</span>
+        <div class="table-actions">
+          <button type="button" class="table-action" [disabled]="transactionPage() === 1" (click)="loadTransactions(transactionPage() - 1)">Previous</button>
+          <button type="button" class="table-action" [disabled]="transactionPage() * 30 >= transactionTotal()" (click)="loadTransactions(transactionPage() + 1)">Next</button>
+        </div>
+      </footer>
+    } @else {
+      <div class="data-table-wrap" style="--data-table-min-width: 760px">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Requested</th>
+              <th class="num">Amount</th>
+              <th>Status</th>
+              <th>Notes</th>
+              <th class="actions-cell">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of payouts(); track row.id) {
+              <tr>
+                <td>{{ row.requestedAt | date: 'medium' }}</td>
+                <td class="num money">{{ money(row.amountMinor, row.currency) }}</td>
+                <td>
+                  <div class="cell-stack">
+                    <span class="data-pill {{ payoutPill(row.status) }}">{{ payoutLabel(row.status) }}</span>
+                    @if (row.paidAt) { <small>Sent {{ row.paidAt | date: 'mediumDate' }}</small> }
+                  </div>
+                </td>
+                <td>
+                  <div class="cell-stack">
+                    <span>{{ row.note || '—' }}</span>
+                    @if (row.adminNote) { <small>Admin: {{ row.adminNote }}</small> }
+                    @if (row.failureReason) { <small>{{ row.failureReason }}</small> }
+                  </div>
+                </td>
+                <td class="actions-cell">
+                  @if (row.status === 'requested') {
+                    <button type="button" class="table-action danger" [disabled]="busy()" (click)="cancelPayout(row)">Cancel</button>
+                  } @else { <span class="muted">—</span> }
+                </td>
+              </tr>
+            } @empty {
+              <tr class="empty-row"><td colspan="5">No payout requests yet.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <footer class="data-table-footer"><span>{{ payoutTotal() }} {{ payoutTotal() === 1 ? 'payout' : 'payouts' }}</span></footer>
+    }
+  </section>
+</main>
+<sfu-footer />

@@ -118,6 +118,30 @@ export const routes: Routes = [
     pathMatch: 'full'
   },
   {
+    path: 'student/payments',
+    canActivate: [roleGuard],
+    data: { role: 'student' },
+    loadComponent: () => import('./features/payments/student-payments/student-payments').then((route) => route.StudentPayments)
+  },
+  {
+    path: 'payments/test-checkout/:paymentId',
+    canActivate: [roleGuard],
+    data: { role: 'student' },
+    loadComponent: () => import('./features/payments/test-checkout/test-checkout').then((route) => route.TestCheckout)
+  },
+  {
+    path: 'payments/:paymentId',
+    canActivate: [roleGuard],
+    data: { role: 'student' },
+    loadComponent: () => import('./features/payments/payment-status/payment-status').then((route) => route.PaymentStatusPage)
+  },
+  {
+    path: 'teacher/earnings',
+    canActivate: [roleGuard],
+    data: { role: 'teacher' },
+    loadComponent: () => import('./features/payments/teacher-earnings/teacher-earnings').then((route) => route.TeacherEarnings)
+  },
+  {
     path: 'student/explore',
     canActivate: [roleGuard],
     data: { role: 'student' },

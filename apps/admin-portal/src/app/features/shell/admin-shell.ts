@@ -27,6 +27,8 @@ interface NavigationItem {
   label: string;
   path: string;
   icon: AdminIconName;
+  /** Highlight only on this exact path (for section roots such as /finance). */
+  exact?: boolean;
 }
 const groups: { label: string; items: NavigationItem[] }[] = [
   {
@@ -59,6 +61,18 @@ const groups: { label: string; items: NavigationItem[] }[] = [
         path: '/teaching-catalog',
         icon: 'archive',
       },
+    ],
+  },
+  {
+    label: 'Finance',
+    items: [
+      { label: 'Finance overview', path: '/finance', icon: 'chart', exact: true },
+      { label: 'Payments', path: '/finance/payments', icon: 'wallet' },
+      { label: 'Payouts', path: '/finance/payouts', icon: 'send' },
+      { label: 'Refunds & disputes', path: '/finance/refunds', icon: 'refresh' },
+      { label: 'Teacher earnings', path: '/finance/teachers', icon: 'users' },
+      { label: 'Ledger', path: '/finance/ledger', icon: 'ledger' },
+      { label: 'Finance settings', path: '/finance/settings', icon: 'settings' },
     ],
   },
   {
@@ -125,9 +139,12 @@ export class AdminShell {
   );
   protected readonly currentPage = computed(
     () =>
-      this.section()?.items.find((item) =>
-        (this.currentUrl().split('?')[0] ?? '').startsWith(item.path),
-      )?.label ?? 'Administration',
+      this.section()
+        ?.items.filter((item) =>
+          (this.currentUrl().split('?')[0] ?? '').startsWith(item.path),
+        )
+        .sort((left, right) => right.path.length - left.path.length)[0]?.label ??
+      'Administration',
   );
   protected readonly initials = computed(() =>
     (this.auth.user()?.name || 'Administrator')

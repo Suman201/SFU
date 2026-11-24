@@ -1,0 +1,121 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Finance</p>
+    <h1>Revenue overview</h1>
+    <p>Student payments, platform commission and what the platform owes teachers, from the double-entry ledger.</p>
+  </div>
+  <a class="primary-action" routerLink="/finance/payouts" [queryParams]="{ status: 'open' }">Review payouts</a>
+</section>
+
+<sfu-finance-tabs />
+
+@if (gateway(); as g) {
+  @if (!g.enabled) {
+    <p class="test-note">Online payments are switched off (PAYMENTS_ENABLED=false). Paid classes still use free enrollment until they are enabled.</p>
+  } @else if (g.gateway === 'test') {
+    <p class="test-note">Test gateway active: payments are simulated and no money moves. Configure Stripe before going live.</p>
+  } @else if (g.testMode) {
+    <p class="test-note">Stripe test mode: use Stripe test cards. Switch to live keys before accepting real payments.</p>
+  }
+}
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Reporting period</h2>
+      <p>{{ data()?.from }} to {{ data()?.to }} · {{ data()?.currency ?? 'USD' }}</p>
+    </div>
+    <form class="data-table-filters" (ngSubmit)="load()">
+      <button type="button" class="table-action" (click)="preset(7)">7 days</button>
+      <button type="button" class="table-action" (click)="preset(30)">30 days</button>
+      <button type="button" class="table-action" (click)="preset(90)">90 days</button>
+      <input type="date" name="from" aria-label="From" [ngModel]="from()" (ngModelChange)="from.set($event)" />
+      <input type="date" name="to" aria-label="To" [ngModel]="to()" (ngModelChange)="to.set($event)" />
+      <button type="submit" class="table-action primary">Apply</button>
+    </form>
+  </div>
+</section>
+
+@if (error()) { <p class="table-error" role="alert">{{ error() }}</p> }
+
+@if (data(); as d) {
+  <section class="summary-grid" aria-label="Period totals">
+    <article class="accent-green">
+      <span>Gross payments</span>
+      <strong>{{ money(d.grossMinor, d.currency) }}</strong>
+      <small>{{ d.successfulPayments }} paid · {{ d.failedPayments }} failed</small>
+    </article>
+    <article class="accent-rose">
+      <span>Commission earned</span>
+      <strong>{{ money(d.commissionMinor - d.refundedCommissionMinor, d.currency) }}</strong>
+      <small>{{ money(d.commissionMinor, d.currency) }} before refunds</small>
+    </article>
+    <article class="accent-coral">
+      <span>Refunds & chargebacks</span>
+      <strong>{{ money(d.refundedMinor, d.currency) }}</strong>
+      <small>Returned to students</small>
+    </article>
+    <article class="accent-amber">
+      <span>Gateway fees</span>
+      <strong>{{ money(d.gatewayFeesMinor, d.currency) }}</strong>
+      <small>Processing and dispute fees</small>
+    </article>
+    <article class="accent-green">
+      <span>Platform net</span>
+      <strong>{{ money(d.platformNetMinor, d.currency) }}</strong>
+      <small>Commission after refunds minus fees</small>
+    </article>
+    <article>
+      <span>Teacher earnings</span>
+      <strong>{{ money(d.teacherEarningsMinor, d.currency) }}</strong>
+      <small>Teacher share of payments</small>
+    </article>
+  </section>
+
+  <section class="panel-grid">
+    <article class="panel">
+      <h2>Daily gross payments</h2>
+      <div class="bars" role="img" [attr.aria-label]="'Daily gross payments from ' + d.from + ' to ' + d.to">
+        @for (point of chart(); track point.date) {
+          <span [class.empty]="!point.grossMinor" [style.height.%]="point.height" [attr.title]="barTitle(point)"></span>
+        }
+      </div>
+      <div class="bars-axis"><span>{{ d.from }}</span><span>{{ d.to }}</span></div>
+    </article>
+
+    <article class="panel">
+      <h2>Owed to teachers now</h2>
+      <dl class="kv">
+        <div><dt>Pending (holding period)</dt><dd class="money">{{ money(d.teacherPendingMinor, d.currency) }}</dd></div>
+        <div><dt>Available for payout</dt><dd class="money">{{ money(d.teacherAvailableMinor, d.currency) }}</dd></div>
+        <div><dt>Requested payouts</dt><dd class="money">{{ money(d.teacherReservedMinor, d.currency) }}</dd></div>
+        <div><dt>Frozen by disputes</dt><dd class="money">{{ money(d.teacherFrozenMinor, d.currency) }}</dd></div>
+        <div class="strong"><dt>Paid out (all time)</dt><dd class="money">{{ money(d.paidOutMinor, d.currency) }}</dd></div>
+      </dl>
+    </article>
+
+    <article class="panel">
+      <h2>Needs attention</h2>
+      <ul class="action-list">
+        <li>
+          <span>Payout requests</span>
+          <a class="table-action" routerLink="/finance/payouts" [queryParams]="{ status: 'open' }"><strong>{{ d.pendingPayoutRequests }}</strong>&nbsp;open</a>
+        </li>
+        <li>
+          <span>Open disputes</span>
+          <a class="table-action" routerLink="/finance/refunds" [queryParams]="{ view: 'disputes' }"><strong>{{ d.openDisputes }}</strong>&nbsp;open</a>
+        </li>
+        <li>
+          <span>Failed gateway events</span>
+          <a class="table-action" routerLink="/finance/ledger"><strong>{{ d.failedGatewayEvents }}</strong>&nbsp;failed</a>
+        </li>
+        <li>
+          <span>Ledger</span>
+          @if (d.ledgerBalanced) { <strong class="ok-text">Balanced</strong> } @else { <a class="table-action danger" routerLink="/finance/ledger">Unbalanced — review</a> }
+        </li>
+      </ul>
+    </article>
+  </section>
+} @else if (loading()) {
+  <p class="empty-state">Loading finance overview…</p>
+}

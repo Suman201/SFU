@@ -1,0 +1,141 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow"><a routerLink="/finance/payments">Payments</a></p>
+    <h1>{{ payment()?.receiptNumber ?? 'Payment' }}</h1>
+    <p>{{ payment()?.description }}</p>
+  </div>
+  @if (payment()?.receiptNumber) {
+    <button type="button" class="primary-action" (click)="receipt()">Receipt PDF</button>
+  }
+</section>
+
+<sfu-finance-tabs />
+
+@if (error()) { <p class="table-error" role="alert">{{ error() }}</p> }
+@if (success()) { <p class="table-success" role="status">{{ success() }}</p> }
+
+@if (payment(); as p) {
+  <section class="panel-grid">
+    <article class="panel">
+      <h2>Payment</h2>
+      <dl class="kv">
+        <div><dt>Status</dt><dd><span class="data-pill {{ tone(p.status) }}">{{ label(p.status) }}</span></dd></div>
+        <div><dt>Student</dt><dd>{{ p.studentName }}</dd></div>
+        <div><dt>Email</dt><dd>{{ p.studentEmail }}</dd></div>
+        <div><dt>Class</dt><dd>{{ p.batchName }}</dd></div>
+        <div><dt>Teacher</dt><dd>{{ p.teacherName }}</dd></div>
+        <div><dt>Created</dt><dd>{{ p.createdAt | date: 'medium' }}</dd></div>
+        @if (p.paidAt) { <div><dt>Paid</dt><dd>{{ p.paidAt | date: 'medium' }}</dd></div> }
+        <div><dt>Class access</dt><dd>{{ p.enrollmentState.replace('_', ' ') }}</dd></div>
+        <div><dt>Dispute</dt><dd>{{ p.disputeState }}</dd></div>
+        @if (p.failureReason) { <div><dt>Note</dt><dd>{{ p.failureReason }}</dd></div> }
+      </dl>
+    </article>
+
+    <article class="panel">
+      <h2>Split</h2>
+      <dl class="kv">
+        <div class="strong"><dt>Amount paid</dt><dd>{{ money(p.amountMinor, p.currency) }}</dd></div>
+        <div><dt>Platform commission ({{ p.commissionBps / 100 }}%)</dt><dd>{{ money(p.commissionMinor, p.currency) }}</dd></div>
+        <div><dt>Teacher share</dt><dd>{{ money(p.teacherMinor, p.currency) }}</dd></div>
+        <div><dt>Gateway fee (platform)</dt><dd>{{ p.gatewayFeeMinor ? money(p.gatewayFeeMinor, p.currency) : '—' }}</dd></div>
+        <div><dt>Refunded</dt><dd>{{ money(p.refundedMinor, p.currency) }}</dd></div>
+        <div><dt>Commission refunded</dt><dd>{{ money(p.refundedCommissionMinor, p.currency) }}</dd></div>
+        <div><dt>Teacher share refunded</dt><dd>{{ money(p.refundedTeacherMinor, p.currency) }}</dd></div>
+        <div><dt>Earnings released</dt><dd>{{ p.earningsReleasedAt ? (p.earningsReleasedAt | date: 'mediumDate') : (p.earningsAvailableAt ? 'From ' + (p.earningsAvailableAt | date: 'mediumDate') : '—') }}</dd></div>
+      </dl>
+    </article>
+
+    <article class="panel">
+      <h2>Refund</h2>
+      @if (refundable() > 0) {
+        <p>Up to {{ money(refundable(), p.currency) }} can be refunded. Retried requests are never refunded twice.</p>
+        <form class="form-grid" (ngSubmit)="refund()">
+          <label class="field">
+            Amount ({{ p.currency }})
+            <input name="amount" inputmode="decimal" [ngModel]="refundAmount()" (ngModelChange)="refundAmount.set($event)" />
+          </label>
+          <label class="field" style="grid-column: 1 / -1">
+            Reason (shared with the student)
+            <textarea name="reason" maxlength="300" [ngModel]="refundReason()" (ngModelChange)="refundReason.set($event)" placeholder="e.g. Class cancelled by the teacher"></textarea>
+          </label>
+          <div class="inline-actions">
+            <button type="submit" class="table-action danger" [disabled]="busy()">Refund</button>
+          </div>
+        </form>
+      } @else if (p.disputeState === 'open') {
+        <p>This payment is disputed. Respond in the payment provider dashboard; refunds are blocked until the dispute closes.</p>
+      } @else {
+        <p>Nothing left to refund for this payment.</p>
+      }
+      @if (gateway()?.gateway === 'test' && p.gatewayPaymentId && p.status !== 'pending') {
+        <div class="test-note">
+          Test gateway — simulate a card dispute:
+          <div class="inline-actions" style="margin-top: 6px">
+            <button type="button" class="table-action" [disabled]="busy()" (click)="simulateDispute('needs_response')">Open</button>
+            <button type="button" class="table-action" [disabled]="busy()" (click)="simulateDispute('won')">Won</button>
+            <button type="button" class="table-action" [disabled]="busy()" (click)="simulateDispute('lost')">Lost</button>
+          </div>
+        </div>
+      }
+    </article>
+  </section>
+
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div><h2>Refunds</h2><p>{{ p.refunds.length }} records</p></div>
+    </div>
+    <div class="data-table-wrap" style="--data-table-min-width: 720px">
+      <table class="data-table">
+        <thead><tr><th>Created</th><th class="num">Amount</th><th>Status</th><th>Reason</th><th>Completed</th></tr></thead>
+        <tbody>
+          @for (refund of p.refunds; track refund.id) {
+            <tr>
+              <td>{{ refund.createdAt | date: 'medium' }}</td>
+              <td class="num">{{ money(refund.amountMinor, p.currency) }}</td>
+              <td><span class="data-pill {{ refundTone(refund.status) }}">{{ refund.status }}</span></td>
+              <td>{{ refund.reason }}</td>
+              <td>{{ refund.completedAt ? (refund.completedAt | date: 'medium') : '—' }}</td>
+            </tr>
+          } @empty {
+            <tr><td colspan="5" class="empty-state">No refunds.</td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <div><h2>Ledger entries</h2><p>Balanced double-entry postings for this payment</p></div>
+    </div>
+    <div class="data-table-wrap" style="--data-table-min-width: 820px">
+      <table class="data-table">
+        <thead><tr><th>Date</th><th>Entry</th><th>Lines (account · debit · credit)</th></tr></thead>
+        <tbody>
+          @for (entry of p.ledger ?? []; track entry.id) {
+            <tr>
+              <td>{{ entry.occurredAt | date: 'medium' }}</td>
+              <td><div class="cell-stack"><strong>{{ entryLabels[entry.type] }}</strong><small>{{ entry.memo }}</small></div></td>
+              <td>
+                <ul class="ledger-lines">
+                  @for (line of entry.lines; track $index) {
+                    <li>
+                      <span>{{ accountLabels[line.account] }}</span>
+                      <span>{{ line.debitMinor ? money(line.debitMinor, entry.currency) : '' }}</span>
+                      <span>{{ line.creditMinor ? money(line.creditMinor, entry.currency) : '' }}</span>
+                    </li>
+                  }
+                </ul>
+              </td>
+            </tr>
+          } @empty {
+            <tr><td colspan="3" class="empty-state">No ledger entries yet (unpaid checkout).</td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+} @else if (!error()) {
+  <p class="empty-state">Loading payment…</p>
+}

@@ -17,6 +17,11 @@ export interface StudentBatch {
   enrolledCount: number;
   capacity: number;
   feeAmount: number;
+  /** Price in integer minor units (cents); provided by servers with online payments. */
+  priceMinor?: number;
+  currency?: string;
+  /** True when the class must be paid online before access is granted. */
+  paymentRequired?: boolean;
   startsAt: string;
   level?: string;
   enrollmentStatus?: StudentEnrollmentStatus;
@@ -191,6 +196,8 @@ export class StudentEnrollmentStore {
       enrolledCount: batch.enrolledCount ?? 0,
       capacity: batch.capacity ?? 0,
       feeAmount: typeof batch.feeAmount === 'number' && Number.isFinite(batch.feeAmount) && batch.feeAmount > 0 ? batch.feeAmount : 0,
+      currency: batch.currency ?? 'USD',
+      paymentRequired: batch.paymentRequired === true,
       startsAt: batch.startsAt ?? new Date().toISOString()
     };
   }

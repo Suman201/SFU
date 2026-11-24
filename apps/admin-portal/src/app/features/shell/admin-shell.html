@@ -71,6 +71,7 @@
         <a
           [routerLink]="item.path"
           routerLinkActive="active"
+          [routerLinkActiveOptions]="{ exact: item.exact ?? false }"
           ariaCurrentWhenActive="page"
           [attr.title]="collapsed() ? item.label : null"
           ><admin-icon [name]="item.icon" /><span>{{ item.label }}</span></a

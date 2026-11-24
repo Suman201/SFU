@@ -33,6 +33,10 @@ const paths = {
   refresh: 'M20 7a8 8 0 0 0-14-2L3 8m0-5v5h5m-4 9a8 8 0 0 0 14 2l3-3m0 5v-5h-5',
   arrow: 'M5 12h14m-6-6 6 6-6 6',
   external: 'M15 3h6v6m0-6L11 13M10 3H3v18h18v-7',
+  wallet: 'M3 7h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm0 0 2-3h11v3m1 6h.01',
+  send: 'M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z',
+  ledger: 'M4 4h16v16H4V4Zm4 0v16M8 9h12M8 14h12',
+  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7.4 7.4 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14.5 2h-5l-.4 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7.4 7.4 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.4 2.6h5l.4-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z',
 } as const;
 export type AdminIconName = keyof typeof paths;
 @Component({

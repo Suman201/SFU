@@ -1,0 +1,129 @@
+<sfu-header />
+<main class="pay-shell site-page">
+  <section class="pay-head">
+    <div>
+      <p class="eyebrow">Billing</p>
+      <h1>Payments</h1>
+      <p>Class fees you have paid, receipts and refunds. Card details are handled by our payment provider and never stored by Sapiovian.</p>
+    </div>
+    <div class="head-actions">
+      <a class="table-action" routerLink="/student/explore">Explore classes</a>
+      <a class="table-action" routerLink="/student/dashboard">My learning</a>
+    </div>
+  </section>
+
+  <section class="stat-grid" aria-label="Payment summary">
+    <article class="stat tone-green">
+      <span>Total paid</span>
+      <strong class="money">{{ money(totals().paidMinor, totals().currency) }}</strong>
+      <small>{{ totals().count }} {{ totals().count === 1 ? 'payment' : 'payments' }}</small>
+    </article>
+    <article class="stat tone-coral">
+      <span>Refunded</span>
+      <strong class="money">{{ money(totals().refundedMinor, totals().currency) }}</strong>
+      <small>Returned to your card</small>
+    </article>
+    <article class="stat tone-amber">
+      <span>Awaiting payment</span>
+      <strong>{{ totals().open }}</strong>
+      <small>Checkouts you can still finish</small>
+    </article>
+  </section>
+
+  @if (error()) {
+    <p class="notice error" role="alert">{{ error() }}</p>
+  }
+
+  <section class="data-table-shell" aria-labelledby="payment-history-title">
+    <div class="data-table-toolbar">
+      <div>
+        <h2 id="payment-history-title" class="visually-hidden">Payment history</h2>
+        <div class="table-view-tabs" role="group" aria-label="Filter payments">
+          @for (item of filters; track item.id) {
+            <button type="button" class="filter-chip" [class.active]="filter() === item.id" [attr.aria-pressed]="filter() === item.id" (click)="filter.set(item.id)">
+              {{ item.label }}
+            </button>
+          }
+        </div>
+      </div>
+      <button type="button" class="table-action" (click)="load()" [disabled]="loading()">Refresh</button>
+    </div>
+
+    <div class="data-table-wrap" style="--data-table-min-width: 860px">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Class</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th class="num">Amount</th>
+            <th class="num">Refunded</th>
+            <th>Receipt</th>
+            <th class="actions-cell">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @if (loading()) {
+            <tr class="empty-row"><td colspan="7">Loading payments…</td></tr>
+          } @else if (!filtered().length) {
+            <tr class="empty-row">
+              <td colspan="7">
+                @if (rows().length) { No payments match this filter. } @else { You have not paid for any classes yet. }
+              </td>
+            </tr>
+          } @else {
+            @for (row of filtered(); track row.id) {
+              <tr>
+                <td>
+                  <div class="cell-stack">
+                    <strong>{{ row.batchName }}</strong>
+                    <small>with {{ row.teacherName }}</small>
+                  </div>
+                </td>
+                <td>
+                  <div class="cell-stack">
+                    <span>{{ (row.paidAt ?? row.createdAt) | date: 'mediumDate' }}</span>
+                    <small>{{ (row.paidAt ?? row.createdAt) | date: 'shortTime' }}</small>
+                  </div>
+                </td>
+                <td>
+                  <div class="cell-stack">
+                    <span class="data-pill {{ pillClass(row.status) }}">{{ statusLabel(row.status) }}</span>
+                    @if (row.disputeState === 'open') { <small>Disputed with your bank</small> }
+                    @if (row.enrollmentState === 'refund_required') { <small>Refund in progress</small> }
+                  </div>
+                </td>
+                <td class="num money">{{ money(row.amountMinor, row.currency) }}</td>
+                <td class="num money">{{ row.refundedMinor ? money(row.refundedMinor, row.currency) : '—' }}</td>
+                <td>{{ row.receiptNumber ?? '—' }}</td>
+                <td class="actions-cell">
+                  <div class="table-actions">
+                    @if (row.receiptNumber) {
+                      <button type="button" class="table-action" [disabled]="downloading() === row.id" (click)="download(row)">
+                        {{ downloading() === row.id ? 'Preparing…' : 'Receipt PDF' }}
+                      </button>
+                    }
+                    @if (row.checkoutUrl) {
+                      <a class="table-action primary" [routerLink]="['/payments', row.id]">Finish payment</a>
+                    } @else {
+                      <a class="table-action" [routerLink]="['/payments', row.id]">Details</a>
+                    }
+                  </div>
+                </td>
+              </tr>
+            }
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <footer class="data-table-footer">
+      <span>{{ total() }} {{ total() === 1 ? 'payment' : 'payments' }}</span>
+      <div class="table-actions">
+        <button type="button" class="table-action" [disabled]="page() === 1 || loading()" (click)="load(page() - 1)">Previous</button>
+        <button type="button" class="table-action" [disabled]="page() * limit() >= total() || loading()" (click)="load(page() + 1)">Next</button>
+      </div>
+    </footer>
+  </section>
+</main>
+<sfu-footer />

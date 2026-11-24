@@ -1,0 +1,331 @@
+// Finance workspace: shared admin table pattern plus product-palette status tones.
+@layer admin-pages {
+  :host {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+  }
+
+  .primary-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  td small,
+  .cell-stack small {
+    display: block;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+
+  .cell-stack {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .num {
+    text-align: right !important;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .money {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .data-pill.tone-success {
+    border-color: color-mix(in srgb, var(--product-green) 30%, transparent);
+    background: var(--green-soft);
+    color: var(--green-ink);
+  }
+
+  .data-pill.tone-attention {
+    border-color: color-mix(in srgb, var(--product-amber) 50%, transparent);
+    background: color-mix(in srgb, var(--product-amber) 20%, var(--panel));
+    color: var(--amber-ink);
+  }
+
+  .data-pill.tone-live {
+    border-color: color-mix(in srgb, var(--product-coral) 40%, transparent);
+    background: color-mix(in srgb, var(--product-coral) 14%, var(--panel));
+    color: var(--coral-ink);
+  }
+
+  .data-pill.tone-danger {
+    border-color: color-mix(in srgb, var(--product-rose) 40%, transparent);
+    background: color-mix(in srgb, var(--product-rose) 12%, var(--panel));
+    color: var(--rose-ink);
+  }
+
+  .data-pill.tone-muted {
+    border-color: var(--line);
+    background: var(--hover);
+    color: var(--muted);
+  }
+
+  .summary-grid article {
+    position: relative;
+  }
+
+  .summary-grid article.accent-rose {
+    box-shadow: inset 3px 0 0 var(--product-rose);
+  }
+
+  .summary-grid article.accent-coral {
+    box-shadow: inset 3px 0 0 var(--product-coral);
+  }
+
+  .summary-grid article.accent-amber {
+    box-shadow: inset 3px 0 0 var(--product-amber);
+  }
+
+  .summary-grid article.accent-green {
+    box-shadow: inset 3px 0 0 var(--product-green);
+  }
+
+  .panel {
+    display: grid;
+    align-content: start;
+    gap: 12px;
+    min-width: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+
+    h2 {
+      margin: 0;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+  }
+
+  .panel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+  }
+
+  .kv {
+    display: grid;
+    margin: 0;
+
+    div {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--line-soft);
+
+      &:last-child {
+        border-bottom: 0;
+      }
+    }
+
+    dt {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    dd {
+      margin: 0;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+
+    .strong dd {
+      font-size: 15px;
+    }
+  }
+
+  .action-list {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+
+    li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    strong {
+      font-variant-numeric: tabular-nums;
+    }
+  }
+
+  .bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 96px;
+    padding-top: 6px;
+
+    span {
+      flex: 1 1 0;
+      min-width: 3px;
+      border-radius: 2px 2px 0 0;
+      background: var(--product-green);
+      opacity: 0.85;
+    }
+
+    span.empty {
+      background: var(--line);
+    }
+  }
+
+  .bars-axis {
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    align-items: end;
+  }
+
+  .field {
+    display: grid;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12.5px;
+    font-weight: 600;
+
+    input,
+    select,
+    textarea {
+      min-height: 34px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--field);
+      color: var(--text);
+      font: inherit;
+      font-weight: 500;
+    }
+
+    textarea {
+      min-height: 64px;
+      resize: vertical;
+    }
+
+    small {
+      color: var(--muted);
+      font-weight: 500;
+    }
+  }
+
+  .check-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+
+    label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text);
+      font-size: 13px;
+    }
+  }
+
+  .inline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .ledger-lines {
+    display: grid;
+    gap: 2px;
+    max-width: 440px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 12px;
+
+    li {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 90px 90px;
+      gap: 8px;
+    }
+
+    span:nth-child(2),
+    span:nth-child(3) {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+  }
+
+  .test-note {
+    padding: 8px 10px;
+    border: 1px dashed color-mix(in srgb, var(--product-amber) 70%, var(--line));
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--product-amber) 12%, var(--panel));
+    color: var(--text);
+    font-size: 12.5px;
+  }
+
+  .ok-text {
+    color: var(--green-ink);
+  }
+
+  .warn-text {
+    color: var(--rose-ink);
+  }
+
+  .view-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+
+    a,
+    button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--muted);
+      font: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .active {
+      border-color: color-mix(in srgb, var(--product-rose) 45%, var(--line));
+      background: color-mix(in srgb, var(--product-rose) 10%, var(--panel));
+      color: var(--rose-ink);
+    }
+  }
+}

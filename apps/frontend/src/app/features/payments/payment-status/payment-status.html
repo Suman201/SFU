@@ -1,0 +1,93 @@
+<sfu-header />
+<main class="site-page result-shell">
+  <section class="result-card" aria-live="polite">
+    @switch (view()) {
+      @case ('loading') {
+        <div class="status-mark pending" aria-hidden="true">…</div>
+        <h1>Loading payment</h1>
+      }
+      @case ('error') {
+        <div class="status-mark failed" aria-hidden="true">!</div>
+        <h1>Payment not found</h1>
+        <p>{{ error() }}</p>
+        <div class="button-row"><a class="action-button secondary" routerLink="/student/payments">View my payments</a></div>
+      }
+      @case ('confirming') {
+        <div class="status-mark pending" aria-hidden="true">…</div>
+        <h1>Confirming your payment</h1>
+        <p>We are waiting for the payment provider to confirm the charge. This usually takes a few seconds — please keep this page open.</p>
+      }
+      @case ('paid') {
+        <div class="status-mark" aria-hidden="true">✓</div>
+        <h1>Payment received</h1>
+        @if (payment()?.enrollmentState === 'granted') {
+          <p>You are enrolled in <strong>{{ payment()?.batchName }}</strong>. Your classes are now on your calendar.</p>
+        } @else if (payment()?.enrollmentState === 'refund_required') {
+          <p class="notice attention">{{ payment()?.failureReason }} A full refund has been issued automatically.</p>
+        } @else {
+          <p>Your payment is confirmed and your class access is being set up.</p>
+        }
+      }
+      @case ('refunded') {
+        <div class="status-mark" aria-hidden="true">↺</div>
+        <h1>{{ statusLabel(payment()!.status) }}</h1>
+        <p>{{ money(payment()!.refundedMinor, payment()!.currency) }} has been refunded to your card. Refunds usually arrive within 5–10 business days.</p>
+      }
+      @case ('cancelled') {
+        <div class="status-mark pending" aria-hidden="true">!</div>
+        <h1>Checkout not completed</h1>
+        <p>You left the payment page before paying. Your place is held until the checkout expires.</p>
+      }
+      @case ('open') {
+        <div class="status-mark pending" aria-hidden="true">…</div>
+        <h1>Awaiting payment</h1>
+        @if (timedOut()) {
+          <p>The payment provider has not confirmed this payment yet. If you were charged, it will appear in your payments shortly.</p>
+        } @else {
+          <p>This checkout is still open.</p>
+        }
+      }
+      @case ('unsuccessful') {
+        <div class="status-mark failed" aria-hidden="true">✕</div>
+        <h1>Payment {{ statusLabel(payment()!.status).toLowerCase() }}</h1>
+        <p>{{ payment()?.failureReason || 'No money was taken for this checkout.' }}</p>
+      }
+    }
+
+    @if (payment(); as p) {
+      @if (p.status === 'pending' && p.failureReason) {
+        <p class="notice error">{{ p.failureReason }}</p>
+      }
+      <dl class="summary-list">
+        <div><dt>Class</dt><dd>{{ p.batchName }}</dd></div>
+        <div><dt>Teacher</dt><dd>{{ p.teacherName }}</dd></div>
+        @if (p.receiptNumber) { <div><dt>Receipt</dt><dd>{{ p.receiptNumber }}</dd></div> }
+        @if (p.paidAt) { <div><dt>Paid</dt><dd>{{ p.paidAt | date: 'medium' }}</dd></div> }
+        @if (p.status === 'pending' && p.expiresAt) { <div><dt>Checkout open until</dt><dd>{{ p.expiresAt | date: 'shortTime' }}</dd></div> }
+        <div class="total"><dt>Total</dt><dd class="money">{{ money(p.amountMinor, p.currency) }}</dd></div>
+      </dl>
+
+      @if (error() && view() !== 'error') {
+        <p class="notice error" role="alert">{{ error() }}</p>
+      }
+
+      <div class="button-row">
+        @if (p.checkoutUrl && (view() === 'cancelled' || view() === 'open')) {
+          <button type="button" class="action-button" (click)="resume()">Return to checkout</button>
+          <button type="button" class="action-button secondary" [disabled]="busy()" (click)="cancel()">Cancel payment</button>
+        }
+        @if (view() === 'paid' && p.enrollmentState === 'granted') {
+          <a class="action-button" routerLink="/calendar">Open my calendar</a>
+        }
+        @if (view() === 'unsuccessful') {
+          <a class="action-button" routerLink="/student/explore" [queryParams]="{ batchId: p.batchId }">Try again</a>
+        }
+        @if (p.receiptNumber) {
+          <button type="button" class="action-button secondary" [disabled]="busy()" (click)="receipt()">Download receipt</button>
+        }
+        <a class="action-button secondary" routerLink="/student/payments">All payments</a>
+      </div>
+    }
+  </section>
+</main>
+<sfu-footer />
