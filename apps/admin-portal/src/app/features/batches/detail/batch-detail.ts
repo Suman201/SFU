@@ -1,3 +1,4 @@
+import { AuthService } from '../../../core/services/auth.service';
 import { SUPPORTED_CURRENCIES, CURRENCY_DECIMALS, isCurrencyCode, formatMoneyWithCode, majorToMinor, type CurrencyCode } from '@native-sfu/contracts';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
@@ -44,6 +45,7 @@ interface SchedulePreviewItem {
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class BatchDetail implements OnInit {
+  protected readonly auth = inject(AuthService);
   protected readonly currencies = SUPPORTED_CURRENCIES;
   protected priceStep(code: string): number { return isCurrencyCode(code) ? 10 ** -CURRENCY_DECIMALS[code] : 0.01; }
   protected feeLabel(batch: { feeAmount?: number; feeMinor?: number; feeCurrency?: CurrencyCode }): string {
@@ -100,6 +102,7 @@ export class BatchDetail implements OnInit {
   }
 
   protected async save(): Promise<void> {
+    if (!this.auth.can('admin:teaching:write')) return;
     const batch = this.batch();
     if (!batch || this.form.invalid || this.saving()) {
       this.form.markAllAsTouched();
@@ -166,10 +169,12 @@ export class BatchDetail implements OnInit {
   }
 
   protected addScheduleRow(): void {
+    if (!this.auth.can('admin:teaching:write')) return;
     this.scheduleRows.push(this.createScheduleGroup());
   }
 
   protected removeScheduleRow(index: number): void {
+    if (!this.auth.can('admin:teaching:write')) return;
     if (this.scheduleRows.length <= 1) {
       return;
     }
@@ -192,6 +197,7 @@ export class BatchDetail implements OnInit {
   }
 
   protected async transition(action: 'activate' | 'pause' | 'complete' | 'cancel'): Promise<void> {
+    if (!this.auth.can('admin:teaching:write')) return;
     const batch = this.batch();
     if (!batch || this.pendingAction()) {
       return;

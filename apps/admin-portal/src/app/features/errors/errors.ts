@@ -1,3 +1,4 @@
+import { AuthService } from '../../core/services/auth.service';
 import { DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import {
@@ -19,6 +20,7 @@ import { API_BASE_URL } from '../../core/services/app-environment';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ErrorsAdmin {
+  protected readonly auth = inject(AuthService);
   private readonly http = inject(HttpClient);
   private readonly base = API_BASE_URL + '/admin/errors';
   readonly rows = signal<ErrorIncident[]>([]);
@@ -89,6 +91,7 @@ export class ErrorsAdmin {
     this.selected.set(null);
   }
   update(): void {
+    if (!this.auth.can('admin:errors:write')) return;
     const item = this.selected();
     if (!item || this.saving()) return;
     this.saving.set(true);

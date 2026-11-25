@@ -179,7 +179,7 @@
         <tr>
           <td colspan="9" class="empty-state">Loading recordings...</td>
         </tr>
-        } @else if (!rows().length) {
+        } @else if(!rows().length) {
         <tr>
           <td colspan="9" class="empty-state">
             No recordings match these filters.
@@ -218,18 +218,15 @@
           </td>
           <td class="row-menu-cell">
             <div class="table-row-menu">
-              <a
+              @if (auth.can('admin:recordings:read')) {<a
                 class="table-action"
                 [routerLink]="['/recordings', row.recordingId]"
                 >View</a
-              >
-              @if (row.sessionId) {
-              <a
+              >} @if (row.sessionId) { @if (auth.can('admin:teaching:read')) {<a
                 class="table-action"
                 [routerLink]="['/class-sessions', row.sessionId]"
                 >Session</a
-              >
-              }
+              >} }
               <button
                 type="button"
                 class="table-action"

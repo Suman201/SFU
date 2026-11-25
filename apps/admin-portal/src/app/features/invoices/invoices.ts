@@ -1,3 +1,4 @@
+import { AuthService } from '../../core/services/auth.service';
 import { DatePipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
@@ -38,6 +39,7 @@ type Editor = Omit<InvoiceInput, 'lines'> & { lines: EditorLine[] };
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class InvoicesAdmin {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(InvoicesApi);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
@@ -201,6 +203,7 @@ export class InvoicesAdmin {
       });
   }
   protected create() {
+    if (!this.auth.can('admin:finance:write')) return;
     this.error.set('');
     this.notice.set('');
     this.editingId = undefined;
@@ -213,6 +216,7 @@ export class InvoicesAdmin {
     this.mode.set('editor');
   }
   protected edit() {
+    if (!this.auth.can('admin:finance:write')) return;
     const value = this.detail();
     if (!value) return;
     this.form = {
@@ -269,10 +273,12 @@ export class InvoicesAdmin {
     }
   }
   protected addLine() {
+    if (!this.auth.can('admin:finance:write')) return;
     if (this.form.lines.length < 50)
       this.form.lines.push({ description: '', quantity: 1, price: 0, tax: 0 });
   }
   protected removeLine(index: number) {
+    if (!this.auth.can('admin:finance:write')) return;
     if (this.form.lines.length > 1) this.form.lines.splice(index, 1);
   }
   protected priceStep(): number { return 1 / (10 ** CURRENCY_DECIMALS[this.form.currency]); }
@@ -284,6 +290,7 @@ export class InvoicesAdmin {
   }
   protected save(event: SubmitEvent) {
     event.preventDefault();
+    if (!this.auth.can('admin:finance:write')) return;
     if (
       this.busy() ||
       !(event.target as HTMLFormElement).reportValidity() ||
@@ -323,6 +330,7 @@ export class InvoicesAdmin {
       });
   }
   protected issue() {
+    if (!this.auth.can('admin:finance:write')) return;
     const value = this.detail();
     if (value)
       this.run(
@@ -331,6 +339,7 @@ export class InvoicesAdmin {
       );
   }
   protected send() {
+    if (!this.auth.can('admin:finance:write')) return;
     const value = this.detail();
     if (!value || this.busy()) return;
     this.busy.set(true);
@@ -405,6 +414,7 @@ export class InvoicesAdmin {
   }
   protected recordPayment(event: SubmitEvent) {
     event.preventDefault();
+    if (!this.auth.can('admin:finance:write')) return;
     const value = this.detail();
     if (!value || !(event.target as HTMLFormElement).reportValidity()) return;
     this.run(
@@ -421,6 +431,7 @@ export class InvoicesAdmin {
   }
   protected voidInvoice(event: SubmitEvent) {
     event.preventDefault();
+    if (!this.auth.can('admin:finance:write')) return;
     const value = this.detail();
     if (!value || !(event.target as HTMLFormElement).reportValidity()) return;
     this.run(
@@ -451,6 +462,7 @@ export class InvoicesAdmin {
   }
   protected saveSettings(event: SubmitEvent) {
     event.preventDefault();
+    if (!this.auth.can('admin:finance:write')) return;
     if (
       !this.settingsForm ||
       this.busy() ||

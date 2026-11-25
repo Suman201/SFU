@@ -175,28 +175,28 @@
         (click)="downloadDocument(doc)"
       >
         Download for review</button
-      ><label
+      >@if(auth.can('admin:teaching:write')){<label
         >Verification findings<textarea
           rows="3"
           maxlength="1000"
           [(ngModel)]="documentNotes[doc.id]"
           placeholder="Record the method, source and findings. Do not copy identity numbers into notes."
         ></textarea></label
-      ><button
+      >}@if (auth.can('admin:teaching:write')) {<button
         type="button"
         class="primary-button"
         [disabled]="saving()||!documentRead().includes(doc.id)||(documentNotes[doc.id]||'').trim().length<20"
         (click)="reviewDocument(doc,'verified')"
       >
         Mark verified</button
-      ><button
+      >}@if (auth.can('admin:teaching:write')) {<button
         type="button"
         class="secondary-button"
         [disabled]="saving()||!documentRead().includes(doc.id)||(documentNotes[doc.id]||'').trim().length<20"
         (click)="reviewDocument(doc,'rejected')"
       >
         Reject document</button
-      >}@else{
+      >}}@else{
       <p>
         File removed under the retention policy. The recorded verification
         result is retained.
@@ -249,17 +249,18 @@
         target="_blank"
         rel="noopener noreferrer"
         >Open supporting evidence ↗</a
-      >} @if(item.status==='submitted' && results[i]){<label
+      >} @if(item.status==='submitted' &&
+      results[i]){@if (auth.can('admin:teaching:write')) {<label
         ><input type="checkbox" [(ngModel)]="results[i]!.passed" /> Subject and
         teaching assessment passed</label
-      ><label
+      >}@if (auth.can('admin:teaching:write')) {<label
         >Assessment findings<textarea
           rows="3"
           maxlength="1000"
           [(ngModel)]="results[i]!.notes"
           placeholder="Record what was assessed, the result, and any interview or demonstration reference."
         ></textarea></label
-      >}
+      >}}
     </fieldset>
     }
     <h3>Qualifications and experience</h3>
@@ -294,7 +295,7 @@
       notes.
     </p>
     <div class="catalog-form">
-      <label
+      @if (auth.can('admin:teaching:write')) {<label
         ><span
           ><input
             type="checkbox"
@@ -303,17 +304,18 @@
           />
           Introduction video watched and suitable</span
         ></label
-      ><label
+      >}@if (auth.can('admin:teaching:write')) {<label
         ><span
           ><input type="checkbox" [(ngModel)]="identity" style="width: auto" />
           Identity and adult tutor eligibility checked</span
         ></label
-      ><label
+      >}@if (auth.can('admin:teaching:write')) {<label
         ><span
           ><input type="checkbox" [(ngModel)]="teaching" style="width: auto" />
           Subject expertise and teaching suitability checked</span
         ></label
-      >@if(item.learnerAgeGroups.includes('children')){<label class="wide"
+      >}@if(item.learnerAgeGroups.includes('children')){@if(auth.can('admin:teaching:write')){<label
+        class="wide"
         ><span
           ><input
             type="checkbox"
@@ -323,38 +325,37 @@
           Required safeguarding checks completed for these markets and age
           groups</span
         ></label
-      >}
-      <label class="wide"
+      >}} @if(auth.can('admin:teaching:write')){<label class="wide"
         >Feedback to tutor<textarea
           rows="4"
           maxlength="2000"
           [(ngModel)]="note"
           placeholder="Explain the decision and any specific changes needed."
-        ></textarea>
-      </label>
+        ></textarea></label
+      >}
       <footer class="editor-actions">
-        <button
+        @if (auth.can('admin:teaching:write')) {<button
           type="button"
           class="primary-button"
           [disabled]="saving()||note.trim().length<10||item.missing.length>0||!videoReviewed||!allAssessmentsPassed()||!identity||!teaching||(item.learnerAgeGroups.includes('children')&&!safeguarding)"
           (click)="review('approved')"
         >
           Approve profile</button
-        ><button
+        >}@if (auth.can('admin:teaching:write')) {<button
           type="button"
           class="secondary-button"
           [disabled]="saving()||note.trim().length<10"
           (click)="review('changes_requested')"
         >
           Request changes</button
-        ><button
+        >}@if (auth.can('admin:teaching:write')) {<button
           type="button"
           class="secondary-button"
           [disabled]="saving()||note.trim().length<10"
           (click)="review('rejected')"
         >
-          Reject application
-        </button>
+          Reject application</button
+        >}
       </footer>
     </div>
     }@else{

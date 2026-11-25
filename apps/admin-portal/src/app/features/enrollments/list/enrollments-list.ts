@@ -1,3 +1,4 @@
+import { AuthService } from '../../../core/services/auth.service';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -24,6 +25,7 @@ type EnrollmentStatusFilter = AdminEnrollmentStatus | 'all';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class EnrollmentsList implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
   protected readonly lookup = inject(AdminLookupService);
@@ -77,12 +79,14 @@ export class EnrollmentsList implements OnInit {
   }
 
   protected toggleCreate(): void {
+    if (!this.auth.can('admin:teaching:write')) return;
     this.showCreate.update((value) => !value);
     this.error.set('');
     this.success.set('');
   }
 
   protected createEnrollment(): void {
+    if (!this.auth.can('admin:teaching:write')) return;
     this.createForm.markAllAsTouched();
     if (this.createForm.invalid || this.saving()) {
       return;
@@ -110,6 +114,7 @@ export class EnrollmentsList implements OnInit {
   }
 
   protected async transition(row: AdminEnrollmentListItem, action: 'cancel' | 'suspend' | 'reactivate' | 'complete'): Promise<void> {
+    if (!this.auth.can('admin:teaching:write')) return;
     if (this.pendingEnrollmentId()) {
       return;
     }

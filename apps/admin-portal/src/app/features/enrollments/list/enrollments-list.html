@@ -6,9 +6,13 @@
       Manage the roster that controls student access to live class sessions.
     </p>
   </div>
-  <button type="button" class="primary-action" (click)="toggleCreate()">
-    {{ showCreate() ? 'Close' : 'Add enrollment' }}
-  </button>
+  @if (auth.can('admin:teaching:write')) {<button
+    type="button"
+    class="primary-action"
+    (click)="toggleCreate()"
+  >
+    {{ showCreate() ? 'Close' : 'Add enrollment' }}</button
+  >}
 </section>
 
 <section class="summary-grid" aria-label="Enrollment summary">
@@ -30,7 +34,7 @@
   </article>
 </section>
 
-@if (showCreate()) {
+@if (showCreate() && auth.can('admin:teaching:write')) {
 <section class="create-panel" aria-labelledby="create-enrollment-title">
   <div>
     <p class="eyebrow">New enrollment</p>
@@ -40,6 +44,7 @@
       remains exact.
     </p>
   </div>
+  @if (auth.can('admin:teaching:write')) {
   <form [formGroup]="createForm" (ngSubmit)="createEnrollment()">
     <input
       type="search"
@@ -60,9 +65,13 @@
       <option value="pending">Pending</option>
       <option value="suspended">Suspended</option>
     </select>
-    <button type="submit" class="table-action primary" [disabled]="saving()">
-      {{ saving() ? 'Adding...' : 'Add' }}
-    </button>
+    @if (auth.can('admin:teaching:write')) {<button
+      type="submit"
+      class="table-action primary"
+      [disabled]="saving()"
+    >
+      {{ saving() ? 'Adding...' : 'Add' }}</button
+    >}
     <datalist id="enrollment-create-student-options">
       @for (option of lookup.students(); track option.id) {
       <option [value]="option.id">
@@ -78,6 +87,7 @@
       }
     </datalist>
   </form>
+  }
 </section>
 }
 
@@ -191,7 +201,7 @@
         <tr>
           <td colspan="8" class="empty-state">Loading enrollments...</td>
         </tr>
-        } @else if (!rows().length) {
+        } @else if(!rows().length) {
         <tr>
           <td colspan="8" class="empty-state">
             No enrollments match these filters.
@@ -237,37 +247,34 @@
             updated' }}
           </td>
           <td class="actions-cell">
-            <a class="table-action" [routerLink]="['/enrollments', row.id]"
+            @if (auth.can('admin:teaching:read')) {<a
+              class="table-action"
+              [routerLink]="['/enrollments', row.id]"
               >View</a
-            >
-            @if (row.status === 'active') {
-            <button
+            >} @if (row.status === 'active') { @if
+            (auth.can('admin:teaching:write')) {<button
               type="button"
               class="table-action accent"
               [disabled]="pendingEnrollmentId() === row.id"
               (click)="transition(row, 'suspend')"
             >
-              Suspend
-            </button>
-            } @else {
-            <button
+              Suspend</button
+            >} } @else { @if (auth.can('admin:teaching:write')) {<button
               type="button"
               class="table-action primary"
               [disabled]="pendingEnrollmentId() === row.id"
               (click)="transition(row, 'reactivate')"
             >
-              Reactivate
-            </button>
-            } @if (row.status !== 'cancelled') {
-            <button
+              Reactivate</button
+            >} } @if (row.status !== 'cancelled') { @if
+            (auth.can('admin:teaching:write')) {<button
               type="button"
               class="table-action danger"
               [disabled]="pendingEnrollmentId() === row.id"
               (click)="transition(row, 'cancel')"
             >
-              Cancel
-            </button>
-            }
+              Cancel</button
+            >} }
           </td>
         </tr>
         } }

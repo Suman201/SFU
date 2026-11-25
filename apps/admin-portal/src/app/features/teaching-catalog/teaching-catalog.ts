@@ -1,3 +1,4 @@
+import { AuthService } from '../../core/services/auth.service';
 import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
@@ -18,6 +19,7 @@ import { TeachingCatalogApi } from '../../core/services/teaching-catalog-api.ser
   styleUrl: './teaching-catalog.scss',
 })
 export class TeachingCatalogAdmin implements OnInit {
+  protected readonly auth = inject(AuthService);
   protected readonly api = inject(TeachingCatalogApi);
   protected readonly kind = signal<TeachingCatalogKind>('category');
   protected readonly tabs = [
@@ -152,6 +154,7 @@ export class TeachingCatalogAdmin implements OnInit {
     { key: 'smtpTransport', label: 'Email transport' },
   ];
   protected runReadiness() {
+    if (!this.auth.can('admin:teaching:read')) return;
     this.checkingReadiness.set(true);
     this.api
       .readiness()
@@ -181,6 +184,7 @@ export class TeachingCatalogAdmin implements OnInit {
     this.error.set('');
   }
   protected approveContent() {
+    if (!this.auth.can('admin:content:write')) return;
     const row = this.contentReview();
     if (!row || this.saving()) return;
     this.saving.set(true);
@@ -203,6 +207,7 @@ export class TeachingCatalogAdmin implements OnInit {
       });
   }
   protected addTask() {
+    if (!this.auth.can('admin:content:write')) return;
     const level = this.levels().find(
       (l) => !this.form.assessmentTasks.some((t) => t.levelId === l.id),
     );
@@ -214,6 +219,7 @@ export class TeachingCatalogAdmin implements OnInit {
       });
   }
   protected removeTask(index: number) {
+    if (!this.auth.can('admin:content:write')) return;
     this.form.assessmentTasks.splice(index, 1);
   }
   protected taskLevelUsed(id: string, index: number) {
@@ -222,6 +228,7 @@ export class TeachingCatalogAdmin implements OnInit {
     );
   }
   protected save() {
+    if (!this.auth.can('admin:content:write')) return;
     if (this.saving() || !this.form.name.trim()) return;
     this.saving.set(true);
     this.error.set('');
@@ -271,6 +278,7 @@ export class TeachingCatalogAdmin implements OnInit {
       });
   }
   protected archive(row: TeachingCatalogEntry) {
+    if (!this.auth.can('admin:content:write')) return;
     if (this.saving()) return;
     this.saving.set(true);
     this.error.set('');
@@ -300,6 +308,7 @@ export class TeachingCatalogAdmin implements OnInit {
       });
   }
   protected starter() {
+    if (!this.auth.can('admin:content:write')) return;
     if (this.saving()) return;
     this.saving.set(true);
     this.api

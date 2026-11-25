@@ -1,3 +1,4 @@
+import { AuthService } from '../../../core/services/auth.service';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
@@ -26,6 +27,7 @@ type UserStatusFilter = AdminUserStatus | 'all';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class UsersList implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
@@ -73,10 +75,12 @@ export class UsersList implements OnInit {
   }
 
   protected activate(row: AdminUserListItem): void {
+    if (!this.auth.can('admin:users:write')) return;
     this.runAction(row, 'activate');
   }
 
   protected async deactivate(row: AdminUserListItem): Promise<void> {
+    if (!this.auth.can('admin:users:write')) return;
     const confirmed = await this.confirmDialog.confirm({
       title: `Deactivate ${row.name}?`,
       message: 'They will be signed out and blocked from logging in until reactivated.',

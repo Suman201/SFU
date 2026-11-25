@@ -1,3 +1,4 @@
+import { AuthService } from '../../../core/services/auth.service';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -15,6 +16,7 @@ import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dia
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class EnrollmentDetail implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly route = inject(ActivatedRoute);
   private readonly confirmDialog = inject(ConfirmDialogService);
@@ -30,6 +32,7 @@ export class EnrollmentDetail implements OnInit {
   }
 
   protected async transition(action: 'cancel' | 'suspend' | 'reactivate' | 'complete'): Promise<void> {
+    if (!this.auth.can('admin:teaching:write')) return;
     const enrollment = this.enrollment();
     if (!enrollment || this.pendingAction()) {
       return;

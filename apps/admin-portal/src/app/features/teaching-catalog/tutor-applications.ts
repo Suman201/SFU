@@ -1,3 +1,4 @@
+import { AuthService } from '../../core/services/auth.service';
 import {
   teachingCategoryPath,
   type TeacherTeachingArea,
@@ -21,6 +22,7 @@ import { TeachingCatalogApi } from '../../core/services/teaching-catalog-api.ser
   styleUrl: './teaching-catalog.scss',
 })
 export class TutorApplicationsAdmin implements OnInit {
+  protected readonly auth = inject(AuthService);
   protected readonly videoPreview = signal('');
   private readonly destroyRef = inject(DestroyRef);
   private clearPreview() {
@@ -91,6 +93,7 @@ export class TutorApplicationsAdmin implements OnInit {
     doc: import('@native-sfu/contracts').TutorVerificationDocument,
     decision: 'verified' | 'rejected',
   ) {
+    if (!this.auth.can('admin:teaching:write')) return;
     const current = this.detail();
     if (!current || this.saving()) return;
     this.saving.set(true);
@@ -212,6 +215,7 @@ export class TutorApplicationsAdmin implements OnInit {
     );
   }
   protected review(decision: TutorReviewRequest['decision']) {
+    if (!this.auth.can('admin:teaching:write')) return;
     const current = this.detail();
     if (!current || this.saving() || this.note.trim().length < 10) return;
     this.saving.set(true);

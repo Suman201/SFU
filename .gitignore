@@ -25,3 +25,7 @@ coverage
 
 # Scratch verification scripts
 /scratch/
+
+# Generated admin CI evidence.
+/reports/admin-ci/
+/test-results/admin/

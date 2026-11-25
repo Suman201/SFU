@@ -1,3 +1,4 @@
+import { AuthService } from '../../core/services/auth.service';
 import { DatePipe, TitleCasePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
@@ -24,6 +25,7 @@ type ContactPriorityFilter = ContactSubmissionPriority | 'all';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class ContactInbox implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
 
@@ -93,6 +95,7 @@ export class ContactInbox implements OnInit {
   }
 
   protected updateSelected(): void {
+    if (!this.auth.can('admin:support:write')) return;
     const row = this.selected();
     if (!row || this.saving()) return;
     const value = this.updateForm.getRawValue();
@@ -108,6 +111,7 @@ export class ContactInbox implements OnInit {
   }
 
   protected reply(): void {
+    if (!this.auth.can('admin:support:write')) return;
     const row = this.selected();
     const message = this.replyForm.controls.message.value.trim();
     if (!row || this.saving() || !message) return;
@@ -117,11 +121,13 @@ export class ContactInbox implements OnInit {
   }
 
   protected archive(row = this.selected()): void {
+    if (!this.auth.can('admin:support:write')) return;
     if (!row || this.saving()) return;
     this.runSave(this.api.archiveContactSubmission(row.submissionId), 'Contact submission archived.');
   }
 
   protected markSpam(row = this.selected()): void {
+    if (!this.auth.can('admin:support:write')) return;
     if (!row || this.saving()) return;
     this.runSave(this.api.markContactSubmissionSpam(row.submissionId), 'Contact submission marked as spam.');
   }

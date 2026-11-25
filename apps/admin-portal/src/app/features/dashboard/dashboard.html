@@ -28,7 +28,10 @@
   [attr.aria-busy]="loading()"
 >
   <a
-    routerLink="/class-sessions"
+    [routerLink]="auth.can('admin:teaching:read') ? '/class-sessions' : null"
+    [class.permission-link-disabled]="!(auth.can('admin:teaching:read'))"
+    [attr.aria-disabled]="auth.can('admin:teaching:read') ? null : true"
+    [attr.tabindex]="auth.can('admin:teaching:read') ? null : -1"
     [queryParams]="{ status: 'live' }"
     class="metric-card"
     ><div class="metric-label">
@@ -39,7 +42,12 @@
       ><span class="live-dot"></span>In progress now<admin-icon
         name="arrow" /></span
   ></a>
-  <a routerLink="/class-sessions" class="metric-card"
+  <a
+    [routerLink]="auth.can('admin:teaching:read') ? '/class-sessions' : null"
+    [class.permission-link-disabled]="!(auth.can('admin:teaching:read'))"
+    [attr.aria-disabled]="auth.can('admin:teaching:read') ? null : true"
+    [attr.tabindex]="auth.can('admin:teaching:read') ? null : -1"
+    class="metric-card"
     ><div class="metric-label">
       <span>Scheduled today</span><admin-icon name="calendar" />
     </div>
@@ -48,7 +56,12 @@
       >{{ summary()?.completedToday ?? '—' }} completed today<admin-icon
         name="arrow" /></span
   ></a>
-  <a routerLink="/attendance" class="metric-card"
+  <a
+    [routerLink]="auth.can('admin:attendance:read') ? '/attendance' : null"
+    [class.permission-link-disabled]="!(auth.can('admin:attendance:read'))"
+    [attr.aria-disabled]="auth.can('admin:attendance:read') ? null : true"
+    [attr.tabindex]="auth.can('admin:attendance:read') ? null : -1"
+    class="metric-card"
     ><div class="metric-label">
       <span>Today’s attendance</span><admin-icon name="chart" />
     </div>
@@ -56,7 +69,12 @@
     ><span class="metric-caption"
       >View attendance report<admin-icon name="arrow" /></span
   ></a>
-  <a routerLink="/enrollments" class="metric-card"
+  <a
+    [routerLink]="auth.can('admin:teaching:read') ? '/enrollments' : null"
+    [class.permission-link-disabled]="!(auth.can('admin:teaching:read'))"
+    [attr.aria-disabled]="auth.can('admin:teaching:read') ? null : true"
+    [attr.tabindex]="auth.can('admin:teaching:read') ? null : -1"
+    class="metric-card"
     ><div class="metric-label">
       <span>New enrollments</span><admin-icon name="users" />
     </div>
@@ -73,12 +91,12 @@
         <h2>Live now</h2>
         <p>Classes currently in progress</p>
       </div>
-      <a
+      @if (auth.can('admin:teaching:read')) {<a
         class="table-action"
         routerLink="/class-sessions"
         [queryParams]="{ status:'live' }"
-        >View all<admin-icon name="arrow"
-      /></a>
+        >View all<admin-icon name="arrow" /></a
+      >}
     </div>
     <div class="data-table-wrap" style="--data-table-min-width: 590px">
       <table class="data-table">
@@ -95,7 +113,7 @@
           <tr>
             <td colspan="4" class="empty-state">Loading live sessions…</td>
           </tr>
-          } @else if (!summary()?.liveSessionItems?.length) {
+          } @else if(!summary()?.liveSessionItems?.length) {
           <tr>
             <td colspan="4" class="empty-state">
               <div class="dashboard-empty">
@@ -106,7 +124,10 @@
                   Live classes will appear here when teachers start their
                   sessions.
                 </p>
-                <a routerLink="/class-sessions">View scheduled classes →</a>
+                @if (auth.can('admin:teaching:read')) {<a
+                  routerLink="/class-sessions"
+                  >View scheduled classes →</a
+                >}
               </div>
             </td>
           </tr>
@@ -128,11 +149,11 @@
               'Starting' }}
             </td>
             <td>
-              <a
+              @if (auth.can('admin:teaching:read')) {<a
                 class="table-action"
                 [routerLink]="['/class-sessions',session.sessionId]"
                 >View</a
-              >
+              >}
             </td>
           </tr>
           } }
@@ -162,23 +183,27 @@
         <p>Items needing review will appear here.</p>
       </div>
       } @else { @for(issue of summary()?.issues ?? []; track
-      trackByIssue($index,issue)) {
-      <a
+      trackByIssue($index,issue)) { @if(auth.canVisit(issuePath(issue))){<a
         class="issue-row {{ issueClass(issue) }}"
         [routerLink]="issuePath(issue)"
         [queryParams]="issueQueryParams(issue)"
         ><span class="issue-count">{{ issue.count }}</span
-        ><strong>{{ issue.label }}</strong><admin-icon name="chevron"
-      /></a>
-      } }
+        ><strong>{{ issue.label }}</strong><admin-icon name="chevron" /></a
+      >} } }
     </div>
-    <a class="support-link" routerLink="/support"
-      >Open support queue<admin-icon name="arrow"
-    /></a>
+    @if (auth.can('admin:support:read')) {<a
+      class="support-link"
+      routerLink="/support"
+      >Open support queue<admin-icon name="arrow" /></a
+    >}
   </section>
 </section>
 <section class="activity-strip" aria-label="Platform totals">
-  <a routerLink="/users"
+  <a
+    [routerLink]="auth.can('admin:users:read') ? '/users' : null"
+    [class.permission-link-disabled]="!(auth.can('admin:users:read'))"
+    [attr.aria-disabled]="auth.can('admin:users:read') ? null : true"
+    [attr.tabindex]="auth.can('admin:users:read') ? null : -1"
     ><span>Active users</span
     ><strong>{{ summary()?.activeUsers ?? '—' }}</strong
     ><small
@@ -186,18 +211,30 @@
       }} students</small
     ></a
   >
-  <a routerLink="/enrollments"
+  <a
+    [routerLink]="auth.can('admin:teaching:read') ? '/enrollments' : null"
+    [class.permission-link-disabled]="!(auth.can('admin:teaching:read'))"
+    [attr.aria-disabled]="auth.can('admin:teaching:read') ? null : true"
+    [attr.tabindex]="auth.can('admin:teaching:read') ? null : -1"
     ><span>Active enrollments</span
     ><strong>{{ summary()?.activeEnrollments ?? '—' }}</strong
     ><small>Across all active batches</small></a
   >
-  <a routerLink="/courses"
+  <a
+    [routerLink]="auth.can('admin:teaching:read') ? '/courses' : null"
+    [class.permission-link-disabled]="!(auth.can('admin:teaching:read'))"
+    [attr.aria-disabled]="auth.can('admin:teaching:read') ? null : true"
+    [attr.tabindex]="auth.can('admin:teaching:read') ? null : -1"
     ><span>Teaching catalog</span
     ><strong
       >{{ summary()?.activeCourses ?? '—' }} <small>courses</small></strong
     ><small>{{ summary()?.activeBatches ?? '—' }} active batches</small></a
   >
-  <a routerLink="/recordings"
+  <a
+    [routerLink]="auth.can('admin:recordings:read') ? '/recordings' : null"
+    [class.permission-link-disabled]="!(auth.can('admin:recordings:read'))"
+    [attr.aria-disabled]="auth.can('admin:recordings:read') ? null : true"
+    [attr.tabindex]="auth.can('admin:recordings:read') ? null : -1"
     ><span>Recording activity</span
     ><strong
       >{{ summary()?.activeRecordings ?? '—' }} <small>active</small></strong
@@ -212,15 +249,15 @@
     <p>Manage your day-to-day operations.</p>
   </div>
   <div class="quick-grid">
-    <a routerLink="/tutor-applications"
+    @if (auth.can('admin:teaching:read')) {<a routerLink="/tutor-applications"
       ><admin-icon name="shield" />Tutor applications<admin-icon
         name="arrow" /></a
-    ><a routerLink="/batches"
+    >}@if (auth.can('admin:teaching:read')) {<a routerLink="/batches"
       ><admin-icon name="layers" />Manage batches<admin-icon name="arrow" /></a
-    ><a routerLink="/invoices"
+    >}@if (auth.can('admin:finance:read')) {<a routerLink="/invoices"
       ><admin-icon name="receipt" />Invoices<admin-icon name="arrow" /></a
-    ><a routerLink="/audit-logs"
-      ><admin-icon name="file" />Audit logs<admin-icon name="arrow"
-    /></a>
+    >}@if (auth.can('admin:audit:read')) {<a routerLink="/audit-logs"
+      ><admin-icon name="file" />Audit logs<admin-icon name="arrow" /></a
+    >}
   </div>
 </section>

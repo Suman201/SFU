@@ -162,3 +162,8 @@ input[type='radio'] {
     transition-duration: 0.01ms !important;
   }
 }
+
+// Native fieldset semantics preserve each control's own disabled state.
+.permission-fieldset { display: contents; border: 0; padding: 0; margin: 0; min-width: 0; }
+
+.permission-link-disabled { cursor: default; pointer-events: none; }

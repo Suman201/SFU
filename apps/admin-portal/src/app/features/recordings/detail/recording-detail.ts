@@ -1,3 +1,4 @@
+import { AuthService } from '../../../core/services/auth.service';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -16,6 +17,7 @@ import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dia
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class RecordingDetail implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly route = inject(ActivatedRoute);
   private readonly formBuilder = inject(FormBuilder);
@@ -72,6 +74,7 @@ export class RecordingDetail implements OnInit {
   }
 
   protected saveRetention(): void {
+    if (!this.auth.can('admin:recordings:write')) return;
     const recording = this.recording();
     if (!recording || this.retentionForm.invalid || this.saving()) {
       this.retentionForm.markAllAsTouched();
@@ -95,6 +98,7 @@ export class RecordingDetail implements OnInit {
   }
 
   protected async archive(): Promise<void> {
+    if (!this.auth.can('admin:recordings:write')) return;
     const recording = this.recording();
     if (!recording || this.archiving()) {
       return;

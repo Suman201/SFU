@@ -1,0 +1,71 @@
+name: Admin portal CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  admin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CI: 'true'
+      NODE_OPTIONS: --max-old-space-size=4096
+      NG_BUILD_MAX_WORKERS: '2'
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install headless browsers and Linux dependencies
+        run: npx playwright install --with-deps chromium webkit
+      - name: Build admin and backend dependencies
+        run: npm run build:admin-ci
+      - name: Run admin unit tests
+        run: |
+          export CHROME_BIN="$(node -p "require('playwright').chromium.executablePath()")"
+          npm run test:admin:unit
+      - name: Run backend authorization regressions
+        run: npm run test:admin:backend
+      - name: Start isolated Mongo replica set and Redis
+        run: node scripts/admin-ci-services.cjs up
+      - name: Run real backend admin and payment scenarios
+        run: npm run test:admin:integration
+      - name: Run Chromium and WebKit admin acceptance
+        env:
+          ADMIN_COMPLETION_OUTPUT: ${{ github.workspace }}/reports/admin-ci/screenshots/operations
+          ADMIN_PERMISSION_UI_OUTPUT: ${{ github.workspace }}/reports/admin-ci/screenshots/permissions
+        run: npm run test:admin:browser
+      - name: Collect test service diagnostics
+        if: always()
+        run: |
+          mkdir -p reports/admin-ci
+          node scripts/admin-ci-services.cjs logs > reports/admin-ci/services.log
+      - name: Preserve reports, screenshots and failure traces
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: admin-ci-evidence
+          path: |
+            reports/admin-ci/
+            test-results/admin/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Remove isolated test services
+        if: always()
+        run: node scripts/admin-ci-services.cjs down

@@ -83,6 +83,41 @@ test.describe('admin portal runtime smoke', () => {
     expect(consoleErrors, 'admin portal console errors').toEqual([]);
   });
 
+  test('read-only staff can inspect records without edit, lifecycle or creation controls', async ({ page }) => {
+    const reads = ADMIN_PORTAL_PERMISSIONS.filter(permission => permission.endsWith(':read'));
+    await installAdminApiMocks(page, 'ADMIN', reads);
+    await seedSession(page, 'ADMIN');
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const routes = ['/users', '/users/user-teacher', '/courses/course-math', '/batches?create=1', '/batches/batch-alpha', '/enrollments', '/enrollments/enrollment-smoke', '/recordings/recording-smoke'];
+    for (const route of routes) {
+      await page.goto(origin + route);
+      await expect(page.locator('h1')).toBeVisible();
+      await expect(page.locator('[role="alert"]')).toHaveCount(0);
+      await expect(page.getByRole('button', {name:/^(Save|Create batch|Add enrollment|Activate$|Deactivate$|Pause$|Suspend$|Reactivate$|Complete$|Cancel$|Add day$|Remove$|Archive|Expire)/})).toHaveCount(0);
+      for (const control of await page.locator('.permission-fieldset input, .permission-fieldset select, .permission-fieldset textarea').all()) await expect(control).toBeDisabled();
+      await expect(page.locator('.create-shell')).toHaveCount(0);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  test('limited module access avoids forbidden lookups and preserves allowed shortcuts', async ({page}) => {
+    let permissions: readonly string[] = ['admin:teaching:read'];
+    await installAdminApiMocks(page, 'ADMIN', () => permissions);
+    await seedSession(page, 'ADMIN');
+    const forbiddenLookups: string[] = [];
+    page.on('request', request => { if(new URL(request.url()).pathname.startsWith('/api/v1/admin/users')) forbiddenLookups.push(request.url()); });
+    await page.goto(origin + '/batches/batch-alpha');
+    await expect(page.getByRole('heading', {name:'Alpha Batch',level:1})).toBeVisible();
+    expect(forbiddenLookups).toEqual([]);
+    await expect(page.locator('a[href^="/users"]')).toHaveCount(0);
+    permissions = ['admin:dashboard:read', 'admin:finance:read'];
+    await page.goto(origin + '/dashboard');
+    await expect(page.getByRole('heading', {name:'Dashboard',level:1})).toBeVisible();
+    await expect(page.locator('a[href^="/users"], a[href^="/support"], a[href^="/class-sessions"], a[href^="/attendance"], a[href^="/enrollments"]')).toHaveCount(0);
+    await expect(page.locator('.quick-access a[href="/invoices"]')).toBeVisible();
+  });
+
   test('redirects non-admin sessions to the login surface', async ({ page }) => {
     await installAdminApiMocks(page, 'STUDENT');
     await seedSession(page, 'STUDENT');
@@ -146,7 +181,7 @@ function contentType(filePath: string): string {
   }
 }
 
-async function installAdminApiMocks(page: Page, role: 'ADMIN' | 'STUDENT'): Promise<void> {
+async function installAdminApiMocks(page: Page, role: 'ADMIN' | 'STUDENT', permissions: readonly string[] | (() => readonly string[]) = ADMIN_PORTAL_PERMISSIONS): Promise<void> {
   await page.route('**/api/v1/**', async (route) => {
     const url = new URL(route.request().url());
     const apiPath = url.pathname.replace(/^\/api\/v1/, '');
@@ -157,7 +192,7 @@ async function installAdminApiMocks(page: Page, role: 'ADMIN' | 'STUDENT'): Prom
         name: role === 'ADMIN' ? 'Smoke Admin' : 'Smoke Student',
         email: role === 'ADMIN' ? 'admin-smoke@example.test' : 'student-smoke@example.test',
         roles: [role],
-        permissions: role === 'ADMIN' ? [...ADMIN_PORTAL_PERMISSIONS] : []
+        permissions: role === 'ADMIN' ? [...(typeof permissions === 'function' ? permissions() : permissions)] : []
       });
       return;
     }

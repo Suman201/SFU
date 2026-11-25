@@ -1,3 +1,4 @@
+import { AuthService } from '../../../core/services/auth.service';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -14,6 +15,7 @@ import { AdminApiService } from '../../../core/services/admin-api.service';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class AuditLogDetail implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly route = inject(ActivatedRoute);
 

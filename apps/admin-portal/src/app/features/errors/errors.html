@@ -184,14 +184,14 @@
         <h3>Suggested recovery</h3>
         <p>{{ item.nextStep }}</p>
         <div class="detail-actions">
-          <button
+          @if (auth.can('admin:errors:write')) {<button
             class="primary-button"
             [disabled]="saving()"
             (click)="update()"
           >
             {{ saving() ? 'Saving…' : item.status === 'open' ? 'Mark resolved' :
             'Reopen error' }}</button
-          ><button class="secondary-button" (click)="copy()">
+          >}<button class="secondary-button" (click)="copy()">
             {{ copied() ? 'Copied' : 'Copy diagnostics' }}
           </button>
         </div>

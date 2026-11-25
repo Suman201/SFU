@@ -1,3 +1,4 @@
+import { AuthService } from '../../core/services/auth.service';
 import { CurrencyPipe, DatePipe } from '@angular/common';
 import { PROMOTION_CURRENCY, promotionPaymentLabel, promotionStatusLabel } from '@native-sfu/contracts';
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
@@ -26,6 +27,7 @@ type PromotionAction = 'approve' | 'pause' | 'cancel' | 'reject';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class TeacherPromotions implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
@@ -66,6 +68,7 @@ export class TeacherPromotions implements OnInit {
   }
 
   protected openPayment(row: TeacherPromotion, dialog: HTMLDialogElement): void {
+    if (!this.auth.can('admin:content:write')) return;
     this.paymentRow.set(row);
     this.paymentError.set('');
     this.paymentForm.reset({ reference: row.paymentReference ?? '', amount: '' });
@@ -73,6 +76,7 @@ export class TeacherPromotions implements OnInit {
   }
 
   protected confirmPayment(dialog: HTMLDialogElement): void {
+    if (!this.auth.can('admin:content:write')) return;
     const row = this.paymentRow();
     if (!row || this.savingPromotionId()) return;
     const { amount, reference } = this.paymentForm.getRawValue();
@@ -133,6 +137,7 @@ export class TeacherPromotions implements OnInit {
   }
 
   protected runAction(row: TeacherPromotion, action: PromotionAction): void {
+    if (!this.auth.can('admin:content:write')) return;
     if (this.savingPromotionId()) {
       return;
     }

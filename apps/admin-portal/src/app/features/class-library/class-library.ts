@@ -1,3 +1,4 @@
+import { AuthService } from '../../core/services/auth.service';
 import { DatePipe, TitleCasePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
@@ -13,6 +14,7 @@ import { AdminApiService } from '../../core/services/admin-api.service';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class AdminClassLibrary implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
 
   protected readonly q = signal('');

@@ -120,7 +120,7 @@
         <tr>
           <td colspan="7" class="empty-state">Loading audit logs...</td>
         </tr>
-        } @else if (!rows().length) {
+        } @else if(!rows().length) {
         <tr>
           <td colspan="7" class="empty-state">
             No audit logs match these filters.
@@ -160,9 +160,11 @@
           </td>
           <td>{{ row.summary || row.action }}</td>
           <td class="actions-cell">
-            @if (resourceLink(row); as link) {
-            <a class="table-action" [routerLink]="link">Open resource</a>
-            }
+            @if (resourceLink(row); as link) { @if(auth.canVisit(link)){<a
+              class="table-action"
+              [routerLink]="link"
+              >Open resource</a
+            >} }
             <a class="table-action" [routerLink]="['/audit-logs', row.id]"
               >View</a
             >

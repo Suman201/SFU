@@ -1,3 +1,4 @@
+import { AuthService } from '../../core/services/auth.service';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
@@ -18,6 +19,7 @@ type SupportIssueFilter = SupportIssueType | 'all';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class SupportRequests {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
 
@@ -80,6 +82,7 @@ export class SupportRequests {
   }
 
   protected updateSelected(): void {
+    if (!this.auth.can('admin:support:write')) return;
     const row = this.selected();
     if (!row || this.saving()) {
       return;

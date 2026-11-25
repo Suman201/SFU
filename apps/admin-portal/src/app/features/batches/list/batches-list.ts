@@ -1,3 +1,4 @@
+import { AuthService } from '../../../core/services/auth.service';
 import { SUPPORTED_CURRENCIES, CURRENCY_DECIMALS, isCurrencyCode, formatMoneyWithCode, majorToMinor, type CurrencyCode } from '@native-sfu/contracts';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
@@ -27,6 +28,7 @@ type BatchStatusFilter = AdminBatchStatus | 'all';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class BatchesList implements OnInit {
+  protected readonly auth = inject(AuthService);
   protected readonly currencies = SUPPORTED_CURRENCIES;
   protected priceStep(code: string): number { return isCurrencyCode(code) ? 10 ** -CURRENCY_DECIMALS[code] : 0.01; }
   protected feeLabel(batch: { feeAmount?: number; feeMinor?: number; feeCurrency?: CurrencyCode }): string {
@@ -95,12 +97,14 @@ export class BatchesList implements OnInit {
   }
 
   protected toggleCreate(): void {
+    if (!this.auth.can('admin:teaching:write')) return;
     this.showCreate.update((value) => !value);
     this.error.set('');
     this.success.set('');
   }
 
   protected createBatch(): void {
+    if (!this.auth.can('admin:teaching:write')) return;
     this.createForm.markAllAsTouched();
     if (this.createForm.invalid || this.saving()) {
       return;
@@ -142,6 +146,7 @@ export class BatchesList implements OnInit {
   }
 
   protected async transition(row: AdminBatchListItem, action: 'activate' | 'pause' | 'complete' | 'cancel'): Promise<void> {
+    if (!this.auth.can('admin:teaching:write')) return;
     if (this.pendingBatchId()) {
       return;
     }

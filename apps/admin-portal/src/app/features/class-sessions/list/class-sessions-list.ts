@@ -1,3 +1,4 @@
+import { AuthService } from '../../../core/services/auth.service';
 import { DatePipe, PercentPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
@@ -23,6 +24,7 @@ type SessionStatusFilter = AdminClassSessionStatus | 'all';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class ClassSessionsList implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
   protected readonly lookup = inject(AdminLookupService);

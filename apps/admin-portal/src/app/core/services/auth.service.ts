@@ -244,6 +244,17 @@ export class AuthService {
     );
   }
 
+  canVisit(url: string): boolean {
+    return canVisitAdmin(this, url);
+  }
+
+  canManageAccount(account: { id: string; roles: readonly string[] }): boolean {
+    return this.can('admin:users:write') && (
+      this.isSuperAdmin() ||
+      !account.roles.some(role => ['ADMIN', 'SUPER_ADMIN'].includes(role.toUpperCase()))
+    );
+  }
+
   logout(): void {
     const token = this.accessToken();
     if (token && !this.isTokenExpired(token)) {

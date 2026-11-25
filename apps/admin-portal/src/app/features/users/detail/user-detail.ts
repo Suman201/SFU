@@ -1,3 +1,4 @@
+import { AuthService } from '../../../core/services/auth.service';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -16,6 +17,7 @@ import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dia
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class UserDetail implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly route = inject(ActivatedRoute);
   private readonly formBuilder = inject(FormBuilder);
@@ -42,6 +44,7 @@ export class UserDetail implements OnInit {
   }
 
   protected save(): void {
+    if (!this.auth.can('admin:users:write')) return;
     const user = this.user();
     if (!user || this.form.invalid || this.saving()) {
       this.form.markAllAsTouched();
@@ -73,10 +76,12 @@ export class UserDetail implements OnInit {
   }
 
   protected activate(): void {
+    if (!this.auth.can('admin:users:write')) return;
     this.runAction('activate');
   }
 
   protected async deactivate(): Promise<void> {
+    if (!this.auth.can('admin:users:write')) return;
     const user = this.user();
     if (!user) {
       return;
@@ -107,6 +112,7 @@ export class UserDetail implements OnInit {
   }
 
   private runAction(action: 'activate' | 'deactivate'): void {
+    if (!this.auth.can('admin:users:write')) return;
     const user = this.user();
     if (!user || this.pendingAction()) {
       return;

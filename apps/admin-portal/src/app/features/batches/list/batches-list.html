@@ -7,9 +7,13 @@
       sessions.
     </p>
   </div>
-  <button type="button" class="primary-action" (click)="toggleCreate()">
-    {{ showCreate() ? 'Close' : 'Create batch' }}
-  </button>
+  @if (auth.can('admin:teaching:write')) {<button
+    type="button"
+    class="primary-action"
+    (click)="toggleCreate()"
+  >
+    {{ showCreate() ? 'Close' : 'Create batch' }}</button
+  >}
 </section>
 
 <section class="summary-grid" aria-label="Batch summary">
@@ -35,7 +39,7 @@
   </article>
 </section>
 
-@if (showCreate()) {
+@if (showCreate() && auth.can('admin:teaching:write')) {
 <section class="create-panel">
   <div>
     <p class="eyebrow">New batch</p>
@@ -45,6 +49,7 @@
       accounts.
     </p>
   </div>
+  @if (auth.can('admin:teaching:write')) {
   <form [formGroup]="createForm" (ngSubmit)="createBatch()">
     <input
       type="search"
@@ -84,8 +89,19 @@
       placeholder="Capacity"
       aria-label="Capacity"
     />
-    <input type="number" min="0" [step]="priceStep(createForm.controls.feeCurrency.value)" formControlName="feeAmount" aria-label="Fee" placeholder="Fee" />
-    <select formControlName="feeCurrency" aria-label="Price currency">@for(code of currencies; track code){<option [value]="code">{{code}}</option>}</select>
+    <input
+      type="number"
+      min="0"
+      [step]="priceStep(createForm.controls.feeCurrency.value)"
+      formControlName="feeAmount"
+      aria-label="Fee"
+      placeholder="Fee"
+    />
+    <select formControlName="feeCurrency" aria-label="Price currency">
+      @for(code of currencies; track code){
+      <option [value]="code">{{code}}</option>
+      }
+    </select>
     <select formControlName="dayOfWeek" aria-label="Weekday">
       <option value="MONDAY">Monday</option>
       <option value="TUESDAY">Tuesday</option>
@@ -96,9 +112,13 @@
       <option value="SUNDAY">Sunday</option>
     </select>
     <input type="time" formControlName="startTime" aria-label="Start time" />
-    <button type="submit" class="table-action primary" [disabled]="saving()">
-      {{ saving() ? 'Creating...' : 'Create' }}
-    </button>
+    @if (auth.can('admin:teaching:write')) {<button
+      type="submit"
+      class="table-action primary"
+      [disabled]="saving()"
+    >
+      {{ saving() ? 'Creating...' : 'Create' }}</button
+    >}
     <datalist id="batch-create-course-options">
       @for (option of lookup.courses(); track option.id) {
       <option [value]="option.id">
@@ -114,6 +134,7 @@
       }
     </datalist>
   </form>
+  }
 </section>
 }
 
@@ -235,7 +256,7 @@
         <tr>
           <td colspan="9" class="empty-state">Loading batches...</td>
         </tr>
-        } @else if (!rows().length) {
+        } @else if(!rows().length) {
         <tr>
           <td colspan="9" class="empty-state">
             No batches match these filters.
@@ -271,46 +292,42 @@
           </td>
           <td class="row-menu-cell">
             <div class="table-row-menu">
-              <a class="table-action" [routerLink]="['/batches', row.id]"
+              @if (auth.can('admin:teaching:read')) {<a
+                class="table-action"
+                [routerLink]="['/batches', row.id]"
                 >View</a
-              >
-              @if (row.status === 'ACTIVE') {
-              <button
+              >} @if (row.status === 'ACTIVE') { @if
+              (auth.can('admin:teaching:write')) {<button
                 type="button"
                 class="table-action accent"
                 [disabled]="pendingBatchId() === row.id"
                 (click)="transition(row, 'pause')"
               >
-                Pause
-              </button>
-              } @else {
-              <button
+                Pause</button
+              >} } @else { @if (auth.can('admin:teaching:write')) {<button
                 type="button"
                 class="table-action primary"
                 [disabled]="pendingBatchId() === row.id"
                 (click)="transition(row, 'activate')"
               >
-                Activate
-              </button>
-              } @if (row.status !== 'COMPLETED') {
-              <button
+                Activate</button
+              >} } @if (row.status !== 'COMPLETED') { @if
+              (auth.can('admin:teaching:write')) {<button
                 type="button"
                 class="table-action"
                 [disabled]="pendingBatchId() === row.id"
                 (click)="transition(row, 'complete')"
               >
-                Complete
-              </button>
-              } @if (row.status !== 'CANCELLED') {
-              <button
+                Complete</button
+              >} } @if (row.status !== 'CANCELLED') { @if
+              (auth.can('admin:teaching:write')) {<button
                 type="button"
                 class="table-action danger"
                 [disabled]="pendingBatchId() === row.id"
                 (click)="transition(row, 'cancel')"
               >
-                Cancel
-              </button>
-              }
+                Cancel</button
+              >} }
             </div>
           </td>
         </tr>

@@ -143,7 +143,7 @@
         <tr>
           <td colspan="8" class="empty-state">Loading class sessions...</td>
         </tr>
-        } @else if (!rows().length) {
+        } @else if(!rows().length) {
         <tr>
           <td colspan="8" class="empty-state">
             No class sessions match these filters.
@@ -190,11 +190,11 @@
             <small>{{ row.attendance.reconnects }} reconnects</small>
           </td>
           <td class="actions-cell">
-            <a
+            @if (auth.can('admin:teaching:read')) {<a
               class="table-action"
               [routerLink]="['/class-sessions', row.sessionId]"
               >View</a
-            >
+            >}
             <button
               type="button"
               class="table-action accent"

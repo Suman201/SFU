@@ -1,3 +1,4 @@
+import { AuthService } from '../../../core/services/auth.service';
 import { DatePipe, TitleCasePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -26,6 +27,7 @@ type AudienceFilter = CmsAudience | 'all';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class CmsPages implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
 
@@ -104,6 +106,7 @@ export class CmsPages implements OnInit {
   }
 
   protected startNew(): void {
+    if (!this.auth.can('admin:content:write')) return;
     this.selected.set(null);
     this.editorError.set('');
     this.form.reset({
@@ -142,6 +145,7 @@ export class CmsPages implements OnInit {
   }
 
   protected save(): void {
+    if (!this.auth.can('admin:content:write')) return;
     this.editorError.set('');
     if (this.form.invalid) {
       this.form.markAllAsTouched();
@@ -166,18 +170,21 @@ export class CmsPages implements OnInit {
   }
 
   protected publish(row = this.selected()): void {
+    if (!this.auth.can('admin:content:write')) return;
     if (row) {
       this.runAction(row, 'publish');
     }
   }
 
   protected unpublish(row = this.selected()): void {
+    if (!this.auth.can('admin:content:write')) return;
     if (row) {
       this.runAction(row, 'unpublish');
     }
   }
 
   protected archive(row = this.selected()): void {
+    if (!this.auth.can('admin:content:write')) return;
     if (row) {
       this.runAction(row, 'archive');
     }
@@ -269,7 +276,7 @@ export class CmsPages implements OnInit {
       seo: {
         metaTitle: value.metaTitle,
         metaDescription: value.metaDescription,
-        canonicalUrl: value.canonicalUrl
+        ...(value.canonicalUrl.trim() ? { canonicalUrl: value.canonicalUrl.trim() } : {})
       },
       tags: value.tagsCsv
         .split(',')

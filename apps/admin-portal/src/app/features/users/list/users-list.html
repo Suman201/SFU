@@ -120,7 +120,7 @@
         <tr>
           <td colspan="7" class="empty-state">Loading users...</td>
         </tr>
-        } @else if (!rows().length) {
+        } @else if(!rows().length) {
         <tr>
           <td colspan="7" class="empty-state">No users match these filters.</td>
         </tr>
@@ -155,26 +155,27 @@
           </td>
           <td class="row-menu-cell">
             <div class="table-row-menu">
-              <a class="table-action" [routerLink]="['/users', row.id]">View</a>
-              @if (row.disabled || row.status !== 'active') {
-              <button
+              @if (auth.can('admin:users:read')) {<a
+                class="table-action"
+                [routerLink]="['/users', row.id]"
+                >View</a
+              >} @if (row.disabled || row.status !== 'active') { @if
+              (auth.canManageAccount(row)) {<button
                 type="button"
                 class="table-action primary"
                 [disabled]="pendingUserId() === row.id"
                 (click)="activate(row)"
               >
-                Activate
-              </button>
-              } @else {
-              <button
+                Activate</button
+              >} } @else { @if (auth.canManageAccount(row) && row.id !==
+              auth.user()?.id) {<button
                 type="button"
                 class="table-action danger"
                 [disabled]="pendingUserId() === row.id"
                 (click)="deactivate(row)"
               >
-                Deactivate
-              </button>
-              }
+                Deactivate</button
+              >} }
             </div>
           </td>
         </tr>

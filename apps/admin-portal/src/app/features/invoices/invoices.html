@@ -21,9 +21,13 @@
         (click)="openSettings()"
       >
         Invoice settings</button
-      ><button class="primary-button" type="button" (click)="create()">
+      >@if (auth.can('admin:finance:write')) {<button
+        class="primary-button"
+        type="button"
+        (click)="create()"
+      >
         + New invoice</button
-      >}@else{<button class="secondary-button" type="button" (click)="back()">
+      >}}@else{<button class="secondary-button" type="button" (click)="back()">
         ← All invoices</button
       >}
     </div>
@@ -80,9 +84,13 @@
           }@else{@for(item of data().items;track item.id){
           <tr>
             <td>
-              <a class="invoice-link" [routerLink]="['/invoices',item.id]"
+              @if (auth.can('admin:finance:read')) {<a
+                class="invoice-link"
+                [routerLink]="['/invoices',item.id]"
                 >{{item.number||'Draft invoice'}}</a
-              ><small>{{item.reference||'—'}}</small>
+              >} @else {<span>{{item.number||'Draft invoice'}}</span>}<small
+                >{{item.reference||'—'}}</small
+              >
             </td>
             <td>
               <strong>{{item.customer.name}}</strong
@@ -107,9 +115,11 @@
               >
             </td>
             <td>
-              <a class="table-action" [routerLink]="['/invoices',item.id]"
+              @if (auth.can('admin:finance:read')) {<a
+                class="table-action"
+                [routerLink]="['/invoices',item.id]"
                 >Open →</a
-              >
+              >}
             </td>
           </tr>
           }@empty{
@@ -144,320 +154,335 @@
   </section>
   } @if(mode()==='editor'){
   <form class="editor-layout" (submit)="save($event)">
-    <div class="editor-main">
-      <section class="panel">
-        <h2>Bill to</h2>
-        <div class="form-grid">
-          <label
-            >Customer name<input
-              name="customerName"
-              [(ngModel)]="form.customer.name"
-              required
-              minlength="2"
-              maxlength="150" /></label
-          ><label
-            >Customer email<input
-              name="customerEmail"
-              type="email"
-              [(ngModel)]="form.customer.email"
-              required
-              maxlength="200" /></label
-          ><label class="wide"
-            >Billing address<textarea
-              name="customerAddress"
-              [(ngModel)]="form.customer.address"
-              required
-              minlength="5"
-              maxlength="500"
-              rows="3"
-            ></textarea></label
-          ><label
-            >Country code<input
-              name="customerCountry"
-              [(ngModel)]="form.customer.countryCode"
-              required
-              pattern="[A-Za-z]{2}"
-              maxlength="2"
-              placeholder="DE" /></label
-          ><label
-            >Customer VAT number <span class="optional">Optional</span
-            ><input
-              name="customerVat"
-              [(ngModel)]="form.customer.vatNumber"
-              maxlength="50"
-          /></label>
-        </div>
-      </section>
-      <section class="panel">
-        <h2>Invoice details</h2>
-        <div class="form-grid three">
-          <label
-            >Invoice date<input
-              name="invoiceDate"
-              type="date"
-              [(ngModel)]="form.invoiceDate"
-              required /></label
-          ><label
-            >Due date<input
-              name="dueDate"
-              type="date"
-              [min]="form.invoiceDate"
-              [(ngModel)]="form.dueDate"
-              required /></label
-          ><label
-            >Supply date<input
-              name="supplyDate"
-              type="date"
-              [(ngModel)]="form.supplyDate"
-              required /></label
-          ><label
-            >Currency<select name="currency" [(ngModel)]="form.currency">
-              @for(currency of currencies;track currency){
-              <option [value]="currency">{{currency}}</option>
-              }
-            </select></label
-          ><label class="span-two"
-            >Reference <span class="optional">Optional</span
-            ><input
-              name="reference"
-              [(ngModel)]="form.reference"
-              maxlength="100"
-              placeholder="Class, booking or purchase reference"
-          /></label>
-        </div>
-      </section>
-      <section class="panel items-panel">
-        <div class="section-heading">
-          <h2>Services</h2>
-          <span>Prices exclude tax</span>
-        </div>
-        <div class="data-table-wrap">
-          <table class="data-table line-editor">
-            <thead>
-              <tr>
-                <th>Description</th>
-                <th>Quantity</th>
-                <th>Unit price</th>
-                <th>Tax %</th>
-                <th>Amount</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for(line of form.lines;track $index;let i=$index){
-              <tr>
-                <td>
-                  <textarea
-                    [attr.aria-label]="'Item description '+(i+1)"
-                    [name]="'description'+i"
-                    [(ngModel)]="line.description"
-                    rows="2"
-                    required
-                    minlength="2"
-                    maxlength="240"
-                  ></textarea>
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    [attr.aria-label]="'Quantity '+(i+1)"
-                    [name]="'quantity'+i"
-                    [(ngModel)]="line.quantity"
-                    min="0.001"
-                    max="1000"
-                    step="0.001"
-                    required
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    [attr.aria-label]="'Unit price '+(i+1)"
-                    [name]="'price'+i" [step]="priceStep()"
-                    [(ngModel)]="line.price"
-                    min="0"
-                    max="1000000"
-                    required
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    [attr.aria-label]="'Tax rate '+(i+1)"
-                    [name]="'tax'+i"
-                    [(ngModel)]="line.tax"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    required
-                  />
-                </td>
-                <td class="amount">
-                  {{money(totals()?.lines?.[i]?.netMinor||0)}}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    class="text-button"
-                    [attr.aria-label]="'Remove item '+(i+1)"
-                    [disabled]="form.lines.length===1"
-                    (click)="removeLine(i)"
-                  >
-                    ×
-                  </button>
-                </td>
-              </tr>
-              }
-            </tbody>
-          </table>
-        </div>
-        <button
-          class="text-button add-item"
-          type="button"
-          [disabled]="form.lines.length>=50"
-          (click)="addLine()"
-        >
-          + Add item
-        </button>
-      </section>
-      <section class="panel">
-        <h2>Additional information</h2>
-        <div class="form-grid">
-          <label class="wide"
-            >Tax information<textarea
-              name="taxNote"
-              [(ngModel)]="form.taxNote"
-              maxlength="500"
-              rows="2"
-              placeholder="Explain any zero tax, exemption or reverse-charge treatment."
-            ></textarea></label
-          ><label class="wide"
-            >Note to customer <span class="optional">Optional</span
-            ><textarea
-              name="notes"
-              [(ngModel)]="form.notes"
-              maxlength="1000"
-              rows="3"
-            ></textarea>
-          </label>
-        </div>
-      </section>
-    </div>
-    <aside class="panel summary-panel">
-      <p class="eyebrow">INVOICE TOTAL</p>
-      <h2>{{money(totals()?.totalMinor||0)}}</h2>
-      <span class="currency-label">{{form.currency}}</span>@if(totals();as
-      amount){
-      <dl>
-        <div>
-          <dt>Subtotal</dt>
-          <dd>{{money(amount.subtotalMinor)}}</dd>
-        </div>
-        @for(tax of amount.taxes;track tax.rateBps){
-        <div>
-          <dt>Tax {{tax.rateBps/100}}%</dt>
-          <dd>{{money(tax.taxMinor)}}</dd>
-        </div>
+    <fieldset
+      class="permission-fieldset"
+      [disabled]="!auth.can('admin:finance:write')"
+    >
+      <div class="editor-main">
+        <section class="panel">
+          <h2>Bill to</h2>
+          <div class="form-grid">
+            <label
+              >Customer name<input
+                name="customerName"
+                [(ngModel)]="form.customer.name"
+                required
+                minlength="2"
+                maxlength="150" /></label
+            ><label
+              >Customer email<input
+                name="customerEmail"
+                type="email"
+                [(ngModel)]="form.customer.email"
+                required
+                maxlength="200" /></label
+            ><label class="wide"
+              >Billing address<textarea
+                name="customerAddress"
+                [(ngModel)]="form.customer.address"
+                required
+                minlength="5"
+                maxlength="500"
+                rows="3"
+              ></textarea></label
+            ><label
+              >Country code<input
+                name="customerCountry"
+                [(ngModel)]="form.customer.countryCode"
+                required
+                pattern="[A-Za-z]{2}"
+                maxlength="2"
+                placeholder="DE" /></label
+            ><label
+              >Customer VAT number <span class="optional">Optional</span
+              ><input
+                name="customerVat"
+                [(ngModel)]="form.customer.vatNumber"
+                maxlength="50"
+            /></label>
+          </div>
+        </section>
+        <section class="panel">
+          <h2>Invoice details</h2>
+          <div class="form-grid three">
+            <label
+              >Invoice date<input
+                name="invoiceDate"
+                type="date"
+                [(ngModel)]="form.invoiceDate"
+                required /></label
+            ><label
+              >Due date<input
+                name="dueDate"
+                type="date"
+                [min]="form.invoiceDate"
+                [(ngModel)]="form.dueDate"
+                required /></label
+            ><label
+              >Supply date<input
+                name="supplyDate"
+                type="date"
+                [(ngModel)]="form.supplyDate"
+                required /></label
+            ><label
+              >Currency<select name="currency" [(ngModel)]="form.currency">
+                @for(currency of currencies;track currency){
+                <option [value]="currency">{{currency}}</option>
+                }
+              </select></label
+            ><label class="span-two"
+              >Reference <span class="optional">Optional</span
+              ><input
+                name="reference"
+                [(ngModel)]="form.reference"
+                maxlength="100"
+                placeholder="Class, booking or purchase reference"
+            /></label>
+          </div>
+        </section>
+        <section class="panel items-panel">
+          <div class="section-heading">
+            <h2>Services</h2>
+            <span>Prices exclude tax</span>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table line-editor">
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th>Quantity</th>
+                  <th>Unit price</th>
+                  <th>Tax %</th>
+                  <th>Amount</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for(line of form.lines;track $index;let i=$index){
+                <tr>
+                  <td>
+                    <textarea
+                      [attr.aria-label]="'Item description '+(i+1)"
+                      [name]="'description'+i"
+                      [(ngModel)]="line.description"
+                      rows="2"
+                      required
+                      minlength="2"
+                      maxlength="240"
+                    ></textarea>
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      [attr.aria-label]="'Quantity '+(i+1)"
+                      [name]="'quantity'+i"
+                      [(ngModel)]="line.quantity"
+                      min="0.001"
+                      max="1000"
+                      step="0.001"
+                      required
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      [attr.aria-label]="'Unit price '+(i+1)"
+                      [name]="'price'+i"
+                      [step]="priceStep()"
+                      [(ngModel)]="line.price"
+                      min="0"
+                      max="1000000"
+                      required
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      [attr.aria-label]="'Tax rate '+(i+1)"
+                      [name]="'tax'+i"
+                      [(ngModel)]="line.tax"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      required
+                    />
+                  </td>
+                  <td class="amount">
+                    {{money(totals()?.lines?.[i]?.netMinor||0)}}
+                  </td>
+                  <td>
+                    @if (auth.can('admin:finance:write')) {<button
+                      type="button"
+                      class="text-button"
+                      [attr.aria-label]="'Remove item '+(i+1)"
+                      [disabled]="form.lines.length===1"
+                      (click)="removeLine(i)"
+                    >
+                      ×</button
+                    >}
+                  </td>
+                </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          @if (auth.can('admin:finance:write')) {<button
+            class="text-button add-item"
+            type="button"
+            [disabled]="form.lines.length>=50"
+            (click)="addLine()"
+          >
+            + Add item</button
+          >}
+        </section>
+        <section class="panel">
+          <h2>Additional information</h2>
+          <div class="form-grid">
+            <label class="wide"
+              >Tax information<textarea
+                name="taxNote"
+                [(ngModel)]="form.taxNote"
+                maxlength="500"
+                rows="2"
+                placeholder="Explain any zero tax, exemption or reverse-charge treatment."
+              ></textarea></label
+            ><label class="wide"
+              >Note to customer <span class="optional">Optional</span
+              ><textarea
+                name="notes"
+                [(ngModel)]="form.notes"
+                maxlength="1000"
+                rows="3"
+              ></textarea>
+            </label>
+          </div>
+        </section>
+      </div>
+      <aside class="panel summary-panel">
+        <p class="eyebrow">INVOICE TOTAL</p>
+        <h2>{{money(totals()?.totalMinor||0)}}</h2>
+        <span class="currency-label">{{form.currency}}</span>@if(totals();as
+        amount){
+        <dl>
+          <div>
+            <dt>Subtotal</dt>
+            <dd>{{money(amount.subtotalMinor)}}</dd>
+          </div>
+          @for(tax of amount.taxes;track tax.rateBps){
+          <div>
+            <dt>Tax {{tax.rateBps/100}}%</dt>
+            <dd>{{money(tax.taxMinor)}}</dd>
+          </div>
+          }
+          <div class="grand-total">
+            <dt>Total</dt>
+            <dd>{{money(amount.totalMinor)}}</dd>
+          </div>
+        </dl>
+        }@else{
+        <p class="error">Check the quantities, prices and tax rates.</p>
         }
-        <div class="grand-total">
-          <dt>Total</dt>
-          <dd>{{money(amount.totalMinor)}}</dd>
-        </div>
-      </dl>
-      }@else{
-      <p class="error">Check the quantities, prices and tax rates.</p>
-      }
-      <p class="muted">
-        Save a draft first. The invoice number is assigned when you issue it.
-      </p>
-      <button
-        class="primary-button"
-        type="submit"
-        [disabled]="busy()||!totals()"
-      >
-        {{busy()?'Saving…':'Save draft'}}</button
-      ><button class="text-button" type="button" (click)="back()">
-        Cancel
-      </button>
-    </aside>
+        <p class="muted">
+          Save a draft first. The invoice number is assigned when you issue it.
+        </p>
+        @if (auth.can('admin:finance:write')) {<button
+          class="primary-button"
+          type="submit"
+          [disabled]="busy()||!totals()"
+        >
+          {{busy()?'Saving…':'Save draft'}}</button
+        >}<button class="text-button" type="button" (click)="back()">
+          Cancel
+        </button>
+      </aside>
+    </fieldset>
   </form>
   } @if(mode()==='settings' && settingsForm; as settings){
   <form class="settings-layout panel" (submit)="saveSettings($event)">
-    <h2>Business details</h2>
-    <p class="muted">
-      These details appear on new invoices. Existing issued invoices retain
-      their original details.
-    </p>
-    <div class="form-grid">
-      <label
-        >Legal business name<input
-          name="sellerName"
-          [(ngModel)]="settings.seller.name"
-          required
-          minlength="2"
-          maxlength="150" /></label
-      ><label
-        >Billing email<input
-          name="sellerEmail"
-          type="email"
-          [(ngModel)]="settings.seller.email"
-          required
-          maxlength="200" /></label
-      ><label class="wide"
-        >Business address<textarea
-          name="sellerAddress"
-          [(ngModel)]="settings.seller.address"
-          required
-          minlength="5"
-          maxlength="500"
-          rows="3"
-        ></textarea></label
-      ><label
-        >Country code<input
-          name="sellerCountry"
-          [(ngModel)]="settings.seller.countryCode"
-          required
-          pattern="[A-Za-z]{2}"
-          maxlength="2" /></label
-      ><label
-        >VAT / tax registration number<input
-          name="sellerVat"
-          [(ngModel)]="settings.seller.vatNumber"
-          maxlength="50" /></label
-      ><label
-        >Business registration number<input
-          name="sellerRegistration"
-          [(ngModel)]="settings.seller.registrationNumber"
-          maxlength="100" /></label
-      ><label
-        >Default currency<select
-          name="defaultCurrency"
-          [(ngModel)]="settings.defaultCurrency"
-        >
-          @for(currency of currencies;track currency){
-          <option [value]="currency">{{currency}}</option>
-          }
-        </select></label
-      ><label class="wide"
-        >Default tax information<textarea
-          name="defaultTaxNote"
-          [(ngModel)]="settings.defaultTaxNote"
-          rows="2"
-          maxlength="500"
-        ></textarea></label
-      ><label class="wide"
-        >Payment instructions<textarea
-          name="paymentInstructions"
-          [(ngModel)]="settings.seller.paymentInstructions"
-          rows="3"
-          maxlength="1000"
-          placeholder="Payment method, account details and reference instructions."
-        ></textarea>
-      </label>
-    </div>
-    <button class="primary-button" type="submit" [disabled]="busy()">
-      {{busy()?'Saving…':'Save settings'}}
-    </button>
+    <fieldset
+      class="permission-fieldset"
+      [disabled]="!auth.can('admin:finance:write')"
+    >
+      <h2>Business details</h2>
+      <p class="muted">
+        These details appear on new invoices. Existing issued invoices retain
+        their original details.
+      </p>
+      <div class="form-grid">
+        <label
+          >Legal business name<input
+            name="sellerName"
+            [(ngModel)]="settings.seller.name"
+            required
+            minlength="2"
+            maxlength="150" /></label
+        ><label
+          >Billing email<input
+            name="sellerEmail"
+            type="email"
+            [(ngModel)]="settings.seller.email"
+            required
+            maxlength="200" /></label
+        ><label class="wide"
+          >Business address<textarea
+            name="sellerAddress"
+            [(ngModel)]="settings.seller.address"
+            required
+            minlength="5"
+            maxlength="500"
+            rows="3"
+          ></textarea></label
+        ><label
+          >Country code<input
+            name="sellerCountry"
+            [(ngModel)]="settings.seller.countryCode"
+            required
+            pattern="[A-Za-z]{2}"
+            maxlength="2" /></label
+        ><label
+          >VAT / tax registration number<input
+            name="sellerVat"
+            [(ngModel)]="settings.seller.vatNumber"
+            maxlength="50" /></label
+        ><label
+          >Business registration number<input
+            name="sellerRegistration"
+            [(ngModel)]="settings.seller.registrationNumber"
+            maxlength="100" /></label
+        ><label
+          >Default currency<select
+            name="defaultCurrency"
+            [(ngModel)]="settings.defaultCurrency"
+          >
+            @for(currency of currencies;track currency){
+            <option [value]="currency">{{currency}}</option>
+            }
+          </select></label
+        ><label class="wide"
+          >Default tax information<textarea
+            name="defaultTaxNote"
+            [(ngModel)]="settings.defaultTaxNote"
+            rows="2"
+            maxlength="500"
+          ></textarea></label
+        ><label class="wide"
+          >Payment instructions<textarea
+            name="paymentInstructions"
+            [(ngModel)]="settings.seller.paymentInstructions"
+            rows="3"
+            maxlength="1000"
+            placeholder="Payment method, account details and reference instructions."
+          ></textarea>
+        </label>
+      </div>
+      @if (auth.can('admin:finance:write')) {<button
+        class="primary-button"
+        type="submit"
+        [disabled]="busy()"
+      >
+        {{busy()?'Saving…':'Save settings'}}</button
+      >}
+    </fieldset>
   </form>
   } @if(mode()==='detail'){@if(loading()){
   <p role="status">Loading invoice…</p>
@@ -467,36 +492,36 @@
       >{{item.status}}</span
     >
     <div>
-      @if(item.status==='draft'){<button
+      @if(item.status==='draft'){@if (auth.can('admin:finance:write')) {<button
         class="secondary-button"
         type="button"
         [disabled]="busy()"
         (click)="edit()"
       >
         Edit draft</button
-      ><button
+      >}@if (auth.can('admin:finance:write')) {<button
         class="primary-button"
         type="button"
         [disabled]="busy()"
         (click)="issue()"
       >
         Issue invoice</button
-      >}<button
+      >}}<button
         class="secondary-button"
         type="button"
         [disabled]="busy()"
         (click)="download()"
       >
         Download PDF</button
-      ><button
+      >@if (auth.can('admin:finance:write')) {<button
         class="primary-button"
         type="button"
         [disabled]="busy()||item.status==='draft'||item.status==='void'"
         (click)="send()"
       >
         {{busy()?'Working…':emailLabel(item)==='Sent'?'Resend email':'Send
-        email'}}
-      </button>
+        email'}}</button
+      >}
     </div>
   </div>
   <div class="detail-layout">
@@ -642,64 +667,80 @@
         >@if(item.paidAt){
         <p class="muted">{{item.paidAt|date:'mediumDate':'UTC'}}</p>
         <p>{{item.paymentReference}}</p>
-        }@if(item.status==='issued'){<button
+        }@if(item.status==='issued'){@if (auth.can('admin:finance:write'))
+        {<button
           class="secondary-button"
           type="button"
           (click)="action.set('payment')"
         >
           Record payment</button
-        >}@if(item.status==='issued'||item.status==='draft'){<button
+        >}}@if(item.status==='issued'||item.status==='draft'){@if
+        (auth.can('admin:finance:write')) {<button
           class="text-button danger"
           type="button"
           (click)="action.set('void')"
         >
           Void invoice</button
-        >}
+        >}}
       </section>
       @if(action()==='payment'){
       <form class="panel action-form" (submit)="recordPayment($event)">
-        <h2>Record payment</h2>
-        <p class="muted">
-          Record a payment received outside this portal. This does not collect
-          money.
-        </p>
-        <label
-          >Payment date<input
-            type="date"
-            name="paidDate"
-            [(ngModel)]="paymentDate"
-            [max]="today()"
-            required /></label
-        ><label
-          >Payment reference<input
-            name="paymentReference"
-            [(ngModel)]="paymentReference"
-            required
-            minlength="3"
-            maxlength="150" /></label
-        ><button class="primary-button" type="submit" [disabled]="busy()">
-          Save payment
-        </button>
+        <fieldset
+          class="permission-fieldset"
+          [disabled]="!auth.can('admin:finance:write')"
+        >
+          <h2>Record payment</h2>
+          <p class="muted">
+            Record a payment received outside this portal. This does not collect
+            money.
+          </p>
+          <label
+            >Payment date<input
+              type="date"
+              name="paidDate"
+              [(ngModel)]="paymentDate"
+              [max]="today()"
+              required /></label
+          ><label
+            >Payment reference<input
+              name="paymentReference"
+              [(ngModel)]="paymentReference"
+              required
+              minlength="3"
+              maxlength="150" /></label
+          >@if (auth.can('admin:finance:write')) {<button
+            class="primary-button"
+            type="submit"
+            [disabled]="busy()"
+          >
+            Save payment</button
+          >}
+        </fieldset>
       </form>
       }@if(action()==='void'){
       <form class="panel action-form" (submit)="voidInvoice($event)">
-        <h2>Void invoice</h2>
-        <label
-          >Reason<textarea
-            name="voidReason"
-            [(ngModel)]="voidReason"
-            minlength="10"
-            maxlength="500"
-            required
-            rows="3"
-          ></textarea></label
-        ><button
-          class="secondary-button danger"
-          type="submit"
-          [disabled]="busy()"
+        <fieldset
+          class="permission-fieldset"
+          [disabled]="!auth.can('admin:finance:write')"
         >
-          Confirm void
-        </button>
+          <h2>Void invoice</h2>
+          <label
+            >Reason<textarea
+              name="voidReason"
+              [(ngModel)]="voidReason"
+              minlength="10"
+              maxlength="500"
+              required
+              rows="3"
+            ></textarea></label
+          >@if (auth.can('admin:finance:write')) {<button
+            class="secondary-button danger"
+            type="submit"
+            [disabled]="busy()"
+          >
+            Confirm void</button
+          >}
+        </fieldset>
       </form>
       }
     </aside>

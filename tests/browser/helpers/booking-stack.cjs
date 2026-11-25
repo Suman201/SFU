@@ -288,6 +288,7 @@ async function startBookingStack(options = {}) {
     },
     async stop() {
       await app.close();
+      require('prom-client').register.clear();
       if (!connection.name.startsWith('booking_acceptance_'))
         throw new Error('Refusing to drop a non-fixture database');
       await connection.dropDatabase();

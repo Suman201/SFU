@@ -2,7 +2,10 @@
   <div>
     <p class="eyebrow">Teacher discovery</p>
     <h1>Profile promotions</h1>
-    <p>Check the campaign fee against your payment records, confirm receipt, then approve the placement.</p>
+    <p>
+      Check the campaign fee against your payment records, confirm receipt, then
+      approve the placement.
+    </p>
   </div>
 </section>
 
@@ -12,7 +15,11 @@
       <h2>Promotion queue</h2>
       <p>{{ total() }} records found</p>
     </div>
-    <form class="data-table-filters" [formGroup]="filters" (ngSubmit)="applyFilters()">
+    <form
+      class="data-table-filters"
+      [formGroup]="filters"
+      (ngSubmit)="applyFilters()"
+    >
       <select formControlName="status" aria-label="Status">
         <option value="all">All statuses</option>
         <option value="requested">Requested</option>
@@ -29,28 +36,43 @@
         <option value="search_boost">Search boost</option>
         <option value="profile_badge">Profile badge</option>
       </select>
-      <input type="search" class="data-table-search" formControlName="search" placeholder="Teacher, promotion, payment ref" aria-label="Search promotions" />
-      <input type="search" formControlName="teacherId" placeholder="Teacher ID" aria-label="Teacher ID" />
+      <input
+        type="search"
+        class="data-table-search"
+        formControlName="search"
+        placeholder="Teacher, promotion, payment ref"
+        aria-label="Search promotions"
+      />
+      <input
+        type="search"
+        formControlName="teacherId"
+        placeholder="Teacher ID"
+        aria-label="Teacher ID"
+      />
       <button type="submit" class="table-action primary">Apply</button>
-      <button type="button" class="table-action" (click)="resetFilters()">Reset</button>
+      <button type="button" class="table-action" (click)="resetFilters()">
+        Reset
+      </button>
     </form>
   </div>
 
+  @if(auth.can('admin:content:write')){
   <form class="promotion-note" [formGroup]="noteForm">
     <label>
       <span>Optional admin note for next action</span>
-      <input type="text" formControlName="adminNote" placeholder="Visible in promotion audit/admin record" />
+      <input
+        type="text"
+        formControlName="adminNote"
+        placeholder="Visible in promotion audit/admin record"
+      />
     </label>
   </form>
-
-  @if (error()) {
-    <p class="table-error" role="alert">{{ error() }}</p>
-  }
-  @if (historyError()) {
-    <p class="table-error" role="alert">{{ historyError() }}</p>
-  }
-  @if (success()) {
-    <p class="table-success" role="status">{{ success() }}</p>
+  } @if (error()) {
+  <p class="table-error" role="alert">{{ error() }}</p>
+  } @if (historyError()) {
+  <p class="table-error" role="alert">{{ historyError() }}</p>
+  } @if (success()) {
+  <p class="table-success" role="status">{{ success() }}</p>
   }
 
   <div class="data-table-wrap" style="--data-table-min-width: 1180px">
@@ -68,59 +90,102 @@
       </thead>
       <tbody>
         @if (loading()) {
-          <tr>
-            <td colspan="7" class="empty-state">Loading teacher promotions...</td>
-          </tr>
-        } @else if (!rows().length && !historyError()) {
-          <tr>
-            <td colspan="7" class="empty-state">No teacher promotions match these filters.</td>
-          </tr>
-        } @else {
-          @for (row of rows(); track trackByPromotion($index, row)) {
-            <tr>
-              <td>
-                <div class="primary-cell">
-                  <span class="table-avatar">{{ initials(row) || 'TR' }}</span>
-                  <div>
-                    <strong>{{ row.teacherName || 'Teacher profile' }}</strong>
-                    <small>{{ row.teacherId }}</small>
-                  </div>
-                </div>
-              </td>
-              <td>
-                <strong>{{ placementLabel(row.placement) }}</strong>
-                <small>{{ row.promotionId }}</small>
-              </td>
-              <td><span class="data-pill {{ statusClass(row.status) }}">{{ statusLabel(row) }}</span></td>
-              <td>
-                <strong>{{ row.startsAt | date: 'medium' }}</strong>
-                <small>to {{ row.endsAt | date: 'medium' }}</small>
-              </td>
-              <td>
-                <strong>@if (row.feeCents !== undefined) { {{ row.feeCents / 100 | currency:row.currency:'symbol':'1.0-2' }} } @else { Fee not recorded }</strong>
-                <small>{{ paymentLabel(row) }}</small>
-                <small>{{ row.paymentReference || 'No payment reference' }}</small>
-                @if (row.paymentConfirmedAt) { <small>Confirmed {{ row.paymentConfirmedAt | date:'mediumDate' }}</small> }
-                @if (canConfirm(row)) {
-                  <button type="button" class="table-action primary" [disabled]="!!savingPromotionId()" (click)="openPayment(row, paymentDialog)">Confirm payment</button>
-                }
-              </td>
-              <td>
-                <strong>{{ row.reason || 'No request reason' }}</strong>
-                <small>{{ row.adminNote || 'No admin note' }}</small>
-              </td>
-              <td class="actions-cell promotion-actions">
-                <a class="table-action" [routerLink]="['/users', row.teacherId]">Teacher</a>
-                <button type="button" class="table-action primary" [disabled]="!canApprove(row) || isSaving(row)" (click)="runAction(row, 'approve')">
-                  {{ isSaving(row) ? 'Saving...' : 'Approve' }}
-                </button>
-                <button type="button" class="table-action" [disabled]="!canPause(row) || isSaving(row)" (click)="runAction(row, 'pause')">Pause</button>
-                <button type="button" class="table-action" [disabled]="!canCancel(row) || isSaving(row)" (click)="runAction(row, 'cancel')">Cancel</button>
-                <button type="button" class="table-action danger" [disabled]="!canReject(row) || isSaving(row)" (click)="runAction(row, 'reject')">Reject</button>
-              </td>
-            </tr>
-          }
-        }
+        <tr>
+          <td colspan="7" class="empty-state">Loading teacher promotions...</td>
+        </tr>
+        } @else if(!rows().length && !historyError()) {
+        <tr>
+          <td colspan="7" class="empty-state">
+            No teacher promotions match these filters.
+          </td>
+        </tr>
+        } @else { @for (row of rows(); track trackByPromotion($index, row)) {
+        <tr>
+          <td>
+            <div class="primary-cell">
+              <span class="table-avatar">{{ initials(row) || 'TR' }}</span>
+              <div>
+                <strong>{{ row.teacherName || 'Teacher profile' }}</strong>
+                <small>{{ row.teacherId }}</small>
+              </div>
+            </div>
+          </td>
+          <td>
+            <strong>{{ placementLabel(row.placement) }}</strong>
+            <small>{{ row.promotionId }}</small>
+          </td>
+          <td>
+            <span class="data-pill {{ statusClass(row.status) }}"
+              >{{ statusLabel(row) }}</span
+            >
+          </td>
+          <td>
+            <strong>{{ row.startsAt | date: 'medium' }}</strong>
+            <small>to {{ row.endsAt | date: 'medium' }}</small>
+          </td>
+          <td>
+            <strong
+              >@if (row.feeCents !== undefined) { {{ row.feeCents / 100 |
+              currency:row.currency:'symbol':'1.0-2' }} } @else { Fee not
+              recorded }</strong
+            >
+            <small>{{ paymentLabel(row) }}</small>
+            <small>{{ row.paymentReference || 'No payment reference' }}</small>
+            @if (row.paymentConfirmedAt) {
+            <small
+              >Confirmed {{ row.paymentConfirmedAt | date:'mediumDate' }}</small
+            >
+            } @if (canConfirm(row)) { @if (auth.can('admin:content:write'))
+            {<button
+              type="button"
+              class="table-action primary"
+              [disabled]="!!savingPromotionId()"
+              (click)="openPayment(row, paymentDialog)"
+            >
+              Confirm payment</button
+            >} }
+          </td>
+          <td>
+            <strong>{{ row.reason || 'No request reason' }}</strong>
+            <small>{{ row.adminNote || 'No admin note' }}</small>
+          </td>
+          <td class="actions-cell promotion-actions">
+            @if (auth.can('admin:users:read')) {<a
+              class="table-action"
+              [routerLink]="['/users', row.teacherId]"
+              >Teacher</a
+            >} @if (auth.can('admin:content:write')) {<button
+              type="button"
+              class="table-action primary"
+              [disabled]="!canApprove(row) || isSaving(row)"
+              (click)="runAction(row, 'approve')"
+            >
+              {{ isSaving(row) ? 'Saving...' : 'Approve' }}</button
+            >} @if (auth.can('admin:content:write')) {<button
+              type="button"
+              class="table-action"
+              [disabled]="!canPause(row) || isSaving(row)"
+              (click)="runAction(row, 'pause')"
+            >
+              Pause</button
+            >} @if (auth.can('admin:content:write')) {<button
+              type="button"
+              class="table-action"
+              [disabled]="!canCancel(row) || isSaving(row)"
+              (click)="runAction(row, 'cancel')"
+            >
+              Cancel</button
+            >} @if (auth.can('admin:content:write')) {<button
+              type="button"
+              class="table-action danger"
+              [disabled]="!canReject(row) || isSaving(row)"
+              (click)="runAction(row, 'reject')"
+            >
+              Reject</button
+            >}
+          </td>
+        </tr>
+        } }
       </tbody>
     </table>
   </div>
@@ -128,38 +193,88 @@
   <footer class="table-footer">
     <span>Page {{ page() }} · {{ total() }} total</span>
     <div>
-      <button type="button" class="table-action" [disabled]="page() === 1" (click)="previousPage()">Previous</button>
-      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="nextPage()">Next</button>
+      <button
+        type="button"
+        class="table-action"
+        [disabled]="page() === 1"
+        (click)="previousPage()"
+      >
+        Previous
+      </button>
+      <button
+        type="button"
+        class="table-action"
+        [disabled]="page() * limit() >= total()"
+        (click)="nextPage()"
+      >
+        Next
+      </button>
     </div>
   </footer>
 </section>
 
 <dialog #paymentDialog aria-labelledby="payment-title" class="payment-dialog">
-  @if (paymentRow(); as row) {
-    <form [formGroup]="paymentForm" (ngSubmit)="confirmPayment(paymentDialog)">
-      <h2 id="payment-title">Confirm payment received</h2>
-      <p>{{ row.teacherName || row.teacherId }} · {{ placementLabel(row.placement) }}</p>
-      @if (row.feeCents !== undefined) {
-        <p class="payment-total">Campaign fee <strong>{{ row.feeCents / 100 | currency:row.currency }}</strong></p>
-      } @else {
-        <label>Amount received ({{ currency }})
-          <input formControlName="amount" inputmode="decimal" placeholder="0.00" required />
-        </label>
-        <small>This older campaign has no saved fee. Enter the amount on the receipt.</small>
-      }
-      <label>Payment reference
-        <input formControlName="reference" maxlength="160" required placeholder="Bank transfer or receipt number" />
-      </label>
-      <p>@if (row.status === 'active' || row.status === 'scheduled') {
-        This campaign was already approved. Confirming payment enables its placement during the scheduled dates.
-      } @else {
-        Confirm once you have received the full fee. Campaign approval is a separate step.
-      }</p>
-      @if (paymentError()) { <p role="alert" class="table-error">{{ paymentError() }}</p> }
-      <footer>
-        <button class="table-action" type="button" (click)="paymentDialog.close()">Back</button>
-        <button class="table-action primary" type="submit" [disabled]="!!savingPromotionId()">Confirm receipt</button>
-      </footer>
-    </form>
-  }
+  @if (paymentRow(); as row) { @if (auth.can('admin:content:write')) {
+  <form [formGroup]="paymentForm" (ngSubmit)="confirmPayment(paymentDialog)">
+    <h2 id="payment-title">Confirm payment received</h2>
+    <p>
+      {{ row.teacherName || row.teacherId }} · {{ placementLabel(row.placement)
+      }}
+    </p>
+    @if (row.feeCents !== undefined) {
+    <p class="payment-total">
+      Campaign fee
+      <strong>{{ row.feeCents / 100 | currency:row.currency }}</strong>
+    </p>
+    } @else {
+    <label
+      >Amount received ({{ currency }})
+      <input
+        formControlName="amount"
+        inputmode="decimal"
+        placeholder="0.00"
+        required
+      />
+    </label>
+    <small
+      >This older campaign has no saved fee. Enter the amount on the
+      receipt.</small
+    >
+    }
+    <label
+      >Payment reference
+      <input
+        formControlName="reference"
+        maxlength="160"
+        required
+        placeholder="Bank transfer or receipt number"
+      />
+    </label>
+    <p>
+      @if (row.status === 'active' || row.status === 'scheduled') { This
+      campaign was already approved. Confirming payment enables its placement
+      during the scheduled dates. } @else { Confirm once you have received the
+      full fee. Campaign approval is a separate step. }
+    </p>
+    @if (paymentError()) {
+    <p role="alert" class="table-error">{{ paymentError() }}</p>
+    }
+    <footer>
+      <button
+        class="table-action"
+        type="button"
+        (click)="paymentDialog.close()"
+      >
+        Back
+      </button>
+      @if (auth.can('admin:content:write')) {<button
+        class="table-action primary"
+        type="submit"
+        [disabled]="!!savingPromotionId()"
+      >
+        Confirm receipt</button
+      >}
+    </footer>
+  </form>
+  } }
 </dialog>

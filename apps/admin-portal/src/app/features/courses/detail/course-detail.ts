@@ -1,3 +1,4 @@
+import { AuthService } from '../../../core/services/auth.service';
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -15,6 +16,7 @@ import { AdminApiService } from '../../../core/services/admin-api.service';
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class CourseDetail implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
   private readonly route = inject(ActivatedRoute);
   private readonly formBuilder = inject(FormBuilder);
@@ -34,6 +36,7 @@ export class CourseDetail implements OnInit {
   }
 
   protected save(): void {
+    if (!this.auth.can('admin:teaching:write')) return;
     const course = this.course();
     if (!course || this.form.invalid || this.saving()) {
       this.form.markAllAsTouched();
