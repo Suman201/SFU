@@ -44,3 +44,4 @@ export * from "./calendar";
 export * from './errors.js';
 
 export * from './admin-operations.js';
+export * from './payments.js';

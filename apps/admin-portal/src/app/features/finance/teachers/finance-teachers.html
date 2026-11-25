@@ -1,0 +1,83 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Finance</p>
+    <h1>Teacher earnings</h1>
+    <p>Lifetime payments per teacher, platform commission kept after refunds, and the balances the platform currently owes.</p>
+  </div>
+</section>
+
+<sfu-finance-tabs />
+
+<section class="summary-grid" aria-label="Teacher totals">
+  <article class="accent-green"><span>Gross payments</span><strong>{{ money(totals().gross, totals().currency) }}</strong></article>
+  <article class="accent-rose"><span>Commission kept</span><strong>{{ money(totals().commission, totals().currency) }}</strong></article>
+  <article class="accent-amber"><span>Owed to teachers</span><strong>{{ money(totals().owed, totals().currency) }}</strong></article>
+  <article class="accent-coral"><span>Paid out</span><strong>{{ money(totals().paidOut, totals().currency) }}</strong></article>
+</section>
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Teachers</h2>
+      <p>{{ rows().length }} teachers with payment activity</p>
+    </div>
+    <form class="data-table-filters" (ngSubmit)="load()">
+      <input type="search" class="data-table-search" name="q" [ngModel]="q()" (ngModelChange)="q.set($event)" placeholder="Teacher name or ID" aria-label="Search teachers" />
+      <button type="submit" class="table-action primary">Search</button>
+    </form>
+  </div>
+
+  @if (error()) { <p class="table-error" role="alert">{{ error() }}</p> }
+
+  <div class="data-table-wrap" style="--data-table-min-width: 1100px">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Teacher</th>
+          <th class="num">Gross</th>
+          <th class="num">Commission kept</th>
+          <th class="num">Refunded</th>
+          <th class="num">Pending</th>
+          <th class="num">Available</th>
+          <th class="num">In payout</th>
+          <th class="num">Frozen</th>
+          <th class="num">Paid out</th>
+          <th class="actions-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr><td colspan="10" class="empty-state">Loading teacher earnings…</td></tr>
+        } @else {
+          @for (row of rows(); track row.teacherId) {
+            <tr>
+              <td>
+                <div class="primary-cell">
+                  <span class="table-avatar">{{ initials(row.teacherName) || 'TR' }}</span>
+                  <div class="cell-stack"><strong>{{ row.teacherName }}</strong><small>{{ row.teacherId }}</small></div>
+                </div>
+              </td>
+              <td class="num">{{ money(row.grossMinor, row.currency) }}</td>
+              <td class="num">{{ money(row.commissionMinor, row.currency) }}</td>
+              <td class="num">{{ row.refundedMinor ? money(row.refundedMinor, row.currency) : '—' }}</td>
+              <td class="num">{{ money(row.pendingMinor, row.currency) }}</td>
+              <td class="num"><strong>{{ money(row.availableMinor, row.currency) }}</strong></td>
+              <td class="num">{{ money(row.reservedMinor, row.currency) }}</td>
+              <td class="num">{{ row.frozenMinor ? money(row.frozenMinor, row.currency) : '—' }}</td>
+              <td class="num">{{ money(row.paidOutMinor, row.currency) }}</td>
+              <td class="actions-cell">
+                <div class="inline-actions">
+                  <a class="table-action" [routerLink]="['/finance/payments']" [queryParams]="{ q: row.teacherName }">Payments</a>
+                  @if (auth.can('admin:users:read')) { <a class="table-action" [routerLink]="['/users', row.teacherId]">Profile</a> }
+                </div>
+              </td>
+            </tr>
+          } @empty {
+            <tr><td colspan="10" class="empty-state">No teacher earnings yet.</td></tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+  <footer class="table-footer"><span>{{ rows().length }} rows</span></footer>
+</section>

@@ -1,0 +1,93 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Finance</p>
+    <h1>Commission & payout settings</h1>
+    <p>Only super administrators can change these values. Each payment stores the commission rate in force at checkout, so changes never alter past earnings.</p>
+  </div>
+</section>
+
+<sfu-finance-tabs />
+
+@if (!superAdmin()) {
+  <p class="test-note">You can view these settings. Ask a super administrator to change them.</p>
+}
+@if (error()) { <p class="table-error" role="alert">{{ error() }}</p> }
+@if (success()) { <p class="table-success" role="status">{{ success() }}</p> }
+
+@if (settings(); as s) {
+  <form class="panel-grid" (ngSubmit)="save()">
+    <fieldset class="panel" [disabled]="!superAdmin() || saving()" style="margin: 0">
+      <h2>Platform commission</h2>
+      <div class="form-grid">
+        <label class="field">
+          Commission (%)
+          <input name="commission" inputmode="decimal" [ngModel]="commission()" (ngModelChange)="commission.set($event)" />
+          <small>Current: {{ percentLabel(s.commissionBps) }}</small>
+        </label>
+      </div>
+      @if (example(); as e) {
+        <p>On a $100.00 payment the platform keeps <strong>{{ e.platform }}</strong> and the teacher earns <strong>{{ e.teacher }}</strong>. Card processing fees are paid from the platform's share.</p>
+      }
+    </fieldset>
+
+    <fieldset class="panel" [disabled]="!superAdmin() || saving()" style="margin: 0">
+      <h2>Payouts</h2>
+      <div class="form-grid">
+        <label class="field">
+          Holding period (days)
+          <input name="holdDays" type="number" min="0" max="90" [ngModel]="holdDays()" (ngModelChange)="holdDays.set($event)" />
+          <small>Covers refunds and early disputes before money can be withdrawn.</small>
+        </label>
+        <label class="field">
+          Minimum payout ({{ s.defaultCurrency }})
+          <input name="minimumPayout" inputmode="decimal" [ngModel]="minimumPayout()" (ngModelChange)="minimumPayout.set($event)" />
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset class="panel" [disabled]="!superAdmin() || saving()" style="margin: 0">
+      <h2>Currencies</h2>
+      <p>{{ s.defaultCurrency }} is the default currency. Other currencies need a gateway that supports them before checkout offers them.</p>
+      <div class="check-row">
+        @for (code of codes; track code) {
+          <label>
+            <input type="checkbox" [checked]="currencies().includes(code)" [disabled]="code === s.defaultCurrency" (change)="toggleCurrency(code, $any($event.target).checked)" />
+            {{ definitions[code].name }} ({{ code }})
+            @if (gateway() && !gateway()!.currencies.includes(code) && currencies().includes(code)) { <small class="warn-text">· gateway not ready</small> }
+          </label>
+        }
+      </div>
+    </fieldset>
+
+    <fieldset class="panel" [disabled]="!superAdmin() || saving()" style="margin: 0; grid-column: 1 / -1">
+      <h2>Teacher-specific commission</h2>
+      <p>Optional negotiated rates. Teachers without an override use the platform commission.</p>
+      @for (row of overrides(); track $index; let i = $index) {
+        <div class="form-grid">
+          <label class="field">
+            Teacher ID
+            <input [name]="'teacher-' + i" [ngModel]="row.teacherId" (ngModelChange)="updateOverride(i, { teacherId: $event })" placeholder="User ID" />
+            @if (row.teacherName) { <small>{{ row.teacherName }}</small> }
+          </label>
+          <label class="field">
+            Commission (%)
+            <input [name]="'percent-' + i" inputmode="decimal" [ngModel]="row.percent" (ngModelChange)="updateOverride(i, { percent: $event })" />
+          </label>
+          <div class="inline-actions"><button type="button" class="table-action danger" (click)="removeOverride(i)">Remove</button></div>
+        </div>
+      } @empty {
+        <p>No overrides.</p>
+      }
+      <div class="inline-actions">
+        <button type="button" class="table-action" (click)="addOverride()">Add override</button>
+      </div>
+    </fieldset>
+
+    @if (superAdmin()) {
+      <div class="inline-actions" style="grid-column: 1 / -1">
+        <button type="submit" class="primary-action" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save settings' }}</button>
+        @if (s.updatedAt) { <small class="muted">Last changed {{ s.updatedAt.slice(0, 10) }} by {{ s.updatedBy }}</small> }
+      </div>
+    }
+  </form>
+}

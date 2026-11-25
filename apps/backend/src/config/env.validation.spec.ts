@@ -353,4 +353,12 @@ describe('validateConfig', () => {
       })
     ).toThrow(/ICE_ANNOUNCED_ADDRESS must not use localhost or wildcard hosts in production/);
   });
+  it('accepts a distinct signing secret for the payment endpoint', () => {
+    expect(() => validateConfig({ ...productionConfig, PAYMENTS_ENABLED: true, PAYMENT_GATEWAY: 'stripe', STRIPE_SECRET_KEY: 'sk_live_fixture_key', PAYMENTS_STRIPE_WEBHOOK_SECRET: 'whsec_payment_endpoint_only' })).not.toThrow();
+  });
+
+  it('requires a payment endpoint signing secret before production collection', () => {
+    expect(() => validateConfig({ ...productionConfig, PAYMENTS_ENABLED: true, PAYMENT_GATEWAY: 'stripe', STRIPE_SECRET_KEY: 'sk_live_fixture_key' })).toThrow(/PAYMENTS_STRIPE_WEBHOOK_SECRET/);
+  });
+
 });

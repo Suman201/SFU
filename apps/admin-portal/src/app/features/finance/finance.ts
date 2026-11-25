@@ -1,3 +1,4 @@
+import { FinanceTabs } from './finance-tabs';
 import { AuthService } from '../../core/services/auth.service';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -17,9 +18,9 @@ import {
 @Component({
   selector: 'sfu-admin-finance',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, FinanceTabs],
   templateUrl: './finance.html',
-  styleUrls: ['../../shared/admin-operations.scss', './finance.scss'],
+  styleUrls: ['../../shared/admin-operations.scss', './booking-finance.scss'],
 })
 export class AdminFinance {
   protected readonly auth = inject(AuthService);

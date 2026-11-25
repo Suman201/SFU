@@ -7,6 +7,7 @@ export default defineConfig({
     'admin-portal-runtime-smoke.spec.ts',
     'admin-completion.spec.ts',
     'admin-permissions.spec.ts',
+    'payment-merge.spec.ts',
   ],
   projects: base.projects?.filter((project) =>
     ['chromium', 'webkit'].includes(project.name!),

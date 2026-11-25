@@ -1,0 +1,113 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Finance</p>
+    <h1>Refunds & disputes</h1>
+    <p>Refunds are issued from a payment. Disputes (chargebacks) are opened by the student's bank; respond with evidence in the payment provider dashboard before the due date.</p>
+  </div>
+</section>
+
+<sfu-finance-tabs />
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div class="view-tabs" role="tablist" aria-label="Records">
+      <button type="button" role="tab" [class.active]="view() === 'refunds'" [attr.aria-selected]="view() === 'refunds'" (click)="setView('refunds')">Refunds</button>
+      <button type="button" role="tab" [class.active]="view() === 'disputes'" [attr.aria-selected]="view() === 'disputes'" (click)="setView('disputes')">Disputes</button>
+    </div>
+    <button type="button" class="table-action" (click)="load()">Refresh</button>
+  </div>
+  <div class="data-table-filters view-tabs" role="group" aria-label="Status">
+    @for (item of statusOptions(); track item.value) {
+      <button type="button" [class.active]="status() === item.value" [attr.aria-pressed]="status() === item.value" (click)="setStatus(item.value)">{{ item.label }}</button>
+    }
+  </div>
+
+  @if (error()) { <p class="table-error" role="alert">{{ error() }}</p> }
+
+  @if (view() === 'refunds') {
+    <div class="data-table-wrap" style="--data-table-min-width: 1080px">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Student / class</th>
+            <th class="num">Amount</th>
+            <th class="num">Commission reversed</th>
+            <th class="num">Teacher share reversed</th>
+            <th>Status</th>
+            <th>Reason</th>
+            <th>Requested</th>
+            <th class="actions-cell">Payment</th>
+          </tr>
+        </thead>
+        <tbody>
+          @if (loading()) {
+            <tr><td colspan="8" class="empty-state">Loading refunds…</td></tr>
+          } @else {
+            @for (row of refunds(); track row.id) {
+              <tr>
+                <td><div class="cell-stack"><strong>{{ row.studentName }}</strong><small>{{ row.batchName }} · {{ row.teacherName }}</small></div></td>
+                <td class="num"><strong>{{ money(row.amountMinor, row.currency) }}</strong></td>
+                <td class="num">{{ money(row.commissionMinor, row.currency) }}</td>
+                <td class="num">{{ money(row.teacherMinor, row.currency) }}</td>
+                <td>
+                  <div class="cell-stack">
+                    <span class="data-pill {{ refundTone(row.status) }}">{{ row.status }}</span>
+                    @if (row.failureReason) { <small>{{ row.failureReason }}</small> }
+                  </div>
+                </td>
+                <td>{{ row.reason }}</td>
+                <td><div class="cell-stack"><span>{{ row.createdAt | date: 'medium' }}</span><small>{{ row.initiatedBy === 'admin' ? row.requestedByName ?? 'Admin' : row.initiatedBy === 'system' ? 'Automatic' : 'Provider dashboard' }}</small></div></td>
+                <td class="actions-cell"><a class="table-action" [routerLink]="['/finance/payments', row.paymentId]">Open</a></td>
+              </tr>
+            } @empty {
+              <tr><td colspan="8" class="empty-state">No refunds in this view.</td></tr>
+            }
+          }
+        </tbody>
+      </table>
+    </div>
+  } @else {
+    <div class="data-table-wrap" style="--data-table-min-width: 1000px">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Student / class</th>
+            <th class="num">Disputed</th>
+            <th>Status</th>
+            <th>Reason</th>
+            <th>Evidence due</th>
+            <th>Opened</th>
+            <th class="actions-cell">Payment</th>
+          </tr>
+        </thead>
+        <tbody>
+          @if (loading()) {
+            <tr><td colspan="7" class="empty-state">Loading disputes…</td></tr>
+          } @else {
+            @for (row of disputes(); track row.id) {
+              <tr>
+                <td><div class="cell-stack"><strong>{{ row.studentName }}</strong><small>{{ row.batchName }} · {{ row.teacherName }}</small></div></td>
+                <td class="num"><strong>{{ money(row.amountMinor, row.currency) }}</strong></td>
+                <td><span class="data-pill {{ disputeTone(row.status) }}">{{ disputeLabels[row.status] }}</span></td>
+                <td>{{ row.reason.replace('_', ' ') }}</td>
+                <td>{{ row.evidenceDueBy ? (row.evidenceDueBy | date: 'medium') : '—' }}</td>
+                <td><div class="cell-stack"><span>{{ row.createdAt | date: 'medium' }}</span><small>{{ row.gatewayDisputeId }}</small></div></td>
+                <td class="actions-cell"><a class="table-action" [routerLink]="['/finance/payments', row.paymentId]">Open</a></td>
+              </tr>
+            } @empty {
+              <tr><td colspan="7" class="empty-state">No disputes in this view.</td></tr>
+            }
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+
+  <footer class="table-footer">
+    <span>Page {{ page() }} · {{ total() }} total</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() === 1" (click)="load(page() - 1)">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="load(page() + 1)">Next</button>
+    </div>
+  </footer>
+</section>

@@ -1,3 +1,4 @@
+import { StudentEnrollmentsService } from '../student-enrollments/student-enrollments.service';
 import {
   BadRequestException,
   ConflictException,
@@ -90,6 +91,7 @@ export class BookingsService {
     readonly billing: BookingBillingService,
     readonly gateway: StripeGateway,
     private readonly config: ConfigService,
+    private readonly enrollmentService: StudentEnrollmentsService,
   ) {}
   get enabled(): boolean {
     return this.config.get<boolean>('BOOKINGS_ENABLED', false);
@@ -694,7 +696,7 @@ export class BookingsService {
             deletedAt: { $exists: false },
           })
           .session(session);
-        if (active + (locked.paymentReservedCount ?? 0) > locked.maxCapacity)
+        if (active + (locked.paymentReservedCount ?? 0) + (await this.enrollmentService.countPaymentCheckoutHolds(batchId, session)) > locked.maxCapacity)
           throw new ConflictException('This class is full.');
         if (
           (await this.enrollments

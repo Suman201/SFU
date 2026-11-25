@@ -1,0 +1,110 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Finance</p>
+    <h1>Teacher payouts</h1>
+    <p>Teachers request payouts from their available balance. Approving sends the transfer to their connected payout account; rejecting returns the amount to their balance.</p>
+  </div>
+</section>
+
+<sfu-finance-tabs />
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Payout requests</h2>
+      <p>{{ total() }} records</p>
+    </div>
+    <div class="data-table-filters">
+      <input type="text" name="note" style="min-width: 280px" [ngModel]="note()" (ngModelChange)="note.set($event)" maxlength="500" placeholder="Admin note (required to reject, shown to teacher)" aria-label="Admin note for next action" />
+      <button type="button" class="table-action" (click)="load()">Refresh</button>
+    </div>
+  </div>
+  <div class="data-table-filters view-tabs" role="group" aria-label="Payout status">
+    @for (item of filters; track item.value) {
+      <button type="button" [class.active]="filter() === item.value" [attr.aria-pressed]="filter() === item.value" (click)="setFilter(item.value)">{{ item.label }}</button>
+    }
+  </div>
+
+  @if (error()) { <p class="table-error" role="alert">{{ error() }}</p> }
+  @if (success()) { <p class="table-success" role="status">{{ success() }}</p> }
+
+  <div class="data-table-wrap" style="--data-table-min-width: 1000px">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Teacher</th>
+          <th class="num">Amount</th>
+          <th>Status</th>
+          <th>Requested</th>
+          <th>Notes</th>
+          <th>Transfer</th>
+          <th class="actions-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr><td colspan="7" class="empty-state">Loading payouts…</td></tr>
+        } @else {
+          @for (row of rows(); track row.id) {
+            <tr>
+              <td>
+                <div class="primary-cell">
+                  <span class="table-avatar">{{ initials(row.teacherName) || 'TR' }}</span>
+                  <div class="cell-stack">
+                    <strong>{{ row.teacherName }}</strong>
+                    <small><a [routerLink]="['/finance/teachers']" [queryParams]="{ q: row.teacherId }">Earnings</a></small>
+                  </div>
+                </div>
+              </td>
+              <td class="num"><strong>{{ money(row.amountMinor, row.currency) }}</strong></td>
+              <td>
+                <div class="cell-stack">
+                  <span class="data-pill {{ tone(row.status) }}">{{ label(row.status) }}</span>
+                  @if (row.failureReason) { <small>{{ row.failureReason }}</small> }
+                </div>
+              </td>
+              <td>{{ row.requestedAt | date: 'medium' }}</td>
+              <td>
+                <div class="cell-stack">
+                  <span>{{ row.note || '—' }}</span>
+                  @if (row.adminNote) { <small>Admin: {{ row.adminNote }}</small> }
+                  @if (row.decidedByName) { <small>By {{ row.decidedByName }}</small> }
+                </div>
+              </td>
+              <td>
+                <div class="cell-stack">
+                  <span>{{ row.gatewayTransferId ?? '—' }}</span>
+                  @if (row.paidAt) { <small>{{ row.paidAt | date: 'medium' }}</small> }
+                </div>
+              </td>
+              <td class="actions-cell">
+                @if (auth.can('admin:finance:write') && (row.status === 'requested' || row.status === 'processing')) {
+                  <div class="inline-actions">
+                    <button type="button" class="table-action primary" [disabled]="savingId() !== null" (click)="approve(row)">
+                      {{ savingId() === row.id ? 'Sending…' : row.status === 'processing' ? 'Retry send' : 'Approve & send' }}
+                    </button>
+                    @if (row.status === 'requested') {
+                      <button type="button" class="table-action danger" [disabled]="savingId() !== null" (click)="reject(row)">Reject</button>
+                    }
+                  </div>
+                } @else {
+                  <span class="muted">—</span>
+                }
+              </td>
+            </tr>
+          } @empty {
+            <tr><td colspan="7" class="empty-state">No payouts in this view.</td></tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <footer class="table-footer">
+    <span>Page {{ page() }} · {{ total() }} total</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() === 1" (click)="load(page() - 1)">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="load(page() + 1)">Next</button>
+    </div>
+  </footer>
+</section>

@@ -1,0 +1,151 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Finance</p>
+    <h1>Ledger & reconciliation</h1>
+    <p>Every money movement is a balanced journal entry with a unique key, so replayed gateway notifications are recorded only once.</p>
+  </div>
+  <button type="button" class="primary-action" (click)="checkReconciliation()">Run check</button>
+</section>
+
+<sfu-finance-tabs />
+
+@if (error()) { <p class="table-error" role="alert">{{ error() }}</p> }
+@if (success()) { <p class="table-success" role="status">{{ success() }}</p> }
+
+@if (report(); as r) {
+  <section class="summary-grid" aria-label="Reconciliation">
+    <article [class.accent-green]="r.ledgerBalanced" [class.accent-rose]="!r.ledgerBalanced">
+      <span>Ledger</span>
+      <strong [class.ok-text]="r.ledgerBalanced" [class.warn-text]="!r.ledgerBalanced">{{ r.ledgerBalanced ? 'Balanced' : 'Unbalanced' }}</strong>
+      <small>{{ r.unbalancedEntries }} unbalanced entries</small>
+    </article>
+    <article [class.accent-rose]="r.paymentsMissingLedger.length" [class.accent-green]="!r.paymentsMissingLedger.length">
+      <span>Paid without ledger entry</span>
+      <strong>{{ r.paymentsMissingLedger.length }}</strong>
+      <small>Should be 0</small>
+    </article>
+    <article [class.accent-rose]="r.paymentsWithMismatchedSplit.length" [class.accent-green]="!r.paymentsWithMismatchedSplit.length">
+      <span>Split mismatches</span>
+      <strong>{{ r.paymentsWithMismatchedSplit.length }}</strong>
+      <small>Payment vs ledger teacher share</small>
+    </article>
+    <article [class.accent-amber]="r.paymentsAwaitingEnrollment.length">
+      <span>Paid, access pending</span>
+      <strong>{{ r.paymentsAwaitingEnrollment.length }}</strong>
+      <small>Older than 5 minutes</small>
+    </article>
+    <article [class.accent-amber]="r.failedEvents.length">
+      <span>Failed gateway events</span>
+      <strong>{{ r.failedEvents.length }}</strong>
+      <small>{{ r.stalePendingPayments }} stale checkouts</small>
+    </article>
+  </section>
+  @if (issues() > 0) {
+    <section class="panel">
+      <h2>Issues found</h2>
+      <p>Re-running settlement repeats only the steps that are missing; it never posts an entry twice.</p>
+      <ul class="action-list">
+        @for (id of r.paymentsMissingLedger; track id) { <li><span>Missing ledger entry</span><a class="table-action" [routerLink]="['/finance/payments', id]">Open payment</a></li> }
+        @for (id of r.paymentsWithMismatchedSplit; track id) { <li><span>Split mismatch</span><a class="table-action" [routerLink]="['/finance/payments', id]">Open payment</a></li> }
+        @for (id of r.paymentsAwaitingEnrollment; track id) { <li><span>Access not yet granted</span><a class="table-action" [routerLink]="['/finance/payments', id]">Open payment</a></li> }
+      </ul>
+      @if (superAdmin()) {
+        <div class="inline-actions"><button type="button" class="table-action primary" [disabled]="busy()" (click)="repair()">Re-run settlement</button></div>
+      }
+    </section>
+  }
+}
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Gateway events</h2>
+      <p>Verified notifications from the payment provider</p>
+    </div>
+    <div class="view-tabs" role="group" aria-label="Event status">
+      @for (item of ['failed', 'pending', 'done', 'all']; track item) {
+        <button type="button" [class.active]="eventStatus() === item" (click)="setEventStatus(item)">{{ item }}</button>
+      }
+    </div>
+  </div>
+  <div class="data-table-wrap" style="--data-table-min-width: 900px">
+    <table class="data-table">
+      <thead><tr><th>Received</th><th>Type</th><th>Status</th><th>Attempts</th><th>Last error</th><th class="actions-cell">Actions</th></tr></thead>
+      <tbody>
+        @for (event of events(); track event.id) {
+          <tr>
+            <td><div class="cell-stack"><span>{{ event.receivedAt | date: 'medium' }}</span><small>{{ event.id }}</small></div></td>
+            <td>{{ event.type }}</td>
+            <td><span class="data-pill" [class.tone-success]="event.status === 'done'" [class.tone-danger]="event.status === 'failed'" [class.tone-attention]="event.status === 'pending' || event.status === 'processing'" [class.tone-muted]="event.status === 'ignored'">{{ event.status }}</span></td>
+            <td class="num">{{ event.attempts }}</td>
+            <td>{{ event.lastError ?? '—' }}</td>
+            <td class="actions-cell">
+              @if (event.paymentId) { <a class="table-action" [routerLink]="['/finance/payments', event.paymentId]">Payment</a> }
+              @if (auth.can('admin:finance:write') && (event.status === 'failed' || event.status === 'pending')) {
+                <button type="button" class="table-action" [disabled]="busy()" (click)="retry(event)">Retry</button>
+              }
+            </td>
+          </tr>
+        } @empty {
+          <tr><td colspan="6" class="empty-state">No {{ eventStatus() === 'all' ? '' : eventStatus() }} events.</td></tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Journal</h2>
+      <p>{{ total() }} entries</p>
+    </div>
+    <div class="data-table-filters">
+      <select name="type" aria-label="Entry type" [ngModel]="type()" (ngModelChange)="setType($event)">
+        <option value="all">All entry types</option>
+        @for (item of types; track item) { <option [value]="item">{{ entryLabels[item] }}</option> }
+      </select>
+    </div>
+  </div>
+  <div class="data-table-wrap" style="--data-table-min-width: 980px">
+    <table class="data-table">
+      <thead><tr><th>Date</th><th>Entry</th><th>Lines (account · debit · credit)</th><th class="actions-cell">Source</th></tr></thead>
+      <tbody>
+        @if (loading()) {
+          <tr><td colspan="4" class="empty-state">Loading journal…</td></tr>
+        } @else {
+          @for (entry of entries(); track entry.id) {
+            <tr>
+              <td><div class="cell-stack"><span>{{ entry.occurredAt | date: 'medium' }}</span><small>{{ entry.currency }}</small></div></td>
+              <td><div class="cell-stack"><strong>{{ entryLabels[entry.type] }}</strong><small>{{ entry.memo }}</small></div></td>
+              <td>
+                <ul class="ledger-lines">
+                  @for (line of entry.lines; track $index) {
+                    <li>
+                      <span>{{ accountLabels[line.account] }}</span>
+                      <span>{{ line.debitMinor ? money(line.debitMinor, entry.currency) : '' }}</span>
+                      <span>{{ line.creditMinor ? money(line.creditMinor, entry.currency) : '' }}</span>
+                    </li>
+                  }
+                </ul>
+              </td>
+              <td class="actions-cell">
+                @if (entry.paymentId) { <a class="table-action" [routerLink]="['/finance/payments', entry.paymentId]">Payment</a> }
+                @else if (entry.payoutId) { <a class="table-action" routerLink="/finance/payouts" [queryParams]="{ status: 'all' }">Payout</a> }
+              </td>
+            </tr>
+          } @empty {
+            <tr><td colspan="4" class="empty-state">No journal entries yet.</td></tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+  <footer class="table-footer">
+    <span>Page {{ page() }} · {{ total() }} total</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() === 1" (click)="loadEntries(page() - 1)">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="loadEntries(page() + 1)">Next</button>
+    </div>
+  </footer>
+</section>

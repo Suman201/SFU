@@ -39,6 +39,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { RedisModule } from './redis/redis.module';
 import { RecordingsModule } from './recordings/recordings.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { PaymentsModule } from './payments/payments.module';
 import { IngestModule } from './ingest/ingest.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { ClusterModule } from './cluster/cluster.module';
@@ -221,6 +222,7 @@ import { UsersModule } from './users/users.module';
     ProfilesModule,
     NotificationsModule,
     InvoicesModule,
+    PaymentsModule,
     SchedulingModule,
     RoomsModule,
     MediaApiModule,

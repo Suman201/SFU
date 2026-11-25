@@ -11,6 +11,7 @@ import { AppModule } from './app.module';
 import { buildPublicRouteExclusions } from './bootstrap/public-routes';
 import { whiteboardBodyParser } from './bootstrap/whiteboard-body-parser';
 import { tutorProfileBodyParser } from './bootstrap/tutor-profile-body-parser';
+import { paymentWebhookBodyParser } from './bootstrap/payment-webhook-body-parser';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { operationsTokenMatches } from './common/guards/operations-token.guard';
 import { SuccessResponseInterceptor } from './common/interceptors/success-response.interceptor';
@@ -31,6 +32,7 @@ async function bootstrap(): Promise<void> {
   app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
   app.useWebSocketAdapter(new ConfiguredIoAdapter(app, config));
 
+  app.use('/api/v1/payments/webhooks', paymentWebhookBodyParser());
   app.use('/api/v1/class-sessions/:sessionId/whiteboard', whiteboardBodyParser());
   app.use('/api/v1/profile/me', tutorProfileBodyParser());
   app.use('/api/v1/admin/tutor-applications/:id/review', tutorProfileBodyParser());

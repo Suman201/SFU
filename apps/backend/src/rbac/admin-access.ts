@@ -41,6 +41,10 @@ export function adminPermissionForRequest(
     return read ? 'admin:teaching:read' : 'admin:teaching:write';
   if (path.startsWith('/recordings/'))
     return read ? 'admin:recordings:read' : 'admin:recordings:write';
+  if (path.startsWith('/admin/finance')) {
+    if ((path === '/admin/finance/settings' && !read) || path === '/admin/finance/reconciliation/repair') return 'super-admin';
+    return read ? 'admin:finance:read' : 'admin:finance:write';
+  }
   if (path.startsWith('/admin/invoices'))
     return read ? 'admin:finance:read' : 'admin:finance:write';
   if (path.startsWith('/admin/users'))

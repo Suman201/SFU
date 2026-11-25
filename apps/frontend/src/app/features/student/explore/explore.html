@@ -23,6 +23,12 @@
     @if (enrollment.enrollmentError()) {
       <div class="form-alert">{{ enrollment.enrollmentError() }}</div>
     }
+    @if (checkoutError()) {
+      <div class="form-alert" role="alert">{{ checkoutError() }}</div>
+    }
+    @if (checkoutNotice()) {
+      <div class="form-alert" role="status">{{ checkoutNotice() }}</div>
+    }
 
     @if (enrollment.loadingAvailableBatches() && !enrollment.availableBatchesLoaded()) {
       <div class="empty-state">
@@ -68,7 +74,7 @@
               <a [routerLink]="desktop?'/desktop/calendar':'/calendar'">Enrolled · View calendar</a>
             } @else {
               <button type="button" class="primary" [disabled]="isEnrollmentPending(batch)" (click)="enroll(batch)">
-                {{ isEnrollmentPending(batch) ? 'Enrolling...' : ((batch.feeMinor ?? 0)>0 || batch.feeAmount>0) ? 'Book class' : 'Enroll free' }}
+                {{ actionLabel(batch) }}
               </button>
             }
           </footer>

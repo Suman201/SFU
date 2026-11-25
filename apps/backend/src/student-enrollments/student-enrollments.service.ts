@@ -1,8 +1,10 @@
+import { PaymentDocument, type PaymentMongo } from '../payments/payment.schemas';
 import { batchMoneyFields } from '../teacher-batches/batch-money';
 import { planClassSessions } from '../class-sessions/class-session-planner';
 import { randomUUID } from 'node:crypto';
 import { scheduleEvent } from '../scheduling/schedule-event';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import type {
   AdminCreateEnrollmentRequest,
@@ -55,10 +57,19 @@ export interface StudentEnrolledBatch {
   paymentOrderId?: string;
   feeMinor?: number;
   feeCurrency?: import("@native-sfu/contracts").CurrencyCode;
+  /** Price in integer minor units of `currency`. */
+  priceMinor?: number;
+  currency?: string;
+  /** True when online payment is required before access is granted. */
+  paymentRequired: boolean;
   startsAt: string;
   level?: string;
   enrollmentStatus?: StudentEnrollmentStatus;
 }
+
+export type PaidEnrollmentResult =
+  | { ok: true; enrollmentId: string }
+  | { ok: false; reason: 'full' | 'closed' | 'already_enrolled' | 'not_student' | 'busy' };
 
 export interface EnrollStudentInput {
   studentId: string;
@@ -83,8 +94,75 @@ export class StudentEnrollmentsService {
     @InjectModel(BatchDocument.name) private readonly batches: Model<BatchMongoDocument>,
     @InjectModel(BatchScheduleDocument.name) private readonly schedules: Model<BatchScheduleMongoDocument>,
     @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>,
-    @Optional() private readonly auditLogs?: AuditLogsService
+    @Optional() private readonly auditLogs?: AuditLogsService,
+    @Optional() private readonly config?: ConfigService,
+    @Optional() @InjectModel(PaymentDocument.name) private readonly paymentCheckouts?: Model<PaymentMongo>
   ) {}
+
+  /** Paid batches need a verified payment before access when online payments are enabled. */
+  requiresPayment(batch: Pick<BatchMongoDocument, 'feeAmount' | 'feeMinor' | 'isPrivateBooking'>): boolean {
+    return !batch.isPrivateBooking && Boolean(this.config?.get<boolean>('payments.enabled', false)) && ((batch.feeMinor ?? 0) > 0 || (batch.feeAmount ?? 0) > 0);
+  }
+
+  async countPaymentCheckoutHolds(batchId: string, session?: ClientSession): Promise<number> {
+    if (!this.paymentCheckouts) return 0;
+    const query = this.paymentCheckouts.countDocuments({ batchId, status: 'pending', seatHoldUntil: { $gt: new Date() } });
+    if (session) query.session(session);
+    return query.exec();
+  }
+
+  /**
+   * Grants access for a verified payment. Idempotent: a repeated call for the
+   * same payment returns the enrollment it already created.
+   */
+  async enrollPaidStudent(input: { studentId: string; batchId: string; paymentId: string }): Promise<PaidEnrollmentResult> {
+    const existing = await this.enrollments.findOne({ studentId: input.studentId, batchId: input.batchId, ...ACTIVE_ACCESS_FILTER }).exec();
+    if (existing) {
+      return existing.paymentId === input.paymentId ? { ok: true, enrollmentId: existing.id } : { ok: false, reason: 'already_enrolled' };
+    }
+    const [batch, student] = await Promise.all([
+      this.batches.findOne({ _id: input.batchId, deletedAt: { $exists: false } }).exec(),
+      this.users.findOne({ _id: input.studentId, deletedAt: { $exists: false } }).exec()
+    ]);
+    if (!student || !student.roles.includes('STUDENT')) return { ok: false, reason: 'not_student' };
+    if (!batch || batch.isPrivateBooking || batch.status !== 'ACTIVE' || (batch.endDate && batch.endDate < new Date())) return { ok: false, reason: 'closed' };
+    const token = randomUUID();
+    const locked = await this.batches.findOneAndUpdate(
+      { _id: batch.id, $or: [{ enrollmentLockUntil: { $exists: false } }, { enrollmentLockUntil: { $lt: new Date() } }] },
+      { $set: { enrollmentLockToken: token, enrollmentLockUntil: new Date(Date.now() + 120000) } },
+      { new: true, timestamps: false }
+    ).exec();
+    if (!locked) return { ok: false, reason: 'busy' };
+    try {
+      // This captured payment no longer holds a pending seat; preserve all other checkout reservations.
+      if ((await this.countActiveByBatch(batch.id)) + (locked.paymentReservedCount ?? 0) + (await this.countPaymentCheckoutHolds(batch.id)) >= locked.maxCapacity) return { ok: false, reason: 'full' };
+      try {
+        const created = await this.createEnrollment(
+          { studentId: student.id, batchId: batch.id, status: 'active', actorUserId: student.id },
+          locked,
+          student,
+          'active',
+          input.paymentId
+        );
+        return { ok: true, enrollmentId: String(created.id) };
+      } catch (error) {
+        if (error instanceof ConflictException) {
+          const raced = await this.enrollments.findOne({ studentId: input.studentId, batchId: input.batchId, ...ACTIVE_ACCESS_FILTER }).exec();
+          return raced?.paymentId === input.paymentId ? { ok: true, enrollmentId: raced.id } : { ok: false, reason: 'already_enrolled' };
+        }
+        throw error;
+      }
+    } finally {
+      await this.batches.updateOne({ _id: batch.id, enrollmentLockToken: token }, { $unset: { enrollmentLockToken: '', enrollmentLockUntil: '' } }, { timestamps: false });
+    }
+  }
+
+  /** Removes access that was bought with a payment that has been fully refunded or charged back. */
+  async revokePaidEnrollment(enrollmentId: string, paymentId: string): Promise<void> {
+    const enrollment = await this.enrollments.findOne({ _id: enrollmentId, paymentId, ...ACTIVE_ACCESS_FILTER }).exec();
+    if (!enrollment) return;
+    await this.transitionEnrollment(enrollment.id, 'cancelled', `payment:${paymentId}`);
+  }
 
   async listAdminEnrollments(query: AdminEnrollmentListQuery, user: AuthenticatedUser): Promise<AdminEnrollmentListResponse> {
     this.assertAdmin(user);
@@ -197,7 +275,7 @@ export class StudentEnrollmentsService {
   }
 
   async hasPaidBookings(batchId: string): Promise<boolean> {
-    return Boolean(await this.enrollments.exists({ batchId, status: 'active', paymentOrderId: { $type: 'string' }, deletedAt: { $exists: false } }));
+    return Boolean(await this.enrollments.exists({ batchId, status: 'active', $or: [{ paymentOrderId: { $type: 'string' } }, { paymentId: { $type: 'string' } }], deletedAt: { $exists: false } }));
   }
 
   private async withEnrollmentLock<T>(batchId: string, handler: (batch: BatchMongoDocument) => Promise<T>): Promise<T> {
@@ -216,6 +294,7 @@ export class StudentEnrollmentsService {
     }
     this.assertBatchOpenForEnrollment(batch);
     if (batch.isPrivateBooking || (batch.feeMinor ?? 0) > 0 || (batch.feeAmount ?? 0) > 0) {
+      if (this.requiresPayment(batch)) throw new HttpException('This class requires verified payment. Choose Pay and enroll to continue.', HttpStatus.PAYMENT_REQUIRED);
       throw new ForbiddenException('Paid classes require a verified booking payment.');
     }
     const token = randomUUID();
@@ -234,7 +313,7 @@ export class StudentEnrollmentsService {
   async selfCancelStudentEnrollment(user: AuthenticatedUser, batchId: string): Promise<Record<string, unknown>> {
     this.assertStudentSelfService(user);
     const existing = await this.enrollments.findOne({ studentId: user.sub, batchId, ...ACTIVE_ACCESS_FILTER }).exec();
-    if (existing?.paymentOrderId) throw new ConflictException('Cancel paid bookings through My bookings so the payment and refund are handled together.');
+    if (existing?.paymentOrderId || existing?.paymentId) throw new ConflictException('Manage paid access through its booking or payment so cancellation and refund stay together.');
     if (!existing) {
       throw new NotFoundException('Active student enrollment not found.');
     }
@@ -245,7 +324,8 @@ export class StudentEnrollmentsService {
     input: EnrollStudentInput,
     batch: BatchMongoDocument,
     student: UserMongoDocument,
-    status: StudentEnrollmentStatus
+    status: StudentEnrollmentStatus,
+    paymentId?: string
   ): Promise<Record<string, unknown>> {
     const now = new Date();
     try {
@@ -262,6 +342,7 @@ export class StudentEnrollmentsService {
         createdBy: input.actorUserId,
         updatedBy: input.actorUserId,
         scheduleEvents: [scheduleEvent('enrollment', {reason: status})],
+        ...(paymentId ? { paymentId } : {}),
         ...this.statusTimestamp(status, now)
       });
       return this.serialize(enrollment);
@@ -451,6 +532,7 @@ export class StudentEnrollmentsService {
       throw new NotFoundException('Student enrollment not found.');
     }
     if (existing.status === status) return this.serialize(existing);
+    if (existing.paymentId && actorUserId !== `payment:${existing.paymentId}` && (status === 'cancelled' || (status === 'active' && existing.status === 'cancelled'))) throw new ConflictException('Manage purchased access through its payment and refund.');
     if (existing.paymentOrderId && (status === 'cancelled' || (status === 'active' && existing.status === 'cancelled'))) throw new ConflictException('Manage purchased access through its booking and refund.');
     if (status === 'active') return this.withEnrollmentLock(existing.batchId, async locked => {
       await this.assertNoActiveEnrollment(existing.studentId, existing.batchId, existing.id);
@@ -619,7 +701,7 @@ export class StudentEnrollmentsService {
 
   private async assertBatchHasCapacity(batch: BatchMongoDocument): Promise<void> {
     const enrolledCount = await this.countActiveByBatch(batch.id);
-    if (enrolledCount + (batch.paymentReservedCount ?? 0) >= batch.maxCapacity) {
+    if (enrolledCount + (batch.paymentReservedCount ?? 0) + (await this.countPaymentCheckoutHolds(batch.id)) >= batch.maxCapacity) {
       throw new ConflictException('This batch is full.');
     }
   }
@@ -714,6 +796,9 @@ export class StudentEnrollmentsService {
       feeAmount: this.batchFeeAmount(batch),
       ...(enrollment?.paymentOrderId ? { paymentOrderId: enrollment.paymentOrderId } : {}),
       ...batchMoneyFields(batch),
+      priceMinor: batch.feeMinor,
+      currency: batch.feeCurrency ?? batch.currency,
+      paymentRequired: this.requiresPayment(batch) && (batch.feeCurrency ?? batch.currency) === 'USD',
       startsAt: nextStart.toISOString(),
       ...(enrollment?.status ? { enrollmentStatus: enrollment.status } : {})
     };

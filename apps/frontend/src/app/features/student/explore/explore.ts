@@ -1,5 +1,6 @@
 import { isDesktopSession } from '../../../core/services/desktop-bridge';
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { PaymentsApi, openHostedPage, paymentErrorMessage } from '../../../core/services/payments.service';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { CurrencyService } from '../../../core/services/currency.service';
@@ -31,12 +32,49 @@ export class StudentExplore implements OnInit {
     this.enrollment.loadEnrolledBatches();
   }
 
+  private readonly payments = inject(PaymentsApi);
+  protected readonly checkoutBatchId = signal<string | null>(null);
+  protected readonly checkoutError = signal('');
+  protected readonly checkoutNotice = signal('');
+
   protected enroll(batch: StudentBatch): void {
+    if (batch.paymentRequired) {
+      this.payAndEnroll(batch);
+      return;
+    }
     this.enrollment.enroll(batch.id);
   }
 
+  /** Paid classes go through the hosted checkout; access is granted only after the gateway confirms payment. */
+  private payAndEnroll(batch: StudentBatch): void {
+    if (this.checkoutBatchId()) return;
+    this.checkoutBatchId.set(batch.id);
+    this.checkoutError.set('');
+    this.checkoutNotice.set('');
+    this.payments.checkout(batch.id).subscribe({
+      next: (checkout) => {
+        if (this.desktop) {
+          this.checkoutBatchId.set(null);
+          this.checkoutNotice.set('Checkout opened in your browser. The class appears here as soon as the payment is confirmed.');
+        }
+        openHostedPage(checkout.checkoutUrl);
+      },
+      error: (error) => {
+        this.checkoutBatchId.set(null);
+        this.checkoutError.set(paymentErrorMessage(error, 'Checkout could not be started. Please try again.'));
+      },
+    });
+  }
+
   protected isEnrollmentPending(batch: StudentBatch): boolean {
-    return this.enrollment.enrollmentActionBatchId() === batch.id;
+    return this.enrollment.enrollmentActionBatchId() === batch.id || this.checkoutBatchId() === batch.id;
+  }
+
+  protected actionLabel(batch: StudentBatch): string {
+    if (batch.paymentRequired) {
+      return this.isEnrollmentPending(batch) ? 'Opening checkout…' : `Pay ${this.feeLabel(batch)} & enroll`;
+    }
+    return this.isEnrollmentPending(batch) ? 'Enrolling...' : ((batch.feeMinor ?? 0) > 0 || batch.feeAmount > 0) ? 'Book class' : 'Enroll free';
   }
 
   protected isEnrolled(batch: StudentBatch): boolean {

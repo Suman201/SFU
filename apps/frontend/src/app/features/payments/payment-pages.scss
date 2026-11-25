@@ -1,0 +1,428 @@
+// Shared layout for student payments, checkout results and teacher earnings.
+// Product palette: green = calm base, rose = primary action, coral = live/highlight, amber = attention.
+
+:host {
+  display: block;
+}
+
+.pay-shell {
+  display: grid;
+  gap: 20px;
+}
+
+.pay-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+
+  h1 {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--page-title-size, clamp(28px, 4vw, 38px));
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+  }
+
+  p {
+    max-width: 62ch;
+    margin: 6px 0 0;
+    color: var(--muted);
+  }
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 10px;
+}
+
+.stat {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 16px 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+
+  &::before {
+    position: absolute;
+    top: 14px;
+    bottom: 14px;
+    left: 0;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--tone, var(--brand-green));
+    content: '';
+  }
+
+  span {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  strong {
+    overflow: hidden;
+    color: var(--text);
+    font-size: 24px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    color: var(--muted);
+    font-size: 12px;
+  }
+}
+
+.tone-green {
+  --tone: var(--brand-green);
+}
+
+.tone-rose {
+  --tone: var(--brand-rose);
+}
+
+.tone-coral {
+  --tone: var(--brand-coral);
+}
+
+.tone-amber {
+  --tone: var(--brand-amber);
+}
+
+.panel-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+
+  h2 {
+    margin: 0;
+    color: var(--text);
+    font-size: 16px;
+  }
+
+  p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 760px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.notice {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+
+  &.error {
+    border-color: var(--feedback-error-line);
+    background: var(--feedback-error-bg);
+    color: var(--feedback-error);
+  }
+
+  &.success {
+    border-color: var(--success-border);
+    background: var(--success-soft);
+    color: var(--brand-green-strong, var(--success));
+  }
+
+  &.attention {
+    border-color: color-mix(in srgb, var(--brand-amber) 55%, var(--line));
+    background: color-mix(in srgb, var(--brand-amber) 16%, var(--panel));
+    color: var(--text);
+  }
+}
+
+.money {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.num {
+  text-align: right !important;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.cell-stack {
+  display: grid;
+  gap: 2px;
+
+  small {
+    color: var(--muted);
+    font-size: 12px;
+  }
+}
+
+.positive {
+  color: var(--brand-green-strong, var(--success));
+}
+
+.negative {
+  color: var(--accent-strong);
+}
+
+.data-pill.info {
+  border-color: color-mix(in srgb, var(--brand-coral) 40%, var(--line));
+  background: color-mix(in srgb, var(--brand-coral) 14%, transparent);
+  color: var(--brand-coral-strong);
+}
+
+.field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+
+  label {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  input,
+  select {
+    min-height: 38px;
+    padding: 0 10px;
+    border: 1px solid var(--line-strong, var(--line));
+    border-radius: 8px;
+    background: var(--control-bg, var(--panel));
+    color: var(--text);
+    font: inherit;
+  }
+
+  .amount-input {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--line-strong, var(--line));
+    border-radius: 8px;
+    background: var(--control-bg, var(--panel));
+
+    span {
+      padding-left: 10px;
+      color: var(--muted);
+    }
+
+    input {
+      width: 130px;
+      border: 0;
+      background: transparent;
+    }
+  }
+}
+
+.action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  &.secondary {
+    border-color: var(--line-strong, var(--line));
+    background: var(--panel);
+    color: var(--text);
+  }
+}
+
+.data-table-footer {
+  padding-top: 4px;
+}
+
+.empty-row td {
+  padding: 22px 12px !important;
+  color: var(--muted);
+  text-align: center !important;
+}
+
+// Checkout result and test checkout cards
+.result-shell {
+  display: grid;
+  justify-items: center;
+  padding-block: 12px;
+}
+
+.result-card {
+  display: grid;
+  gap: 16px;
+  width: min(100%, 560px);
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+
+  h1 {
+    margin: 0;
+    color: var(--text);
+    font-size: 24px;
+    line-height: 1.2;
+  }
+
+  p {
+    margin: 0;
+    color: var(--muted);
+  }
+}
+
+.status-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--tone-soft, var(--success-soft));
+  color: var(--tone-ink, var(--brand-green-strong, var(--success)));
+  font-size: 22px;
+  font-weight: 800;
+
+  &.pending {
+    --tone-soft: color-mix(in srgb, var(--brand-amber) 22%, transparent);
+    --tone-ink: var(--brand-amber-strong);
+  }
+
+  &.failed {
+    --tone-soft: var(--accent-soft);
+    --tone-ink: var(--accent-strong);
+  }
+}
+
+.summary-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+
+  div {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line-soft);
+
+    &:last-child {
+      border-bottom: 0;
+    }
+  }
+
+  dt {
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  dd {
+    margin: 0;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 650;
+    text-align: right;
+  }
+
+  .total dd {
+    font-size: 18px;
+  }
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.test-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px dashed color-mix(in srgb, var(--brand-amber) 70%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--brand-amber) 14%, var(--panel));
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+// Payment status pills: green = settled, amber = waiting, coral = refunded, rose = failed.
+.data-pill.success {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--brand-green-strong, var(--success));
+}
+
+.data-pill.neutral {
+  border-color: var(--line);
+  background: var(--panel-muted, var(--panel));
+  color: var(--muted);
+}

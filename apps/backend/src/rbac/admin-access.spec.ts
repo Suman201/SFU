@@ -47,4 +47,13 @@ describe('admin resource permission classification', () => {
     );
     expect(adminPermissionForRequest('GET', '/api/v1/auth/me')).toBeNull();
   });
+  it('integrates the incoming payment workspace with managed Finance permissions', () => {
+    expect(adminPermissionForRequest('GET', '/api/v1/admin/finance/payments')).toBe('admin:finance:read');
+    expect(adminPermissionForRequest('POST', '/api/v1/admin/finance/payments/id/refunds')).toBe('admin:finance:write');
+    expect(adminPermissionForRequest('POST', '/api/v1/admin/finance/payouts/id/approve')).toBe('admin:finance:write');
+    expect(adminPermissionForRequest('POST', '/api/v1/admin/finance/events/id/retry')).toBe('admin:finance:write');
+    expect(adminPermissionForRequest('PATCH', '/api/v1/admin/finance/settings')).toBe('super-admin');
+    expect(adminPermissionForRequest('POST', '/api/v1/admin/finance/reconciliation/repair')).toBe('super-admin');
+  });
+
 });

@@ -1,0 +1,46 @@
+.chart-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.cash-chart {
+  height: 225px;
+  display: flex;
+  gap: 12px;
+  min-width: min-content;
+  align-items: end;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+}
+.chart-day {
+  height: 100%;
+  flex: 1 0 40px;
+  max-width: 100px;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 8px;
+  text-align: center;
+}
+.bars {
+  display: flex;
+  gap: 4px;
+  align-items: end;
+  height: 100%;
+}
+.cash-bar {
+  flex: 1;
+  min-width: 8px;
+  border-radius: 3px 3px 0 0;
+}
+.collected {
+  background: var(--brand-green, #458b73);
+}
+.refunded {
+  background: var(--brand-rose, #f26076);
+}
+.legend {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-left: 12px;
+}

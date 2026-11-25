@@ -34,7 +34,7 @@ jobs:
         run: npm ci
       - name: Install headless browsers and Linux dependencies
         run: npx playwright install --with-deps chromium webkit
-      - name: Build admin and backend dependencies
+      - name: Build learning portal, admin and backend dependencies
         run: npm run build:admin-ci
       - name: Run admin unit tests
         run: |
@@ -50,6 +50,7 @@ jobs:
         env:
           ADMIN_COMPLETION_OUTPUT: ${{ github.workspace }}/reports/admin-ci/screenshots/operations
           ADMIN_PERMISSION_UI_OUTPUT: ${{ github.workspace }}/reports/admin-ci/screenshots/permissions
+          PAYMENT_MERGE_OUTPUT: ${{ github.workspace }}/reports/admin-ci/screenshots/payments
         run: npm run test:admin:browser
       - name: Collect test service diagnostics
         if: always()

@@ -1,0 +1,113 @@
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Finance</p>
+    <h1>Student payments</h1>
+    <p>Every checkout with its commission split, refunds and dispute state. Open a payment to refund it or inspect its ledger entries.</p>
+  </div>
+  <button type="button" class="primary-action" [disabled]="exporting()" (click)="exportCsv()">{{ exporting() ? 'Exporting…' : 'Export CSV' }}</button>
+</section>
+
+<sfu-finance-tabs />
+
+<section class="data-table-shell">
+  <div class="data-table-toolbar">
+    <div>
+      <h2>Payments</h2>
+      <p>{{ total() }} records</p>
+    </div>
+    <form class="data-table-filters" (ngSubmit)="load(1)">
+      <input type="search" class="data-table-search" name="q" [ngModel]="q()" (ngModelChange)="q.set($event)" placeholder="Receipt, student, teacher, class" aria-label="Search payments" />
+      <input type="date" name="from" aria-label="Created from" [ngModel]="from()" (ngModelChange)="from.set($event)" />
+      <input type="date" name="to" aria-label="Created to" [ngModel]="to()" (ngModelChange)="to.set($event)" />
+      <button type="submit" class="table-action primary">Apply</button>
+      <button type="button" class="table-action" (click)="reset()">Reset</button>
+    </form>
+  </div>
+  <div class="data-table-filters view-tabs" role="group" aria-label="Status">
+    @for (item of statuses; track item.value) {
+      <button type="button" [class.active]="status() === item.value" [attr.aria-pressed]="status() === item.value" (click)="setStatus(item.value)">{{ item.label }}</button>
+    }
+  </div>
+
+  @if (error()) { <p class="table-error" role="alert">{{ error() }}</p> }
+
+  <div class="data-table-wrap" style="--data-table-min-width: 1180px">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Student</th>
+          <th>Class / teacher</th>
+          <th>Status</th>
+          <th class="num">Amount</th>
+          <th class="num">Commission</th>
+          <th class="num">Teacher share</th>
+          <th class="num">Fee</th>
+          <th class="num">Refunded</th>
+          <th>Date</th>
+          <th class="actions-cell">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          <tr><td colspan="10" class="empty-state">Loading payments…</td></tr>
+        } @else {
+          @for (row of rows(); track row.id) {
+            <tr>
+              <td>
+                <div class="primary-cell">
+                  <span class="table-avatar">{{ initials(row.studentName) || 'ST' }}</span>
+                  <div class="cell-stack">
+                    <strong>{{ row.studentName }}</strong>
+                    <small>{{ row.studentEmail }}</small>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div class="cell-stack">
+                  <strong>{{ row.batchName }}</strong>
+                  <small>{{ row.teacherName }}</small>
+                </div>
+              </td>
+              <td>
+                <div class="cell-stack">
+                  <span class="data-pill {{ tone(row.status) }}">{{ label(row.status) }}</span>
+                  @if (row.disputeState !== 'none') { <small>Dispute {{ row.disputeState }}</small> }
+                  @if (row.enrollmentState === 'refund_required') { <small>Access not granted</small> }
+                </div>
+              </td>
+              <td class="num">{{ money(row.amountMinor, row.currency) }}</td>
+              <td class="num">
+                <div class="cell-stack">
+                  <span>{{ money(row.commissionMinor, row.currency) }}</span>
+                  <small>{{ row.commissionBps / 100 }}%</small>
+                </div>
+              </td>
+              <td class="num">{{ money(row.teacherMinor, row.currency) }}</td>
+              <td class="num">{{ row.gatewayFeeMinor ? money(row.gatewayFeeMinor, row.currency) : '—' }}</td>
+              <td class="num">{{ row.refundedMinor ? money(row.refundedMinor, row.currency) : '—' }}</td>
+              <td>
+                <div class="cell-stack">
+                  <span>{{ (row.paidAt ?? row.createdAt) | date: 'mediumDate' }}</span>
+                  <small>{{ row.receiptNumber ?? 'No receipt' }}</small>
+                </div>
+              </td>
+              <td class="actions-cell">
+                <a class="table-action" [routerLink]="['/finance/payments', row.id]">Open</a>
+              </td>
+            </tr>
+          } @empty {
+            <tr><td colspan="10" class="empty-state">No payments match these filters.</td></tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <footer class="table-footer">
+    <span>Page {{ page() }} · {{ total() }} total</span>
+    <div>
+      <button type="button" class="table-action" [disabled]="page() === 1" (click)="load(page() - 1)">Previous</button>
+      <button type="button" class="table-action" [disabled]="page() * limit() >= total()" (click)="load(page() + 1)">Next</button>
+    </div>
+  </footer>
+</section>

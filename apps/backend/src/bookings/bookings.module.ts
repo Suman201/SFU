@@ -1,3 +1,4 @@
+import { StudentEnrollmentsModule } from '../student-enrollments/student-enrollments.module';
 import { AdminBookingOperationsService } from './admin-booking-operations.service';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -45,6 +46,7 @@ import {
     AuthModule,
     AuditLogsModule,
     DatabaseModule,
+    StudentEnrollmentsModule,
     NotificationsModule,
     InvoicesModule,
     BookingCalendarModule,
