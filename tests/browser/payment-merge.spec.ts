@@ -53,9 +53,10 @@ test('merged payment screens use real settlement, earnings and Finance permissio
     await teacher.goto(web.origin + '/teacher/earnings');
     await expect(teacher.getByRole('heading', { name: 'Earnings', exact: true })).toBeVisible();
     await expect(teacher.getByText('$85.00', { exact: true }).first()).toBeVisible();
+    await teacher.getByRole('button', { name: 'Switch to dark mode', exact: true }).click();
+    await expect(teacher.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect.poll(() => teacher.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(10, 25, 48)');
     await teacher.setViewportSize({ width: 390, height: 844 });
-    await teacher.emulateMedia({ colorScheme: 'dark' });
-    await teacher.evaluate(() => { document.documentElement.dataset['theme'] = 'dark'; document.documentElement.classList.add('dark'); });
     await teacher.screenshot({ path: path.join(output, info.project.name + '-teacher-earnings-mobile.png'), fullPage: true });
     const staff = await stack.bookings.users.create({ name: 'Finance UI reader', displayName: 'Finance UI reader', email: 'finance-ui-reader@booking.test', passwordHash: await bcrypt.hash(stack.password, 4), roles: ['ADMIN'], permissions: [], status: 'active', disabled: false });
     const role = await api('admin', 'POST', 'admin/staff/roles', { name: 'Payment UI reader', description: 'Synthetic Finance read access', status: 'active', permissions: ['admin:finance:read'] });
