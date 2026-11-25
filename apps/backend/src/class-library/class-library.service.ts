@@ -300,7 +300,7 @@ export class ClassLibraryService {
       status: this.publishedStatus(Boolean(state.publishedAt && !state.unpublishedAt)),
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
-      detailUrl: this.sessionDetailUrl(state.sessionId, state.batchId, audience),
+      detailUrl: audience === 'admin' ? `/whiteboards/${encodeURIComponent(state.sessionId)}` : this.sessionDetailUrl(state.sessionId, state.batchId, audience),
       metadata: {
         pages: state.pageCount,
         elements: state.elementCount,

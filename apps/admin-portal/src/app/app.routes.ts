@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { adminGuard, guestGuard } from './core/services/auth.guards';
+import { adminGuard, adminFeatureGuard, guestGuard } from './core/services/auth.guards';
 
 export const routes: Routes = [
   { path: 'error-encyclopedia', loadComponent: () => import('./features/error-encyclopedia/error-encyclopedia').then(m => m.ErrorEncyclopedia) },
@@ -16,10 +16,15 @@ export const routes: Routes = [
   {
     path: '',
     canActivate: [adminGuard],
+    canActivateChild: [adminFeatureGuard],
     loadComponent: () => import('./features/shell/admin-shell').then((route) => route.AdminShell),
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
       { path: 'errors', loadComponent: () => import('./features/errors/errors').then(m => m.ErrorsAdmin) },
+      { path: 'whiteboards', loadComponent: () => import('./features/whiteboards/whiteboards').then(route => route.AdminWhiteboards) },
+      { path: 'whiteboards/:sessionId', loadComponent: () => import('./features/whiteboards/whiteboards').then(route => route.AdminWhiteboards) },
+      { path: 'staff', loadComponent: () => import('./features/staff/staff').then(route => route.AdminStaff) },
+      { path: 'finance', loadComponent: () => import('./features/finance/finance').then(route => route.AdminFinance) },
       { path: 'bookings', loadComponent: () => import('./features/bookings/bookings').then(route => route.AdminBookings) },
       { path: 'invoices', loadComponent: () => import('./features/invoices/invoices').then(m => m.InvoicesAdmin) },
       { path: 'invoices/:id', loadComponent: () => import('./features/invoices/invoices').then(m => m.InvoicesAdmin) },

@@ -1,0 +1,225 @@
+<section class="operations-page">
+  <header class="operations-heading">
+    <div>
+      <p class="eyebrow">BUSINESS PERFORMANCE</p>
+      <h1>Financial overview</h1>
+      <p>
+        Verified booking receipts, confirmed refunds and booking activity in
+        each original currency.
+      </p>
+    </div>
+    <div class="actions">
+      @if(auth.can('admin:bookings:read')){<a
+        class="secondary"
+        routerLink="/bookings"
+        >Bookings and refunds</a
+      >}<button
+        class="secondary"
+        type="button"
+        [disabled]="!report()||loading()"
+        (click)="export()"
+      >
+        Export daily CSV
+      </button>
+    </div>
+  </header>
+  @if(error()){
+  <p class="notice error" role="alert">{{error()}}</p>
+  }
+  <section class="panel">
+    <form class="fields" (ngSubmit)="apply()">
+      <label
+        >From (UTC)<input
+          type="date"
+          name="dateFrom"
+          [(ngModel)]="dateFrom"
+          required /></label
+      ><label
+        >To (UTC)<input
+          type="date"
+          name="dateTo"
+          [(ngModel)]="dateTo"
+          required /></label
+      ><button class="primary" type="submit" [disabled]="loading()">
+        Update report</button
+      ><button
+        class="secondary"
+        type="button"
+        [disabled]="loading()"
+        (click)="load()"
+      >
+        Refresh
+      </button>
+    </form>
+    <p class="note">
+      Maximum 366 days. Monetary values are never added across currencies.
+    </p>
+  </section>
+  @if(report();as data){
+  <div class="metric-grid">
+    <article class="metric">
+      <span>Bookings created in range</span
+      ><strong>{{data.totals.createdBookings}}</strong>
+    </article>
+    <article class="metric">
+      <span>Paid bookings in range</span
+      ><strong>{{data.totals.paidBookings}}</strong>
+    </article>
+    <article class="metric">
+      <span>Cancellations in range</span
+      ><strong>{{data.totals.cancellations}}</strong>
+    </article>
+    <article class="metric">
+      <span>Payment reviews · current</span
+      ><strong>{{data.totals.paymentReviews}}</strong>
+    </article>
+  </div>
+  <section class="data-table-shell">
+    <div class="data-table-toolbar"><h2>Cash activity by currency</h2></div>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Currency</th>
+            <th>Collected incl. tax</th>
+            <th>Confirmed refunds</th>
+            <th>Net collected</th>
+            <th>Paid bookings</th>
+            <th>Pending refunds · current</th>
+            <th>Failed refunds · current</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for(item of data.currencies;track item.currency){
+          <tr>
+            <td><strong>{{item.currency}}</strong></td>
+            <td>
+              {{exact({amountMinor:item.collectedMinor,currency:item.currency})}}
+            </td>
+            <td>
+              {{exact({amountMinor:item.refundedMinor,currency:item.currency})}}<small
+                >{{item.confirmedRefunds}} credit notes</small
+              >
+            </td>
+            <td>
+              <strong
+                >{{exact({amountMinor:item.netCollectedMinor,currency:item.currency})}}</strong
+              >
+            </td>
+            <td>{{item.paidBookings}}</td>
+            <td>
+              {{exact({amountMinor:item.pendingRefundMinor,currency:item.currency})}}
+            </td>
+            <td>{{item.failedRefunds}}</td>
+          </tr>
+          }@empty{
+          <tr>
+            <td colspan="7">No booking activity or outstanding refunds.</td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="operations-heading">
+      <div>
+        <h2>Daily cash activity</h2>
+        <p class="note">
+          Latest 31 days with activity in the selected currency.
+        </p>
+      </div>
+      <label
+        >Chart currency<select
+          [ngModel]="currency()"
+          (ngModelChange)="currency.set($event)"
+        >
+          @for(item of data.currencies;track item.currency){
+          <option [ngValue]="item.currency">{{item.currency}}</option>
+          }
+        </select></label
+      >
+    </div>
+    <p class="note">
+      <span class="legend collected"></span> Collected
+      <span class="legend refunded"></span> Refunded
+    </p>
+    <div class="chart-scroll">
+      <div
+        class="cash-chart"
+        role="img"
+        [attr.aria-label]="'Daily collected and refunded amounts in '+currency()"
+      >
+        @for(day of chart();track day.date){
+        <div
+          class="chart-day"
+          [title]="day.date+': collected '+exact({amountMinor:day.collectedMinor,currency:day.currency})+', refunded '+exact({amountMinor:day.refundedMinor,currency:day.currency})"
+        >
+          <div class="bars">
+            <span
+              class="cash-bar collected"
+              [style.height.%]="day.collectedMinor/maximum()*100"
+            ></span
+            ><span
+              class="cash-bar refunded"
+              [style.height.%]="day.refundedMinor/maximum()*100"
+            ></span>
+          </div>
+          <small>{{day.date.slice(5)}}</small>
+        </div>
+        }@empty{
+        <p class="note">
+          No daily cash activity for this currency in the selected range.
+        </p>
+        }
+      </div>
+    </div>
+  </section>
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <h2>Daily booking and payment records</h2>
+    </div>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date (UTC)</th>
+            <th>Currency</th>
+            <th>Created</th>
+            <th>Paid</th>
+            <th>Cancelled</th>
+            <th>Collected</th>
+            <th>Refunded</th>
+            <th>Net collected</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for(day of data.days;track day.currency+day.date){
+          <tr>
+            <td>{{day.date}}</td>
+            <td>{{day.currency}}</td>
+            <td>{{day.createdBookings}}</td>
+            <td>{{day.paidBookings}}</td>
+            <td>{{day.cancellations}}</td>
+            <td>
+              {{exact({amountMinor:day.collectedMinor,currency:day.currency})}}
+            </td>
+            <td>
+              {{exact({amountMinor:day.refundedMinor,currency:day.currency})}}
+            </td>
+            <td>
+              {{exact({amountMinor:day.netCollectedMinor,currency:day.currency})}}
+            </td>
+          </tr>
+          }@empty{
+          <tr>
+            <td colspan="8">No activity in this range.</td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <p class="notice">{{data.basis}}</p>
+  }
+</section>

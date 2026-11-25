@@ -50,3 +50,7 @@ All checks run headlessly. No native development app or visible browser is requi
 Validated on 29 October 2026: the real-backend acceptance flow passed in Chromium, Firefox and WebKit, including 1440px, 820px and 390px layouts. The existing admin root integration test passed, along with all 12 route/reference regression checks across those browser engines. Headless screenshots include the dashboard, user directory/detail, invoice editor, catalogue, sign-in, dark mode and mobile navigation.
 
 The production build also passed. Its real-backend acceptance flow and all four route/reference regression checks were rerun successfully in Chromium.
+
+## Operational workflows
+
+Saved-whiteboard review and controlled recovery, booking reconciliation/refund retries, managed staff permissions, session renewal and currency-separated cash reporting are described in [Admin operations](admin-operations.md), including additive index preparation and real-backend acceptance commands.

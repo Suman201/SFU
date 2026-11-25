@@ -136,6 +136,7 @@ export const UserSettingsSchema = SchemaFactory.createForClass(UserSettingsDocum
 
 @Schema({ collection: 'users', timestamps: true })
 export class UserDocument {
+  @Prop({ type: String, index: true }) adminRoleId?: string;
   @Prop({ type: String, enum: SUPPORTED_CURRENCIES })
   preferredCurrency?: CurrencyCode;
   @Prop({ trim: true, maxlength: 120 })
@@ -839,6 +840,7 @@ BatchScheduleSchema.index({ batchId: 1, dayOfWeek: 1 }, { unique: true });
 
 @Schema({ collection: 'class_sessions', timestamps: true })
 export class ClassSessionDocument {
+  @Prop({ type: Number, default: 0 }) adminRecoveryRevision!: number;
   @Prop({ type: String, default: () => randomUUID() })
   _id!: string;
 
@@ -1330,6 +1332,7 @@ ClassSessionWhiteboardOperationSchema.index({ actorUserId: 1, createdAt: -1 });
 
 @Schema({ collection: 'class_session_whiteboard_versions', timestamps: true })
 export class ClassSessionWhiteboardVersionDocument {
+  @Prop({ type: Boolean }) recoveryBackup?: boolean;
   @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
   versionId!: string;
 
@@ -1557,6 +1560,8 @@ AssignmentSubmissionSchema.index({ assignmentId: 1, status: 1, updatedAt: -1 });
 
 @Schema({ collection: 'roles', timestamps: true })
 export class RoleDocument {
+  @Prop({ type: [String], default: undefined }) adminPermissionSlugs?: string[];
+  @Prop({ type: Number, default: 0 }) adminVersion!: number;
   @Prop({ required: true, trim: true, maxlength: 120 })
   name!: string;
 

@@ -1,0 +1,261 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+.operations-page {
+  padding: 26px;
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+.operations-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.operations-heading h1 {
+  font-size: 28px;
+  letter-spacing: -0.035em;
+  margin: 4px 0 8px;
+}
+.operations-heading p,
+p.note {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--success-ink, #326c57);
+  font-weight: 700;
+  margin: 0;
+}
+.panel {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+h2 {
+  font-size: 17px;
+  margin: 0 0 14px;
+}
+h3 {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+.fields,
+.actions {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+.fields label {
+  flex: 1 1 155px;
+}
+.fields .wide {
+  flex-basis: 100%;
+}
+label {
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text);
+}
+input,
+textarea,
+select {
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px;
+  background: var(--control-bg, var(--panel));
+  color: var(--text);
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+input[type='checkbox'] {
+  accent-color: var(--brand-green, #458b73);
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.primary {
+  background: var(--accent, #f26076);
+  color: var(--on-accent, #2c1420);
+  border: 0;
+  border-radius: 7px;
+  padding: 11px 16px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+.secondary {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+}
+.notice {
+  padding: 12px 15px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft, var(--panel));
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+}
+.error {
+  border-color: var(--danger, #b94141);
+  color: var(--danger, #b94141);
+}
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 350px);
+  gap: 20px;
+  align-items: start;
+}
+.stack {
+  display: grid;
+  gap: 17px;
+  min-width: 0;
+}
+.facts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+.facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.facts dt {
+  color: var(--muted);
+}
+.facts dd {
+  margin: 0;
+  max-width: 65%;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.muted,
+small {
+  color: var(--muted);
+}
+small {
+  font-size: 11px;
+}
+.break {
+  overflow-wrap: anywhere;
+}
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+.metric {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.metric span {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+.metric strong {
+  display: block;
+  font-size: 25px;
+  margin-top: 10px;
+  letter-spacing: -0.03em;
+}
+.data-table td small {
+  display: block;
+  margin-top: 4px;
+}
+.data-table-footer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.form-stack {
+  display: grid;
+  gap: 15px;
+}
+.permission-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.permission-grid label {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.permission-grid input {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.row-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.row-list li {
+  border: 1px solid var(--line);
+  padding: 14px;
+  border-radius: 8px;
+}
+.row-list p {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.row-list .actions {
+  margin-top: 12px;
+}
+@media (max-width: 1000px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .operations-page {
+    padding: 16px;
+  }
+  .panel {
+    padding: 17px;
+  }
+  .permission-grid {
+    grid-template-columns: 1fr;
+  }
+  .operations-heading h1 {
+    font-size: 25px;
+  }
+}

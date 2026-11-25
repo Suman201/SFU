@@ -187,7 +187,7 @@
         <h2>Artifacts and work</h2>
         <dl>
           <div><dt>Broadcasts</dt><dd>{{ recap.broadcasts.count }}</dd></div>
-          <div><dt>Whiteboard</dt><dd>{{ recap.artifacts.whiteboard.available ? 'Available' : 'No snapshot' }}</dd></div>
+          <div><dt>Whiteboard</dt><dd>{{ recap.artifacts.whiteboard.available ? 'Available' : 'No snapshot' }} @if(recap.artifacts.whiteboard.available && auth.can('admin:whiteboards:read')){ <a class="table-action" [routerLink]="['/whiteboards',session()?.sessionId]">Review whiteboard</a> }</dd></div>
           <div><dt>Assignments</dt><dd>{{ recap.assignments.total }}</dd></div>
           <div><dt>Submissions</dt><dd>{{ submissionTotal(recap) }}</dd></div>
           <div><dt>Published assignments</dt><dd>{{ recap.assignments.published }}</dd></div>

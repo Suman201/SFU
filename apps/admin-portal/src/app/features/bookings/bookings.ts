@@ -1,388 +1,357 @@
-import { HttpClient } from '@angular/common/http';
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { finalize, map } from 'rxjs';
+import { finalize, timer } from 'rxjs';
 import {
   formatMoneyWithCode,
   majorToMinor,
-  type BookingOrder,
+  SUPPORTED_CURRENCIES,
+  type AdminBookingDetail,
+  type AdminBookingPage,
+  type AdminBookingQuery,
 } from '@native-sfu/contracts';
-import { API_BASE_URL } from '../../core/services/app-environment';
+import {
+  AdminOperationsApi,
+  adminOperationError,
+  saveAdminBlob,
+} from '../../core/services/admin-operations-api.service';
+import { AuthService } from '../../core/services/auth.service';
 import { ConfirmDialogService } from '../../shared/confirm-dialog/confirm-dialog.service';
-
 @Component({
   selector: 'sfu-admin-bookings',
   standalone: true,
-  imports: [FormsModule],
-  template: ` <section class="bookings-admin">
-    <header>
-      <p class="eyebrow">BUSINESS</p>
-      <h1>Bookings and refunds</h1>
-      <p>
-        Review payment status and return verified payments to their original
-        method.
-      </p>
-    </header>
-    @if (error()) {
-      <p class="table-error" role="alert">{{ error() }}</p>
-    }
-    @if (notice()) {
-      <p role="status">{{ notice() }}</p>
-    }
-    <section class="data-table-shell">
-      <div class="data-table-toolbar">
-        <h2>Recent bookings</h2>
-        <button
-          type="button"
-          class="table-action"
-          [disabled]="busy()"
-          (click)="load()"
-        >
-          Refresh
-        </button>
-      </div>
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Booking</th>
-              <th>Student</th>
-              <th>Teacher</th>
-              <th>Starts</th>
-              <th>Paid total</th>
-              <th>Refunded / pending</th>
-              <th>Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (order of orders(); track order.id) {
-              <tr>
-                <td>
-                  <strong>{{ order.title }}</strong
-                  ><small>{{ order.id }}</small>
-                </td>
-                <td>{{ order.studentName }}</td>
-                <td>{{ order.teacherName }}</td>
-                <td>{{ date(order.startsAt) }}</td>
-                <td>{{ exact(order.price) }}</td>
-                <td>
-                  {{
-                    exact({
-                      amountMinor: order.refundedMinor,
-                      currency: order.price.currency,
-                    })
-                  }}
-                  /
-                  {{
-                    exact({
-                      amountMinor: order.refundPendingMinor,
-                      currency: order.price.currency,
-                    })
-                  }}
-                </td>
-                <td>
-                  <span class="data-pill">{{
-                    order.status.replaceAll('_', ' ')
-                  }}</span>
-                </td>
-                <td>
-                  <button
-                    class="table-action"
-                    type="button"
-                    (click)="select(order)"
-                  >
-                    Manage
-                  </button>
-                </td>
-              </tr>
-            } @empty {
-              <tr>
-                <td colspan="8">
-                  {{ busy() ? 'Loading bookings…' : 'No bookings yet.' }}
-                </td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
-      <div class="data-table-footer">{{ orders().length }} recent bookings</div>
-    </section>
-    @if (selected(); as order) {
-      <section class="refund-editor">
-        <div>
-          <h2>{{ order.title }}</h2>
-          <p>Booking {{ order.id }}</p>
-          <p>
-            Confirmed refunds:
-            {{
-              exact({
-                amountMinor: order.refundedMinor,
-                currency: order.price.currency,
-              })
-            }}. Pending refunds:
-            {{
-              exact({
-                amountMinor: order.refundPendingMinor,
-                currency: order.price.currency,
-              })
-            }}.
-          </p>
-        </div>
-        @if (
-          order.paidAt &&
-          order.price.amountMinor >
-            order.refundedMinor + order.refundPendingMinor
-        ) {
-          <form (ngSubmit)="refund($event)">
-            <label
-              >Refund amount ({{ order.price.currency }})<input
-                name="amount"
-                [(ngModel)]="amount"
-                inputmode="decimal"
-                required /></label
-            ><label
-              >Reason<textarea
-                name="reason"
-                [(ngModel)]="reason"
-                required
-                minlength="5"
-                maxlength="500"
-                rows="3"
-              ></textarea>
-            </label>
-            <p>
-              A full refund cancels class access. Partial refunds preserve the
-              booking. End a live lesson before issuing its full refund.
-            </p>
-            <button class="primary" type="submit" [disabled]="busy()">
-              Review refund
-            </button>
-          </form>
-        } @else {
-          <p>This order has no unrefunded verified balance available.</p>
-        }
-        <ul>
-          @for (item of order.refunds; track item.id) {
-            <li>
-              {{
-                exact({
-                  amountMinor: item.amountMinor,
-                  currency: item.currency,
-                })
-              }}
-              · {{ item.status }} · {{ item.reason }}
-            </li>
-          }
-        </ul>
-        <button type="button" class="table-action" (click)="selected.set(null)">
-          Close
-        </button>
-      </section>
-    }
-  </section>`,
-  styles: [
-    `
-      :host {
-        display: block;
-      }
-      .bookings-admin {
-        padding: 26px;
-        display: grid;
-        gap: 22px;
-      }
-      h1 {
-        margin: 5px 0;
-        font-size: 28px;
-        letter-spacing: -0.035em;
-      }
-      h2 {
-        font-size: 17px;
-        margin: 0;
-      }
-      p {
-        font-size: 13px;
-        color: var(--muted);
-        line-height: 1.7;
-      }
-      .eyebrow {
-        font-size: 10px;
-        letter-spacing: 0.16em;
-        color: var(--brand-green, #458b73);
-        font-weight: 700;
-      }
-      .refund-editor {
-        max-width: 700px;
-        padding: 24px;
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        display: grid;
-        gap: 18px;
-      }
-      form,
-      label {
-        display: grid;
-        gap: 10px;
-      }
-      form {
-        gap: 17px;
-      }
-      label {
-        font-size: 12px;
-      }
-      input,
-      textarea {
-        width: 100%;
-        padding: 11px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: var(--panel);
-        color: var(--text);
-        font: inherit;
-        box-sizing: border-box;
-      }
-      .primary {
-        padding: 12px 18px;
-        justify-self: start;
-        border: 0;
-        border-radius: 8px;
-        background: var(--brand-green, #458b73);
-        color: #fff;
-        font-weight: 700;
-        cursor: pointer;
-      }
-      button:disabled {
-        opacity: 0.5;
-      }
-      li {
-        font-size: 12px;
-        margin-bottom: 10px;
-      }
-      @media (max-width: 600px) {
-        .bookings-admin {
-          padding: 16px;
-        }
-        .refund-editor {
-          padding: 18px;
-        }
-      }
-    `,
-  ],
+  imports: [FormsModule, RouterLink],
+  templateUrl: './bookings.html',
+  styleUrl: '../../shared/admin-operations.scss',
 })
 export class AdminBookings {
-  private readonly http = inject(HttpClient);
+  private readonly api = inject(AdminOperationsApi);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly destroy = inject(DestroyRef);
   private readonly confirm = inject(ConfirmDialogService);
+  protected readonly auth = inject(AuthService);
   protected readonly exact = formatMoneyWithCode;
-  protected readonly orders = signal<BookingOrder[]>([]);
-  protected readonly selected = signal<BookingOrder | null>(null);
+  protected readonly currencies = SUPPORTED_CURRENCIES;
+  protected readonly data = signal<AdminBookingPage>({
+    items: [],
+    total: 0,
+    page: 1,
+    limit: 25,
+  });
+  protected readonly selected = signal<AdminBookingDetail | null>(null);
   protected readonly busy = signal(false);
+  protected readonly loading = signal(false);
   protected readonly error = signal('');
   protected readonly notice = signal('');
+  protected query: AdminBookingQuery = { page: 1, limit: 25 };
   protected amount = '';
   protected reason = '';
   private requestId = crypto.randomUUID();
+  private requestVersion = 0;
+  private detailVersion = 0;
+  private polling = false;
+  protected readonly statuses = [
+    'awaiting_payment',
+    'processing',
+    'confirmed',
+    'expired',
+    'cancelled',
+    'refund_pending',
+    'refunded',
+    'payment_review',
+  ] as const;
   constructor() {
-    this.load();
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroy))
+      .subscribe((params) => {
+        this.query = {
+          page: Number(params.get('page') || 1),
+          limit: Number(params.get('limit') || 25),
+          search: params.get('search') || '',
+          status: (params.get('status') ||
+            'all') as AdminBookingQuery['status'],
+          kind: (params.get('kind') || 'all') as AdminBookingQuery['kind'],
+          currency:
+            (params.get('currency') as AdminBookingQuery['currency']) ||
+            undefined,
+          dateFrom: params.get('dateFrom') || '',
+          dateTo: params.get('dateTo') || '',
+          refundStatus:
+            (params.get('refundStatus') as AdminBookingQuery['refundStatus']) ||
+            undefined,
+        };
+        this.load();
+        const id = params.get('orderId');
+        if (id && id !== this.selected()?.id) this.openId(id);
+        if (!id) this.selected.set(null);
+      });
+    timer(5000, 5000)
+      .pipe(takeUntilDestroyed(this.destroy))
+      .subscribe(() => {
+        const item = this.selected();
+        if (
+          item &&
+          !this.polling &&
+          !this.busy() &&
+          (item.status === 'refund_pending' ||
+            item.refunds.some(
+              (refund) =>
+                refund.status === 'queued' || refund.status === 'pending',
+            ))
+        )
+          this.refreshDetail(true);
+      });
   }
-  protected load(): void {
-    this.busy.set(true);
-    this.http
-      .get<BookingOrder[] | { data: BookingOrder[] }>(
-        API_BASE_URL + '/admin/bookings',
-      )
+  protected load() {
+    const version = ++this.requestVersion;
+    this.loading.set(true);
+    this.api
+      .bookings(this.query)
       .pipe(
-        map((body) => ('data' in body ? body.data : body)),
+        finalize(() => {
+          if (version === this.requestVersion) this.loading.set(false);
+        }),
+        takeUntilDestroyed(this.destroy),
+      )
+      .subscribe({
+        next: (page) => {
+          if (version === this.requestVersion) {
+            this.data.set(page);
+            this.error.set('');
+          }
+        },
+        error: (error) => {
+          if (version === this.requestVersion)
+            this.error.set(adminOperationError(error));
+        },
+      });
+  }
+  protected apply() {
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { ...this.query, page: 1, orderId: this.selected()?.id },
+      replaceUrl: false,
+    });
+  }
+  protected reset() {
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { page: 1, limit: 25 },
+    });
+  }
+  protected page(change: number) {
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        ...this.query,
+        page: this.data().page + change,
+        orderId: this.selected()?.id,
+      },
+    });
+  }
+  protected open(item: AdminBookingDetail) {
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { ...this.query, orderId: item.id },
+    });
+  }
+  private openId(id: string) {
+    const version = ++this.detailVersion;
+    this.selected.set(null);
+    this.reason = '';
+    this.amount = '';
+    this.requestId = crypto.randomUUID();
+    this.api
+      .booking(id)
+      .pipe(takeUntilDestroyed(this.destroy))
+      .subscribe({
+        next: (item) => {
+          if (version === this.detailVersion) this.selected.set(item);
+        },
+        error: (error) => {
+          if (version === this.detailVersion)
+            this.error.set(adminOperationError(error));
+        },
+      });
+  }
+  protected close() {
+    ++this.detailVersion;
+    this.selected.set(null);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { ...this.query },
+    });
+  }
+  protected refreshDetail(quiet = false) {
+    const item = this.selected();
+    if (!item || this.polling) return;
+    this.polling = true;
+    this.api
+      .booking(item.id, quiet)
+      .pipe(
+        finalize(() => (this.polling = false)),
+        takeUntilDestroyed(this.destroy),
+      )
+      .subscribe({
+        next: (value) => {
+          if (this.selected()?.id === value.id) this.selected.set(value);
+        },
+        error: (error) => {
+          if (!quiet) this.error.set(adminOperationError(error));
+        },
+      });
+  }
+  protected export() {
+    this.api
+      .bookingsCsv(this.query)
+      .pipe(takeUntilDestroyed(this.destroy))
+      .subscribe({
+        next: (blob) => saveAdminBlob(blob, 'bookings.csv'),
+        error: (error) => this.error.set(adminOperationError(error)),
+      });
+  }
+  protected download(creditId?: string) {
+    const order = this.selected();
+    if (!order) return;
+    this.api
+      .billingDocument(order.id, creditId)
+      .pipe(takeUntilDestroyed(this.destroy))
+      .subscribe({
+        next: (blob) =>
+          saveAdminBlob(
+            blob,
+            (creditId ? 'credit-note-' : 'invoice-') + order.id + '.pdf',
+          ),
+        error: (error) => this.error.set(adminOperationError(error)),
+      });
+  }
+  protected async reconcile() {
+    const item = this.selected();
+    if (!item || this.busy()) return;
+    if (this.reason.trim().length < 5) {
+      this.error.set('Add a reason of at least five characters.');
+      return;
+    }
+    this.busy.set(true);
+    this.api
+      .reconcile(item.id, this.reason.trim())
+      .pipe(
         finalize(() => this.busy.set(false)),
         takeUntilDestroyed(this.destroy),
       )
       .subscribe({
-        next: (orders) => {
-          this.orders.set(orders);
-          const id = this.selected()?.id;
-          if (id)
-            this.selected.set(orders.find((order) => order.id === id) ?? null);
+        next: (value) => {
+          this.selected.set(value);
+          this.notice.set(
+            value.status === 'payment_review'
+              ? 'The provider still does not match the agreed order. The payment remains under review.'
+              : 'Provider verification completed.',
+          );
+          this.load();
         },
-        error: () => this.error.set('Bookings could not be loaded.'),
+        error: (error) => this.error.set(adminOperationError(error)),
       });
   }
-  protected select(order: BookingOrder): void {
-    this.selected.set(order);
-    this.amount = '';
-    this.reason = '';
-    this.requestId = crypto.randomUUID();
-    this.error.set('');
-    this.notice.set('');
-  }
-  protected async refund(event: SubmitEvent): Promise<void> {
+  protected async refund(event: SubmitEvent) {
     event.preventDefault();
-    const order = this.selected();
+    const item = this.selected();
     if (
-      !order ||
+      !item ||
       this.busy() ||
       !(event.target as HTMLFormElement).reportValidity()
     )
       return;
-    let amountMinor: number;
+    let amount: number;
     try {
-      amountMinor = majorToMinor(this.amount, order.price.currency);
+      amount = majorToMinor(this.amount, item.price.currency);
       if (
-        amountMinor < 1 ||
-        amountMinor >
-          order.price.amountMinor -
-            order.refundedMinor -
-            order.refundPendingMinor
+        amount < 1 ||
+        amount >
+          item.price.amountMinor - item.refundedMinor - item.refundPendingMinor
       )
         throw new Error(
           'Enter an amount within the remaining verified balance.',
         );
     } catch (error) {
-      this.error.set(
-        error instanceof Error ? error.message : 'Invalid refund amount.',
-      );
+      this.error.set(adminOperationError(error));
       return;
     }
-    const approved = await this.confirm.confirm({
-      title: 'Refund original payment?',
-      message:
-        'Return ' +
-        this.exact({ amountMinor, currency: order.price.currency }) +
-        ' to the original payment method. A full refund cancels the booking.',
-      confirmLabel: 'Request refund',
-      variant: 'danger',
-    });
-    if (!approved) return;
+    if (
+      !(await this.confirm.confirm({
+        title: 'Refund original payment?',
+        message:
+          'Return ' +
+          this.exact({ amountMinor: amount, currency: item.price.currency }) +
+          ' to the original method. A full refund cancels access.',
+        confirmLabel: 'Request refund',
+        variant: 'danger',
+      }))
+    )
+      return;
     this.busy.set(true);
-    this.error.set('');
-    this.http
-      .post(
-        API_BASE_URL +
-          '/admin/bookings/' +
-          encodeURIComponent(order.id) +
-          '/refunds',
-        { requestId: this.requestId, amountMinor, reason: this.reason.trim() },
-      )
+    this.api
+      .refund(item.id, amount, this.reason.trim(), this.requestId)
       .pipe(
         finalize(() => this.busy.set(false)),
         takeUntilDestroyed(this.destroy),
       )
       .subscribe({
         next: () => {
-          this.notice.set(
-            'Refund requested. Its status updates after confirmation from the payment provider.',
-          );
           this.requestId = crypto.randomUUID();
+          this.notice.set(
+            'Refund requested. Completion depends on provider confirmation.',
+          );
+          this.refreshDetail();
           this.load();
         },
-        error: () =>
-          this.error.set(
-            'The refund could not be requested. Refresh the booking to check its latest balance and status.',
-          ),
+        error: (error) => this.error.set(adminOperationError(error)),
       });
   }
-  protected date(value: string): string {
+  protected canRetry(id: string) {
+    const refunds = this.selected()?.refunds ?? [];
+    const root =
+      refunds.find((refund) => refund.id === id)?.retryOfRefundId ?? id;
+    return !refunds.some(
+      (refund) => refund.retryOfRefundId === root && refund.status !== 'failed',
+    );
+  }
+  protected async retry(id: string) {
+    const item = this.selected();
+    if (!item || this.busy()) return;
+    if (this.reason.trim().length < 5) {
+      this.error.set('Add a reason for retrying this refund.');
+      return;
+    }
+    if (
+      !(await this.confirm.confirm({
+        title: 'Retry failed refund?',
+        message:
+          'Create a new request for the same amount. The failed request stays in history.',
+        confirmLabel: 'Retry refund',
+        variant: 'danger',
+      }))
+    )
+      return;
+    this.busy.set(true);
+    this.api
+      .retryRefund(item.id, id, this.reason.trim(), this.requestId)
+      .pipe(
+        finalize(() => this.busy.set(false)),
+        takeUntilDestroyed(this.destroy),
+      )
+      .subscribe({
+        next: (value) => {
+          this.selected.set(value);
+          this.requestId = crypto.randomUUID();
+          this.notice.set('Refund retry queued.');
+          this.load();
+        },
+        error: (error) => this.error.set(adminOperationError(error)),
+      });
+  }
+  protected date(value: string) {
     return new Intl.DateTimeFormat(undefined, {
       dateStyle: 'medium',
       timeStyle: 'short',

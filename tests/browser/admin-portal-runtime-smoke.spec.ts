@@ -1,3 +1,4 @@
+import { ADMIN_PORTAL_PERMISSIONS } from '@native-sfu/contracts';
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -156,7 +157,7 @@ async function installAdminApiMocks(page: Page, role: 'ADMIN' | 'STUDENT'): Prom
         name: role === 'ADMIN' ? 'Smoke Admin' : 'Smoke Student',
         email: role === 'ADMIN' ? 'admin-smoke@example.test' : 'student-smoke@example.test',
         roles: [role],
-        permissions: []
+        permissions: role === 'ADMIN' ? [...ADMIN_PORTAL_PERMISSIONS] : []
       });
       return;
     }

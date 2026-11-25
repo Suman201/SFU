@@ -1,0 +1,225 @@
+<section class="operations-page">
+  <header class="operations-heading">
+    <div>
+      <p class="eyebrow">TEACHING OVERSIGHT</p>
+      <h1>{{sessionId?'Whiteboard review':'Whiteboards'}}</h1>
+      <p>
+        {{sessionId?'Inspect saved pages and checkpoints without editing the
+        classroom.':'Find saved boards by lesson, page title, topic, class
+        reference or teacher ID.'}}
+      </p>
+    </div>
+    <div class="actions">
+      @if(sessionId){<a class="secondary" routerLink="/whiteboards"
+        >All whiteboards</a
+      ><button
+        class="secondary"
+        type="button"
+        [disabled]="loading()"
+        (click)="loadReview()"
+      >
+        Refresh board</button
+      >}
+    </div>
+  </header>
+  @if(error()){
+  <p class="notice error" role="alert">{{error()}}</p>
+  }@if(notice()){
+  <p class="notice" role="status">{{notice()}}</p>
+  } @if(!sessionId){
+  <section class="data-table-shell">
+    <form class="data-table-toolbar" (ngSubmit)="apply()">
+      <label
+        >Search whiteboards<input
+          type="search"
+          name="search"
+          [(ngModel)]="search"
+          maxlength="150" /></label
+      ><button class="primary" type="submit" [disabled]="loading()">
+        Search
+      </button>
+    </form>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Lesson</th>
+            <th>Status</th>
+            <th>Pages</th>
+            <th>Elements</th>
+            <th>Saved</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for(item of list().items;track item.sessionId){
+          <tr>
+            <td>
+              <strong>{{item.title}}</strong><small>{{item.sessionId}}</small>
+            </td>
+            <td><span class="data-pill">{{item.status}}</span></td>
+            <td>{{item.pageCount}}</td>
+            <td>{{item.elementCount}}</td>
+            <td>{{date(item.updatedAt)}}</td>
+            <td>
+              <a
+                class="table-action"
+                [routerLink]="['/whiteboards',item.sessionId]"
+                >Review board</a
+              >
+            </td>
+          </tr>
+          }@empty{
+          <tr>
+            <td colspan="6">
+              {{loading()?'Loading boards…':'No saved whiteboards match your
+              search.'}}
+            </td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <footer class="data-table-footer">
+      <span>{{list().total}} boards · Page {{list().page}}</span>
+      <div class="actions">
+        <button
+          class="table-action"
+          type="button"
+          (click)="changePage(-1)"
+          [disabled]="loading()||list().page<=1"
+        >
+          Previous</button
+        ><button
+          class="table-action"
+          type="button"
+          (click)="changePage(1)"
+          [disabled]="loading()||list().page*list().limit>=list().total"
+        >
+          Next
+        </button>
+      </div>
+    </footer>
+  </section>
+  } @if(review();as item){
+  <section class="panel">
+    <div class="operations-heading">
+      <div>
+        <h2>{{item.session.title}}</h2>
+        <p class="note">
+          {{item.session.status}} · {{item.board?.summary?.pageCount||0}} saved
+          pages · Snapshot {{item.board?.snapshotVersion||0}}
+        </p>
+      </div>
+      <div class="actions">
+        @if(auth.can('admin:teaching:read')){<a
+          class="secondary"
+          [routerLink]="['/class-sessions',item.session.id]"
+          >Class context</a
+        >}@if(snapshot()){@for(format of ['png','pdf','json'];track
+        format){<button
+          class="secondary"
+          type="button"
+          [disabled]="loading()"
+          (click)="export($any(format))"
+        >
+          Export {{format.toUpperCase()}}</button
+        >}}
+      </div>
+    </div>
+    @if(item.session.status==='live'){
+    <p class="notice">
+      The class is live. Review and export are available; recovery is disabled
+      until it ends.
+    </p>
+    }
+  </section>
+  <div class="board-workspace">
+    <section class="panel board-panel">
+      <div class="operations-heading">
+        <h2>
+          {{selectedVersion()?'Checkpoint preview':'Current saved board'}}
+        </h2>
+        @if(selectedVersion()){<button
+          class="secondary"
+          type="button"
+          (click)="current()"
+        >
+          View current board</button
+        >}
+      </div>
+      @for(entry of entries();track entry.key){
+      <div class="canvas-review">
+        <sfu-whiteboard
+          [readOnly]="true"
+          [initialState]="entry.snapshot"
+          [allowPageManagement]="false"
+          [allowAssetImport]="false"
+          [allowClear]="false"
+          [allowExport]="true"
+          title="Saved lesson whiteboard"
+          eyebrow="ADMIN REVIEW"
+        />
+      </div>
+      }@empty{
+      <p class="note">No whiteboard snapshot has been saved.</p>
+      }
+    </section>
+    <aside class="panel stack">
+      <h2>Version history</h2>
+      <p class="note">
+        Up to 100 recent checkpoints. Previewing a checkpoint does not change
+        the current board.
+      </p>
+      <ul class="row-list versions">
+        @for(version of item.versions;track version.versionId){
+        <li>
+          <strong>Snapshot {{version.snapshotVersion}}</strong>
+          <p>
+            {{version.recoveryBackup ? 'Recovery backup' : version.reason.replaceAll('-',' ')}} ·
+            {{version.summary.pageCount}} pages
+          </p>
+          <small>{{date(version.createdAt)}}</small
+          ><button
+            class="secondary"
+            type="button"
+            [disabled]="loading()||selectedVersion()===version.versionId"
+            (click)="preview(version.versionId)"
+          >
+            Preview version {{version.snapshotVersion}}
+          </button>
+        </li>
+        }@empty{
+        <li>No checkpoints saved yet.</li>
+        }
+      </ul>
+      @if(selectedVersion()&&auth.can('admin:whiteboards:restore')){
+      <section class="form-stack">
+        <h3>Controlled recovery</h3>
+        <label
+          >Recovery reason<textarea
+            name="reason"
+            [(ngModel)]="reason"
+            rows="3"
+            minlength="5"
+            maxlength="500"
+          ></textarea>
+        </label>
+        <p class="note">
+          A backup is kept automatically. If the board changes after your
+          review, reload it before retrying.
+        </p>
+        <button
+          class="primary"
+          type="button"
+          [disabled]="busy()||loading()||!item.canRestore||reason.trim().length<5"
+          (click)="restore()"
+        >
+          Restore selected version
+        </button>
+      </section>
+      }
+    </aside>
+  </div>
+  }
+</section>

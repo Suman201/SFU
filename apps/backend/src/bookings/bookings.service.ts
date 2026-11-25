@@ -860,11 +860,14 @@ export class BookingsService {
   async view(
     order: BookingOrderDocument,
     user: AuthenticatedUser,
+    preloadedRefunds?: BookingRefundDocument[],
   ): Promise<BookingOrder> {
-    const refunds = await this.refunds
-      .find({ orderId: order._id })
-      .sort({ createdAt: 1 })
-      .lean();
+    const refunds =
+      preloadedRefunds ??
+      (await this.refunds
+        .find({ orderId: order._id })
+        .sort({ createdAt: 1 })
+        .lean());
     const billingAccess = order.studentId === user.sub || this.admin(user);
     return {
       id: order._id,
@@ -909,6 +912,7 @@ export class BookingsService {
             reason: refund.reason,
             createdAt: refund.createdAt.toISOString(),
             creditNoteId: refund.creditNoteId,
+            retryOfRefundId: refund.retryOfRefundId,
           }))
         : [],
       canCancel:
@@ -1075,6 +1079,7 @@ export class BookingsService {
     reason: string,
     actorId: string,
     session: ClientSession,
+    retryOfRefundId?: string,
   ) {
     const existing = await this.refunds
       .findOne({ orderId: order.id, requestId })
@@ -1108,6 +1113,7 @@ export class BookingsService {
           currency: order.invoiceSource.currency,
           reason,
           actorId,
+          retryOfRefundId,
           status: 'queued',
           nextAttemptAt: new Date(),
         },
@@ -1123,6 +1129,7 @@ export class BookingsService {
     amount: number,
     requestId: string,
     reason: string,
+    retryOfRefundId?: string,
   ): Promise<BookingOrder> {
     reason = reason.trim();
     if (reason.length < 5)
@@ -1141,6 +1148,29 @@ export class BookingsService {
           .session(session)
       )
         return;
+      if (retryOfRefundId) {
+        const original = await this.refunds
+          .findOne({
+            _id: retryOfRefundId,
+            orderId: id,
+            status: 'failed',
+            amountMinor: amount,
+          })
+          .session(session);
+        if (
+          !original ||
+          (await this.refunds
+            .exists({
+              orderId: id,
+              retryOfRefundId,
+              status: { $in: ['queued', 'pending', 'succeeded'] },
+            })
+            .session(session))
+        )
+          throw new ConflictException(
+            'This refund already has an active or completed retry.',
+          );
+      }
       await this.queueRefund(
         order,
         amount,
@@ -1148,6 +1178,7 @@ export class BookingsService {
         reason,
         user.sub,
         session,
+        retryOfRefundId,
       );
       if (
         order.refundedMinor + order.refundPendingMinor >=

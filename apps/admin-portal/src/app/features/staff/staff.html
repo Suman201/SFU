@@ -1,0 +1,227 @@
+<section class="operations-page">
+  <header class="operations-heading">
+    <div>
+      <p class="eyebrow">SUPER ADMIN</p>
+      <h1>Staff permissions</h1>
+      <p>
+        Manage access roles for existing administrator accounts. Super-admin
+        accounts retain their protected system access.
+      </p>
+    </div>
+    <button class="primary" type="button" (click)="edit()">
+      Create access role
+    </button>
+  </header>
+  @if(error()){
+  <p class="notice error" role="alert">{{error()}}</p>
+  }@if(notice()){
+  <p class="notice" role="status">{{notice()}}</p>
+  }
+  <section class="data-table-shell">
+    <div class="data-table-toolbar"><h2>Managed access roles</h2></div>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Permissions</th>
+            <th>Assigned staff</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for(role of roles();track role.id){
+          <tr>
+            <td>
+              <strong>{{role.name}}</strong><small>{{role.description}}</small>
+            </td>
+            <td><span class="data-pill">{{role.status}}</span></td>
+            <td>{{role.permissions.length}}</td>
+            <td>{{role.assignedUsers}}</td>
+            <td>
+              <div class="actions">
+                <button class="table-action" type="button" (click)="edit(role)">
+                  Edit role</button
+                ><button
+                  class="table-action"
+                  type="button"
+                  [disabled]="busy()||role.assignedUsers>0"
+                  (click)="remove(role)"
+                >
+                  Delete
+                </button>
+              </div>
+            </td>
+          </tr>
+          }@empty{
+          <tr>
+            <td colspan="5">
+              No managed access roles yet. Existing admins use their default
+              access.
+            </td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+  @if(editorOpen()){
+  <section class="panel">
+    <div class="operations-heading">
+      <h2>{{editingId?'Edit access role':'Create access role'}}</h2>
+      <button class="secondary" type="button" (click)="editorOpen.set(false)">
+        Close editor
+      </button>
+    </div>
+    <form class="form-stack" (ngSubmit)="save($event)">
+      <div class="fields">
+        <label
+          >Role name<input
+            name="name"
+            [(ngModel)]="form.name"
+            required
+            minlength="2"
+            maxlength="120" /></label
+        ><label
+          >Status<select name="roleStatus" [(ngModel)]="form.status">
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select></label
+        ><label class="wide"
+          >Description<textarea
+            name="description"
+            [(ngModel)]="form.description"
+            maxlength="500"
+            rows="2"
+          ></textarea>
+        </label>
+      </div>
+      <p class="note">
+        View permission is included when you select an action. Removing view
+        permission removes that module’s actions. Inactive roles grant no
+        access.
+      </p>
+      <div class="permission-grid">
+        @for(permission of permissions();track permission){<label
+          ><input
+            type="checkbox"
+            [name]="permission"
+            [checked]="form.permissions.includes($any(permission))"
+            (change)="toggle(permission,$any($event.target).checked)"
+          />{{label(permission)}}</label
+        >}
+      </div>
+      <button class="primary" type="submit" [disabled]="busy()">
+        Review and save role
+      </button>
+    </form>
+  </section>
+  }
+  <section class="data-table-shell">
+    <form class="data-table-toolbar" (ngSubmit)="loadMembers()">
+      <h2>Administrator accounts</h2>
+      <label
+        >Search staff<input
+          type="search"
+          name="search"
+          [(ngModel)]="search"
+          maxlength="150" /></label
+      ><button class="secondary" type="submit">Search staff</button>
+    </form>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Staff member</th>
+            <th>Account</th>
+            <th>Current access</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for(member of members().items;track member.id){
+          <tr>
+            <td>
+              <strong>{{member.name}}</strong><small>{{member.email}}</small>
+            </td>
+            <td>
+              <span class="data-pill"
+                >{{member.disabled?'disabled':member.status}}</span
+              >
+            </td>
+            <td>
+              {{member.adminRoleId?(member.adminRoleName||'Missing role — no
+              access'):'Default administrator'}}
+            </td>
+            <td>
+              <button
+                class="table-action"
+                type="button"
+                (click)="select(member)"
+              >
+                Assign access
+              </button>
+            </td>
+          </tr>
+          }@empty{
+          <tr>
+            <td colspan="4">No administrator accounts match this search.</td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <footer class="data-table-footer">
+      <span>{{members().total}} staff · Page {{members().page}}</span>
+      <div class="actions">
+        <button
+          class="table-action"
+          type="button"
+          [disabled]="members().page<=1"
+          (click)="loadMembers(members().page-1)"
+        >
+          Previous</button
+        ><button
+          class="table-action"
+          type="button"
+          [disabled]="members().page*members().limit>=members().total"
+          (click)="loadMembers(members().page+1)"
+        >
+          Next
+        </button>
+      </div>
+    </footer>
+  </section>
+  @if(assignment();as member){
+  <section class="panel">
+    <h2>Assign access to {{member.name}}</h2>
+    <form class="form-stack" (ngSubmit)="assign($event)">
+      <label
+        >Access role<select name="assignmentRole" [(ngModel)]="roleId">
+          <option value="">Default administrator — unrestricted</option>
+          @for(role of roles();track role.id){@if(role.status==='active'){
+          <option [value]="role.id">{{role.name}}</option>
+          }}
+        </select></label
+      ><label
+        >Reason for access change<textarea
+          name="reason"
+          [(ngModel)]="reason"
+          required
+          minlength="5"
+          maxlength="500"
+          rows="3"
+        ></textarea>
+      </label>
+      <div class="actions">
+        <button class="primary" type="submit" [disabled]="busy()">
+          Review access change</button
+        ><button class="secondary" type="button" (click)="assignment.set(null)">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+</section>

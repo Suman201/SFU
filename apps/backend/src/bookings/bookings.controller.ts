@@ -1,4 +1,11 @@
 import {
+  AdminBookingOperationsService,
+  AdminBookingQueryDto,
+  AdminOperationDto,
+  RetryRefundDto,
+  FinanceQueryDto,
+} from './admin-booking-operations.service';
+import {
   BadRequestException,
   ForbiddenException,
   Body,
@@ -14,6 +21,7 @@ import {
   Req,
   StreamableFile,
   UseGuards,
+  Query,
   Res,
 } from '@nestjs/common';
 import type { Request } from 'express';
@@ -223,9 +231,56 @@ export class TeacherBookingsController {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'SUPER_ADMIN')
 export class AdminBookingsController {
-  constructor(private readonly bookings: BookingsService) {}
-  @Get() list(@CurrentUser() user: AuthenticatedUser) {
-    return this.bookings.list(user, 'admin');
+  constructor(
+    private readonly bookings: BookingsService,
+    private readonly operations: AdminBookingOperationsService,
+  ) {}
+  @Get() list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: AdminBookingQueryDto,
+  ) {
+    return this.operations.list(user, query);
+  }
+  @Get('finance') finance(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: FinanceQueryDto,
+  ) {
+    return this.operations.finance(user, query);
+  }
+  @Get('export.csv') async csv(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: AdminBookingQueryDto,
+    @Res({ passthrough: true })
+    response: { setHeader(key: string, value: string): void },
+  ) {
+    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    response.setHeader(
+      'Content-Disposition',
+      'attachment; filename="bookings.csv"',
+    );
+    response.setHeader('Cache-Control', 'private, no-store');
+    return this.operations.csv(user, query);
+  }
+  @Get(':id') detail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.operations.detail(user, id);
+  }
+  @Post(':id/reconcile') reconcile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() body: AdminOperationDto,
+  ) {
+    return this.operations.recheck(user, id, body.reason);
+  }
+  @Post(':id/refunds/:refundId/retry') retry(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('refundId') refundId: string,
+    @Body() body: RetryRefundDto,
+  ) {
+    return this.operations.retryRefund(user, id, refundId, body);
   }
   @Post(':id/refunds') refund(
     @CurrentUser() user: AuthenticatedUser,

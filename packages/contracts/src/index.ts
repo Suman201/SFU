@@ -42,3 +42,5 @@ export * from './bookings.js';
 export * from "./calendar";
 
 export * from './errors.js';
+
+export * from './admin-operations.js';

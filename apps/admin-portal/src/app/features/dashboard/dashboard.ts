@@ -1,3 +1,4 @@
+import { AuthService } from '../../core/services/auth.service';
 import { DatePipe, PercentPipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
@@ -25,6 +26,7 @@ import { AdminApiService } from '../../core/services/admin-api.service';
   changeDetection: ChangeDetectionStrategy.Eager,
 })
 export class AdminDashboard implements OnInit {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(AdminApiService);
 
   protected readonly summary = signal<AdminDashboardSummary | null>(null);

@@ -72,7 +72,9 @@
     "setup:scheduling": "node scripts/setup-scheduling.cjs",
     "setup:errors": "node scripts/setup-errors.cjs",
     "setup:bookings": "node scripts/setup-bookings.cjs",
-    "test:bookings": "node --test tests/integration/booking-payments.test.cjs"
+    "test:bookings": "node --test tests/integration/booking-payments.test.cjs",
+    "setup:admin-operations": "node scripts/setup-admin-operations.cjs",
+    "test:admin-operations": "node --test tests/integration/admin-completion.test.cjs"
   },
   "devDependencies": {
     "@angular/compiler": "22.0.1",

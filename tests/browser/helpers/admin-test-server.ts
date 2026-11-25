@@ -67,6 +67,10 @@ export async function startBuiltUiTestServer(
   });
   return {
     origin: `http://127.0.0.1:${(server.address() as any).port}`,
-    stop: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    stop: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
   };
 }

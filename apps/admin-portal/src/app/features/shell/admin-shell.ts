@@ -1,3 +1,4 @@
+import { canVisitAdmin } from '../../core/services/admin-access';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -36,6 +37,7 @@ const groups: { label: string; items: NavigationItem[] }[] = [
   {
     label: 'Teaching',
     items: [
+      { label: 'Whiteboards', path: '/whiteboards', icon: 'file' },
       { label: 'Class sessions', path: '/class-sessions', icon: 'calendar' },
       { label: 'Courses', path: '/courses', icon: 'book' },
       { label: 'Batches', path: '/batches', icon: 'layers' },
@@ -64,6 +66,7 @@ const groups: { label: string; items: NavigationItem[] }[] = [
   {
     label: 'Business',
     items: [
+      { label: 'Financial overview', path: '/finance', icon: 'chart' },
       { label: 'Bookings and refunds', path: '/bookings', icon: 'receipt' },
       { label: 'Invoices', path: '/invoices', icon: 'receipt' },
       { label: 'Support', path: '/support', icon: 'support' },
@@ -75,6 +78,7 @@ const groups: { label: string; items: NavigationItem[] }[] = [
   {
     label: 'System',
     items: [
+      { label: 'Staff permissions', path: '/staff', icon: 'shield' },
       { label: 'Audit logs', path: '/audit-logs', icon: 'shield' },
       { label: 'Error log', path: '/errors', icon: 'alert' },
       {
@@ -112,7 +116,7 @@ export class AdminShell {
       .map((group) => ({
         ...group,
         items: group.items.filter((item) =>
-          `${item.label} ${group.label}`.toLowerCase().includes(query),
+          canVisitAdmin(this.auth,item.path) && `${item.label} ${group.label}`.toLowerCase().includes(query),
         ),
       }))
       .filter((group) => group.items.length);

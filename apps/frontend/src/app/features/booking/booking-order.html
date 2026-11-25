@@ -87,8 +87,7 @@
         The payment window ended and the reservation was released. Choose
         another available time.
       </p>
-      <a routerLink="/teachers">Find a lesson</a>} @else
-      if(item.status==='refund_pending'){
+      <a routerLink="/teachers">Find a lesson</a>} @else if(item.status==='refund_pending'){
       <p class="notice" role="status">
         Your cancellation is recorded. The refund is being returned to the
         original payment method; it is complete only when the status below says

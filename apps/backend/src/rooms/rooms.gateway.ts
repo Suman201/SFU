@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, Logger, Optional, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger, Optional, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   Ack as WsAck,
@@ -234,7 +234,25 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     const token = this.extractToken(socket);
     if (!token) throw new Error('Socket missing bearer token');
     const payload = await this.auth.verifyAccessToken(token);
+    if (payload.adminRoleId && !payload.roles.includes('SUPER_ADMIN')) {
+      throw new ForbiddenException('Managed staff use the authorized admin portal.');
+    }
     socket.data.user = { id: payload.sub, email: payload.email, roles: payload.roles };
+    if (payload.roles.includes('ADMIN') && !payload.roles.includes('SUPER_ADMIN')) {
+      // Recheck connected administrators so assigning a profile removes legacy bypasses.
+      socket.use((_events, next) => {
+        void this.auth.verifyAccessToken(token).then((current) => {
+          if (current.adminRoleId && !current.roles.includes('SUPER_ADMIN')) {
+            throw new ForbiddenException('Staff access changed.');
+          }
+          socket.data.user = { id: current.sub, email: current.email, roles: current.roles };
+          next();
+        }).catch(() => {
+          next(new Error('Administrative socket access changed. Reconnect to authenticate.'));
+          socket.disconnect(true);
+        });
+      });
+    }
     this.installSocketRateLimiter(socket);
   }
 

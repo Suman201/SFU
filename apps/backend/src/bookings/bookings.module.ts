@@ -1,3 +1,4 @@
+import { AdminBookingOperationsService } from './admin-booking-operations.service';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
@@ -63,6 +64,7 @@ import {
     StripeGateway,
     BookingBillingService,
     BookingsService,
+    AdminBookingOperationsService,
     BookingWorkerService,
   ],
   controllers: [

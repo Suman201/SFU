@@ -1,0 +1,319 @@
+<section class="operations-page">
+  <header class="operations-heading">
+    <div>
+      <p class="eyebrow">BUSINESS</p>
+      <h1>Bookings and refunds</h1>
+      <p>
+        Search reservations, verify provider status and manage the remaining
+        refundable balance.
+      </p>
+    </div>
+    <div class="actions">
+      @if(auth.can('admin:finance:read')){<a
+        class="secondary"
+        routerLink="/finance"
+        >Financial report</a
+      >}<button class="secondary" type="button" (click)="export()">
+        Export CSV
+      </button>
+    </div>
+  </header>
+  @if(error()){
+  <p class="notice error" role="alert">{{error()}}</p>
+  }@if(notice()){
+  <p class="notice" role="status">{{notice()}}</p>
+  }
+  <section class="panel">
+    <form class="fields" (ngSubmit)="apply()">
+      <label
+        >Search bookings<input
+          name="search"
+          [(ngModel)]="query.search"
+          placeholder="Reference, student, teacher or lesson"
+          maxlength="150"
+          type="search" /></label
+      ><label
+        >Status<select name="status" [(ngModel)]="query.status">
+          <option value="all">All statuses</option>
+          @for(status of statuses;track status){
+          <option [value]="status">{{status.replaceAll('_',' ')}}</option>
+          }
+        </select></label
+      ><label
+        >Kind<select name="kind" [(ngModel)]="query.kind">
+          <option value="all">All bookings</option>
+          <option value="lesson">Individual lessons</option>
+          <option value="batch">Group classes</option>
+        </select></label
+      ><label
+        >Currency<select name="currency" [(ngModel)]="query.currency">
+          <option [ngValue]="undefined">All currencies</option>
+          @for(currency of currencies;track currency){
+          <option [value]="currency">{{currency}}</option>
+          }
+        </select></label
+      ><label
+        >Created from<input
+          name="dateFrom"
+          type="date"
+          [(ngModel)]="query.dateFrom" /></label
+      ><label
+        >Created to<input
+          name="dateTo"
+          type="date"
+          [(ngModel)]="query.dateTo" /></label
+      ><label
+        >Refund status<select
+          name="refundStatus"
+          [(ngModel)]="query.refundStatus"
+        >
+          <option [ngValue]="undefined">Any refund status</option>
+          <option value="queued">Queued</option>
+          <option value="pending">Pending</option>
+          <option value="succeeded">Succeeded</option>
+          <option value="failed">Failed</option>
+        </select></label
+      ><label
+        >Page size<select name="limit" [(ngModel)]="query.limit">
+          @for(size of [10,25,50,100];track size){
+          <option [ngValue]="size">{{size}}</option>
+          }
+        </select></label
+      ><button class="primary" [disabled]="loading()" type="submit">
+        Apply filters</button
+      ><button class="secondary" type="button" (click)="reset()">Reset</button>
+    </form>
+  </section>
+  <section class="data-table-shell">
+    <div class="data-table-toolbar">
+      <h2>{{data().total}} bookings</h2>
+      <button
+        class="table-action"
+        [disabled]="loading()"
+        type="button"
+        (click)="load()"
+      >
+        Refresh
+      </button>
+    </div>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Booking</th>
+            <th>Student</th>
+            <th>Teacher</th>
+            <th>Starts</th>
+            <th>Total</th>
+            <th>Refunded / pending</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for(order of data().items;track order.id){
+          <tr>
+            <td><strong>{{order.title}}</strong><small>{{order.id}}</small></td>
+            <td>{{order.studentName}}</td>
+            <td>{{order.teacherName}}</td>
+            <td>{{date(order.startsAt)}}</td>
+            <td>{{exact(order.price)}}</td>
+            <td>
+              {{exact({amountMinor:order.refundedMinor,currency:order.price.currency})}}
+              /
+              {{exact({amountMinor:order.refundPendingMinor,currency:order.price.currency})}}
+            </td>
+            <td>
+              <span class="data-pill"
+                >{{order.status.replaceAll('_',' ')}}</span
+              >
+            </td>
+            <td>
+              <button class="table-action" type="button" (click)="open(order)">
+                Manage
+              </button>
+            </td>
+          </tr>
+          }@empty{
+          <tr>
+            <td colspan="8">
+              {{loading()?'Loading bookings…':'No bookings match these
+              filters.'}}
+            </td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <footer class="data-table-footer">
+      <span>Page {{data().page}} · {{data().total}} matching bookings</span>
+      <div class="actions">
+        <button
+          class="table-action"
+          type="button"
+          [disabled]="loading()||data().page<=1"
+          (click)="page(-1)"
+        >
+          Previous</button
+        ><button
+          class="table-action"
+          type="button"
+          [disabled]="loading()||data().page*data().limit>=data().total"
+          (click)="page(1)"
+        >
+          Next
+        </button>
+      </div>
+    </footer>
+  </section>
+  @if(selected();as order){
+  <section class="panel refund-editor">
+    <div class="operations-heading">
+      <div>
+        <h2>{{order.title}}</h2>
+        <p class="note break">
+          Booking {{order.id}} · {{order.status.replaceAll('_',' ')}}
+        </p>
+      </div>
+      <div class="actions">
+        <button class="secondary" type="button" (click)="refreshDetail()">
+          Refresh status</button
+        ><button class="secondary" type="button" (click)="close()">
+          Close
+        </button>
+      </div>
+    </div>
+    <div class="split">
+      <div class="stack">
+        <dl class="facts">
+          <div>
+            <dt>Agreed payment</dt>
+            <dd>{{exact(order.price)}}</dd>
+          </div>
+          <div>
+            <dt>Confirmed refunds</dt>
+            <dd>
+              {{exact({amountMinor:order.refundedMinor,currency:order.price.currency})}}
+            </dd>
+          </div>
+          <div>
+            <dt>Pending refunds</dt>
+            <dd>
+              {{exact({amountMinor:order.refundPendingMinor,currency:order.price.currency})}}
+            </dd>
+          </div>
+          <div>
+            <dt>Provider session</dt>
+            <dd>{{order.providerSessionId||'Not created'}}</dd>
+          </div>
+          <div>
+            <dt>Provider payment</dt>
+            <dd>{{order.providerPaymentId||'Not verified'}}</dd>
+          </div>
+        </dl>
+        @if(order.reviewReason){
+        <p class="notice error">
+          {{order.reviewReason}} Rechecking cannot override the agreed price or
+          currency.
+        </p>
+        }
+        <div class="actions">
+          @if(order.invoiceId&&auth.can('admin:finance:read')){<button
+            class="secondary"
+            type="button"
+            (click)="download()"
+          >
+            Download invoice</button
+          >}@if(order.providerDashboardUrl){<a
+            class="secondary"
+            [href]="order.providerDashboardUrl"
+            target="_blank"
+            rel="noopener"
+            >Open Stripe payment</a
+          >}
+        </div>
+        <h3>Refund history</h3>
+        <ul class="row-list">
+          @for(refund of order.refunds;track refund.id){
+          <li>
+            <strong
+              >{{exact({amountMinor:refund.amountMinor,currency:refund.currency})}}
+              · {{refund.status}}</strong
+            >
+            <p>{{refund.reason}}</p>
+            <small>{{date(refund.createdAt)}}</small>
+            <div class="actions">
+              @if(refund.creditNoteId&&auth.can('admin:finance:read')){<button
+                class="secondary"
+                type="button"
+                (click)="download(refund.creditNoteId)"
+              >
+                Download credit note</button
+              >}@if(refund.status==='failed'&&canRetry(refund.id)&&auth.can('admin:bookings:refund')){<button
+                class="secondary"
+                type="button"
+                [disabled]="busy()"
+                (click)="retry(refund.id)"
+              >
+                Retry failed refund</button
+              >}
+            </div>
+          </li>
+          }@empty{
+          <li>No refunds recorded.</li>
+          }
+        </ul>
+      </div>
+      <div class="stack">
+        <label
+          >Action reason<textarea
+            name="reason"
+            [(ngModel)]="reason"
+            rows="3"
+            minlength="5"
+            maxlength="500"
+          ></textarea></label
+        >@if(auth.can('admin:bookings:reconcile')){<button
+          class="secondary"
+          type="button"
+          [disabled]="busy()||reason.trim().length<5"
+          (click)="reconcile()"
+        >
+          Recheck provider
+        </button>
+        <p class="note">
+          Retrieve the provider’s current payment and refund records. Pending
+          refunds retain their original request.
+        </p>
+        }@if(order.paidAt&&order.price.amountMinor>order.refundedMinor+order.refundPendingMinor&&auth.can('admin:bookings:refund')){
+        <form class="form-stack" (ngSubmit)="refund($event)">
+          <label
+            >Refund amount ({{order.price.currency}})<input
+              name="amount"
+              [(ngModel)]="amount"
+              inputmode="decimal"
+              required
+          /></label>
+          <p class="note">
+            A full refund cancels class access. Partial refunds preserve the
+            booking. End a live lesson before its full refund.
+          </p>
+          <button
+            class="primary"
+            type="submit"
+            [disabled]="busy()||reason.trim().length<5"
+          >
+            Review refund
+          </button>
+        </form>
+        }@else{
+        <p class="note">
+          This order has no unrefunded verified balance available for this
+          account.
+        </p>
+        }
+      </div>
+    </div>
+  </section>
+  }
+</section>

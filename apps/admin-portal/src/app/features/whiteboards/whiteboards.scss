@@ -1,0 +1,44 @@
+.board-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  gap: 18px;
+  align-items: start;
+}
+.canvas-review {
+  height: 700px;
+  max-height: 80vh;
+  min-height: 460px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.canvas-review sfu-whiteboard {
+  display: block;
+  height: 100%;
+}
+.board-panel {
+  padding: 15px;
+  min-width: 0;
+}
+.versions {
+  max-height: 480px;
+  overflow: auto;
+}
+.versions button {
+  margin-top: 12px;
+  width: 100%;
+}
+@media (max-width: 1150px) {
+  .board-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .canvas-review {
+    height: 540px;
+    min-height: 400px;
+  }
+  .board-panel {
+    padding: 10px;
+  }
+}

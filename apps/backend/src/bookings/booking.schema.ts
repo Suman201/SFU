@@ -105,9 +105,13 @@ BookingOrderSchema.index(
   },
 );
 BookingOrderSchema.index({ status: 1, nextReconcileAt: 1 });
+BookingOrderSchema.index({ createdAt: -1, _id: -1 });
+BookingOrderSchema.index({ paidAt: 1, 'invoiceSource.currency': 1 });
+BookingOrderSchema.index({ cancelledAt: 1, 'invoiceSource.currency': 1 });
 
 @Schema({ collection: 'booking_refunds', timestamps: true })
 export class BookingRefundDocument {
+  @Prop({ type: String, index: true }) retryOfRefundId?: string;
   @Prop({ type: String, default: () => randomUUID() }) _id!: string;
   @Prop({ required: true, index: true }) orderId!: string;
   @Prop({ required: true }) requestId!: string;
@@ -175,3 +179,5 @@ export class BookingCreditNoteDocument {
 export const BookingCreditNoteSchema = SchemaFactory.createForClass(
   BookingCreditNoteDocument,
 );
+
+BookingCreditNoteSchema.index({ createdAt: 1, 'value.currency': 1 });

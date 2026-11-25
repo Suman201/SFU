@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
@@ -11,9 +11,11 @@ import {
   PasswordResetTokenMongoDocument,
   SessionDocument,
   SessionMongoDocument,
+  RoleDocument, RoleMongoDocument,
   UserDocument,
   UserMongoDocument
 } from '../database/schemas';
+import { ADMIN_PORTAL_PERMISSIONS } from '@native-sfu/contracts';
 import { ROLE_PERMISSION_MAP } from '../rbac/rbac.constants';
 import { ChangePasswordDto, LoginDto, RegisterDto, ResetPasswordDto } from './dto/auth.dto';
 
@@ -39,6 +41,7 @@ export interface JwtPayload {
   roles: string[];
   permissions: string[];
   tokenId: string;
+  adminRoleId?: string;
 }
 
 export interface RequestContext {
@@ -54,7 +57,8 @@ export class AuthService {
     @InjectModel(PasswordResetTokenDocument.name) private readonly resetTokens: Model<PasswordResetTokenMongoDocument>,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
-    private readonly auditLogs: AuditLogsService
+    private readonly auditLogs: AuditLogsService,
+    @Optional() @InjectModel(RoleDocument.name) private readonly staffRoles?: Model<RoleMongoDocument>,
   ) {}
 
   async register(request: RegisterDto, context: RequestContext = {}): Promise<TokenPair> {
@@ -167,7 +171,7 @@ export class AuthService {
   async me(userId: string): Promise<Record<string, unknown>> {
     const user = await this.findActiveUser(userId);
     const roles = user.roles?.length ? user.roles : ['STUDENT'];
-    const permissions = user.permissions?.length ? user.permissions : this.permissionsForRoles(roles);
+    const permissions = await this.effectivePermissions(user);
     return {
       ...this.sanitizeUser(user),
       ...this.authResponseUser(user, roles, permissions)
@@ -180,7 +184,7 @@ export class AuthService {
       issuer: this.config.getOrThrow<string>('jwt.issuer'),
       audience: this.config.getOrThrow<string>('jwt.audience')
     });
-    await this.findActiveUser(payload.sub);
+    const user = await this.findActiveUser(payload.sub);
     const activeSession = await this.sessions.exists({
       userId: payload.sub,
       refreshTokenJti: payload.tokenId,
@@ -190,7 +194,20 @@ export class AuthService {
     if (!activeSession) {
       throw new UnauthorizedException('Session is no longer active');
     }
-    return payload;
+    return { ...payload, email: user.email, roles: user.roles?.length ? user.roles : ['STUDENT'], permissions: await this.effectivePermissions(user), ...(user.adminRoleId ? { adminRoleId: user.adminRoleId } : {}) };
+  }
+
+  private async effectivePermissions(user: UserMongoDocument): Promise<string[]> {
+    const roles = user.roles?.length ? user.roles : ['STUDENT'];
+    if (roles.includes('SUPER_ADMIN')) return [...new Set([...this.permissionsForRoles(roles), ...ADMIN_PORTAL_PERMISSIONS])];
+    if (roles.includes('ADMIN')) {
+      if (user.adminRoleId) {
+        const profile = await this.staffRoles?.findOne({ _id: user.adminRoleId, isSystem: false, status: 'active', adminPermissionSlugs: { $exists: true } }).lean();
+        return profile?.adminPermissionSlugs?.filter(permission => ADMIN_PORTAL_PERMISSIONS.includes(permission as typeof ADMIN_PORTAL_PERMISSIONS[number])) ?? [];
+      }
+      return [...new Set([...(user.permissions?.length ? user.permissions : this.permissionsForRoles(roles)), ...ADMIN_PORTAL_PERMISSIONS])];
+    }
+    return user.permissions?.length ? user.permissions : this.permissionsForRoles(roles);
   }
 
   private async issueTokens(user: UserMongoDocument, context: RequestContext): Promise<TokenPair> {
@@ -198,7 +215,7 @@ export class AuthService {
     const accessTtl = this.config.get<string>('jwt.accessTtl', '15m') as never;
     const refreshTtl = this.config.get<string>('jwt.refreshTtl', '7d') as never;
     const roles = user.roles?.length ? user.roles : ['STUDENT'];
-    const permissions = user.permissions?.length ? user.permissions : this.permissionsForRoles(roles);
+    const permissions = await this.effectivePermissions(user);
     const payload = { sub: user.id, email: user.email, roles, permissions };
     const refreshToken = await this.jwt.signAsync({ ...payload, tokenId: sessionTokenId }, { ...this.refreshVerifyOptions(), expiresIn: refreshTtl });
     await this.sessions.create({

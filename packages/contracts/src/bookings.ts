@@ -39,6 +39,7 @@ export interface BookingCatalogue {
   cancellationNoticeHours: number;
 }
 export interface BookingRefund {
+  retryOfRefundId?: string;
   id: string;
   amountMinor: number;
   currency: CurrencyCode;

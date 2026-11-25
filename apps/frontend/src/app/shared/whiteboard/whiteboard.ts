@@ -3437,6 +3437,11 @@ export class Whiteboard implements AfterViewInit, OnDestroy {
     this.commitPageChanges(previous);
   }
 
+  /** Export the rendered review without enabling canvas editing. */
+  async exportForReview(format: 'png' | 'pdf'): Promise<void> {
+    if (format === 'png') await this.exportPng(); else await this.exportAllPagesPdf();
+  }
+
   protected async exportPng(): Promise<void> {
     if (!this.canExportBoard()) {
       return;

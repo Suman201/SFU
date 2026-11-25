@@ -38,7 +38,7 @@ The repo has many production-shaped features in place: manual class-session life
 | --- | --- | --- | --- |
 | Backend API and sockets | `apps/backend` | Needs full green test/build/dev proof, auth edge-case coverage, staging WebRTC proof, and operational hardening evidence. | **Pending Proof** |
 | Teacher/student portal | `apps/frontend` | Needs real runtime screenshots, mobile/tablet QA proof, browser media proof, and demo/static data sweep. | **Pending Proof** |
-| Admin portal | `apps/admin-portal` | Has build-backed route smoke coverage for dashboard/modules and basic non-admin redirect; still needs seeded real-backend workflow QA, production config proof, and export/action signoff. | **Pending Proof** |
+| Admin portal | `apps/admin-portal` | Includes real-backend workspace and admin operations acceptance suites; production configuration, live provider delivery and deployment signoff remain environment-specific. See `docs/admin-operations.md`. | **Local acceptance; production proof pending** |
 | Shared contracts | `packages/contracts` | Needs contract drift checks across backend/frontend/admin and versioned release discipline. | **Pending Proof** |
 | SFU core packages | `packages/sfu-core`, `packages/nest-sfu` | Needs media interoperability, staging TURN/UDP proof, multi-node pipe proof, and load/soak evidence. | **Blocker** for scale |
 | Infra | `infra` | Needs production secret handling, ingress/TURN validation, backups, retention, observability access control, and multi-node runbooks. | **Blocker** |
@@ -150,7 +150,7 @@ Target paths to keep under review:
 
 ## P0: Admin Portal Runtime And Workflow Proof
 
-Status: **Pending Proof**.
+Status: **Local acceptance implemented; production-environment proof pending**. See [Admin workspace](admin-workspace.md) and [Admin operations](admin-operations.md) for implemented workflows, repeatable validation and the distinction between local payment adapters and live merchant-account proof.
 
 Completed baseline proof:
 

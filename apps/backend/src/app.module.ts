@@ -1,3 +1,5 @@
+import { AdminWhiteboardsModule } from './admin-whiteboards/admin-whiteboards.module';
+import { AdminStaffModule } from './admin-staff/admin-staff.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { ErrorsModule } from './errors/errors.module';
@@ -121,6 +123,8 @@ import { UsersModule } from './users/users.module';
       })
     }),
     DatabaseModule,
+    AdminStaffModule,
+    AdminWhiteboardsModule,
     CurrenciesModule,
     BookingsModule,
     ErrorsModule,

@@ -71,6 +71,28 @@ describe('RoomsGateway', () => {
     expect(socket.use).not.toHaveBeenCalled();
   });
 
+  it('blocks managed staff from using classroom administrator bypasses', async () => {
+    const { gateway } = createGatewayHarness();
+    (gateway as any).auth.verifyAccessToken = jest.fn(async () => ({sub:'staff',email:'staff@example.test',roles:['ADMIN'],adminRoleId:'profile'}));
+    const socket: any = {data:{},handshake:{auth:{token:'staff-token'},headers:{},address:'127.0.0.1'},use:jest.fn(),disconnect:jest.fn()};
+    await gateway.handleConnection(socket);
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(socket.data.user).toBeUndefined();
+  });
+
+  it('rechecks an already connected administrator before allowing subsequent packets', async () => {
+    const { gateway } = createGatewayHarness();
+    const verify = jest.fn().mockResolvedValueOnce({sub:'staff',email:'staff@example.test',roles:['ADMIN']}).mockResolvedValue({sub:'staff',email:'staff@example.test',roles:['ADMIN'],adminRoleId:'profile'});
+    (gateway as any).auth.verifyAccessToken = verify;
+    const middleware: any[] = [];
+    const socket: any = {data:{},handshake:{auth:{token:'staff-token'},headers:{},address:'127.0.0.1'},use:(handler:any)=>middleware.push(handler),disconnect:jest.fn()};
+    await gateway.handleConnection(socket);
+    const next=jest.fn(); middleware[0](['whiteboard:command',{}],next);
+    await new Promise(resolve=>setImmediate(resolve));
+    expect(next.mock.calls[0][0]).toBeInstanceOf(Error);
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+  });
+
   it('allows a full-board edit and undo without spending control or cursor allowances', () => {
     const { gateway } = createGatewayHarness();
     let middleware: any;
