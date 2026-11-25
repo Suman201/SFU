@@ -102,8 +102,11 @@ test('payment branch coexists with bookings, currency and staff access', { timeo
     assert.equal(again.id, payout.id);
     const sent = await api('admin', 'POST', 'admin/finance/payouts/' + payout.id + '/approve', { note: 'Synthetic merge acceptance' });
     assert.equal(sent.status, 'paid');
-    const repeated = await api('admin', 'POST', 'admin/finance/payouts/' + payout.id + '/approve', {});
-    assert.equal(repeated.gatewayTransferId, sent.gatewayTransferId);
+    assert.ok(sent.gatewayTransferId);
+    await api('admin', 'POST', 'admin/finance/payouts/' + payout.id + '/approve', {}, 409);
+    const after = await api('teacher', 'GET', 'teacher/earnings');
+    assert.equal(after.balances.find((b) => b.currency === 'USD').paidOutMinor, 4250);
+    assert.equal(after.balances.find((b) => b.currency === 'USD').availableMinor, 0);
     const report = await api('admin', 'GET', 'admin/finance/reconciliation');
     assert.equal(report.ledgerBalanced, true);
   });
