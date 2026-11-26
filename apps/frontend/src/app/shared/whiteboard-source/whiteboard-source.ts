@@ -1,13 +1,16 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { ClassroomLocaleService } from '../../core/services/classroom-locale.service';
+import { ClassroomLanguageComponent } from '../classroom-locale/classroom-language';
+import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
 
 export type ClassroomWhiteboardSource = 'classroom' | 'device';
 
 /** The same source picker is used by the website and installed classroom. */
 @Component({
-  selector: 'sfu-whiteboard-source', standalone: true, changeDetection: ChangeDetectionStrategy.OnPush,
+  selector: 'sfu-whiteboard-source', standalone: true, imports: [ClassroomLanguageComponent], changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="source-row">
-      <label>Whiteboard source<select aria-label="Whiteboard source" [value]="source()" [disabled]="disabled() || busy()" (change)="sourceChange.emit($any($event.target).value)"><option value="classroom">Classroom whiteboard</option><option value="device">Share device whiteboard</option></select></label>
+      <label>{{ i18n.text('whiteboardSource') }}<select [attr.aria-label]="i18n.text('whiteboardSource')" [value]="source()" [disabled]="disabled() || busy()" (change)="sourceChange.emit($any($event.target).value)"><option value="classroom">{{ i18n.text('classroomWhiteboard') }}</option><option value="device">{{ i18n.text('deviceWhiteboard') }}</option></select></label>
+      <sfu-classroom-language />
       @if (source() === 'device') {
         @if (sharing()) { <button type="button" [disabled]="busy()" (click)="stop.emit()">Stop device sharing</button> }
         @else if (student() && !canShare()) {
@@ -22,6 +25,7 @@ export type ClassroomWhiteboardSource = 'classroom' | 'device';
   styles: [`:host{display:block;padding:var(--whiteboard-source-padding,10px 14px);border-bottom:1px solid var(--line-soft,#dce5df);background:var(--panel,#fff);color:var(--text,#15392c)}.source-row{display:flex;align-items:end;flex-wrap:wrap;gap:10px}label{font-size:var(--whiteboard-source-label-size,11px);font-weight:650}select{display:block;margin-top:var(--whiteboard-source-select-margin,4px);max-width:100%;min-height:34px;border:1px solid var(--line,#cadbd1);border-radius:6px;padding:6px 28px 6px 9px;background:var(--control-bg,var(--panel,#fff));color:inherit;font:inherit;font-size:12px}button{min-height:34px;padding:6px 10px;border:1px solid var(--line,#cadbd1);border-radius:6px;background:var(--panel,#fff);color:inherit;font:inherit;font-size:12px;font-weight:600;cursor:pointer}.primary{background:#458b73;color:#fff;border-color:#458b73}button:disabled,select:disabled{opacity:.55;cursor:not-allowed}.hint{margin:7px 0 0;max-width:850px;color:var(--muted,#607469);font-size:11px;line-height:1.45}.presenter{align-self:center;font-size:11px;color:var(--muted,#607469)}button:focus-visible,select:focus-visible{outline:3px solid #458b73;outline-offset:2px}`]
 })
 export class WhiteboardSourceControl {
+  protected readonly i18n = inject(ClassroomLocaleService);
   readonly source = input<ClassroomWhiteboardSource>('classroom');
   readonly student = input(false);
   readonly disabled = input(false);

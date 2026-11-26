@@ -1,10 +1,13 @@
+import { ClassroomLocaleService } from '../../../core/services/classroom-locale.service';
+import { ClassroomLanguageComponent } from '../../../shared/classroom-locale/classroom-language';
+import { DialogFocusDirective } from '../../../shared/dialog-focus/dialog-focus.directive';
 import { WhiteboardSourceControl, type ClassroomWhiteboardSource } from '../../../shared/whiteboard-source/whiteboard-source';
 import { DeviceSetupDialogComponent } from '../../../shared/device-setup/device-setup-dialog';
 import { ClassroomRecoveryStore } from '../../../core/services/classroom-recovery-store';
 import { ClassroomConnectionTools } from '../../../shared/classroom-connection-tools/classroom-connection-tools';
 import { isDesktopSession } from '../../../core/services/desktop-bridge';
 import { applyWhiteboardMemoryCommand } from '../../../shared/whiteboard/whiteboard-memory-reducer';
-import { ChangeDetectionStrategy, Component, HostListener, OnDestroy, OnInit, ViewChild, computed, inject, signal, type Signal, type WritableSignal } from '@angular/core';
+import { afterRenderEffect, ElementRef, viewChild, ChangeDetectionStrategy, Component, HostListener, OnDestroy, OnInit, ViewChild, computed, inject, signal, type Signal, type WritableSignal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type {
   ClassSessionRecordingEvent,
@@ -138,13 +141,26 @@ const TEACHER_MEDIA_STREAM_MAX_RETRIES = 2;
 
 @Component({
   selector: 'sfu-student-class-session',
+  host: { '[style.--student-live-controls-height.px]': 'liveControlsHeight()' },
   standalone: true,
-  imports: [WhiteboardSourceControl, DeviceSetupDialogComponent, ClassroomConnectionTools, RouterLink, SessionChat, SessionMaterials, MediaStreamDirective, Whiteboard],
+  imports: [ClassroomLanguageComponent, DialogFocusDirective, WhiteboardSourceControl, DeviceSetupDialogComponent, ClassroomConnectionTools, RouterLink, SessionChat, SessionMaterials, MediaStreamDirective, Whiteboard],
   templateUrl: './class-session.html',
   styleUrl: './class-session.scss',
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class StudentClassSession implements OnInit, OnDestroy {
+  protected readonly i18n = inject(ClassroomLocaleService);
+  protected readonly liveControlsHeight = signal(132);
+  private readonly liveMediaControls = viewChild<ElementRef<HTMLElement>>('liveMediaControls');
+  constructor() {
+    afterRenderEffect(onCleanup => {
+      const controls = this.liveMediaControls()?.nativeElement;
+      if (!controls) return;
+      const observer = new ResizeObserver(() => this.liveControlsHeight.set(Math.ceil(controls.getBoundingClientRect().height)));
+      observer.observe(controls);
+      onCleanup(() => observer.disconnect());
+    });
+  }
   private readonly lifecycleEventNames = ['session:started', 'session:ended'];
   private readonly moderationCommandEventNames = [
     'moderation:command',
@@ -348,28 +364,28 @@ export class StudentClassSession implements OnInit, OnDestroy {
   );
   protected readonly localMediaPublished = computed(() => this.localProducerIds().length > 0);
   protected readonly localMediaStatus = computed(() => {
-    if (this.refreshingDevices()) return 'Refreshing devices';
-    if (this.switchingAudioDevice()) return 'Switching microphone';
-    if (this.switchingVideoDevice()) return 'Switching camera';
-    if (this.publishingStudentMedia()) return 'Starting media';
-    if (this.teacherDisabledAudio() && this.teacherDisabledVideo()) return 'Mic and camera disabled by teacher';
-    if (this.teacherDisabledAudio()) return 'Mic disabled by teacher';
-    if (this.teacherDisabledVideo()) return 'Camera disabled by teacher';
-    if (!this.studentCanSelfUnmute() && !this.studentCanSelfStartCamera()) return 'Mic and camera locked by class settings';
-    if (!this.studentCanSelfUnmute()) return 'Mic locked by class settings';
-    if (!this.studentCanSelfStartCamera()) return 'Camera locked by class settings';
+    if (this.refreshingDevices()) return this.i18n.text('refreshingDevices');
+    if (this.switchingAudioDevice()) return this.i18n.text('switchingMic');
+    if (this.switchingVideoDevice()) return this.i18n.text('switchingCamera');
+    if (this.publishingStudentMedia()) return this.i18n.text('startingMedia');
+    if (this.teacherDisabledAudio() && this.teacherDisabledVideo()) return this.i18n.text('teacherDisabledMedia');
+    if (this.teacherDisabledAudio()) return this.i18n.text('teacherDisabledMic');
+    if (this.teacherDisabledVideo()) return this.i18n.text('teacherDisabledCamera');
+    if (!this.studentCanSelfUnmute() && !this.studentCanSelfStartCamera()) return this.i18n.text('policyLockedMedia');
+    if (!this.studentCanSelfUnmute()) return this.i18n.text('policyLockedMic');
+    if (!this.studentCanSelfStartCamera()) return this.i18n.text('policyLockedCamera');
     if (this.localMediaError()) return this.localMediaError();
-    if (this.deviceError()) return 'Device needs attention';
+    if (this.deviceError()) return this.i18n.text('deviceAttention');
     if (!this.roomJoined()) {
-      if (!this.localAudioEnabled() && !this.localVideoEnabled()) return 'Mic off / Camera off';
-      if (this.localAudioEnabled() && this.localVideoEnabled()) return 'Mic and camera preview on';
-      if (this.localAudioEnabled()) return 'Mic preview on';
-      return 'Camera preview on';
+      if (!this.localAudioEnabled() && !this.localVideoEnabled()) return this.i18n.text('previewOff');
+      if (this.localAudioEnabled() && this.localVideoEnabled()) return this.i18n.text('previewOn');
+      if (this.localAudioEnabled()) return this.i18n.text('micPreview');
+      return this.i18n.text('cameraPreview');
     }
-    if (!this.localMediaPublished()) return 'Media off';
-    if (!this.localAudioEnabled() && !this.localVideoEnabled()) return 'Mic and camera off';
-    if (!this.localAudioEnabled()) return 'Mic off';
-    if (!this.localVideoEnabled()) return 'Camera off';
+    if (!this.localMediaPublished()) return this.i18n.text('mediaOff');
+    if (!this.localAudioEnabled() && !this.localVideoEnabled()) return this.i18n.text('micCameraOff');
+    if (!this.localAudioEnabled()) return this.i18n.text('micOff');
+    if (!this.localVideoEnabled()) return this.i18n.text('cameraOff');
     return 'You are live';
   });
   protected readonly prejoinJoinDisabled = computed(() => this.joiningMedia() || (this.prejoinDeviceCheckRequired() && this.refreshingDevices()));

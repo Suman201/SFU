@@ -4,13 +4,15 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const p1 = process.argv.includes('--p1');
+const p2 = process.argv.includes('--p2');
+if (p1 && p2) throw Error('Choose one acceptance suite.');
 const mongo = process.env.P0_MONGODB_URI || 'mongodb://127.0.0.1:27028/whiteboard_acceptance?directConnection=true&replicaSet=p0-tests';
 const redis = process.env.P0_REDIS_URL || 'redis://127.0.0.1:6394/15';
 const m = new URL(mongo), r = new URL(redis);
 if (m.hostname !== '127.0.0.1' || m.port !== '27028' || m.pathname !== '/whiteboard_acceptance' || r.hostname !== '127.0.0.1' || r.port !== '6394' || r.pathname !== '/15') throw Error('P0 acceptance only runs on its owned local database/services.');
 const patch = spawnSync(process.execPath, [path.join(root, 'scripts/patch-playwright-loader.cjs')], { cwd: root, stdio: 'inherit' });
 if (patch.status !== 0) process.exit(patch.status || 1);
-const result = spawnSync(process.execPath, [require.resolve('@playwright/test/cli'), 'test', p1 ? '--config=playwright.p1.config.ts' : '--config=playwright.p0.config.ts', ...process.argv.slice(2).filter(arg => arg !== '--p1')], {
+const result = spawnSync(process.execPath, [require.resolve('@playwright/test/cli'), 'test', p2 ? '--config=playwright.p2.config.ts' : p1 ? '--config=playwright.p1.config.ts' : '--config=playwright.p0.config.ts', ...process.argv.slice(2).filter(arg => arg !== '--p1' && arg !== '--p2')], {
   cwd: root, stdio: 'inherit', env: {
     ...process.env,
     MONGODB_URI: mongo, REDIS_URL: redis, REDIS_REQUIRED: 'true',

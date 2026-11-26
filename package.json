@@ -92,10 +92,15 @@
     "contracts:check": "node scripts/check-contract-api.cjs",
     "contracts:baseline": "node scripts/check-contract-api.cjs --update",
     "test:p1:workers": "npm test -w @native-sfu/nest-sfu -- --runInBand src/worker/worker-media.service.spec.ts",
-    "test:p1:uploads": "node scripts/p1-upload-scan-drill.cjs"
+    "test:p1:uploads": "node scripts/p1-upload-scan-drill.cjs",
+    "setup:cms": "node scripts/setup-cms.cjs",
+    "docs:environment": "node scripts/environment-reference.cjs",
+    "release:check": "node scripts/check-release-readiness.cjs",
+    "test:p2:browser": "node scripts/p0-browser.cjs --p2"
   },
   "devDependencies": {
     "@angular/compiler": "22.0.1",
+    "@axe-core/playwright": "4.14.1",
     "@playwright/test": "^1.61.0"
   }
 }

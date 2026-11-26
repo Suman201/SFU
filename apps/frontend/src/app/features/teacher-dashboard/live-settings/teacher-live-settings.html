@@ -69,6 +69,8 @@
               <p>{{ section.description }}</p>
             </div>
           </header>
+@if (isBatchMode()) { <sfu-classroom-policy-presets [disabled]="saving() || loading()" (presetSelected)="applyPolicyPreset($event)" /> }
+
 
           <div class="field-list">
             @for (field of section.fields; track field.key) {

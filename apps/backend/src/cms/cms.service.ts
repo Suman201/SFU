@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { createHash, randomUUID } from 'node:crypto';
+import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import {
   CMS_AUDIENCES,
@@ -10,6 +11,10 @@ import {
   type CmsBlockType,
   type CmsLink,
   type CmsPage,
+  type CmsPageContent,
+  type CmsPageRevision,
+  type CmsPageRevisionSummary,
+  type CmsPageRevisionListResponse,
   type CmsPageBlock,
   type CmsPageListQuery,
   type CmsPageListResponse,
@@ -18,10 +23,10 @@ import {
   type CmsPageWriteRequest,
   type CmsSeoMetadata
 } from '@native-sfu/contracts';
-import type { FilterQuery, Model } from 'mongoose';
+import type { ClientSession, FilterQuery, Model } from 'mongoose';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
-import { CmsPageDocument, CmsPageMongoDocument } from '../database/schemas';
+import { CmsPageDocument, CmsPageMongoDocument, CmsPageRevisionDocument, CmsPageRevisionMongoDocument } from '../database/schemas';
 
 const DEFAULT_LOCALE = 'en';
 const MAX_SECTIONS = 30;
@@ -36,7 +41,8 @@ const UNSAFE_URL_PATTERN = /\b(?:javascript|data|vbscript):/gi;
 export class CmsService {
   constructor(
     @InjectModel(CmsPageDocument.name) private readonly pages: Model<CmsPageMongoDocument>,
-    private readonly auditLogs: AuditLogsService
+    private readonly auditLogs: AuditLogsService,
+    @InjectModel(CmsPageRevisionDocument.name) private readonly revisions: Model<CmsPageRevisionMongoDocument>
   ) {}
 
   async listAdminPages(query: CmsPageListQuery, user: AuthenticatedUser): Promise<CmsPageListResponse> {
@@ -83,11 +89,21 @@ export class CmsService {
     return this.toPage(await this.findPage(pageId));
   }
 
-  async updateAdminPage(pageId: string, request: CmsPageWriteRequest, user: AuthenticatedUser): Promise<CmsPage> {
+  async updateAdminPage(pageId: string, request: CmsPageWriteRequest, user: AuthenticatedUser, restoreArchived = false): Promise<CmsPage> {
     this.assertAdmin(user);
     const page = await this.findPage(pageId);
     const before = this.auditSnapshot(page);
+    this.assertRevision(page, request.expectedRevision);
     const patch = this.normalizeWriteRequest(request, false);
+    if (page.status === 'published') {
+      for (const key of ['slug', 'locale', 'audience', 'pageType'] as const) {
+        if (patch[key] !== undefined && patch[key] !== page[key]) throw new ConflictException('Unpublish the page before changing its slug, locale, audience or type.');
+      }
+      // Preserve the already published legacy copy before the first draft edit.
+      if (!page.publishedContent) page.publishedContent = this.contentSnapshot(page);
+    }
+    // Restoring an archive reopens only its private working copy.
+    if (restoreArchived && page.status === 'archived') { page.status = 'draft'; page.archivedAt = undefined; }
     Object.assign(page, patch, { updatedByUserId: user.sub });
     try {
       await page.save();
@@ -102,24 +118,61 @@ export class CmsService {
     return this.toPage(page);
   }
 
-  async publishAdminPage(pageId: string, user: AuthenticatedUser): Promise<CmsPage> {
+  async publishAdminPage(pageId: string, user: AuthenticatedUser, expectedRevision?: number): Promise<CmsPage> {
     this.assertAdmin(user);
-    const page = await this.findPage(pageId);
-    if (page.status === 'archived') {
-      throw new BadRequestException('Archived CMS pages cannot be published.');
-    }
-    page.status = 'published';
-    page.publishedAt = new Date();
-    page.publishedByUserId = user.sub;
-    page.archivedAt = undefined;
-    page.updatedByUserId = user.sub;
-    await page.save();
-    await this.recordAudit(user, 'cms.page.published', page, {
-      summary: `Published CMS page ${page.slug}`,
-      status: page.status,
-      publishedAt: page.publishedAt?.toISOString()
-    });
-    return this.toPage(page);
+    const transaction = await this.pages.db.startSession();
+    let result!: CmsPageMongoDocument;
+    let published = false;
+    try {
+      await transaction.withTransaction(async () => {
+        published = false;
+        const page = await this.findPage(pageId, transaction);
+        this.assertRevision(page, expectedRevision);
+        if (page.status === 'archived') throw new BadRequestException('Archived CMS pages cannot be published.');
+        const content = this.contentSnapshot(page);
+        const digest = this.contentDigest(content);
+        if (page.status === 'published' && page.publishedVersion > 0 && page.publishedContent && this.contentDigest(page.publishedContent) === digest) { result = page; return; }
+        const publishedAt = new Date();
+        const version = (page.publishedVersion ?? 0) + 1;
+        await this.revisions.create([{ revisionId: randomUUID(), pageId, version, digest, content, publishedAt, publishedByUserId: user.sub }], { session: transaction });
+        page.status = 'published'; page.publishedContent = content; page.publishedVersion = version;
+        page.publishedAt = publishedAt; page.publishedByUserId = user.sub;
+        page.archivedAt = undefined; page.updatedByUserId = user.sub;
+        await page.save({ session: transaction }); result = page; published = true;
+      }, { readPreference: 'primary', readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' } });
+    } catch (error) {
+      if ((error as { code?: number })?.code === 11000) throw new ConflictException('Another publication completed. Reload the page before publishing again.');
+      if ((error as { code?: number })?.code === 20) throw new ServiceUnavailableException('Versioned CMS publication requires a MongoDB replica set.');
+      this.handlePersistenceError(error);
+    } finally { await transaction.endSession(); }
+    if (published) await this.recordAudit(user, 'cms.page.published', result, { summary: `Published CMS page ${result.slug}`, status: result.status, version: result.publishedVersion, publishedAt: result.publishedAt?.toISOString() });
+    return this.toPage(result);
+  }
+
+  async listPageRevisions(pageId: string, query: { page?: number; limit?: number }, user: AuthenticatedUser): Promise<CmsPageRevisionListResponse> {
+    this.assertAdmin(user); await this.findPage(pageId);
+    const page = this.clampNumber(query.page, 1, 10000, 1), limit = this.clampNumber(query.limit, 1, 100, 20);
+    const [items, total] = await Promise.all([
+      this.revisions.find({ pageId }).sort({ version: -1 }).skip((page - 1) * limit).limit(limit).exec(),
+      this.revisions.countDocuments({ pageId }).exec()
+    ]);
+    return { items: items.map(item => this.revisionSummary(item)), page, limit, total };
+  }
+
+  async getPageRevision(pageId: string, revisionId: string, user: AuthenticatedUser): Promise<CmsPageRevision> {
+    this.assertAdmin(user); await this.findPage(pageId);
+    const revision = await this.revisions.findOne({ pageId, revisionId }).exec();
+    if (!revision) throw new NotFoundException('CMS publication not found.');
+    return { ...this.revisionSummary(revision), content: revision.content };
+  }
+
+  async restorePageRevision(pageId: string, revisionId: string, expectedRevision: number, user: AuthenticatedUser): Promise<CmsPage> {
+    this.assertAdmin(user);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new BadRequestException('The current page revision is required.');
+    const revision = await this.getPageRevision(pageId, revisionId, user);
+    const page = await this.updateAdminPage(pageId, { ...revision.content, expectedRevision }, user, true);
+    await this.auditLogs.record({ actor: user, action: 'cms.page.revision_restored', resourceType: 'cms_page', resourceId: pageId, metadata: { revisionId, version: revision.version, published: false } });
+    return page;
   }
 
   async unpublishAdminPage(pageId: string, user: AuthenticatedUser): Promise<CmsPage> {
@@ -168,7 +221,7 @@ export class CmsService {
     if (!page) {
       throw new NotFoundException('CMS page not found.');
     }
-    return this.toPage(page);
+    return this.toPublicPage(page);
   }
 
   async listPublicPages(query: CmsPageListQuery = {}): Promise<CmsPageListResponse> {
@@ -191,7 +244,7 @@ export class CmsService {
         .exec(),
       this.pages.countDocuments(filter).exec()
     ]);
-    return { items: items.map((doc) => this.toPage(doc)), page, limit, total };
+    return { items: items.map((doc) => this.toPublicPage(doc)), page, limit, total };
   }
 
   private toAdminFilter(query: CmsPageListQuery): FilterQuery<CmsPageMongoDocument> {
@@ -233,6 +286,7 @@ export class CmsService {
     if (sections.length > MAX_SECTIONS) {
       throw new BadRequestException(`CMS pages can have at most ${MAX_SECTIONS} sections.`);
     }
+    if (sections.some(section => !section || typeof section !== 'object' || Array.isArray(section))) throw new BadRequestException('Each CMS section must be an object.');
     return sections.map((section, index) => ({
       blockId: this.optionalText(section.blockId, 80) || `block-${index + 1}`,
       type: this.assertOneOf(section.type, CMS_BLOCK_TYPES, `sections[${index}].type`),
@@ -252,6 +306,7 @@ export class CmsService {
     if (items.length > MAX_BLOCK_ITEMS) {
       throw new BadRequestException(`${field} can include at most ${MAX_BLOCK_ITEMS} items.`);
     }
+    if (items.some(item => !item || typeof item !== 'object' || Array.isArray(item))) throw new BadRequestException(`${field} entries must be objects.`);
     return items.map((item, index) => ({
       ...(item.title !== undefined ? { title: this.optionalText(item.title, 180) } : {}),
       ...(item.body !== undefined ? { body: this.optionalText(item.body, 1200) } : {}),
@@ -268,6 +323,7 @@ export class CmsService {
     if (links.length > MAX_LINKS) {
       throw new BadRequestException(`${field} can include at most ${MAX_LINKS} links.`);
     }
+    if (links.some(link => !link || typeof link !== 'object' || Array.isArray(link))) throw new BadRequestException(`${field} entries must be objects.`);
     return links.map((link, index) => ({
       label: this.requiredText(link.label, `${field}[${index}].label`, 120),
       url: this.normalizeUrl(link.url, `${field}[${index}].url`),
@@ -375,8 +431,10 @@ export class CmsService {
     return value as T;
   }
 
-  private async findPage(pageId: string): Promise<CmsPageMongoDocument> {
-    const page = await this.pages.findOne({ pageId }).exec();
+  private async findPage(pageId: string, session?: ClientSession): Promise<CmsPageMongoDocument> {
+    const query = this.pages.findOne({ pageId });
+    if (session) query.session(session);
+    const page = await query.exec();
     if (!page) {
       throw new NotFoundException('CMS page not found.');
     }
@@ -387,6 +445,9 @@ export class CmsService {
     const timestamps = doc as CmsPageMongoDocument & { createdAt?: Date; updatedAt?: Date };
     return {
       pageId: doc.pageId,
+      revision: doc.__v ?? 0,
+      publishedVersion: doc.publishedVersion ?? 0,
+      hasUnpublishedChanges: doc.status === 'published' && Boolean(doc.publishedContent) && this.contentDigest(this.contentSnapshot(doc)) !== this.contentDigest(doc.publishedContent!),
       slug: doc.slug,
       title: doc.title,
       pageType: doc.pageType,
@@ -406,6 +467,29 @@ export class CmsService {
       createdAt: (timestamps.createdAt ?? new Date()).toISOString(),
       updatedAt: (timestamps.updatedAt ?? new Date()).toISOString()
     };
+  }
+
+  private toPublicPage(doc: CmsPageMongoDocument): CmsPage {
+    const { revision: _revision, hasUnpublishedChanges: _draft, ...page } = this.toPage(doc);
+    return { ...page, ...doc.publishedContent, updatedAt: doc.publishedAt?.toISOString() ?? page.updatedAt };
+  }
+
+  private assertRevision(page: CmsPageMongoDocument, expected: number | undefined): void {
+    if (expected === undefined) return; // Existing v1 callers remain compatible.
+    if (!Number.isSafeInteger(expected) || expected < 0) throw new BadRequestException('Invalid page revision.');
+    if (expected !== (page.__v ?? 0)) throw new ConflictException('This page changed. Reload it before saving your edits.');
+  }
+
+  private contentSnapshot(page: CmsPageContent): CmsPageContent {
+    return JSON.parse(JSON.stringify({ slug: page.slug, title: page.title, pageType: page.pageType, audience: page.audience, locale: page.locale || 'en', summary: page.summary || '', bodyMarkdown: page.bodyMarkdown || '', sections: page.sections ?? [], seo: page.seo ?? {}, tags: page.tags ?? [] })) as CmsPageContent;
+  }
+  private contentDigest(content: CmsPageContent): string {
+    const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+      : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, canonical(item)])) : value;
+    return createHash('sha256').update(JSON.stringify(canonical(this.contentSnapshot(content)))).digest('hex');
+  }
+  private revisionSummary(item: CmsPageRevisionMongoDocument): CmsPageRevisionSummary {
+    return { revisionId: item.revisionId, pageId: item.pageId, version: item.version, digest: item.digest, publishedAt: item.publishedAt.toISOString(), publishedByUserId: item.publishedByUserId };
   }
 
   private auditSnapshot(doc: CmsPageMongoDocument): Record<string, unknown> {
@@ -433,6 +517,7 @@ export class CmsService {
   }
 
   private handlePersistenceError(error: unknown): never {
+    if ((error as { name?: string })?.name === 'VersionError') throw new ConflictException('This page changed. Reload it before saving your edits.');
     if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 11000) {
       throw new BadRequestException('A CMS page with this slug, locale, and audience already exists.');
     }

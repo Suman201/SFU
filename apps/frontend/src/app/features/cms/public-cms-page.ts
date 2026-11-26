@@ -1,9 +1,10 @@
 import { DatePipe, TitleCasePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import type { CmsPage, CmsPageBlock, ContactSubmissionCategory } from '@native-sfu/contracts';
-import { finalize } from 'rxjs';
+import { catchError, combineLatest, distinctUntilChanged, finalize, map, of, switchMap, tap } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CmsService } from '../../core/services/cms.service';
 import { Footer } from '../../shared/footer/footer';
 import { Header } from '../../shared/header/header';
@@ -75,6 +76,7 @@ const FALLBACKS: Record<string, PublicCmsFallback> = {
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class PublicCmsPage implements OnInit {
+  private readonly destroyRef = inject(DestroyRef);
   private readonly route = inject(ActivatedRoute);
   private readonly cms = inject(CmsService);
   private readonly formBuilder = inject(FormBuilder);
@@ -106,15 +108,17 @@ export class PublicCmsPage implements OnInit {
   });
 
   ngOnInit(): void {
-    this.route.data.subscribe((data) => {
-      const slug = typeof data['slug'] === 'string' ? data['slug'] : this.route.snapshot.url.at(-1)?.path || 'about';
-      this.slug.set(slug);
-      this.load(slug);
-    });
+    combineLatest([this.route.data, this.route.paramMap]).pipe(
+      map(([data, params]) => typeof data['slug'] === 'string' ? data['slug'] : params.get('slug') || 'about'),
+      distinctUntilChanged(),
+      tap(slug => { this.slug.set(slug); this.page.set(null); this.loading.set(true); this.usingFallback.set(false); }),
+      switchMap(slug => this.cms.getPublishedPage(slug, 'en', true).pipe(catchError(() => of(null)))),
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe(page => { this.page.set(page); this.loading.set(false); this.usingFallback.set(!page); });
   }
 
   protected fallback(): PublicCmsFallback {
-    return FALLBACKS[this.slug()] ?? FALLBACKS['about']!;
+    return FALLBACKS[this.slug()] ?? { title: 'Page unavailable', summary: 'This page is not published or is no longer available.', body: '', pageType: 'page' };
   }
 
   protected title(): string {
@@ -175,18 +179,4 @@ export class PublicCmsPage implements OnInit {
       });
   }
 
-  private load(slug: string): void {
-    this.loading.set(true);
-    this.usingFallback.set(false);
-    this.cms
-      .getPublishedPage(slug)
-      .pipe(finalize(() => this.loading.set(false)))
-      .subscribe({
-        next: (page) => this.page.set(page),
-        error: () => {
-          this.page.set(null);
-          this.usingFallback.set(true);
-        }
-      });
-  }
 }

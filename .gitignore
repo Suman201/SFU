@@ -37,3 +37,7 @@ coverage
 # P1 verification artifacts.
 /reports/p1/
 /test-results/p1/
+
+# P2 acceptance evidence.
+/reports/p2/
+/test-results/p2/

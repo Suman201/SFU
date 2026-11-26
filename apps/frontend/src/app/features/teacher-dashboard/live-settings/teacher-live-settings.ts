@@ -1,3 +1,5 @@
+import { ClassroomPolicyPresetsComponent } from '../../../shared/classroom-policy/classroom-policy-presets';
+import type { ClassroomPolicyPresetId } from '@native-sfu/contracts';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -21,7 +23,7 @@ import {
 @Component({
   selector: 'sfu-teacher-live-settings',
   standalone: true,
-  imports: [Footer, Header, RouterLink],
+  imports: [ClassroomPolicyPresetsComponent, Footer, Header, RouterLink],
   templateUrl: './teacher-live-settings.html',
   styleUrl: './teacher-live-settings.scss',
   changeDetection: ChangeDetectionStrategy.Eager
@@ -59,6 +61,15 @@ export class TeacherLiveSettings implements OnInit {
       this.dashboard.loadBatches();
     }
     this.loadSettings();
+  }
+
+  protected applyPolicyPreset(presetId: ClassroomPolicyPresetId): void {
+    if (!this.isBatchMode() || this.saving()) return;
+    this.saving.set(true); this.error.set('');
+    this.dashboard.applyBatchPolicyPreset(this.batchId(), presetId).pipe(finalize(() => this.saving.set(false))).subscribe({
+      next: response => { this.form.set(liveSettingsFormFromSettings(response.resolved)); this.inheritedForm.set(liveSettingsFormFromSettings(response.teacherDefaults)); this.overriddenKeys.set(liveSettingsOverrideKeysFromPatch(response.overrides)); this.notice.set('Classroom policy saved for future classes.'); },
+      error: error => this.error.set(this.profiles.errorMessage(error))
+    });
   }
 
   protected loadSettings(): void {

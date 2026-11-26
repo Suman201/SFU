@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Observable, catchError, finalize, forkJoin, map, of, tap, throwError } from 'rxjs';
-import type { BatchLiveClassSettingsResponse, ChatThreadSummaryResponse, LiveClassSettingsPatch, Recording } from '@native-sfu/contracts';
+import type { BatchLiveClassSettingsResponse, ClassroomPolicyPresetId, ChatThreadSummaryResponse, LiveClassSettingsPatch, Recording } from '@native-sfu/contracts';
 import { API_BASE_URL } from '../../core/services/app-environment';
 import { ClassSessionService, type ClassroomPayload, type ClassSessionStatus } from '../class-session/class-session.service';
 
@@ -264,6 +264,10 @@ export class TeacherDashboardStore {
         request
       )
       .pipe(map((response) => this.unwrapResponse(response)));
+  }
+
+  applyBatchPolicyPreset(batchId: string, presetId: ClassroomPolicyPresetId): Observable<BatchLiveClassSettingsResponse> {
+    return this.http.post<BatchLiveClassSettingsResponse | ApiEnvelope<BatchLiveClassSettingsResponse>>(`${API_BASE_URL}/teacher/batches/${encodeURIComponent(batchId)}/live-settings/preset`, { presetId }).pipe(map(response => this.unwrapResponse(response)));
   }
 
   resetBatchLiveSettings(batchId: string): Observable<BatchLiveClassSettingsResponse> {

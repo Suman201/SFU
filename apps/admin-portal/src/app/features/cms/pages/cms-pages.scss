@@ -202,7 +202,7 @@
 
   @media (max-width: 1180px) {
     .cms-editor-shell {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
 
     .cms-preview {
@@ -216,7 +216,7 @@
     }
 
     .field-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
 
     .editor-actions {
@@ -224,3 +224,24 @@
     }
   }
 }
+
+.section-builder { display: grid; gap: 14px; min-width: 0; }
+.section-builder > header { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.section-builder h3, .section-builder p { margin: 0; }
+.section-builder p { margin-top: 5px; color: var(--muted); }
+.section-card { display: grid; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
+.section-card legend { padding-inline: 6px; font-weight: 700; }
+.section-actions, .section-entry { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; }
+.section-entry { margin-block: 12px; }
+.section-entry label { flex: 1 1 180px; min-width: 0; }
+.section-builder details > summary { cursor: pointer; padding-block: 8px; font-weight: 600; }
+.section-builder details > label { display: grid; gap: 6px; }
+
+.publication-copy { padding: 18px; overflow-wrap: anywhere; }
+.publication-copy pre { white-space: pre-wrap; font: inherit; }
+
+// Allow intrinsic form widths to shrink inside Firefox grid tracks on phones.
+:host { display: block; min-width: 0; max-width: 100%; }
+.cms-editor-shell, .cms-editor, .cms-preview { min-width: 0; max-width: 100%; }
+.cms-editor { grid-template-columns: minmax(0, 1fr); }
+.cms-editor input, .cms-editor select, .cms-editor textarea { min-width: 0; }

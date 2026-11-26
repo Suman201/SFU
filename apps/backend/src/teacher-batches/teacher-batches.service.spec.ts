@@ -1,9 +1,33 @@
 import { expect } from '@jest/globals';
-import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException, NotFoundException } from '@nestjs/common';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { TeacherBatchesService } from './teacher-batches.service';
 
 describe('TeacherBatchesService', () => {
+  it('applies controlled entry while preserving recording and unrelated settings, with an audit event', async () => {
+    const save = jest.fn().mockResolvedValue(undefined);
+    const batch = batchDoc({ save, liveSettingsOverrides: { recording: { recordingEnabled: true, autoRecordOnStart: false }, recordingRetention: { recordingRetentionDays: 90 }, chat: { teacherBroadcastEnabled: false } } });
+    const { service, profiles, auditLogs } = harnessWith({ batches: [batch] });
+    await service.applyPolicyPreset('teacher-1', 'batch-1', 'controlled_entry');
+    expect(batch.liveSettingsOverrides).toMatchObject({ recording: { recordingEnabled: true, autoRecordOnStart: false }, recordingRetention: { recordingRetentionDays: 90 }, chat: { studentChatInitiallyLocked: true }, access: { lockClassAfterTeacherStarts: true, waitingRoomEnabled: true } });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(profiles.resolveBatchLiveSettings).toHaveBeenCalledWith(batch);
+    expect(auditLogs.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'batch.classroom_policy.applied', resourceId: 'batch-1', metadata: { presetId: 'controlled_entry', appliesTo: 'future_sessions' } }));
+  });
+
+  it('rejects missing ownership, unsupported presets and a missing audit dependency before saving', async () => {
+    const save = jest.fn();
+    const owned = harnessWith({ batches: [batchDoc({ save })] });
+    await expect(owned.service.applyPolicyPreset('teacher-1', 'batch-1', 'unknown')).rejects.toBeInstanceOf(BadRequestException);
+    expect(owned.batches.findOne).not.toHaveBeenCalled();
+    const missing = harnessWith({ batches: [] });
+    await expect(missing.service.applyPolicyPreset('other-teacher', 'batch-1', 'teaching')).rejects.toBeInstanceOf(NotFoundException);
+    expect(missing.batches.findOne).toHaveBeenCalledWith(expect.objectContaining({ teacherId: 'other-teacher' }));
+    const unavailable = harnessWith({ batches: [batchDoc({ save })], withoutAudit: true });
+    await expect(unavailable.service.applyPolicyPreset('teacher-1', 'batch-1', 'teaching')).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('rejects duplicate weekdays in a batch schedule', async () => {
     const service = serviceWith({ batchExists: false });
 
@@ -232,7 +256,7 @@ function serviceWith(options: { batchExists?: boolean; batches?: unknown[]; sche
   return harnessWith(options).service;
 }
 
-function harnessWith(options: { batchExists?: boolean; batches?: unknown[]; schedules?: unknown[]; roster?: unknown[] }) {
+function harnessWith(options: { batchExists?: boolean; batches?: unknown[]; schedules?: unknown[]; roster?: unknown[]; withoutAudit?: boolean }) {
   const batches = {
     exists: jest.fn().mockResolvedValue(options.batchExists ? { _id: 'existing' } : null),
     create: jest.fn(),
@@ -271,8 +295,9 @@ function harnessWith(options: { batchExists?: boolean; batches?: unknown[]; sche
   };
   const profiles = {
     resolveBatchLiveSettings: jest.fn(),
-    normalizeLiveSettingsPatch: jest.fn()
+    normalizeLiveSettingsPatch: jest.fn((patch: unknown) => patch ?? {})
   };
+  const auditLogs = { record: jest.fn().mockResolvedValue(undefined) };
   return {
     service: new TeacherBatchesService(
       batches as never,
@@ -281,14 +306,16 @@ function harnessWith(options: { batchExists?: boolean; batches?: unknown[]; sche
       users as never,
       connection as never,
       studentEnrollments as never,
-      profiles as never
+      profiles as never,
+      (options.withoutAudit ? undefined : auditLogs) as never
     ),
     batches,
     schedules,
     classSessions,
     users,
     studentEnrollments,
-    profiles
+    profiles,
+    auditLogs
   };
 }
 

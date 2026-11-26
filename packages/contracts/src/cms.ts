@@ -54,6 +54,9 @@ export interface CmsSeoMetadata {
 
 export interface CmsPage {
   pageId: string;
+  revision?: number;
+  publishedVersion?: number;
+  hasUnpublishedChanges?: boolean;
   slug: string;
   title: string;
   pageType: CmsPageType;
@@ -92,6 +95,7 @@ export interface CmsPageListResponse {
 }
 
 export interface CmsPageWriteRequest {
+  expectedRevision?: number;
   slug?: string;
   title?: string;
   pageType?: CmsPageType;
@@ -109,3 +113,15 @@ export interface CmsPublicPageQuery {
   locale?: string;
   pageType?: CmsPageType | 'all';
 }
+
+export type CmsPageContent = Pick<CmsPage, 'slug' | 'title' | 'pageType' | 'audience' | 'locale' | 'summary' | 'bodyMarkdown' | 'sections' | 'seo' | 'tags'>;
+export interface CmsPageRevisionSummary {
+  revisionId: string;
+  pageId: string;
+  version: number;
+  digest: string;
+  publishedAt: string;
+  publishedByUserId: string;
+}
+export interface CmsPageRevision extends CmsPageRevisionSummary { content: CmsPageContent }
+export interface CmsPageRevisionListResponse { items: CmsPageRevisionSummary[]; page: number; limit: number; total: number }

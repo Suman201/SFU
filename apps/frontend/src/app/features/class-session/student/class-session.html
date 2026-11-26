@@ -1,3 +1,4 @@
+<p class="classroom-announcement" role="status" aria-live="polite" aria-atomic="true" [attr.lang]="i18n.locale()">{{ session()?.status === 'completed' ? i18n.text('classEnded') : '' }}</p>
 @if (recoveredWhiteboardChanges()) {
   <div class="student-recovery-notice" role="status"><span>{{ recoveredWhiteboardChanges() }} unsynchronized board changes saved on this device.</span><button type="button" [disabled]="studentWhiteboardReadOnly() || retryingWhiteboardChanges()" (click)="retryRecoveredStrokes()">Retry saved writing</button><button type="button" (click)="discardRecoveredStrokes()">Discard</button></div>
 }
@@ -15,7 +16,7 @@
   </main>
 } @else if (!sessionLive()) {
   <main class="student-session-state">
-    <h1>{{ session()?.status === 'completed' ? 'Class ended' : 'Waiting room' }}</h1>
+    <h1>{{ session()?.status === 'completed' ? i18n.text('classEnded') : i18n.text('waitingRoom') }}</h1>
     <p>{{ blockedMessage() }}</p>
     @if (latestRecording(); as recording) {
       <div class="recording-playback-card" [class.failed]="recording.status === 'failed' || recordingExpired(recording)">
@@ -64,7 +65,7 @@
     <a class="button primary" [routerLink]="desktopSession ? '/desktop/upcoming' : '/student/dashboard'">{{ desktopSession ? 'Back to classes' : 'Back to dashboard' }}</a>
   </main>
 } @else {
-<main class="student-session-shell" [class.has-pip]="pipProducer()" [class.prejoin-open]="!roomJoined()">
+<main [attr.lang]="i18n.locale()" class="student-session-shell" [class.has-pip]="pipProducer()" [class.prejoin-open]="!roomJoined()">
   <section class="video-stage" aria-label="Class video">
   @if (roomJoined()) {
     <div class="student-whiteboard-source">
@@ -74,8 +75,8 @@
     <div class="video-frame" [class.screen-mode]="hasScreenShare()" [class.empty]="!stageStream()">
       @if (teacherReconnecting()) {
         <div class="teacher-reconnect-banner" role="status">
-          <strong>Teacher reconnecting</strong>
-          <span>The class is still live. Please stay here.</span>
+          <strong>{{ i18n.text('teacherReconnecting') }}</strong>
+          <span>{{ i18n.text('stayHere') }}</span>
         </div>
       }
       @if (recordingStatusLabel()) {
@@ -124,14 +125,14 @@
   }
 
   @if (!roomJoined()) {
-    <section class="student-prejoin-backdrop" aria-labelledby="student-prejoin-title" aria-modal="true" role="dialog">
+    <section class="student-prejoin-backdrop" sfuDialogFocus (dialogEscape)="leaveClassroom()" aria-labelledby="student-prejoin-title" aria-modal="true" role="dialog">
       <article class="student-prejoin-modal">
         <header class="student-prejoin-header">
           <div>
             <p>Live class</p>
-            <h1 id="student-prejoin-title">Ready to join?</h1>
+            <h1 id="student-prejoin-title">{{ i18n.text('readyToJoin') }}</h1>
           </div>
-          <div class="prejoin-status-group">
+          <div class="prejoin-status-group"><sfu-classroom-language />
             <sfu-device-setup-dialog [previewStream]="localStream()" [error]="deviceError()" (microphoneSelected)="switchMicrophone($event)" (cameraSelected)="switchCamera($event)" />
             @if (recordingStatusLabel()) {
               <span class="student-recording-badge compact" [class.live]="recordingActive()">
@@ -257,7 +258,7 @@
         <footer class="student-prejoin-actions">
           <span class="prejoin-policy-hint">{{ prejoinPolicyHint() }}</span>
           <button class="button primary prejoin-join-button" type="button" [disabled]="prejoinJoinDisabled()" (click)="joinClass()">
-            {{ joiningMedia() ? 'Joining...' : 'Join Class' }}
+            {{ joiningMedia() ? 'Joining...' : i18n.text('joinClass') }}
           </button>
         </footer>
       </article>
@@ -266,6 +267,7 @@
 
   @if (roomJoined()) {
   <div
+    #liveMediaControls
     class="student-media-controls live-media-controls"
     [class.problem]="mediaDeviceProblem()"
     [class.teacher-moderated]="teacherModerationMessage()"
@@ -390,7 +392,7 @@
   }
 
   @if (roomJoined()) {
-  <button class="student-support-button student-leave-button" type="button" (click)="leaveClassroom()">Leave class</button>
+  <button class="student-support-button student-leave-button" type="button" (click)="leaveClassroom()">{{ i18n.text('leaveClass') }}</button>
   @if (whiteboardAvailable()) {
     <button
       class="student-whiteboard-button"

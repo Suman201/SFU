@@ -563,6 +563,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly roomSnapshotGeneratedEventListeners = new Set<(summary: RoomSnapshotBundleSummary) => void>();
   private readonly roomClosedEventListeners = new Set<(roomId: string) => void>();
   private readonly chatReadReceiptEventListeners = new Set<(delivery: ChatReadDeliveryResult) => void>();
+  private readonly locallyCountedTransports = new Map<string, { roomId: string; participantId: string }>();
   private readonly locallyCountedConsumers = new Map<string, Pick<Consumer, 'roomId' | 'producerId' | 'participantId'>>();
   private readonly whiteboardControlByRoomId = new Map<string, WhiteboardControlState>();
   private readonly whiteboardLockByRoomId = new Map<string, WhiteboardLockState>();
@@ -898,7 +899,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     return this.getRoom(roomDoc.id);
   }
 
-  async joinRoom(user: SocketUser, socketId: string, request: JoinRoomRequest): Promise<JoinRoomResponse & { closedProducerIds?: string[] }> {
+  async joinRoom(user: SocketUser, socketId: string, request: JoinRoomRequest, retryParticipantRace = true): Promise<JoinRoomResponse & { closedProducerIds?: string[] }> {
     const startedAt = performance.now();
     const classSession: ClassSessionMongoDocument | null = await this.classSessions.findOne({ roomId: request.roomId });
     try {
@@ -922,7 +923,11 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     if (existingParticipant) {
       const closedProducerIds = classSessionEntitlements ? await this.applyClassSessionEntitlements(room, existingParticipant, classSessionEntitlements) : [];
 
-      await this.replaceParticipantSocket(room.id, existingParticipant.id, socketId);
+      try { await this.replaceParticipantSocket(room.id, existingParticipant.id, socketId); }
+      catch (error) {
+        if (retryParticipantRace && error instanceof NotFoundException) return this.joinRoom(user, socketId, request, false);
+        throw error;
+      }
       if (classSession && this.isClassSessionTeacherUser(classSession, user)) {
         const hadReconnectGrace = Boolean(classSession.teacherReconnectDeadlineAt || this.classSessionTeacherReconnectTimers.has(classSession.id));
         await this.clearClassSessionTeacherReconnectGrace(classSession.id);
@@ -1067,12 +1072,11 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     if (!participant) {
       throw new NotFoundException('Participant not found');
     }
-    participant.socketId = socketId;
-    participant.nodeId = this.nodeRegistry.localNodeId();
-    participant.lastSeenAt = new Date();
-    participant.lastActiveAt = new Date();
-    participant.inactiveSince = undefined;
-    await participant.save();
+    const replacement = await this.participants.updateOne(
+      { _id: participantId, roomId, leftAt: { $exists: false } },
+      { $set: { socketId, nodeId: this.nodeRegistry.localNodeId(), lastSeenAt: new Date(), lastActiveAt: new Date() }, $unset: { inactiveSince: '' } }
+    );
+    if (replacement?.matchedCount === 0) throw new NotFoundException('Participant not found');
     await this.redis.markPresence(roomId, participant.id, socketId, {
       userId: participant.userId,
       nodeId: this.nodeRegistry.localNodeId()
@@ -1176,19 +1180,26 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     if (classSession?.status === 'live' && this.isClassSessionTeacherParticipant(classSession, participant)) {
       return this.deferClassSessionTeacherDisconnect(classSession, participant);
     }
-    const result = await this.leaveRoom(roomId, participantId);
-    return { ...result, left: true };
+    const result = await this.leaveRoom(roomId, participantId, socketId);
+    return { ...result, left: result.left ?? true };
   }
 
-  async leaveRoom(roomId: string, participantId: string): Promise<{ closed: boolean }> {
+  async leaveRoom(roomId: string, participantId: string, expectedSocketId?: string): Promise<{ closed: boolean; left?: boolean }> {
     const ownerLookup = await this.requireRoomOwnerLookup(roomId);
     if (!ownerLookup.local && !this.pipeCoordinator.isEnabled()) {
       await this.nodeRegistry.assertLocalRoomOwner(roomId);
     }
     const participant = await this.participants.findById(participantId);
-    if (!participant || participant.roomId !== roomId) {
-      return { closed: false };
+    if (!participant || participant.roomId !== roomId || participant.leftAt) {
+      return { closed: false, left: false };
     }
+    // Claim the old socket atomically before any media cleanup. A reconnect
+    // either replaces it first or observes a departed participant and rejoins.
+    const departure = await this.participants.updateOne(
+      { _id: participantId, roomId, leftAt: { $exists: false }, ...(expectedSocketId ? { socketId: expectedSocketId } : {}) },
+      { $set: { leftAt: new Date(), lastSeenAt: new Date() } }
+    );
+    if (departure?.matchedCount === 0) return { closed: false, left: false };
     const participantProducers = await this.producers.find({ roomId, participantId, status: { $ne: 'closed' } });
     const participantProducerIds = participantProducers.map((producer) => producer.id);
     const participantConsumers = await this.consumers.find({ roomId, participantId, status: { $ne: 'closed' } });
@@ -1201,7 +1212,6 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
         producerHosting.set(producer.id, await this.isProducerHostedLocally(producer, ownerLookup));
       }
     }
-    await this.participants.updateOne({ _id: participantId }, { leftAt: new Date(), lastSeenAt: new Date() });
     await this.producers.updateMany({ roomId, participantId, status: { $ne: 'closed' } }, { status: 'closed', closedAt: new Date() });
     await this.consumers.updateMany(
       {
@@ -1222,6 +1232,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     }
     await this.redis.removePresence(roomId, participantId);
     await this.media.closeParticipantTransports(participantId);
+    this.releaseLocalTransportMetrics(transport => transport.participantId === participantId);
     this.releaseLocalConsumerMetrics(consumer => consumer.participantId === participantId || participantProducerIds.includes(consumer.producerId));
     if (this.pipeCoordinator.isEnabled()) {
       for (const consumer of uniqueConsumerDocs([...participantConsumers, ...producerConsumers])) {
@@ -1558,7 +1569,10 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     await this.assertParticipant(roomId, participantId);
     try {
       const options = await this.media.createWebRtcTransport(roomId, participantId);
-      this.metrics.activeTransports.inc();
+      if (!this.locallyCountedTransports.has(options.id)) {
+        this.locallyCountedTransports.set(options.id, { roomId, participantId });
+        this.metrics.activeTransports.inc();
+      }
       return options;
     } catch (error) {
       this.metrics.roomAdmissionRejections.labels('media_worker_capacity').inc();
@@ -3167,9 +3181,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       this.metrics.activeParticipants.labels(failure.roomId).dec();
     }
     this.releaseLocalConsumerMetrics(consumer => consumer.roomId === failure.roomId);
-    for (let index = 0; index < failure.affectedTransports.length; index += 1) {
-      this.metrics.activeTransports.dec();
-    }
+    this.releaseLocalTransportMetrics(transport => transport.roomId === failure.roomId);
     const event: RoomFailureEvent = {
       roomId: failure.roomId,
       reason: failure.reason,
@@ -7154,6 +7166,8 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     );
     await this.redis.removePresence(session.roomId, participant.id);
     await this.media.closeParticipantTransports(participant.id);
+    this.releaseLocalTransportMetrics(transport => transport.participantId === participant.id);
+    this.releaseLocalConsumerMetrics(consumer => consumer.participantId === participant.id || activeProducerIds.includes(consumer.producerId));
     await this.classSessions.updateOne(
       { _id: session.id, status: 'live' },
       {
@@ -7807,7 +7821,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
         canPublishVideo: liveSettings.media.allowStudentsToStartCameraSelf,
         // A class participant always needs an explicit teacher grant, including legacy auto-approval settings.
         canShareScreen: false,
-        canChat: liveSettings.chat.privateTeacherStudentChatEnabled || liveSettings.chat.teacherBroadcastEnabled
+        canChat: !liveSettings.chat.studentChatInitiallyLocked && (liveSettings.chat.privateTeacherStudentChatEnabled || liveSettings.chat.teacherBroadcastEnabled)
       }
     };
   }
@@ -8462,6 +8476,12 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     this.metrics.activeParticipants.labels(roomId).set(0);
   }
 
+  private releaseLocalTransportMetrics(matches: (transport: { roomId: string; participantId: string }) => boolean): void {
+    for (const [id, transport] of this.locallyCountedTransports) {
+      if (matches(transport) && this.locallyCountedTransports.delete(id)) this.metrics.activeTransports.dec();
+    }
+  }
+
   private releaseLocalConsumerMetric(consumerId: string): void {
     if (this.locallyCountedConsumers.delete(consumerId)) this.metrics.activeConsumers.dec();
   }
@@ -8482,9 +8502,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       }
     }
     this.releaseLocalConsumerMetrics(consumer => consumer.roomId === roomId);
-    for (let index = 0; index < cleanup.transportCount; index += 1) {
-      this.metrics.activeTransports.dec();
-    }
+    this.releaseLocalTransportMetrics(transport => transport.roomId === roomId);
   }
 
   private readRecentObservabilityTombstone(map: Map<string, number>, key: string, now = Date.now()): number | undefined {

@@ -2167,7 +2167,8 @@ sfu-session-chat {
       'connection connection connection connection'
       'status status speak speak'
       'warning warning warning warning'
-      'problem problem recovery recovery';
+      'problem problem problem problem'
+      'recovery recovery recovery recovery';
     gap: 5px 6px;
     border-radius: 14px;
   }
@@ -2241,5 +2242,17 @@ sfu-session-chat {
     left: 12px;
     right: auto;
     bottom: calc(108px + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-offset, 0px));
+  }
+}
+
+.classroom-announcement { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+.student-prejoin-header .eyebrow { color: var(--muted); }
+
+@media (max-width: 900px) {
+  sfu-session-chat,
+  sfu-session-chat.student-chat-collapsed {
+    --chat-reserved-bottom: calc(var(--student-live-controls-height, 184px) + 24px);
+    bottom: calc(var(--student-live-controls-height, 184px) + 24px + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-offset, 0px));
   }
 }

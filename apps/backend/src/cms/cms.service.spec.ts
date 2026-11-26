@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { expect, it } from '@jest/globals';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CmsService } from './cms.service';
 
@@ -105,6 +106,85 @@ describe('CmsService', () => {
     expect(archiveAuditPayload.action).toBe('cms.page.archived');
   });
 
+  it('keeps published copy stable while a newer draft is edited', async () => {
+    const { service, pages } = createService();
+    const document = pageDoc({ status: 'published', bodyMarkdown: 'Public version', __v: 4 });
+    pages.findOne.mockReturnValue(query(document));
+    const draft = await service.updateAdminPage('page-1', { expectedRevision: 4, title: 'Draft title', bodyMarkdown: 'Draft version' }, adminUser());
+    expect(draft.hasUnpublishedChanges).toBe(true);
+    expect(draft.bodyMarkdown).toBe('Draft version');
+    const published = await service.getPublicPage('home');
+    expect(published.bodyMarkdown).toBe('Public version');
+    expect(published.title).toBe('Home');
+    expect(published.hasUnpublishedChanges).toBeUndefined();
+  });
+
+  it('rejects stale draft edits and published routing changes before persistence', async () => {
+    const { service, pages } = createService(); const document = pageDoc({ status: 'published', __v: 2 });
+    pages.findOne.mockReturnValue(query(document));
+    await expect(service.updateAdminPage('page-1', { expectedRevision: 1, bodyMarkdown: 'stale' }, adminUser())).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.updateAdminPage('page-1', { expectedRevision: 2, slug: 'new-slug' }, adminUser())).rejects.toBeInstanceOf(ConflictException);
+    expect(document.save).not.toHaveBeenCalled();
+  });
+
+  it('publishes an immutable version once and makes unchanged publication retries idempotent', async () => {
+    const { service, pages, revisions, transaction } = createService(); const document = pageDoc();
+    pages.findOne.mockReturnValue(query(document));
+    await service.publishAdminPage('page-1', adminUser());
+    // Storage may omit empty objects or return object keys in a different order.
+    const stored = (document as Record<string, any>).publishedContent;
+    delete stored.seo;
+    (document as Record<string, any>).publishedContent = Object.fromEntries(Object.entries(stored).reverse());
+    await service.publishAdminPage('page-1', adminUser());
+    expect(revisions.create).toHaveBeenCalledTimes(1);
+    const snapshot = revisions.create.mock.calls[0][0][0];
+    expect(snapshot.version).toBe(1); expect(snapshot.content.bodyMarkdown).toBe('Welcome');
+    expect(snapshot.digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(revisions.create.mock.calls[0][1]).toEqual({ session: transaction });
+    expect(document.save).toHaveBeenCalledTimes(1);
+    expect(transaction.endSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not publish if immutable-history persistence fails', async () => {
+    const { service, pages, revisions, transaction, auditLogs } = createService(); const document = pageDoc();
+    pages.findOne.mockReturnValue(query(document)); revisions.create.mockRejectedValue(new Error('Database unavailable'));
+    await expect(service.publishAdminPage('page-1', adminUser())).rejects.toThrow('Database unavailable');
+    expect(document.status).toBe('draft'); expect(document.save).not.toHaveBeenCalled();
+    expect(auditLogs.record).not.toHaveBeenCalled(); expect(transaction.endSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores a publication into the working draft without changing public copy', async () => {
+    const { service, pages, revisions, auditLogs } = createService();
+    const liveContent = { slug: 'home', title: 'Current', pageType: 'landing', audience: 'public', locale: 'en', bodyMarkdown: 'Current public copy', summary: '', sections: [], seo: {}, tags: [] };
+    const document = pageDoc({ status: 'published', publishedContent: liveContent, bodyMarkdown: 'Current public copy', __v: 3 });
+    pages.findOne.mockReturnValue(query(document));
+    revisions.findOne.mockReturnValue(query({ revisionId: 'revision-old', pageId: 'page-1', version: 1, digest: 'digest', publishedAt: new Date(), publishedByUserId: 'admin-1', content: { ...liveContent, bodyMarkdown: 'Older copy' } }));
+    const restored = await service.restorePageRevision('page-1', 'revision-old', 3, adminUser());
+    expect(restored.bodyMarkdown).toBe('Older copy');
+    expect((await service.getPublicPage('home')).bodyMarkdown).toBe('Current public copy');
+    expect(revisions.findOne).toHaveBeenCalledWith({ pageId: 'page-1', revisionId: 'revision-old' });
+    expect(revisions.create).not.toHaveBeenCalled();
+    expect(auditLogs.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'cms.page.revision_restored' }));
+    expect(JSON.stringify(auditLogs.record.mock.calls)).not.toContain('Older copy');
+  });
+
+  it('restores an archived publication to an unpublished draft', async () => {
+    const { service, pages, revisions } = createService();
+    const document = pageDoc({ status: 'archived', archivedAt: new Date(), __v: 3 });
+    pages.findOne.mockReturnValue(query(document));
+    revisions.findOne.mockReturnValue(query({ revisionId: 'old', pageId: 'page-1', version: 1, digest: 'digest', publishedAt: new Date(), publishedByUserId: 'admin-1', content: { slug: 'home', title: 'Restored', pageType: 'landing', audience: 'public', locale: 'en', sections: [], seo: {}, tags: [] } }));
+    const restored = await service.restorePageRevision('page-1', 'old', 3, adminUser());
+    expect(restored.status).toBe('draft'); expect(restored.archivedAt).toBeUndefined();
+    expect(revisions.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-admin publication history and malformed sections', async () => {
+    const { service, revisions } = createService();
+    await expect(service.listPageRevisions('page-1', {}, studentUser())).rejects.toBeInstanceOf(ForbiddenException);
+    expect(revisions.find).not.toHaveBeenCalled();
+    await expect(service.createAdminPage({ title: 'Bad section', slug: 'bad-section', sections: [null] as never }, adminUser())).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('rejects duplicate slug, locale, and audience combinations', async () => {
     const { service, pages } = createService();
     pages.create.mockRejectedValue({ code: 11000 });
@@ -142,7 +222,10 @@ describe('CmsService', () => {
 
 function createService() {
   const findChain = queryChain([]);
+  const transaction = { withTransaction: jest.fn(async (work: () => Promise<void>) => work()), endSession: jest.fn(async () => undefined) };
+  const revisions: any = { create: jest.fn(async () => []), find: jest.fn(() => queryChain([])), countDocuments: jest.fn(() => query(0)), findOne: jest.fn(() => query(null)) };
   const pages: any = {
+    db: { startSession: jest.fn(async () => transaction) },
     create: jest.fn(),
     find: jest.fn((_filter?: unknown) => findChain),
     findOne: jest.fn((_filter?: unknown) => query(pageDoc())),
@@ -152,10 +235,10 @@ function createService() {
     record: jest.fn().mockResolvedValue(undefined)
   };
   return {
-    service: new CmsService(pages as never, auditLogs as never),
+    service: new CmsService(pages as never, auditLogs as never, revisions as never),
     pages,
     auditLogs,
-    findChain
+    findChain, revisions, transaction
   };
 }
 
@@ -204,6 +287,7 @@ function pageDoc(overrides: Record<string, unknown> = {}) {
 
 function query<T>(value: T) {
   return {
+    session: jest.fn().mockReturnThis(),
     sort: jest.fn().mockReturnThis(),
     exec: jest.fn().mockResolvedValue(value)
   };
@@ -211,6 +295,7 @@ function query<T>(value: T) {
 
 function queryChain<T>(value: T) {
   const chain = {
+    session: jest.fn().mockReturnThis(),
     sort: jest.fn().mockReturnThis(),
     skip: jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),

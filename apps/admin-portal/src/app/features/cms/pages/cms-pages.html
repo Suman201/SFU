@@ -123,13 +123,13 @@
             <button type="button" class="table-action" (click)="edit(row)">
               {{auth.can('admin:content:write') ? 'Edit' : 'View'}}
             </button>
-            @if (row.status !== 'published' && row.status !== 'archived') { @if
+            @if ((row.status !== 'published' || row.hasUnpublishedChanges) && row.status !== 'archived') { @if
             (auth.can('admin:content:write')) {<button
               type="button"
               class="table-action primary"
               (click)="publish(row)"
             >
-              Publish</button
+              {{ row.hasUnpublishedChanges ? 'Publish changes' : 'Publish' }}</button
             >} } @if (row.status === 'published') { @if
             (auth.can('admin:content:write')) {<button
               type="button"
@@ -183,7 +183,7 @@
           <h2>{{ selected()?.title || 'New CMS page' }}</h2>
         </div>
         <div class="editor-actions">
-          @if (selected(); as current) { @if (current.status !== 'published' &&
+          @if (selected(); as current) { @if ((current.status !== 'published' || current.hasUnpublishedChanges) &&
           current.status !== 'archived') { @if (auth.can('admin:content:write'))
           {<button
             type="button"
@@ -191,7 +191,7 @@
             [disabled]="saving()"
             (click)="publish(current)"
           >
-            Publish</button
+            {{ current.hasUnpublishedChanges ? 'Publish changes' : 'Publish' }}</button
           >} } @if (current.status === 'published') { @if
           (auth.can('admin:content:write')) {<button
             type="button"
@@ -218,6 +218,7 @@
         </div>
       </div>
 
+      @if (editorNotice()) { <p role="status">{{ editorNotice() }}</p> }
       @if (editorError()) {
       <p class="table-error" role="alert">{{ editorError() }}</p>
       }
@@ -289,15 +290,43 @@
         ></textarea>
       </label>
 
-      <label>
-        <span>Sections JSON</span>
-        <textarea
-          formControlName="sectionsJson"
-          rows="12"
-          spellcheck="false"
-          placeholder='[{"type":"hero","title":"Learn live","body":"..."}]'
-        ></textarea>
-      </label>
+      <section class="section-builder" aria-label="Page sections">
+        <header><div><h3>Page sections</h3><p>Add and arrange content without editing JSON.</p></div>
+          <label><span>Section type</span><select #sectionType aria-label="Section type" (change)="newSectionType.set($any($event.target).value)">
+            @for (type of sectionTypes; track type) { <option [value]="type" [selected]="type === newSectionType()">{{ type.replaceAll('_', ' ') | titlecase }}</option> }
+          </select></label>
+          <button type="button" class="table-action" [disabled]="parsedSections().length >= 30" (click)="addSection(newSectionType())">Add section</button>
+        </header>
+        @for (section of parsedSections(); track section.blockId || $index; let index = $index) {
+          <fieldset class="section-card">
+            <legend>{{ index + 1 }}. {{ section.type.replaceAll('_', ' ') | titlecase }}</legend>
+            <div class="section-actions">
+              <button type="button" class="table-action" [disabled]="index === 0" [attr.aria-label]="'Move section ' + (index + 1) + ' up'" (click)="moveSection(index, -1)">Move up</button>
+              <button type="button" class="table-action" [disabled]="index === parsedSections().length - 1" [attr.aria-label]="'Move section ' + (index + 1) + ' down'" (click)="moveSection(index, 1)">Move down</button>
+              <button type="button" class="table-action danger" (click)="removeSection(index)">Remove section</button>
+            </div>
+            <label><span>Section title</span><input [value]="section.title || ''" (input)="updateSection(index, 'title', $any($event.target).value)" maxlength="180" /></label>
+            <label><span>Eyebrow</span><input [value]="section.eyebrow || ''" (input)="updateSection(index, 'eyebrow', $any($event.target).value)" maxlength="120" /></label>
+            <label><span>Section body</span><textarea rows="4" [value]="section.body || ''" (input)="updateSection(index, 'body', $any($event.target).value)"></textarea></label>
+            <label><span>Public image URL</span><input type="url" [value]="section.imageUrl || ''" (input)="updateSection(index, 'imageUrl', $any($event.target).value)" placeholder="https://…" /></label>
+            <details><summary>Links and items</summary>
+              @for (link of section.links || []; track $index; let entry = $index) {
+                <div class="section-entry"><label><span>Link label</span><input [value]="link.label" (input)="updateSectionEntry(index, 'links', entry, 'label', $any($event.target).value)" /></label>
+                <label><span>Link URL</span><input [value]="link.url" (input)="updateSectionEntry(index, 'links', entry, 'url', $any($event.target).value)" /></label>
+                <button type="button" class="table-action" (click)="removeSectionEntry(index, 'links', entry)">Remove link</button></div>
+              }
+              <button type="button" class="table-action" [disabled]="(section.links?.length || 0) >= 8" (click)="addSectionEntry(index, 'links')">Add link</button>
+              @for (item of section.items || []; track $index; let entry = $index) {
+                <div class="section-entry"><label><span>Item title or question</span><input [value]="item.title || ''" (input)="updateSectionEntry(index, 'items', entry, 'title', $any($event.target).value)" /></label>
+                <label><span>Item body or answer</span><textarea rows="3" [value]="item.body || ''" (input)="updateSectionEntry(index, 'items', entry, 'body', $any($event.target).value)"></textarea></label>
+                <button type="button" class="table-action" (click)="removeSectionEntry(index, 'items', entry)">Remove item</button></div>
+              }
+              <button type="button" class="table-action" [disabled]="(section.items?.length || 0) >= 24" (click)="addSectionEntry(index, 'items')">Add item</button>
+            </details>
+          </fieldset>
+        } @empty { <p>No sections yet. Add a section or use the page body above.</p> }
+        <details><summary>Advanced section JSON</summary><label><span>Sections JSON</span><textarea formControlName="sectionsJson" rows="10" spellcheck="false"></textarea></label></details>
+      </section>
 
       <div class="field-grid">
         <label>
@@ -369,3 +398,24 @@
     </div>
   </aside>
 </section>
+
+@if (selected(); as current) {
+<section class="data-table-shell" aria-label="Publication history">
+  <div class="data-table-toolbar"><div><h2>Publication history</h2><p>Published copies are preserved. Restore creates a draft for review.</p></div><button type="button" class="table-action" [disabled]="historyLoading()" (click)="loadPublications()">Load publication history</button></div>
+  @if (historyError()) { <p class="table-error" role="alert">{{ historyError() }}</p> }
+  @if (publicationHistory(); as history) {
+    <div class="data-table-wrap"><table class="data-table"><thead><tr><th>Version</th><th>Published</th><th>Integrity</th><th>Action</th></tr></thead><tbody>
+      @for (revision of history.items; track revision.revisionId) {
+        <tr><td>Version {{ revision.version }}</td><td>{{ revision.publishedAt | date:'medium' }}</td><td><code>{{ revision.digest.slice(0, 16) }}…</code></td><td><button type="button" class="table-action" (click)="viewPublication(revision.revisionId)">View publication</button></td></tr>
+      } @empty { <tr><td colspan="4">No versioned publications yet.</td></tr> }
+    </tbody></table></div>
+    <div class="table-footer"><span>{{ history.total }} publications</span><button type="button" class="table-action" [disabled]="history.page <= 1" (click)="loadPublications(history.page - 1)">Earlier page</button><button type="button" class="table-action" [disabled]="history.page * history.limit >= history.total" (click)="loadPublications(history.page + 1)">Next page</button></div>
+  }
+  @if (selectedPublication(); as revision) {
+    <article class="publication-copy"><h3>Version {{ revision.version }} · {{ revision.content.title }}</h3><p>{{ revision.content.summary }}</p><pre>{{ revision.content.bodyMarkdown }}</pre>
+      @for (section of revision.content.sections; track section.blockId || $index) { <h4>{{ section.title }}</h4><p>{{ section.body }}</p> }
+      @if (auth.can('admin:content:write')) { <button type="button" class="table-action" [disabled]="saving()" (click)="restorePublication()">Restore as draft</button> }
+    </article>
+  }
+</section>
+}

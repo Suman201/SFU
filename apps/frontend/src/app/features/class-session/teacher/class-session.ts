@@ -1,3 +1,6 @@
+import { ClassroomLocaleService } from '../../../core/services/classroom-locale.service';
+import { ClassroomLanguageComponent } from '../../../shared/classroom-locale/classroom-language';
+import { DialogFocusDirective } from '../../../shared/dialog-focus/dialog-focus.directive';
 import { isDialogBackdropClick } from '../../../shared/confirm-dialog/dialog-backdrop';
 import { WhiteboardSourceControl, type ClassroomWhiteboardSource } from '../../../shared/whiteboard-source/whiteboard-source';
 import { DeviceSetupDialogComponent } from '../../../shared/device-setup/device-setup-dialog';
@@ -124,12 +127,13 @@ interface StudentWhiteboardAttempt {
 @Component({
   selector: 'sfu-teacher-class-session',
   standalone: true,
-  imports: [WhiteboardSourceControl, DeviceSetupDialogComponent, ClassroomConnectionTools, RouterLink, SessionChat, SessionMaterials, Whiteboard, MediaStreamDirective],
+  imports: [ClassroomLanguageComponent, DialogFocusDirective, WhiteboardSourceControl, DeviceSetupDialogComponent, ClassroomConnectionTools, RouterLink, SessionChat, SessionMaterials, Whiteboard, MediaStreamDirective],
   templateUrl: './class-session.html',
   styleUrl: './class-session.scss',
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class TeacherClassSession implements OnInit, OnDestroy {
+  protected readonly i18n = inject(ClassroomLocaleService);
   protected readonly isBackdropClick = isDialogBackdropClick;
   private readonly host = inject(ElementRef<HTMLElement>);
   protected readonly lessonRecorder = inject(LessonRecordingService);
@@ -359,7 +363,7 @@ export class TeacherClassSession implements OnInit, OnDestroy {
     if (this.preflightActionPending()) {
       return this.preflightMode() === 'start' ? 'Starting...' : 'Entering...';
     }
-    return this.preflightMode() === 'start' ? 'Start Live Class' : 'Enter Live Class';
+    return this.preflightMode() === 'start' ? this.i18n.text('startClass') : 'Enter Live Class';
   });
   protected readonly cameraPreviewReady = computed(() => Boolean(this.preflightPreviewStream()?.getVideoTracks().some((track) => track.readyState === 'live')));
   protected readonly microphonePreviewReady = computed(() => Boolean(this.preflightPreviewStream()?.getAudioTracks().some((track) => track.readyState === 'live')));
@@ -901,6 +905,20 @@ export class TeacherClassSession implements OnInit, OnDestroy {
       await this.stopScreenShare();
     }
     this.whiteboardSourceChoice.set(this.screenSharing() ? 'device' : 'classroom');
+  }
+
+  protected readonly chatPermissionPending = signal<string | null>(null);
+  protected participantChatAllowed(participantId: string): boolean { return this.store.room()?.participants.find(item => item.id === participantId)?.permissions.canChat !== false; }
+  protected async toggleStudentChat(participantId: string): Promise<void> {
+    const roomId = this.store.room()?.id;
+    if (!roomId || this.chatPermissionPending() || !this.isStudentParticipantId(participantId)) return;
+    const allowed = !this.participantChatAllowed(participantId); this.chatPermissionPending.set(participantId);
+    try {
+      await this.socket.emitAck('permission:update', { roomId, participantId, permissions: { canChat: allowed } });
+      const participant = this.store.room()?.participants.find(item => item.id === participantId);
+      if (participant) this.store.patchParticipant(participantId, { permissions: { ...participant.permissions, canChat: allowed } });
+    } catch { this.mediaError.set('Chat permission could not change. Try again.'); }
+    finally { this.chatPermissionPending.set(null); }
   }
 
   protected hasDeviceSharingPermission(participantId: string): boolean {

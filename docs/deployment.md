@@ -200,3 +200,13 @@ The complete production configuration, alert, rollout, rotation, backup, and res
 ## Observability
 
 Prometheus scrapes backend `/metrics`. Grafana provisions a starter dashboard with room, participant, RTP forwarding, pipe, worker, and cluster-health panels.
+
+## P2 CMS publication and release procedure
+
+Versioned publication requires a MongoDB **replica set** or mongos with transactions; standalone MongoDB is suitable only for flows that do not publish CMS pages. Provision and verify the deployment's replica set before enabling publication. The existing local acceptance service creates its own single-member test replica set, not a production topology.
+
+After building contracts/backend and reviewing the database target, provide `MONGODB_URI` or `MONGODB_URI_FILE` from the deployment's secret store and run `npm run setup:cms` (append `-- --allow-remote` only for an explicitly reviewed remote target). It creates CMS collections and indexes without replacing content or rewriting publication history. Repeat it and verify documents/counts are unchanged. The script refuses a standalone target and prints no connection credentials. Resolve duplicate-index conflicts with an approved data repair rather than deletion.
+
+Deploy the backend and admin client together: saves update a working copy and explicit publication atomically archives it and changes the public snapshot. Legacy published content remains visible and receives numbered history on the next explicit publication. There is no retrospective legal approval or fabricated old version. Custom public pages are served at `/pages/:slug`.
+
+Before rollout, complete [release checks, rollback, escalation and independent signoff](release-checklist.md), review [P2 behavior and external proof](p2-release-readiness.md), and verify the [generated environment inventory](environment-reference.md). `npm run release:check` detects stale inventory/missing documentation; it does not approve deployment. Roll back only to a compatible build preserving published snapshots and private drafts. Keep additive history/indexes; use restore-to-draft plus explicit publish to reverse a content change.

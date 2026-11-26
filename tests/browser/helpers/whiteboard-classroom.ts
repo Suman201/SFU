@@ -99,7 +99,7 @@ export async function startAcceptanceStack(
   };
 }
 
-export async function createClassroomHarness(options: { stack?: LocalUiStack; frontendPort?: number; backendPort?: number; enrollStudent?: boolean; teacherDevice?: Pick<BrowserContextOptions, 'viewport' | 'hasTouch' | 'deviceScaleFactor' | 'isMobile'> } = {}) {
+export async function createClassroomHarness(options: { stack?: LocalUiStack; frontendPort?: number; backendPort?: number; enrollStudent?: boolean; batchName?: string; teacherDevice?: Pick<BrowserContextOptions, 'viewport' | 'hasTouch' | 'deviceScaleFactor' | 'isMobile'> } = {}) {
   const stack = options.stack ?? await startAcceptanceStack(options);
   const browser = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] }).catch(async (error) => { if (!options.stack) await stack.stop(); throw error; });
   const contexts: BrowserContext[] = [];
@@ -109,7 +109,7 @@ export async function createClassroomHarness(options: { stack?: LocalUiStack; fr
     if (!options.stack) await stack.stop();
   };
   try {
-    const fixture = await seedClassroom({enrollStudent:options.enrollStudent ?? true});
+    const fixture = await seedClassroom({enrollStudent:options.enrollStudent ?? true, batchName:options.batchName});
     const teacherTokens = await login(stack.nodeAUrl, teacherEmail, password);
     const studentTokens = await login(stack.nodeAUrl, studentEmail, password);
     const teacherContext = await authenticatedContext(teacherTokens.accessToken, options.teacherDevice);

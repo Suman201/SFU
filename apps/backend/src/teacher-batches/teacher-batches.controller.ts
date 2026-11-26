@@ -50,6 +50,12 @@ export class TeacherBatchesController {
     return this.batches.updateLiveSettings(teacher.sub, id, body);
   }
 
+  @Post(':id/live-settings/preset')
+  @ApiOperation({ summary: 'Apply a classroom policy preset to future sessions of an owned batch' })
+  applyPolicyPreset(@Param('id') id: string, @Body() body: { presetId: string }, @CurrentUser() teacher: AuthenticatedUser): Promise<BatchLiveClassSettingsResponse> {
+    return this.batches.applyPolicyPreset(teacher.sub, id, body?.presetId);
+  }
+
   @Post(':id/live-settings/reset')
   @ApiOperation({ summary: "Reset one of the logged-in teacher's batch live settings to inherited defaults" })
   resetLiveSettings(@Param('id') id: string, @CurrentUser() teacher: AuthenticatedUser): Promise<BatchLiveClassSettingsResponse> {

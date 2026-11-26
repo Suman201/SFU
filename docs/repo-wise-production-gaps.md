@@ -337,7 +337,7 @@ Remaining proof:
 
 ## P2: Page-Wise CMS, Public Content, And Contact Inbox Management
 
-Status: **Done** for the first production-safe CMS and Contact Inbox baseline; richer visual block editing, media picker integration, legal version history, and seeded browser QA remain future scope.
+Status: **Implemented** for structured section editing, private working copies, transactional publication history, restore-to-draft and seeded three-browser CMS/contact/audit acceptance. The media picker remains future scope; approved legal copy and target-environment proof remain external gates. See [P2 readiness](p2-release-readiness.md).
 
 Completed baseline:
 
@@ -461,7 +461,7 @@ Repo areas:
 
 ## P2: Documentation And Release Discipline
 
-Status: **Tracked**.
+Status: **Repository release procedure and CI checks implemented**. See [release checklist](release-checklist.md), [environment inventory](environment-reference.md) and [P2 readiness](p2-release-readiness.md). Independent operator execution, named incident owners and staging/production approvals remain pending external evidence.
 
 Required before broad production:
 

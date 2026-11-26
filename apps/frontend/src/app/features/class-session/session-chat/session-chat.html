@@ -1,5 +1,6 @@
 <section
   #chatElement
+  [attr.lang]="i18n.locale()"
   class="session-chat"
   [class.collapsed]="isCollapsed()"
   [class.docked]="docked()"
@@ -14,7 +15,7 @@
     class="chat-toggle drag-handle"
     type="button"
     [attr.aria-expanded]="!isCollapsed()"
-    [title]="isCollapsed() ? 'Open class chat' : 'Collapse class chat'"
+    [title]="isCollapsed() ? i18n.text('openChat') : i18n.text('collapseChat')"
     (pointerdown)="startDrag($event, chatElement)"
     (click)="toggleCollapsed($event)"
   >
@@ -38,7 +39,7 @@
           type="button"
           class="icon-button collapse-button"
           title="Collapse chat"
-          aria-label="Collapse chat"
+          [attr.aria-label]="i18n.text('collapseChat')"
           (pointerdown)="$event.stopPropagation()"
           (click)="toggleCollapsed($event)"
         >
@@ -165,7 +166,7 @@
       @if (chatError()) {
         <p class="chat-error" role="alert">{{ chatError() }}</p>
       } @else if (composerDisabledReason()) {
-        <p class="chat-hint">{{ composerDisabledReason() }}</p>
+        <p class="chat-hint" role="status">{{ composerDisabledReason() }}</p>
       }
 
       <form class="chat-composer" [formRoot]="chatForm" (submit)="sendMessage($event)">
@@ -221,6 +222,7 @@
             type="text"
             autocomplete="off"
             [placeholder]="composerPlaceholder()"
+            [attr.aria-label]="i18n.text('sendMessage')"
             [formField]="chatForm.message"
           />
           <button

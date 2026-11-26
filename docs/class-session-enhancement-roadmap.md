@@ -1084,6 +1084,8 @@ Done: admin attendance reporting now supports cross-session analytics with sourc
 
 ## P2: Classroom Policy Presets
 
+Status: **Implemented on 2026-11-26** for three audited, owner-scoped batch presets, future-session snapshots and teacher chat grants. See [P2 readiness](p2-release-readiness.md).
+
 ### Why
 
 Teachers need repeatable class setup rules instead of toggling the same controls every session.
@@ -1111,6 +1113,8 @@ Teachers need repeatable class setup rules instead of toggling the same controls
 - Students see clear disabled/locked states.
 
 ## P2: Accessibility And Localization
+
+Status: **Keyboard and localization foundation implemented on 2026-11-26** with focused browser accessibility checks and English/Hindi classroom controls. Full-site translation and physical assistive-technology signoff remain separate. See [P2 readiness](p2-release-readiness.md).
 
 ### Why
 

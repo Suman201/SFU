@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { CmsPage, CmsPageListQuery, CmsPageListResponse, CmsPageStatus, CmsPageWriteRequest } from '@native-sfu/contracts';
+import type { CmsPage, CmsPageListQuery, CmsPageListResponse, CmsPageStatus, CmsPageWriteRequest, CmsPageRevision, CmsPageRevisionListResponse } from '@native-sfu/contracts';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AuthenticatedUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -55,8 +55,8 @@ export class AdminCmsController {
   @Post(':pageId/publish')
   @Roles('ADMIN', 'SUPER_ADMIN')
   @ApiOperation({ summary: 'Publish a CMS page' })
-  publishPage(@Param('pageId') pageId: string, @CurrentUser() user: AuthenticatedUser): Promise<CmsPage> {
-    return this.cms.publishAdminPage(pageId, user);
+  publishPage(@Param('pageId') pageId: string, @CurrentUser() user: AuthenticatedUser, @Body() request: { expectedRevision?: number }): Promise<CmsPage> {
+    return this.cms.publishAdminPage(pageId, user, request?.expectedRevision);
   }
 
   @Post(':pageId/unpublish')
@@ -71,6 +71,24 @@ export class AdminCmsController {
   @ApiOperation({ summary: 'Archive a CMS page' })
   archivePage(@Param('pageId') pageId: string, @CurrentUser() user: AuthenticatedUser): Promise<CmsPage> {
     return this.cms.archiveAdminPage(pageId, user);
+  }
+
+  @Get(':pageId/revisions')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  listRevisions(@Param('pageId') pageId: string, @Query() query: { page?: string; limit?: string }, @CurrentUser() user: AuthenticatedUser): Promise<CmsPageRevisionListResponse> {
+    return this.cms.listPageRevisions(pageId, { page: Number(query.page), limit: Number(query.limit) }, user);
+  }
+
+  @Get(':pageId/revisions/:revisionId')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  getRevision(@Param('pageId') pageId: string, @Param('revisionId') revisionId: string, @CurrentUser() user: AuthenticatedUser): Promise<CmsPageRevision> {
+    return this.cms.getPageRevision(pageId, revisionId, user);
+  }
+
+  @Post(':pageId/revisions/:revisionId/restore')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  restoreRevision(@Param('pageId') pageId: string, @Param('revisionId') revisionId: string, @Body() request: { expectedRevision: number }, @CurrentUser() user: AuthenticatedUser): Promise<CmsPage> {
+    return this.cms.restorePageRevision(pageId, revisionId, request?.expectedRevision, user);
   }
 
   private toListQuery(query: CmsPageQueryParams): CmsPageListQuery {

@@ -53,3 +53,9 @@ The payment-branch merge extends the gate with payment ledger/Stripe tests, enro
 P0 classroom services use their own labelled MongoDB replica set on localhost:27028 and Redis on localhost:6394 (database 15). Headless Chromium verifies the actual local SFU and recording; production network paths and live providers remain separate. P0 reports and failure traces are included in `admin-ci-evidence`.
 
 P1 extends the same gate with public declaration drift detection, real worker lifecycle regressions, an isolated ClamAV engine drill, three-browser completed-class private Q&A, two-node targeted event isolation, bounded worker crash/recovery churn, and required native UDP video in both directions. P1 reports and traces are included in the same artifact. Local proof boundaries and activation instructions are in [P1 release readiness](p1-release-readiness.md).
+
+## P2 release gate
+
+CI requires `npm run release:check` after shared builds and `npm run test:p2:browser` after P0/P1. P2 covers real CMS draft isolation, transactional history/restore, stale writes, readonly staff, contact delivery to a loopback SMTP sink, audit metadata safety, idempotent CMS indexes, classroom presets, chat enforcement, keyboard dialogs and focused contrast checks. CMS runs in Chromium, Firefox and WebKit; classroom device checks use headless Chromium. Reports, actual screenshots and traces under `reports/p2/` and `test-results/p2/` are retained with existing artifacts.
+
+Media setup reuses installed FFmpeg/FFprobe; missing tools and Playwright Linux dependencies have bounded download retries/timeouts. These bounds fail setup explicitly rather than skipping verification. The generated environment inventory must match checked-in configuration. See [P2 readiness](p2-release-readiness.md) and [release checklist](release-checklist.md) for deployment evidence and independent approvals that CI cannot supply.

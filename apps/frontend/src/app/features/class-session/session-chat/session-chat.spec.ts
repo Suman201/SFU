@@ -64,6 +64,20 @@ describe('SessionChat delivery state', () => {
     fixture.detectChanges();
   });
 
+  it('disables a paused student composer without hiding the readable conversation', async () => {
+    fixture.componentRef.setInput('currentRole', 'Student');
+    fixture.componentRef.setInput('sessionId', 'session-1'); fixture.componentRef.setInput('roomId', 'room-1');
+    fixture.componentRef.setInput('live', true); fixture.componentRef.setInput('joined', true);
+    store.setLocalParticipant('student-1');
+    store.room.set({ id: 'room-1', participants: [{ id: 'student-1', permissions: { canChat: false } }], producers: [], consumers: [] } as never);
+    fixture.detectChanges(); await fixture.whenStable();
+    expect((fixture.componentInstance as any).canSend()).toBeFalse();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Your teacher has paused your chat');
+    store.patchParticipant('student-1', { permissions: { canChat: true } } as never);
+    fixture.detectChanges(); await fixture.whenStable();
+    expect((fixture.componentInstance as any).canSend()).toBeTrue();
+  });
+
   it('settles terminal cleanup without repeatedly rewriting unchanged message and attachment state', () => {
     const component = fixture.componentInstance as any;
     const messages = component.messages(); const attachments = component.pendingAttachments();

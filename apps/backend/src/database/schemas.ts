@@ -22,7 +22,7 @@ import {
 import type { LiveClassSettings, LiveClassSettingsPatch } from '@native-sfu/contracts';
 import type { ClassSessionTimelineCategory, ClassSessionTimelineEventVisibility } from '@native-sfu/contracts';
 import type { AssignmentStatus, AssignmentSubmissionStatus, AssignmentSubmissionType } from '@native-sfu/contracts';
-import type { CmsAudience, CmsPageBlock, CmsPageStatus, CmsPageType, CmsSeoMetadata } from '@native-sfu/contracts';
+import type { CmsAudience, CmsPageContent, CmsPageBlock, CmsPageStatus, CmsPageType, CmsSeoMetadata } from '@native-sfu/contracts';
 import type { ContactReplyDeliveryStatus, ContactSubmissionCategory, ContactSubmissionPriority, ContactSubmissionStatus } from '@native-sfu/contracts';
 import type { IngestAuthConfig, IngestRestartPolicy, IngestRuntimeState, IngestSourceType, IngestStatus, IngestTransportProtocol, ParticipantOrigin, ProducerSource } from '@native-sfu/contracts';
 import type { SupportIssueType, SupportRequestStatus } from '@native-sfu/contracts';
@@ -81,6 +81,7 @@ export type RecordingPlaybackProgressMongoDocument = HydratedDocument<RecordingP
 export type PushSubscriptionMongoDocument = HydratedDocument<PushSubscriptionDocument>;
 export type SupportRequestMongoDocument = HydratedDocument<SupportRequestDocument>;
 export type CmsPageMongoDocument = HydratedDocument<CmsPageDocument>;
+export type CmsPageRevisionMongoDocument = HydratedDocument<CmsPageRevisionDocument>;
 export type ContactSubmissionMongoDocument = HydratedDocument<ContactSubmissionDocument>;
 
 @Schema({ _id: false })
@@ -418,7 +419,7 @@ export const CMS_PAGE_STATUSES = ['draft', 'published', 'archived'] as const sat
 export const CMS_PAGE_TYPES = ['page', 'legal', 'faq', 'landing', 'announcement', 'banner'] as const satisfies readonly CmsPageType[];
 export const CMS_AUDIENCES = ['public', 'student', 'teacher', 'admin', 'all'] as const satisfies readonly CmsAudience[];
 
-@Schema({ collection: 'cms_pages', timestamps: true })
+@Schema({ collection: 'cms_pages', timestamps: true, optimisticConcurrency: true, minimize: false })
 export class CmsPageDocument {
   @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
   pageId!: string;
@@ -471,9 +472,28 @@ export class CmsPageDocument {
   @Prop({ index: true })
   updatedByUserId?: string;
 
+  @Prop({ type: Object })
+  publishedContent?: CmsPageContent;
+
+  @Prop({ default: 0, min: 0 })
+  publishedVersion!: number;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
+
+@Schema({ collection: 'cms_page_revisions', timestamps: true, versionKey: false, minimize: false })
+export class CmsPageRevisionDocument {
+  @Prop({ required: true, immutable: true, unique: true }) revisionId!: string;
+  @Prop({ required: true, immutable: true, index: true }) pageId!: string;
+  @Prop({ required: true, immutable: true, min: 1 }) version!: number;
+  @Prop({ required: true, immutable: true }) digest!: string;
+  @Prop({ required: true, immutable: true, type: Date }) publishedAt!: Date;
+  @Prop({ required: true, immutable: true }) publishedByUserId!: string;
+  @Prop({ required: true, immutable: true, type: Object }) content!: CmsPageContent;
+}
+export const CmsPageRevisionSchema = SchemaFactory.createForClass(CmsPageRevisionDocument);
+CmsPageRevisionSchema.index({ pageId: 1, version: 1 }, { unique: true });
 
 export const CmsPageSchema = SchemaFactory.createForClass(CmsPageDocument);
 CmsPageSchema.index({ slug: 1, locale: 1, audience: 1 }, { unique: true });

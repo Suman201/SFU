@@ -13,9 +13,9 @@ type Api = (
   data?: any,
   expected?: number,
 ) => Promise<any>;
-export async function startLocalSmtpSink() {
+export async function startLocalSmtpSink(options: { rejectFirst?: boolean } = {}) {
   const messages: Array<{ subject: string; raw: string }> = [];
-  let rejectFirst = true;
+  let rejectFirst = options.rejectFirst ?? true;
   let failures = 0;
   const sockets = new Set<Socket>();
   const server = createServer((socket) => {

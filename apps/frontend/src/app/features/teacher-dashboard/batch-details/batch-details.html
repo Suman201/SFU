@@ -252,6 +252,7 @@
           </button>
         </div>
       </header>
+<sfu-classroom-policy-presets [disabled]="liveSettingsSaving()" (presetSelected)="applyPolicyPreset($event)" />
 
       @if (liveSettingsLoading()) {
         <div class="empty-state compact">
@@ -296,6 +297,7 @@
 
           <div class="settings-group">
             <strong>Chat</strong>
+            <label><input type="checkbox" [checked]="liveSettingsForm().studentChatInitiallyLocked" (change)="updateLiveSettingsForm('studentChatInitiallyLocked', checkedValue($event))" /><span>Chat starts paused</span><small>{{ liveSettingInheritanceLabel('studentChatInitiallyLocked') }}</small><button type="button" class="inherit-button" (click)="resetLiveSettingField('studentChatInitiallyLocked', $event)">Inherit</button></label>
             <label class="toggle-row">
               <input type="checkbox" [checked]="liveSettingsForm().privateTeacherStudentChatEnabled" (change)="updateLiveSettingsForm('privateTeacherStudentChatEnabled', checkedValue($event))" />
               <span>Private chat</span>

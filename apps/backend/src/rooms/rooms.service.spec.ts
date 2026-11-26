@@ -9,6 +9,31 @@ import { CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS, RoomsService, type SocketUser
 import { defaultConsumerLayers, defaultConsumerPriority, defaultProducerPriority, resolveRoomMediaProfile } from './room-policy';
 
 describe('RoomsService', () => {
+  it('counts only locally allocated transports once when distributed room cleanup overlaps', async () => {
+    const { service, media, metrics } = createService();
+    const counted = (service as any).locallyCountedTransports as Map<string, { roomId: string; participantId: string }>;
+    counted.set('transport-1', { roomId: 'room-1', participantId: 'student-1' });
+    counted.set('transport-2', { roomId: 'room-1', participantId: 'student-2' });
+    counted.set('transport-other', { roomId: 'room-other', participantId: 'student-other' });
+    media.closeRoom.mockResolvedValue({ participantIds: [], transportCount: 2, consumerCount: 0, pipeTransportCount: 0, producerCounts: {} });
+    await Promise.all([(service as any).cleanupDistributedClosedRoom('room-1'), (service as any).cleanupDistributedClosedRoom('room-1')]);
+    expect(metrics.activeTransports.dec).toHaveBeenCalledTimes(2);
+    expect([...counted.keys()]).toEqual(['transport-other']);
+    await (service as any).cleanupDistributedClosedRoom('room-1');
+    expect(metrics.activeTransports.dec).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not close media when an old disconnect loses the atomic socket claim to a reconnect', async () => {
+    const { service, participants, media, metrics } = createService();
+    participants.findById.mockResolvedValue({ id: 'participant', roomId: 'room-1', socketId: 'old-socket' });
+    participants.updateOne.mockResolvedValue({ matchedCount: 0 });
+    const result = await service.leaveRoom('room-1', 'participant', 'old-socket');
+    expect(result).toEqual({ closed: false, left: false });
+    expect(participants.updateOne).toHaveBeenCalledWith(expect.objectContaining({ socketId: 'old-socket', leftAt: { $exists: false } }), expect.anything());
+    expect(media.closeParticipantTransports).not.toHaveBeenCalled();
+    expect(metrics.activeTransports.dec).not.toHaveBeenCalled();
+  });
+
   it('requires the host role to create a room', async () => {
     const { service, nodeRegistry } = createService();
 
@@ -1085,7 +1110,7 @@ describe('RoomsService', () => {
       await jest.advanceTimersByTimeAsync(CLASS_SESSION_TEACHER_RECONNECT_GRACE_MS);
 
       expect(result).toEqual({ closed: false, left: true });
-      expect(leaveRoom).toHaveBeenCalledWith('room-1', 'student-participant');
+      expect(leaveRoom).toHaveBeenCalledWith('room-1', 'student-participant', 'student-socket');
       expect(classSessions.updateOne).not.toHaveBeenCalled();
       expect(classSessions.findOneAndUpdate).not.toHaveBeenCalled();
     } finally {
@@ -1149,7 +1174,7 @@ describe('RoomsService', () => {
     const result = await service.leaveRoomForSocket('room-1', 'host-participant', 'host-socket');
 
     expect(result).toEqual({ closed: true, left: true });
-    expect(leaveRoom).toHaveBeenCalledWith('room-1', 'host-participant');
+    expect(leaveRoom).toHaveBeenCalledWith('room-1', 'host-participant', 'host-socket');
   });
 
   it('keeps profile-soft-throttled joins pending even without an explicit waiting room', async () => {
@@ -4985,6 +5010,7 @@ describe('RoomsService', () => {
 
   it('cleans up distributed local room state when a room is closed on another node', async () => {
     const { service, media, pipeCoordinator, metrics, emitSignal } = createService();
+    (service as any).locallyCountedTransports.set('local-transport', { roomId: 'room-1', participantId: 'participant-1' });
     (service as any).locallyCountedConsumers.set('local-consumer', { roomId: 'room-1', producerId: 'producer-1', participantId: 'participant-local-1' });
     (service as any).locallyCountedConsumers.set('other-consumer', { roomId: 'other-room', producerId: 'other-producer', participantId: 'other-participant' });
     media.closeRoom.mockResolvedValue({
@@ -5015,6 +5041,7 @@ describe('RoomsService', () => {
 
   it('decrements active room entity gauges when a room is explicitly closed', async () => {
     const { service, participants, producers, consumers, media, nodeRegistry, metrics, pipeCoordinator } = createService();
+    (service as any).locallyCountedTransports.set('local-transport', { roomId: 'room-1', participantId: 'participant-1' });
     (service as any).locallyCountedConsumers.set('consumer-one', { roomId: 'room-1' });
     (service as any).locallyCountedConsumers.set('consumer-two', { roomId: 'room-1' });
     const summary = summaryState();
@@ -5128,6 +5155,7 @@ describe('RoomsService', () => {
 
   it('clears worker-room quarantine after room failure cleanup completes', async () => {
     const { service, rooms, participants, producers, consumers, redis, media, nodeRegistry, pipeCoordinator, metrics } = createService();
+    (service as any).locallyCountedTransports.set('local-transport', { roomId: 'room-1', participantId: 'participant-1' });
     (service as any).locallyCountedConsumers.set('consumer-one', { roomId: 'room-1' });
     const summary = summaryState();
     (service as any).roomQualitySummaryStates.set('room-1', summary);

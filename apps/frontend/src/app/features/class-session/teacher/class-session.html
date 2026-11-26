@@ -575,6 +575,8 @@
 
             @if (participant.canModerate) {
               <div class="participant-controls">
+                <button type="button" class="participant-control" [disabled]="chatPermissionPending() !== null" (click)="toggleStudentChat(participant.id)" [attr.aria-pressed]="participantChatAllowed(participant.id)">{{ participantChatAllowed(participant.id) ? 'Pause student chat' : 'Allow student chat' }}</button>
+
                 @if (participant.handRaised || participant.allowedToSpeak) {
                   <button
                     class="control-button speak-control"
@@ -833,15 +835,15 @@
 <!-- <sfu-footer /> -->
 
 @if (preflightOpen()) {
-  <section class="teacher-preflight-backdrop" role="dialog" aria-modal="true" aria-labelledby="teacher-preflight-title">
+  <section class="teacher-preflight-backdrop" sfuDialogFocus (dialogEscape)="cancelPreflight()" role="dialog" aria-modal="true" aria-labelledby="teacher-preflight-title">
     <article class="teacher-preflight-modal">
       <header class="preflight-header">
         <div>
-          <p class="eyebrow">Teacher preflight</p>
+          <p class="eyebrow">{{ i18n.text('teacherPreflight') }}</p>
           <h1 id="teacher-preflight-title">{{ preflightTitle() }}</h1>
         </div>
         <sfu-device-setup-dialog [previewStream]="webrtc.localStream()" [error]="preflightOpen() ? preflightError() : mediaError()" (microphoneSelected)="preflightOpen() ? switchPreflightMicrophone($event) : switchMicrophone($event)" (cameraSelected)="preflightOpen() ? switchPreflightCamera($event) : switchCamera($event)" />
-        <span class="preflight-mode">{{ preflightMode() === 'start' ? 'Manual start' : 'Live session' }}</span>
+        <sfu-classroom-language /><span class="preflight-mode">{{ preflightMode() === 'start' ? 'Manual start' : 'Live session' }}</span>
       </header>
 
       <div class="preflight-grid">

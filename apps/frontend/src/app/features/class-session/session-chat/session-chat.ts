@@ -1,3 +1,4 @@
+import { ClassroomLocaleService } from '../../../core/services/classroom-locale.service';
 import { isDialogBackdropClick } from '../../../shared/confirm-dialog/dialog-backdrop';
 import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, OnInit, ViewChild, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { FormField, FormRoot, form as signalForm } from '@angular/forms/signals';
@@ -72,6 +73,7 @@ export interface ChatThreadParticipant {
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class SessionChat {
+  protected readonly i18n = inject(ClassroomLocaleService);
   protected readonly isBackdropClick = isDialogBackdropClick;
   private readonly auth = inject(AuthService);
   private readonly classSessions = inject(ClassSessionService);
@@ -155,7 +157,9 @@ export class SessionChat {
   protected readonly unreadCount = computed(() => (this.isCollapsed() ? this.totalUnreadCount() : 0));
   protected readonly composerHasContent = computed(() => Boolean(this.chatModel().message.trim() || this.pendingAttachments().length));
   protected readonly activeChatScope = computed<ChatMessageScope>(() => (this.isTeacherChat() ? this.chatMode() : 'private'));
+  protected readonly chatPermissionPaused = computed(() => !this.isTeacherChat() && this.store.room()?.participants.find(item => item.id === this.store.localParticipantId())?.permissions.canChat === false);
   protected readonly canSend = computed(() => {
+    if (this.chatPermissionPaused()) return false;
     if (!this.live() || !this.joined() || !this.socketConnected() || this.sending() || this.uploadingAttachments() > 0 || !this.roomId()) {
       return false;
     }
@@ -186,11 +190,12 @@ export class SessionChat {
     return this.chatMode() === 'broadcast' ? 'Teacher announcement' : 'Private student thread';
   });
   protected readonly headerTitle = computed(() => {
-    if (!this.isTeacherChat()) return 'Teacher chat';
+    if (!this.isTeacherChat()) return this.i18n.text('teacherChat');
     if (this.chatMode() === 'broadcast') return 'Broadcast';
     return this.selectedThreadParticipant()?.name ?? 'Select student';
   });
   protected readonly composerDisabledReason = computed(() => {
+    if (this.chatPermissionPaused()) return this.i18n.text('chatPaused');
     if (!this.live()) return 'Chat opens when the session is live.';
     if (!this.joined()) return 'Join the classroom before sending chat.';
     if (!this.socketConnected()) return 'Reconnecting to chat.';

@@ -16,7 +16,7 @@ concurrency:
 jobs:
   admin:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       CI: 'true'
       NODE_OPTIONS: --max-old-space-size=4096
@@ -33,13 +33,22 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
       - name: Install media verification tools
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        timeout-minutes: 8
+        run: |
+          echo 'Acquire::Retries "2"; Acquire::http::Timeout "30"; Acquire::https::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/80-sfu-ci-network > /dev/null
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
       - name: Install headless browsers and Linux dependencies
+        timeout-minutes: 10
         run: npx playwright install --with-deps chromium firefox webkit
       - name: Build learning portal, admin and backend dependencies
         run: npm run build:admin-ci
       - name: Detect public contract drift
         run: npm run contracts:check
+      - name: Verify release documentation and environment inventory
+        run: npm run release:check
       - name: Verify uploads against a real malware scanner
         run: npm run test:p1:uploads
       - name: Run worker lifecycle regressions
@@ -76,6 +85,8 @@ jobs:
         run: npm run test:p0:browser
       - name: Verify P1 private threads, multi-node isolation, native pipes and bounded recovery
         run: npm run test:p1:browser
+      - name: Verify P2 publication history, contact, audit, policies and accessibility
+        run: npm run test:p2:browser
       - name: Collect test service diagnostics
         if: always()
         run: |
@@ -93,6 +104,8 @@ jobs:
             reports/p0/
             test-results/p0/
             reports/p1/
+            reports/p2/
+            test-results/p2/
             test-results/p1/
           if-no-files-found: warn
           retention-days: 7

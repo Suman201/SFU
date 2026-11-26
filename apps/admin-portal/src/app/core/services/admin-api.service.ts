@@ -31,6 +31,8 @@ import type {
   AdminCourseListResponse,
   AdminCourseUpdateRequest,
   CmsPage,
+  CmsPageRevision,
+  CmsPageRevisionListResponse,
   CmsPageListQuery,
   CmsPageListResponse,
   CmsPageWriteRequest,
@@ -271,8 +273,18 @@ export class AdminApiService {
       );
   }
 
-  publishCmsPage(pageId: string): Observable<CmsPage> {
-    return this.cmsPageAction(pageId, 'publish');
+  publishCmsPage(pageId: string, expectedRevision?: number): Observable<CmsPage> {
+    return this.http.post<CmsPage | ApiEnvelope<CmsPage>>(`${API_BASE_URL}/admin/cms/pages/${encodeURIComponent(pageId)}/publish`, { expectedRevision }).pipe(map(response => this.unwrapResponse(response)), catchError(error => throwError(() => this.toApiError(error))));
+  }
+
+  listCmsRevisions(pageId: string, page = 1): Observable<CmsPageRevisionListResponse> {
+    return this.http.get<CmsPageRevisionListResponse | ApiEnvelope<CmsPageRevisionListResponse>>(`${API_BASE_URL}/admin/cms/pages/${encodeURIComponent(pageId)}/revisions`, { params: { page } }).pipe(map(response => this.unwrapResponse(response)));
+  }
+  getCmsRevision(pageId: string, revisionId: string): Observable<CmsPageRevision> {
+    return this.http.get<CmsPageRevision | ApiEnvelope<CmsPageRevision>>(`${API_BASE_URL}/admin/cms/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(revisionId)}`).pipe(map(response => this.unwrapResponse(response)));
+  }
+  restoreCmsRevision(pageId: string, revisionId: string, expectedRevision: number): Observable<CmsPage> {
+    return this.http.post<CmsPage | ApiEnvelope<CmsPage>>(`${API_BASE_URL}/admin/cms/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(revisionId)}/restore`, { expectedRevision }).pipe(map(response => this.unwrapResponse(response)));
   }
 
   unpublishCmsPage(pageId: string): Observable<CmsPage> {

@@ -2,10 +2,14 @@ import { AuthService } from '../../../core/services/auth.service';
 import { DatePipe, TitleCasePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { CMS_BLOCK_TYPES } from '@native-sfu/contracts';
 import type {
   CmsAudience,
+  CmsBlockType,
   CmsPage,
   CmsPageBlock,
+  CmsPageRevision,
+  CmsPageRevisionListResponse,
   CmsPageListQuery,
   CmsPageStatus,
   CmsPageType,
@@ -36,6 +40,14 @@ export class CmsPages implements OnInit {
   protected readonly loading = signal(false);
   protected readonly saving = signal(false);
   protected readonly error = signal('');
+  protected readonly sectionTypes = CMS_BLOCK_TYPES;
+  protected readonly publicationHistory = signal<CmsPageRevisionListResponse | null>(null);
+  protected readonly selectedPublication = signal<CmsPageRevision | null>(null);
+  protected readonly historyError = signal('');
+  protected readonly historyLoading = signal(false);
+  private historyGeneration = 0;
+  protected readonly newSectionType = signal<CmsBlockType>('rich_text');
+  protected readonly editorNotice = signal('');
   protected readonly editorError = signal('');
   protected readonly page = signal(1);
   protected readonly limit = signal(25);
@@ -73,10 +85,60 @@ export class CmsPages implements OnInit {
   protected parsedSections(): CmsPageBlock[] {
     try {
       const parsed = JSON.parse(this.form.controls.sectionsJson.value || '[]') as unknown;
-      return Array.isArray(parsed) ? (parsed as CmsPageBlock[]) : [];
+      return Array.isArray(parsed) && parsed.every(item => item && typeof item === 'object' && !Array.isArray(item) && CMS_BLOCK_TYPES.includes(item.type) && ['links', 'items'].every(key => item[key] === undefined || (Array.isArray(item[key]) && item[key].every((entry: unknown) => entry && typeof entry === 'object' && !Array.isArray(entry))))) ? (parsed as CmsPageBlock[]) : [];
     } catch {
       return [];
     }
+  }
+
+  protected addSection(type: CmsBlockType): void {
+    this.mutateSections(sections => {
+      if (sections.length >= 30) return;
+      sections.push({ blockId: crypto.randomUUID(), type, title: '', body: '',
+        ...(type === 'faq_list' || type === 'feature_grid' ? { items: [{ title: '', body: '' }] } : {}),
+        ...(type === 'cta' || type === 'link_list' ? { links: [{ label: '', url: '/' }] } : {}) });
+    });
+  }
+
+  protected updateSection(index: number, key: 'title' | 'eyebrow' | 'body' | 'imageUrl', value: string): void {
+    this.mutateSections(sections => { if (sections[index]) sections[index] = { ...sections[index], [key]: value }; });
+  }
+
+  protected moveSection(index: number, delta: number): void {
+    this.mutateSections(sections => {
+      const target = index + delta;
+      if (target < 0 || target >= sections.length) return;
+      [sections[index], sections[target]] = [sections[target]!, sections[index]!];
+    });
+  }
+
+  protected removeSection(index: number): void { this.mutateSections(sections => { sections.splice(index, 1); }); }
+
+  protected addSectionEntry(index: number, kind: 'links' | 'items'): void {
+    this.mutateSections(sections => {
+      const section = sections[index]; if (!section) return;
+      if (kind === 'links' && (section.links?.length ?? 0) < 8) section.links = [...section.links ?? [], { label: '', url: '/' }];
+      if (kind === 'items' && (section.items?.length ?? 0) < 24) section.items = [...section.items ?? [], { title: '', body: '' }];
+    });
+  }
+
+  protected updateSectionEntry(index: number, kind: 'links' | 'items', entry: number, key: string, value: string): void {
+    this.mutateSections(sections => { const item = sections[index]?.[kind]?.[entry]; if (item) Object.assign(item, { [key]: value }); });
+  }
+
+  protected removeSectionEntry(index: number, kind: 'links' | 'items', entry: number): void {
+    this.mutateSections(sections => { sections[index]?.[kind]?.splice(entry, 1); });
+  }
+
+  private mutateSections(mutate: (sections: CmsPageBlock[]) => void): void {
+    if (!this.auth.can('admin:content:write')) return;
+    try {
+      const sections: unknown = JSON.parse(this.form.controls.sectionsJson.value || '[]');
+      if (!Array.isArray(sections) || sections.some(section => !section || typeof section !== 'object' || !CMS_BLOCK_TYPES.includes(section.type))) throw new Error('Correct the advanced section JSON before using section controls.');
+      mutate(sections as CmsPageBlock[]);
+      this.form.controls.sectionsJson.setValue(JSON.stringify(sections, null, 2));
+      this.form.controls.sectionsJson.markAsDirty(); this.editorError.set('');
+    } catch { this.editorError.set('Correct the advanced section JSON before using section controls.'); }
   }
 
   ngOnInit(): void {
@@ -107,6 +169,7 @@ export class CmsPages implements OnInit {
 
   protected startNew(): void {
     if (!this.auth.can('admin:content:write')) return;
+    this.historyGeneration++; this.publicationHistory.set(null); this.selectedPublication.set(null); this.historyError.set(''); this.historyLoading.set(false); this.editorNotice.set('');
     this.selected.set(null);
     this.editorError.set('');
     this.form.reset({
@@ -126,6 +189,7 @@ export class CmsPages implements OnInit {
   }
 
   protected edit(row: CmsPage): void {
+    this.historyGeneration++; this.publicationHistory.set(null); this.selectedPublication.set(null); this.historyError.set(''); this.historyLoading.set(false); this.editorNotice.set('');
     this.selected.set(row);
     this.editorError.set('');
     this.form.reset({
@@ -171,6 +235,7 @@ export class CmsPages implements OnInit {
 
   protected publish(row = this.selected()): void {
     if (!this.auth.can('admin:content:write')) return;
+    if (row && this.selected()?.pageId === row.pageId && this.form.dirty) { this.editorError.set('Save your draft before publishing.'); return; }
     if (row) {
       this.runAction(row, 'publish');
     }
@@ -190,6 +255,34 @@ export class CmsPages implements OnInit {
     }
   }
 
+  protected loadPublications(page = 1): void {
+    const current = this.selected(); if (!current) return;
+    const generation = ++this.historyGeneration;
+    this.historyLoading.set(true); this.historyError.set('');
+    this.api.listCmsRevisions(current.pageId, page).subscribe({
+      next: history => { if (generation === this.historyGeneration) { this.publicationHistory.set(history); this.historyLoading.set(false); } },
+      error: error => { if (generation === this.historyGeneration) { this.historyError.set(this.api.apiErrorMessage(error)); this.historyLoading.set(false); } }
+    });
+  }
+  protected viewPublication(revisionId: string): void {
+    const current = this.selected(); if (!current) return;
+    const generation = ++this.historyGeneration; this.historyLoading.set(false); this.historyError.set('');
+    this.api.getCmsRevision(current.pageId, revisionId).subscribe({
+      next: revision => { if (generation === this.historyGeneration) this.selectedPublication.set(revision); },
+      error: error => { if (generation === this.historyGeneration) this.historyError.set(this.api.apiErrorMessage(error)); }
+    });
+  }
+  protected restorePublication(): void {
+    const current = this.selected(), revision = this.selectedPublication();
+    if (!current || !revision || !this.auth.can('admin:content:write') || this.saving()) return;
+    if (this.form.dirty) { this.editorError.set('Save your current draft before restoring a publication.'); return; }
+    this.saving.set(true);
+    this.api.restoreCmsRevision(current.pageId, revision.revisionId, current.revision ?? 0).pipe(finalize(() => this.saving.set(false))).subscribe({
+      next: page => { this.edit(page); this.editorNotice.set('Publication restored to the draft. Review and publish it when ready.'); this.load(this.page()); },
+      error: error => this.editorError.set(this.api.apiErrorMessage(error))
+    });
+  }
+
   protected statusClass(status: CmsPageStatus): string {
     return `status-${status}`;
   }
@@ -199,7 +292,7 @@ export class CmsPages implements OnInit {
   }
 
   protected publicPath(page: CmsPage): string {
-    return page.slug === 'home' ? '/' : `/${page.slug}`;
+    return page.slug === 'home' ? '/' : ['about', 'contact-us', 'faq', 'help', 'terms', 'privacy-policy', 'refund-policy'].includes(page.slug) ? `/${page.slug}` : `/pages/${encodeURIComponent(page.slug)}`;
   }
 
   protected sectionLabel(section: CmsPageBlock): string {
@@ -227,7 +320,7 @@ export class CmsPages implements OnInit {
     this.editorError.set('');
     this.saving.set(true);
     const request =
-      action === 'publish' ? this.api.publishCmsPage(row.pageId) : action === 'unpublish' ? this.api.unpublishCmsPage(row.pageId) : this.api.archiveCmsPage(row.pageId);
+      action === 'publish' ? this.api.publishCmsPage(row.pageId, row.revision) : action === 'unpublish' ? this.api.unpublishCmsPage(row.pageId) : this.api.archiveCmsPage(row.pageId);
     request.pipe(finalize(() => this.saving.set(false))).subscribe({
       next: (page) => {
         this.selected.set(page);
@@ -265,6 +358,7 @@ export class CmsPages implements OnInit {
     }
     const value = this.form.getRawValue();
     return {
+      ...(this.selected() ? { expectedRevision: this.selected()!.revision ?? 0 } : {}),
       title: value.title,
       slug: value.slug,
       pageType: value.pageType,

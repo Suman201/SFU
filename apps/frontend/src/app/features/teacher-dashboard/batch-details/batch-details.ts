@@ -1,3 +1,5 @@
+import { ClassroomPolicyPresetsComponent } from '../../../shared/classroom-policy/classroom-policy-presets';
+import type { ClassroomPolicyPresetId } from '@native-sfu/contracts';
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterEveryRender, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { DOCUMENT, TitleCasePipe } from '@angular/common';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
@@ -92,6 +94,7 @@ interface LiveSettingsForm {
   requirePrejoinDeviceCheck: boolean;
   allowStudentsToUnmuteSelf: boolean;
   allowStudentsToStartCameraSelf: boolean;
+  studentChatInitiallyLocked: boolean;
   privateTeacherStudentChatEnabled: boolean;
   teacherBroadcastEnabled: boolean;
   chatAttachmentsEnabled: boolean;
@@ -175,6 +178,7 @@ const EMPTY_LIVE_SETTINGS_FORM: LiveSettingsForm = {
   requirePrejoinDeviceCheck: true,
   allowStudentsToUnmuteSelf: true,
   allowStudentsToStartCameraSelf: true,
+  studentChatInitiallyLocked: false,
   privateTeacherStudentChatEnabled: true,
   teacherBroadcastEnabled: true,
   chatAttachmentsEnabled: true,
@@ -256,7 +260,7 @@ const EMPTY_LIVE_SETTINGS_FORM: LiveSettingsForm = {
   selector: 'sfu-batch-details',
   providers: [PostClassThreadStore],
   standalone: true,
-  imports: [Footer, FormField, FormRoot, Header, RouterLink, TitleCasePipe],
+  imports: [ClassroomPolicyPresetsComponent, Footer, FormField, FormRoot, Header, RouterLink, TitleCasePipe],
   templateUrl: './batch-details.html',
   styleUrl: './batch-details.scss',
   changeDetection: ChangeDetectionStrategy.Eager
@@ -626,6 +630,15 @@ export class BatchDetails {
       return value ? 'on' : 'off';
     }
     return `${value}`;
+  }
+
+  protected applyPolicyPreset(presetId: ClassroomPolicyPresetId): void {
+    const batchId = this.batchId(); if (!batchId || this.liveSettingsSaving()) return;
+    this.liveSettingsSaving.set(true); this.actionError.set('');
+    this.dashboard.applyBatchPolicyPreset(batchId, presetId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: response => { this.liveSettings.set(response); this.liveSettingsForm.set(this.liveSettingsFormFromSettings(response.resolved)); this.actionNotice.set('Classroom policy saved for future classes.'); this.liveSettingsSaving.set(false); },
+      error: error => { this.actionError.set(this.classSessions.errorMessage(error)); this.liveSettingsSaving.set(false); }
+    });
   }
 
   protected saveBatchLiveSettings(): void {
@@ -1521,6 +1534,7 @@ export class BatchDetails {
     if (Object.keys(media).length) patch.media = media;
 
     const chat: NonNullable<LiveClassSettingsPatch['chat']> = {};
+    if (form.studentChatInitiallyLocked !== (base.chat.studentChatInitiallyLocked ?? false)) chat.studentChatInitiallyLocked = form.studentChatInitiallyLocked;
     if (form.privateTeacherStudentChatEnabled !== base.chat.privateTeacherStudentChatEnabled) chat.privateTeacherStudentChatEnabled = form.privateTeacherStudentChatEnabled;
     if (form.teacherBroadcastEnabled !== base.chat.teacherBroadcastEnabled) chat.teacherBroadcastEnabled = form.teacherBroadcastEnabled;
     if (form.chatAttachmentsEnabled !== base.chat.chatAttachmentsEnabled) chat.chatAttachmentsEnabled = form.chatAttachmentsEnabled;
@@ -1692,6 +1706,7 @@ export class BatchDetails {
         allowStudentsToStartCameraSelf: form.allowStudentsToStartCameraSelf
       },
       chat: {
+        studentChatInitiallyLocked: form.studentChatInitiallyLocked,
         privateTeacherStudentChatEnabled: form.privateTeacherStudentChatEnabled,
         teacherBroadcastEnabled: form.teacherBroadcastEnabled,
         chatAttachmentsEnabled: form.chatAttachmentsEnabled,
@@ -1806,7 +1821,8 @@ export class BatchDetails {
       requirePrejoinDeviceCheck: settings.media.requirePrejoinDeviceCheck,
       allowStudentsToUnmuteSelf: settings.media.allowStudentsToUnmuteSelf,
       allowStudentsToStartCameraSelf: settings.media.allowStudentsToStartCameraSelf,
-      privateTeacherStudentChatEnabled: settings.chat.privateTeacherStudentChatEnabled,
+      studentChatInitiallyLocked: settings.chat.studentChatInitiallyLocked ?? false,
+    privateTeacherStudentChatEnabled: settings.chat.privateTeacherStudentChatEnabled,
       teacherBroadcastEnabled: settings.chat.teacherBroadcastEnabled,
       chatAttachmentsEnabled: settings.chat.chatAttachmentsEnabled,
       messageLengthLimit: settings.chat.messageLengthLimit,

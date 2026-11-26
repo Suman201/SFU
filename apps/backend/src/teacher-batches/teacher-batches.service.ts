@@ -1,8 +1,8 @@
 import { BookingCalendarService } from '../bookings/booking-calendar.service';
 import { batchMoneyFields, batchPriceWrite } from './batch-money';
-import { validTimeZone } from '@native-sfu/contracts';
+import { CLASSROOM_POLICY_PRESETS, validTimeZone } from '@native-sfu/contracts';
 import { scheduleEvent } from '../scheduling/schedule-event';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type {
   AdminBatchCreateRequest,
@@ -239,6 +239,20 @@ export class TeacherBatchesService {
     const next = this.profiles.normalizeLiveSettingsPatch(patch);
     batch.liveSettingsOverrides = next as BatchMongoDocument['liveSettingsOverrides'];
     await batch.save();
+    return this.profiles.resolveBatchLiveSettings(batch);
+  }
+
+  async applyPolicyPreset(teacherId: string, batchId: string, presetId: unknown): Promise<BatchLiveClassSettingsResponse> {
+    const preset = CLASSROOM_POLICY_PRESETS.find(item => item.id === presetId);
+    if (!preset) throw new BadRequestException('Choose a supported classroom policy preset.');
+    const batch = await this.findOwnedBatch(teacherId, batchId);
+    if (!this.auditLogs) throw new ServiceUnavailableException('Audit logging is required to apply classroom policies.');
+    const overrides = this.profiles.normalizeLiveSettingsPatch(batch.liveSettingsOverrides);
+    const next = { ...overrides } as Record<string, unknown>;
+    for (const [group, settings] of Object.entries(preset.settings)) next[group] = { ...(overrides as Record<string, object>)[group], ...settings };
+    batch.liveSettingsOverrides = this.profiles.normalizeLiveSettingsPatch(next as LiveClassSettingsPatch) as BatchMongoDocument['liveSettingsOverrides'];
+    await batch.save();
+    await this.auditLogs.record({ actor: { sub: teacherId, roles: ['TEACHER'] } as AuthenticatedUser, action: 'batch.classroom_policy.applied', resourceType: 'batch', resourceId: batch.id, metadata: { presetId: preset.id, appliesTo: 'future_sessions' } });
     return this.profiles.resolveBatchLiveSettings(batch);
   }
 

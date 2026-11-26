@@ -123,6 +123,7 @@ export const SYSTEM_LIVE_CLASS_SETTINGS: LiveClassSettings = {
     allowStudentsToStartCameraSelf: true
   },
   chat: {
+    studentChatInitiallyLocked: false,
     privateTeacherStudentChatEnabled: true,
     teacherBroadcastEnabled: true,
     chatAttachmentsEnabled: true,
@@ -1191,6 +1192,7 @@ export class ProfilesService {
         allowStudentsToStartCameraSelf: this.booleanSetting(media.allowStudentsToStartCameraSelf, SYSTEM_LIVE_CLASS_SETTINGS.media.allowStudentsToStartCameraSelf)
       },
       chat: {
+        studentChatInitiallyLocked: this.booleanSetting(chat.studentChatInitiallyLocked, false),
         privateTeacherStudentChatEnabled: this.booleanSetting(
           chat.privateTeacherStudentChatEnabled,
           SYSTEM_LIVE_CLASS_SETTINGS.chat.privateTeacherStudentChatEnabled
@@ -1517,6 +1519,7 @@ export class ProfilesService {
         'teacherBroadcastEnabled',
         'chatAttachmentsEnabled'
       ]);
+      this.maybeBooleanAlias(normalized, 'studentChatInitiallyLocked', source.studentChatInitiallyLocked);
       this.maybeBooleanAlias(normalized, 'privateTeacherStudentChatEnabled', source.privateTeacherStudentChatEnabled ?? source.privateChatEnabled);
       if (source.messageLengthLimit !== undefined || source.chatMaxMessageLength !== undefined) {
         normalized.messageLengthLimit = this.integerSetting(source.messageLengthLimit ?? source.chatMaxMessageLength, SYSTEM_LIVE_CLASS_SETTINGS.chat.messageLengthLimit, 200, 5000);

@@ -12,6 +12,7 @@ export interface LiveClassMediaSettings {
 }
 
 export interface LiveClassChatSettings {
+  studentChatInitiallyLocked?: boolean;
   privateTeacherStudentChatEnabled: boolean;
   teacherBroadcastEnabled: boolean;
   chatAttachmentsEnabled: boolean;
@@ -184,3 +185,30 @@ export interface BatchLiveClassSettingsResponse {
   overrides: LiveClassSettingsPatch;
   resolved: LiveClassSettings;
 }
+
+export type ClassroomPolicyPresetId = 'teaching' | 'discussion' | 'controlled_entry';
+export interface ClassroomPolicyPreset { id: ClassroomPolicyPresetId; name: string; description: string; settings: LiveClassSettingsPatch }
+/** Only classroom policy fields are changed. Billing, retention and recording consent stay independent. */
+export const CLASSROOM_POLICY_PRESETS: readonly ClassroomPolicyPreset[] = [
+  { id: 'teaching', name: 'Teaching', description: 'Students join quietly, ask private questions and request speaking or drawing permission.', settings: {
+    media: { studentsJoinMuted: true, studentsJoinCameraOff: true, requirePrejoinDeviceCheck: true, allowStudentsToUnmuteSelf: false, allowStudentsToStartCameraSelf: false },
+    chat: { privateTeacherStudentChatEnabled: true, teacherBroadcastEnabled: true, studentChatInitiallyLocked: false },
+    whiteboard: { whiteboardSharingEnabled: true, studentWhiteboardControlEnabled: false },
+    access: { waitingRoomEnabled: false, lockClassAfterTeacherStarts: false, allowEnrolledStudentReconnectAfterLock: true },
+    speaking: { handRaiseEnabled: true, maxActiveSpeakers: 3 }
+  } },
+  { id: 'discussion', name: 'Discussion', description: 'Students choose when to enable their own microphone or camera; the teacher controls board access.', settings: {
+    media: { studentsJoinMuted: true, studentsJoinCameraOff: true, requirePrejoinDeviceCheck: true, allowStudentsToUnmuteSelf: true, allowStudentsToStartCameraSelf: true },
+    chat: { privateTeacherStudentChatEnabled: true, teacherBroadcastEnabled: true, studentChatInitiallyLocked: false },
+    whiteboard: { whiteboardSharingEnabled: true, studentWhiteboardControlEnabled: true, maxActiveWhiteboardControllers: 3 },
+    access: { waitingRoomEnabled: false, lockClassAfterTeacherStarts: false, allowEnrolledStudentReconnectAfterLock: true },
+    speaking: { handRaiseEnabled: true, maxActiveSpeakers: 6 }
+  } },
+  { id: 'controlled_entry', name: 'Controlled entry', description: 'The class starts locked. Open entry to admit students, then allow each student to speak, chat or draw.', settings: {
+    media: { studentsJoinMuted: true, studentsJoinCameraOff: true, requirePrejoinDeviceCheck: true, allowStudentsToUnmuteSelf: false, allowStudentsToStartCameraSelf: false },
+    chat: { privateTeacherStudentChatEnabled: true, teacherBroadcastEnabled: true, studentChatInitiallyLocked: true },
+    whiteboard: { whiteboardSharingEnabled: true, studentWhiteboardControlEnabled: false },
+    access: { waitingRoomEnabled: true, lockClassAfterTeacherStarts: true, allowEnrolledStudentReconnectAfterLock: true },
+    speaking: { handRaiseEnabled: true, maxActiveSpeakers: 1 }
+  } }
+];

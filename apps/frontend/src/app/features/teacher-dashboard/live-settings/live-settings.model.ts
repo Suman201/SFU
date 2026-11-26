@@ -13,6 +13,7 @@ export interface LiveSettingsForm {
   requirePrejoinDeviceCheck: boolean;
   allowStudentsToUnmuteSelf: boolean;
   allowStudentsToStartCameraSelf: boolean;
+  studentChatInitiallyLocked: boolean;
   privateTeacherStudentChatEnabled: boolean;
   teacherBroadcastEnabled: boolean;
   chatAttachmentsEnabled: boolean;
@@ -126,6 +127,7 @@ export const EMPTY_LIVE_SETTINGS_FORM: LiveSettingsForm = {
   requirePrejoinDeviceCheck: true,
   allowStudentsToUnmuteSelf: true,
   allowStudentsToStartCameraSelf: true,
+  studentChatInitiallyLocked: false,
   privateTeacherStudentChatEnabled: true,
   teacherBroadcastEnabled: true,
   chatAttachmentsEnabled: true,
@@ -221,6 +223,7 @@ export const LIVE_SETTINGS_SECTIONS: readonly LiveSettingsSection[] = [
     title: 'Chat',
     description: 'Private teacher-student chat, broadcasts, and attachments.',
     fields: [
+      field('studentChatInitiallyLocked', 'chat', 'studentChatInitiallyLocked', 'Chat starts paused', 'The teacher can enable chat for each student in the classroom.', 'toggle'),
       field('privateTeacherStudentChatEnabled', 'chat', 'privateTeacherStudentChatEnabled', 'Private chat', 'Keep each student conversation private with the teacher.', 'toggle'),
       field('teacherBroadcastEnabled', 'chat', 'teacherBroadcastEnabled', 'Teacher broadcast', 'Allow explicit announcements to all students.', 'toggle'),
       field('chatAttachmentsEnabled', 'chat', 'chatAttachmentsEnabled', 'Chat attachments', 'Allow file attachments in class chat.', 'toggle'),
@@ -381,6 +384,7 @@ export function liveSettingsFormFromSettings(settings: LiveClassSettings): LiveS
     requirePrejoinDeviceCheck: settings.media.requirePrejoinDeviceCheck,
     allowStudentsToUnmuteSelf: settings.media.allowStudentsToUnmuteSelf,
     allowStudentsToStartCameraSelf: settings.media.allowStudentsToStartCameraSelf,
+    studentChatInitiallyLocked: settings.chat.studentChatInitiallyLocked ?? false,
     privateTeacherStudentChatEnabled: settings.chat.privateTeacherStudentChatEnabled,
     teacherBroadcastEnabled: settings.chat.teacherBroadcastEnabled,
     chatAttachmentsEnabled: settings.chat.chatAttachmentsEnabled,
