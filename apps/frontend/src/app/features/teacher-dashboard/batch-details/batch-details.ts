@@ -1049,6 +1049,7 @@ export class BatchDetails {
   }
 
   protected selectPostClassThread(studentId: string): void {
+    this.postClassGeneration++;
     this.postClassSending.set(false);
     this.postClassSelectedStudentId.set(studentId);
     this.postClassDraft.set('');

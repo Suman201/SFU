@@ -89,6 +89,31 @@ test('historical private Q&A refreshes both ways, clears read state, and isolate
     await threads.getByRole('button').filter({ hasText: studentName }).click();
     await expect(teacher.locator('.post-class-message-list').getByText(reply, { exact: true })).toBeVisible();
     await expect(teacher.locator('.post-class-message-list').getByText(peerSecret, { exact: true })).toHaveCount(0);
+    // Hold a real persisted reply response while the teacher switches away/back.
+    // A response from the old selection must not clear the newly typed draft.
+    let releaseReply!: () => void, replyPersisted!: () => void;
+    const heldReply = new Promise<void>(resolve => { releaseReply = resolve; });
+    const persistedReply = new Promise<void>(resolve => { replyPersisted = resolve; });
+    const replyPath = '/api/v1/class-sessions/' + sessionId + '/post-class-chat';
+    await teacher.route(url => url.pathname === replyPath, async route => {
+      if (route.request().method() !== 'POST') { await route.continue(); return; }
+      const response = await route.fetch(); replyPersisted(); await heldReply;
+      await route.fulfill({ response });
+    });
+    try {
+      await teacher.getByPlaceholder('Write a private answer for this student', { exact: true }).fill('Reply sent before switching threads.');
+      await teacher.getByRole('button', { name: 'Send reply', exact: true }).click();
+      await persistedReply;
+      await threads.getByRole('button').filter({ hasText: peerName }).click();
+      await threads.getByRole('button').filter({ hasText: studentName }).click();
+      const draft = teacher.getByPlaceholder('Write a private answer for this student', { exact: true });
+      await draft.fill('Keep this unsent draft after returning.');
+      const resumed = teacher.waitForResponse(response => new URL(response.url()).pathname === replyPath && response.request().method() === 'POST');
+      releaseReply(); await (await resumed).finished();
+      await teacher.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(null)))));
+      await expect(student.getByText('Reply sent before switching threads.', { exact: true })).toBeVisible({ timeout: 20000 });
+      await expect(draft).toHaveValue('Keep this unsent draft after returning.');
+    } finally { releaseReply(); }
     expect(await student.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await student.screenshot({ path: path.join(output, 'student-qna-mobile.png'), fullPage: true });
     await teacher.screenshot({ path: path.join(output, 'teacher-qna-tablet.png'), fullPage: true });
@@ -99,7 +124,7 @@ test('historical private Q&A refreshes both ways, clears read state, and isolate
     await expect(homeworkPage.getByText('Access is restricted', { exact: true })).toHaveCount(0);
     await homeworkPage.screenshot({ path: path.join(output, 'historical-homework-mobile.png'), fullPage: true });
 
-    await writeFile(path.join(output, 'post-class.json'), JSON.stringify({ passed: true, realBackend: true, historicalEnrollment: true, historicalHomeworkReadOnly: true, noLiveParticipants: true, bidirectionalRefreshWithoutReload: true, unreadCleared: true, olderReceiptCannotRewind: true, peerAndOutsiderIsolation: true, productionSignoff: false }, null, 2));
+    await writeFile(path.join(output, 'post-class.json'), JSON.stringify({ passed: true, realBackend: true, historicalEnrollment: true, historicalHomeworkReadOnly: true, lateReplyPreservesDraftAcrossThreadSwitches: true, noLiveParticipants: true, bidirectionalRefreshWithoutReload: true, unreadCleared: true, olderReceiptCannotRewind: true, peerAndOutsiderIsolation: true, productionSignoff: false }, null, 2));
   } finally {
     await writeFile(info.outputPath('backend-runtime.log'), stack.getLogs());
     for (const context of contexts) await context.close().catch(() => undefined);
