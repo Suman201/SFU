@@ -79,7 +79,15 @@
     "test:admin:unit": "npm exec -w @native-sfu/admin-portal -- ng test --watch=false --browsers=ChromeHeadlessCI",
     "test:admin:backend": "npm test -w @native-sfu/backend -- --runInBand src/auth/auth.service.spec.ts src/users/users.service.spec.ts src/admin-dashboard/admin-dashboard.service.spec.ts src/rbac/admin-access.spec.ts src/rooms/rooms.gateway.spec.ts src/payments src/student-enrollments/student-enrollments.service.spec.ts src/config/env.validation.spec.ts src/bookings/stripe.gateway.spec.ts",
     "test:admin:integration": "node --test --test-concurrency=1 tests/integration/admin-completion.test.cjs tests/integration/booking-payments.test.cjs tests/integration/payment-merge.test.cjs",
-    "test:admin:browser": "node scripts/patch-playwright-loader.cjs && playwright test --config=playwright.admin.config.ts"
+    "test:admin:browser": "node scripts/patch-playwright-loader.cjs && playwright test --config=playwright.admin.config.ts",
+    "setup:payments": "node scripts/setup-payments.cjs",
+    "test:p0:backend": "npm test -w @native-sfu/backend -- --runInBand",
+    "test:p0:frontend": "npm exec -w @native-sfu/frontend -- ng test --watch=false --browsers=ChromeHeadlessCI",
+    "test:p0:operations": "node --test tests/operations/launch-readiness.test.cjs && node scripts/p0-operations-drill.cjs",
+    "build:p0:classroom": "npm run build -w @native-sfu/frontend -- --configuration development --output-path dist/p0-frontend",
+    "test:p0:browser": "node scripts/p0-browser.cjs",
+    "verify:p0:launch": "node scripts/p0-launch-readiness.cjs",
+    "test:p0:setup": "node --test tests/operations/payment-indexes.test.cjs"
   },
   "devDependencies": {
     "@angular/compiler": "22.0.1",

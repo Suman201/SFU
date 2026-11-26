@@ -14,7 +14,7 @@ describe('currency HTTP contracts and account isolation', () => {
     const module = await Test.createTestingModule({ controllers: [CurrenciesController], providers: [
       { provide: CurrenciesService, useValue: { catalogue: async () => ({ currencies: ['EUR', 'INR', 'JPY', 'KWD'], defaultCurrency: 'EUR', snapshot: null }), rates: async () => null } },
       { provide: getModelToken(UserDocument.name), useValue: { updateOne } },
-      { provide: AuthService, useValue: { verifyAccessToken: async (token: string) => { if (token !== 'alice') throw new UnauthorizedException(); return { sub: 'alice-id' }; } } },
+      { provide: AuthService, useValue: { verifyAccessToken: async (token: string) => { if (token !== 'alice') throw new UnauthorizedException(); return { sub: 'alice-id', email: 'alice@example.test', roles: ['STUDENT'], permissions: [], tokenId: 'currency-test' }; } } },
     ] }).compile();
     app = module.createNestApplication();
     app.setGlobalPrefix('api'); app.enableVersioning({ type: VersioningType.URI });

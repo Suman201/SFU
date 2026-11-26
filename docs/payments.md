@@ -82,3 +82,9 @@ The payment branch is integrated with the existing booking, currency and staff-p
 Class charges read the explicit `feeMinor` and `feeCurrency` snapshot. A legacy fee without a known currency, or a currency unsupported by this payment gateway, is rejected rather than assumed to be USD. The new gateway currently collects USD; existing booking charge currencies remain independent. Paid self-enrollment stays blocked even when the new payments flag is disabled. Both checkout paths and administrative enrollment respect the other path's held capacity.
 
 Managed staff use `admin:finance:read` and `admin:finance:write` for the new APIs and controls. Finance settings changes and reconciliation repair remain super-admin-only. The shared Stripe SDK stays at the version already used by bookings. Configure `PAYMENTS_STRIPE_WEBHOOK_SECRET` for the new endpoint; its legacy `STRIPE_WEBHOOK_SECRET` fallback is only suitable when that secret belongs to this endpoint.
+
+## Production index provisioning
+
+Production disables automatic MongoDB index creation. After building the backend, run `npm run setup:payments` with `MONGODB_URI` or `MONGODB_URI_FILE`; add `-- --allow-remote` for the reviewed remote target. This creates missing payment-ledger, idempotency and payout collections/indexes while preserving existing records. Existing duplicates fail the setup instead of silently weakening uniqueness. `npm run test:p0:setup` verifies repeatability and duplicate-payment rejection on an isolated local database.
+
+The product CI uses synthetic provider adapters and a local SMTP sink. Hosted Stripe Checkout, deployed webhook/refund processing, approved issuer/tax/legal values and external email receipt remain deployment acceptance requirements; see [P0 release readiness](p0-release-readiness.md).

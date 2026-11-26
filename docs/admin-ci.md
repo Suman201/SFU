@@ -8,7 +8,7 @@ Cross-module context links require access to their destination. Dashboard totals
 
 `.github/workflows/admin.yml` runs on pull requests, pushes to main and manual dispatch. It uses read-only repository permissions, disables persisted checkout credentials, pins GitHub Actions to immutable commits, and cancels superseded runs. The job uses Ubuntu 24.04, the project's Node 22.22.3 version and `npm ci`.
 
-The workflow installs Chromium/WebKit and their Linux dependencies, builds contracts and backend dependencies plus the student/teacher and admin portals, runs all admin unit tests and focused backend authorization regressions, then runs real-HTTP admin/payment scenarios and the dedicated browser suite. Services are isolated MongoDB 7 (`booking-tests` replica set on localhost:27124) and Redis 7 (localhost:6395). Only synthetic fixture accounts and payment-provider adapters are used; no production database, Stripe or SMTP secrets are required.
+The workflow installs Chromium/WebKit and their Linux dependencies, builds contracts and backend dependencies plus the student/teacher and admin portals, runs all admin, frontend and backend unit tests, then runs real-HTTP admin/payment scenarios and the dedicated browser suite. It also installs FFmpeg and runs the P0 paid classroom, calendar, invoice/PDF/local-email, payment index, encrypted recovery and monitoring acceptance gate described in [P0 release readiness](p0-release-readiness.md). Admin services are isolated MongoDB 7 (`booking-tests` replica set on localhost:27124) and Redis 7 (localhost:6395). Only synthetic fixture accounts and payment-provider adapters are used; no production database, Stripe or SMTP secrets are required.
 
 Reports, actual screenshots, JUnit results and retained failure traces are uploaded as `admin-ci-evidence` for seven days, including when checks fail. Test service diagnostics are collected before cleanup. Production configuration and live merchant/email delivery checks remain separate from this workflow. The workflow does not modify branch-protection settings.
 
@@ -20,11 +20,18 @@ npx playwright install --with-deps chromium webkit
 npm run build:admin-ci
 export CHROME_BIN="$(node -p "require('playwright').chromium.executablePath()")"
 npm run test:admin:unit
-npm run test:admin:backend
+npm run test:p0:frontend
+npm run test:p0:backend
 node scripts/admin-ci-services.cjs up
 npm run test:admin:integration
 npm run test:admin:browser
 node scripts/admin-ci-services.cjs down
+npm run build:p0:classroom
+npm run test:p0:operations
+node scripts/p0-ci-services.cjs up
+npm run test:p0:setup
+npm run test:p0:browser
+node scripts/p0-ci-services.cjs down
 ```
 
 On macOS, use the installed headless Chromium executable for `CHROME_BIN` if a full Chromium build is unavailable. The service helper refuses to replace existing named containers and only removes containers with its own test-suite label. Ensure no other process uses the isolated ports before starting it. Always run `down` after local checks, including failures.
@@ -38,3 +45,5 @@ References: [GitHub checkout](https://github.com/actions/checkout), [Node setup]
 Validated locally on 25 November 2026: the complete build chain, 78 focused unit tests, 23 real-backend integration scenarios, and all 12 Chromium/WebKit browser checks passed. Actual screenshots include read-only user and invoice settings views, authorized user editing, and a successful CMS update on a 390px dark-mode layout.
 
 The payment-branch merge extends the gate with payment ledger/Stripe tests, enrollment and configuration regressions, real settlement/refund/payout and cross-checkout capacity scenarios, and real student/teacher/Finance browser screens. `PAYMENT_MERGE_OUTPUT` selects the new payment screen captures. The earlier validation counts above describe the pre-merge baseline.
+
+P0 classroom services use their own labelled MongoDB replica set on localhost:27028 and Redis on localhost:6394 (database 15). Headless Chromium verifies the actual local SFU and recording; production network paths and live providers remain separate. P0 reports and failure traces are included in `admin-ci-evidence`.

@@ -52,13 +52,18 @@ async function main() {
     },
     nodes,
     turnCredentials,
-    controlledRolloutReady: failedChecks.length === 0,
+    preflightPassed: failedChecks.length === 0 && !turnCredentials.skipped,
+    controlledRolloutReady: false,
+    scope: 'server-preflight-only',
+    requiredExternalEvidence: ['shared-ingress browser publish/subscribe', 'public TURN relay media', 'rollout drain and recovery', 'deployment backup/restore and alert delivery'],
     failedChecks
   };
 
   console.log(JSON.stringify(report, null, 2));
   if (failedChecks.length > 0) {
     process.exitCode = 1;
+  } else if (turnCredentials.skipped) {
+    process.exitCode = 2;
   }
 }
 
@@ -240,7 +245,8 @@ async function inspectTurnCredentials(baseUrl, failedChecks) {
     };
   }
 
-  const auth = await loginResponse.json();
+  const authBody = await loginResponse.json();
+  const auth = authBody.data ?? authBody;
   const turnResponse = await fetch(`${baseUrl}/api/v1/media/turn-credentials`, {
     headers: {
       authorization: `Bearer ${auth.accessToken}`
@@ -255,7 +261,8 @@ async function inspectTurnCredentials(baseUrl, failedChecks) {
     };
   }
 
-  const credentials = await turnResponse.json();
+  const turnBody = await turnResponse.json();
+  const credentials = turnBody.data ?? turnBody;
   const uris = Array.isArray(credentials.uris) ? credentials.uris : [];
   const unsupportedUris = uris.filter((uri) => !isSupportedTurnUri(uri));
   if (uris.length === 0) {
@@ -282,7 +289,8 @@ async function getJson(url, operatorOnly) {
   if (!response.ok) {
     throw new Error(`Request failed ${url}: ${response.status} ${await response.text()}`);
   }
-  return response.json();
+  const body = await response.json();
+  return body.data ?? body;
 }
 
 function operationsHeaders(includeToken) {

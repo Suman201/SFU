@@ -4,6 +4,8 @@ This document tracks the areas that are still not proven by the current local an
 
 Use it as a backlog after staging so the team can close the remaining confidence gaps without mixing them into the active rollout signoff work.
 
+Updated local evidence and remaining deployment gates: [P0 release readiness](p0-release-readiness.md), 26 November 2026.
+
 ## How To Use This Checklist
 
 - Mark an item done only when it is backed by real evidence, not inference.
@@ -14,10 +16,10 @@ Use it as a backlog after staging so the team can close the remaining confidence
 
 These items were not fully proven in the current local pass.
 
-- [ ] Honest frontend-to-backend local UI proof under the real machine port layout
-  - Current issue: backend needed to run on `3010`, while the frontend local runtime still targeted `localhost:3000`.
-- [ ] Clean backend unit-suite proof
-  - Current issue: `apps/backend/src/auth/dto/auth.dto.spec.ts` was red due to TypeScript/Jest matcher typing issues.
+- [x] Real frontend-to-backend local paid classroom journey
+  - `npm run test:p0:browser`: real login, checkout, SFU media, reconnect, recording/playback and private post-class Q&A; actual screenshots in `reports/p0/`. Public staging remains separate.
+- [x] Clean backend unit-suite proof
+  - `npm run test:p0:backend`: all 66 suites / 770 tests passed locally on 26 November 2026 with FFmpeg available.
 - [ ] Honest local distributed/two-node proof
   - Done: the checked-in local two-node stack and report-writing soak harness now exist (`npm run docker:start:multi-node`, `npm run seed:dummy-users:multi-node`, `npm run test:live-soak:local`).
   - Current issue: keep this proof item open until a real passing report from `reports/live-soak/` is attached. The latest run did not start the soak because existing Docker containers already occupied host ports `3000`, `3002`, and `6379`.
@@ -60,8 +62,11 @@ These are useful follow-ups after staging even if staging goes green.
 - [ ] Broaden the shared-ingress browser proof beyond Chromium and single-flow video coverage
 - [ ] Add explicit frontend handling for owner redirects if multi-node non-pipe routing is meant to be first-class
 - [x] Package alert rules and dashboard guidance for drain, worker, capacity, abuse, control-plane, and pipe incidents. Environment alert delivery remains unproven.
-- [ ] Run a Mongo/artifact backup and isolated restore drill using the production scripts
-- [ ] Verify the configured Alertmanager receiver receives firing and resolved alerts
+- [x] Run a Mongo/artifact backup and isolated restore drill using the production scripts
+  - `npm run test:p0:operations`: age-encrypted archive, actual restore to a fresh MongoDB, six artifact directories, wrong-key/checksum rejection before writes; `reports/p0/operations.json`. Target-environment RPO/RTO remains unproven.
+- [x] Verify production alert rules and actual Alertmanager firing/resolved delivery to an isolated local receiver
+  - `npm run test:p0:operations`; Promtool timing assertions and real webhook receipt.
+- [ ] Verify the deployment-configured Alertmanager receiver receives firing and resolved alerts
 - [ ] Decide whether `/metrics` should remain canonical with alias behavior documented, or become fully path-configurable
 - [ ] Reduce backend lint/test warning noise that obscures real failures
 - [ ] Quiet `ts-jest` dist `.js` transform warnings in backend test output

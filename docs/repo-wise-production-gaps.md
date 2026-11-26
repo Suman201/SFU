@@ -1,8 +1,10 @@
 # Repo-Wide Production Readiness Gaps
 
-Updated: 2026-07-09
+Updated: 2026-11-26
 
 This document tracks production gaps across the full Native SFU repo, not only the live class-session surface.
+
+The current four-area P0 release gate and evidence requirements are tracked in [P0 release readiness](p0-release-readiness.md). Historical estimates below are not launch approval.
 
 Related focused docs:
 
@@ -43,7 +45,7 @@ The repo has many production-shaped features in place: manual class-session life
 | SFU core packages | `packages/sfu-core`, `packages/nest-sfu` | Needs media interoperability, staging TURN/UDP proof, multi-node pipe proof, and load/soak evidence. | **Blocker** for scale |
 | Infra | `infra` | Needs production secret handling, ingress/TURN validation, backups, retention, observability access control, and multi-node runbooks. | **Blocker** |
 | Tests and scripts | `tests`, `scripts` | Good coverage scaffolding exists, but CI/dev-mode/browser/load signoff must be repeatable and recorded. | **Pending Proof** |
-| CI/CD | `.github` or external CI | No repo-local GitHub workflow directory was found during this review. CI source of truth must be confirmed. | **Blocker** |
+| CI/CD | `.github` or external CI | Product and admin CI is checked in at `.github/workflows/admin.yml`; shared builds, all unit suites, real integration/browser acceptance and recovery/monitoring drills are gated. Release-commit and deployment proof remain required. | **Blocker** |
 
 ## P0: Build, Test, And Dev Runtime Proof
 
@@ -78,7 +80,7 @@ Known gap:
 
 Status: **Blocker** for production.
 
-The root `package.json` has strong verification scripts, but this review did not find a repo-local `.github` workflow directory.
+The source of truth is `.github/workflows/admin.yml`, running on PRs, main pushes and manual dispatch. See [Admin and product CI](admin-ci.md) and [P0 release readiness](p0-release-readiness.md). Production deployment and branch-protection policy still require environment-specific verification.
 
 Required proof:
 
@@ -360,7 +362,7 @@ Remaining proof:
 
 ## P1: Data Durability, Backups, And Retention
 
-Status: **Implemented baseline; restore proof remains a blocker** for paid-user production.
+Status: **Local encrypted restore drill passed; target-environment restore proof remains a blocker** for paid-user production. See `npm run test:p0:operations` and [P0 release readiness](p0-release-readiness.md).
 
 Implemented:
 

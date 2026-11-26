@@ -18,6 +18,7 @@ export async function startAcceptanceStack(
     backendPort?: number;
     secondBackendPort?: number;
     localSmtpPort?: number;
+    paymentsEnabled?: boolean;
   } = {},
 ) {
   const uri = new URL(process.env.MONGODB_URI ?? 'mongodb://invalid/missing');
@@ -35,6 +36,15 @@ export async function startAcceptanceStack(
   const overrides: Record<string, string> = {
     MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER: '50',
     SMTP_ENABLED: options.localSmtpPort ? 'true' : 'false',
+    PAYMENTS_ENABLED: options.paymentsEnabled ? 'true' : 'false',
+    PAYMENT_GATEWAY: 'test',
+    BOOKINGS_ENABLED: 'false',
+    STRIPE_SECRET_KEY: '',
+    STRIPE_SECRET_KEY_FILE: '',
+    STRIPE_WEBHOOK_SECRET: '',
+    STRIPE_WEBHOOK_SECRET_FILE: '',
+    PAYMENTS_STRIPE_WEBHOOK_SECRET: '',
+    PAYMENTS_STRIPE_WEBHOOK_SECRET_FILE: '',
     CLASS_MATERIAL_LOCAL_PATH: materialDirectory,
     ...(options.localSmtpPort
       ? {
@@ -47,6 +57,8 @@ export async function startAcceptanceStack(
           SMTP_FROM_EMAIL: 'tutor-test@example.com',
           SMTP_FROM_NAME: 'Sapiovian',
           TUTOR_NOTIFICATION_POLL_MS: '500',
+          CLASS_NOTIFICATION_POLL_MS: '500',
+          INVOICE_EMAIL_POLL_MS: '500',
         }
       : {}),
   };
@@ -58,7 +70,7 @@ export async function startAcceptanceStack(
     Object.assign(process.env, overrides);
     stack = await startLocalUiStack({
       frontendPort: options.frontendPort ?? 4440,
-      frontendDir: options.frontendDir,
+      frontendDir: options.frontendDir ?? process.env.P0_FRONTEND_DIR,
       nodePorts: options.secondBackendPort
         ? [options.backendPort ?? 3340, options.secondBackendPort]
         : [options.backendPort ?? 3340],
@@ -143,7 +155,7 @@ export async function enterTeacherClassroom(page: Page, url: string) {
   await page.getByRole('button', { name: 'Start Live Class', exact: true }).click();
   await expect(page.locator('.teacher-preflight-backdrop')).toHaveCount(0, { timeout: 45_000 });
   await waitJoined(page, 'teacher');
-  await expect(page.getByRole('button', { name: 'Writing Pen', exact: true })).toBeEnabled({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: /^(?:Writing Pen|Pen: solid)$/ })).toBeEnabled({ timeout: 20_000 });
 }
 
 export async function enterStudentClassroom(page: Page, url: string) {
@@ -186,7 +198,7 @@ export async function classroomState(page: Page, role: string) {
   });
 }
 export async function draw(page: Page, index: number) {
-  await page.getByRole('button', { name: 'Writing Pen', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:Writing Pen|Pen: solid)$/ }).click();
   await pointerStroke(page, index);
 }
 export async function pointerStroke(page: Page, index: number) {

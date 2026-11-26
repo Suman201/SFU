@@ -1,0 +1,38 @@
+rule_files:
+  - /rules/alerts.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: sfu_media_workers_ready
+        values: '1 0x4 1x4'
+      - series: sfu_media_workers_configured
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: NativeSfuMediaWorkersUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: One or more media workers are not ready
+              description: Ready media worker count is below configured capacity.
+      - eval_time: 7m
+        alertname: NativeSfuMediaWorkersUnavailable
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: sfu_media_worker_capacity_score
+        values: '0.95x6 0.1x4'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: NativeSfuMediaWorkerCapacityHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Media worker capacity is above 90 percent
+              description: New-room admission may soon be rejected; add capacity or drain load.
+      - eval_time: 9m
+        alertname: NativeSfuMediaWorkerCapacityHigh
+        exp_alerts: []

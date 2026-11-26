@@ -29,3 +29,7 @@ coverage
 # Generated admin CI evidence.
 /reports/admin-ci/
 /test-results/admin/
+
+# P0 release verification artifacts.
+/reports/p0/
+/test-results/p0/

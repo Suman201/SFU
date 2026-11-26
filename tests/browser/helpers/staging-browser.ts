@@ -53,7 +53,8 @@ export async function loginToStaging(baseUrl: string, email: string, password: s
   if (!response.ok) {
     throw new Error(`Login failed for ${email}: ${response.status} ${await response.text()}`);
   }
-  return response.json() as Promise<AuthTokens>;
+  const body = await response.json();
+  return (body.data ?? body) as AuthTokens;
 }
 
 export async function registerInStaging(baseUrl: string, email: string, password: string, displayName: string): Promise<AuthTokens> {
@@ -65,7 +66,8 @@ export async function registerInStaging(baseUrl: string, email: string, password
   if (!response.ok) {
     throw new Error(`Registration failed for ${email}: ${response.status} ${await response.text()}`);
   }
-  return response.json() as Promise<AuthTokens>;
+  const body = await response.json();
+  return (body.data ?? body) as AuthTokens;
 }
 
 export async function fetchTurnCredentials(baseUrl: string, accessToken: string): Promise<TurnCredentials> {
@@ -77,7 +79,8 @@ export async function fetchTurnCredentials(baseUrl: string, accessToken: string)
   if (!response.ok) {
     throw new Error(`TURN credentials request failed: ${response.status} ${await response.text()}`);
   }
-  return response.json() as Promise<TurnCredentials>;
+  const body = await response.json();
+  return (body.data ?? body) as TurnCredentials;
 }
 
 export function supportedTurnIceServer(credentials: TurnCredentials): BrowserIceServer {

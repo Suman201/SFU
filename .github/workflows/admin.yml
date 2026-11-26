@@ -1,4 +1,4 @@
-name: Admin portal CI
+name: Product and admin CI
 
 on:
   pull_request:
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   admin:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       CI: 'true'
       NODE_OPTIONS: --max-old-space-size=4096
@@ -32,6 +32,8 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Install media verification tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Install headless browsers and Linux dependencies
         run: npx playwright install --with-deps chromium webkit
       - name: Build learning portal, admin and backend dependencies
@@ -40,8 +42,12 @@ jobs:
         run: |
           export CHROME_BIN="$(node -p "require('playwright').chromium.executablePath()")"
           npm run test:admin:unit
-      - name: Run backend authorization regressions
-        run: npm run test:admin:backend
+      - name: Run all frontend unit tests
+        run: |
+          export CHROME_BIN="$(node -p "require('playwright').chromium.executablePath()")"
+          npm run test:p0:frontend
+      - name: Run the complete backend regression suite
+        run: npm run test:p0:backend
       - name: Start isolated Mongo replica set and Redis
         run: node scripts/admin-ci-services.cjs up
       - name: Run real backend admin and payment scenarios
@@ -52,11 +58,22 @@ jobs:
           ADMIN_PERMISSION_UI_OUTPUT: ${{ github.workspace }}/reports/admin-ci/screenshots/permissions
           PAYMENT_MERGE_OUTPUT: ${{ github.workspace }}/reports/admin-ci/screenshots/payments
         run: npm run test:admin:browser
+      - name: Build classroom acceptance frontend
+        run: npm run build:p0:classroom
+      - name: Verify backup restore and monitoring delivery
+        run: npm run test:p0:operations
+      - name: Start isolated classroom services
+        run: node scripts/p0-ci-services.cjs up
+      - name: Verify production payment index provisioning
+        run: npm run test:p0:setup
+      - name: Verify paid learning, media, recording, Q&A, calendar and invoice delivery
+        run: npm run test:p0:browser
       - name: Collect test service diagnostics
         if: always()
         run: |
           mkdir -p reports/admin-ci
           node scripts/admin-ci-services.cjs logs > reports/admin-ci/services.log
+          node scripts/p0-ci-services.cjs logs > reports/admin-ci/p0-services.log
       - name: Preserve reports, screenshots and failure traces
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -65,8 +82,12 @@ jobs:
           path: |
             reports/admin-ci/
             test-results/admin/
+            reports/p0/
+            test-results/p0/
           if-no-files-found: warn
           retention-days: 7
       - name: Remove isolated test services
         if: always()
-        run: node scripts/admin-ci-services.cjs down
+        run: |
+          node scripts/admin-ci-services.cjs down
+          node scripts/p0-ci-services.cjs down

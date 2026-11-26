@@ -442,7 +442,7 @@ test('real backend: create, issue, PDF, email retry, numbering and payment recor
           .catch(() => undefined);
     throw error;
   } finally {
-    for (const context of contexts) await context.close();
+    for (const context of contexts) await context.close().catch(() => undefined);
     await adminServer?.stop();
     await stack.stop();
     await smtp.close();

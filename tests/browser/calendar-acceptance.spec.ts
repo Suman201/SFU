@@ -228,7 +228,7 @@ test('real calendar: batch enrollment, local times, changes, durable mail and cl
       }),
     ).toBeVisible();
     await studentPage
-      .getByRole('button', { name: 'Enroll', exact: true })
+      .getByRole('button', { name: 'Enroll free', exact: true })
       .click();
     await expect(
       studentPage.getByRole('link', { name: 'Enrolled · View calendar' }),
@@ -453,7 +453,7 @@ test('real calendar: batch enrollment, local times, changes, durable mail and cl
     );
     await expect(studentPage.locator('h1')).toHaveCSS(
       'color',
-      'rgb(237, 244, 237)',
+      'rgb(248, 250, 252)',
     );
     await studentPage.screenshot({
       path: path.join(screens, `${info.project.name}-student-dark.png`),
@@ -757,7 +757,7 @@ test('real calendar: batch enrollment, local times, changes, durable mail and cl
     console.error(stack.getLogs().slice(-20000));
     throw error;
   } finally {
-    for (const c of contexts) await c.close();
+    for (const c of contexts) await c.close().catch(() => undefined);
     await stack.stop();
     await smtp.close();
     await connection.close();
