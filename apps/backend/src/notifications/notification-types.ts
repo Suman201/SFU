@@ -25,6 +25,8 @@ export interface NotificationDeliverySummary {
 }
 
 export interface EmailMessageInput {
+  /** Suppress SMTP provider error text for messages containing authentication secrets. */
+  sensitive?: boolean;
   to: string | string[];
   subject: string;
   text?: string;

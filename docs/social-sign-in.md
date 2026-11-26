@@ -41,7 +41,7 @@ The direct `GOOGLE_AUTH_CLIENT_SECRET` and `APPLE_AUTH_PRIVATE_KEY` variables ar
 
 A verified provider subject identifies an account; matching email alone never links accounts. To connect an existing email/password account, choose **Link an existing email/password account** on the completion page and confirm its current email and password. When a matching account exists, the page requests this proof before signing in. This also lets teachers link Apple private relay identities without changing their existing account email. Linking cannot replace a different identity from the same provider or bind an identity already owned by someone else.
 
-Provider-only students have no password hash; password login fails cleanly. Continue using the original provider for these accounts. This release does not add provider management/unlinking or a password-setting flow to account settings. Existing password reset behavior is unchanged. Do not merge provider-only accounts by email or modify database identity fields manually as a recovery shortcut.
+Provider-only students initially have no password hash; password login fails cleanly. They can continue using their provider or use [account recovery](account-recovery.md) through the registered mailbox to establish a password. Provider management/unlinking is not yet available in account settings. Do not merge provider-only accounts by email or modify database identity fields manually as a recovery shortcut.
 
 Apple's unsigned first-consent name is used only for display; email, issuer, audience, verification status and stable subject come from the verified token. Subsequent sign-ins preserve the account's display name. Provider access/refresh tokens are neither stored nor returned to the browser.
 

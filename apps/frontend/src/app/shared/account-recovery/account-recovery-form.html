@@ -1,0 +1,34 @@
+<div class="recovery-panel">
+  <h1>{{ mode === 'request' ? 'Forgot your password?' : 'Reset your password' }}</h1>
+  @if (done()) {
+    <p class="success" role="status">Your password has been updated. Sign in again with your new password.</p>
+  } @else if (mode === 'request') {
+    @if (requested()) {
+      <p class="success" role="status">If an active account matches that email, you’ll receive a reset link. Check your inbox and spam folder. Wait a minute before requesting another link.</p>
+      <button class="secondary-action" type="button" (click)="requested.set(false)">Request another link</button>
+    } @else {
+      <p>Enter your account email. We’ll send instructions if it matches an active account.</p>
+      <form [formGroup]="requestForm" (ngSubmit)="request()" novalidate>
+        <label for="recovery-email">Email</label>
+        <input id="recovery-email" type="email" autocomplete="email" formControlName="email" maxlength="254" [attr.aria-invalid]="requestForm.controls.email.touched && requestForm.controls.email.invalid" aria-describedby="email-help">
+        <small id="email-help">Use the email associated with your account.</small>
+        <button class="recovery-action" type="submit" [disabled]="busy() || requestForm.invalid">{{ busy() ? 'Sending…' : 'Send reset link' }}</button>
+      </form>
+    }
+  } @else if (validLink()) {
+    <p>Choose a new password. Your other sessions will be signed out.</p>
+    <form [formGroup]="resetForm" (ngSubmit)="reset()" novalidate>
+      <label for="recovery-password">New password</label>
+      <input id="recovery-password" [type]="showPasswords() ? 'text' : 'password'" autocomplete="new-password" formControlName="password" maxlength="72" aria-describedby="password-help" [attr.aria-invalid]="resetForm.controls.password.touched && resetForm.controls.password.invalid">
+      <small id="password-help">Use 10–72 characters.</small>
+      <label for="recovery-confirm">Confirm new password</label>
+      <input id="recovery-confirm" [type]="showPasswords() ? 'text' : 'password'" autocomplete="new-password" formControlName="confirm" maxlength="72" [attr.aria-invalid]="resetForm.controls.confirm.touched && resetForm.hasError('passwordMismatch')" aria-describedby="confirm-help">
+      <small id="confirm-help">{{ resetForm.controls.confirm.touched && resetForm.hasError('passwordMismatch') ? 'Passwords must match.' : 'Enter the same password again.' }}</small>
+      <button class="secondary-action" type="button" [attr.aria-pressed]="showPasswords()" (click)="showPasswords.set(!showPasswords())">{{ showPasswords() ? 'Hide passwords' : 'Show passwords' }}</button>
+      <button class="recovery-action" type="submit" [disabled]="busy() || resetForm.invalid">{{ busy() ? 'Updating…' : 'Update password' }}</button>
+    </form>
+  }
+  @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+  @if (mode === 'reset' && !done()) { <a [routerLink]="requestPath" [queryParams]="{role:requestRole()}">Request a new reset link</a> }
+  <a [routerLink]="loginDestination()">Back to login</a>
+</div>

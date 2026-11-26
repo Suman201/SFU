@@ -45,3 +45,7 @@ coverage
 # Social sign-in acceptance evidence.
 /reports/social/
 /test-results/social/
+
+# Account recovery acceptance evidence.
+/reports/recovery/
+/test-results/recovery/

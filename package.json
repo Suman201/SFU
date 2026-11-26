@@ -98,7 +98,9 @@
     "release:check": "node scripts/check-release-readiness.cjs",
     "test:p2:browser": "node scripts/p0-browser.cjs --p2",
     "setup:social-auth": "node scripts/setup-social-auth.cjs",
-    "test:social:browser": "node scripts/p0-browser.cjs --social"
+    "test:social:browser": "node scripts/p0-browser.cjs --social",
+    "setup:account-recovery": "node scripts/setup-account-recovery.cjs",
+    "test:recovery:browser": "node scripts/p0-browser.cjs --recovery"
   },
   "devDependencies": {
     "@angular/compiler": "22.0.1",

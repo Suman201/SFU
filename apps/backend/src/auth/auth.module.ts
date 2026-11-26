@@ -1,3 +1,6 @@
+import { EmailModule } from '../notifications/email.module';
+import { PasswordRecoveryService } from './password-recovery.service';
+import { PasswordRecoveryJob, PasswordRecoveryJobSchema } from './password-recovery.schema';
 import { MongooseModule } from '@nestjs/mongoose';
 import { SocialAuthFlow, SocialAuthFlowSchema } from './social-auth.schema';
 import { SocialOAuthClient } from './social-oauth.client';
@@ -12,9 +15,9 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 @Module({
-  imports: [JwtModule.register({}), MongooseModule.forFeature([{ name: SocialAuthFlow.name, schema: SocialAuthFlowSchema }]), DatabaseModule, AuditLogsModule],
+  imports: [JwtModule.register({}), MongooseModule.forFeature([{ name: SocialAuthFlow.name, schema: SocialAuthFlowSchema }, { name: PasswordRecoveryJob.name, schema: PasswordRecoveryJobSchema }]), DatabaseModule, AuditLogsModule, EmailModule],
   controllers: [AuthController, SocialAuthController],
-  providers: [AuthService, JwtAuthGuard, SocialOAuthClient, SocialAuthService],
+  providers: [PasswordRecoveryService, AuthService, JwtAuthGuard, SocialOAuthClient, SocialAuthService],
   exports: [AuthService, JwtAuthGuard]
 })
 export class AuthModule {}

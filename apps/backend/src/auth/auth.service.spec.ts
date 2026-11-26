@@ -1,3 +1,4 @@
+import { describe, expect, it } from '@jest/globals';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
@@ -14,7 +15,7 @@ describe('AuthService', () => {
         'jwt.audience': 'native-sfu-clients'
       })[key])
     } as unknown as ConfigService;
-    const service = new AuthService(users as never, sessions as never, {} as never, jwt, config, {} as never);
+    const service = new AuthService(users as never, sessions as never, jwt, config, {} as never, {} as never);
 
     await service.verifyAccessToken('token');
 
@@ -42,7 +43,7 @@ describe('AuthService', () => {
         'jwt.audience': 'native-sfu-clients'
       })[key])
     } as unknown as ConfigService;
-    const service = new AuthService(users as never, sessions as never, {} as never, jwt, config, {} as never);
+    const service = new AuthService(users as never, sessions as never, jwt, config, {} as never, {} as never);
 
     let thrown: unknown;
     try {
@@ -52,5 +53,37 @@ describe('AuthService', () => {
     }
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).toBe('Session is no longer active');
+  });
+});
+
+describe('Authentication epoch after recovery', () => {
+  it('rejects stale access tokens even if a session row survives cleanup', async () => {
+    const jwt = { verifyAsync: jest.fn().mockResolvedValue({ sub: 'user-id', tokenId: 'session-id', authVersion: 0 }) } as unknown as JwtService;
+    const users = { findOne: jest.fn().mockResolvedValue({ id: 'user-id', authVersion: 1 }) };
+    const sessions = { exists: jest.fn().mockResolvedValue(true) };
+    const config = { getOrThrow: jest.fn(() => 'test-value') } as unknown as ConfigService;
+    const service = new AuthService(users as never, sessions as never, jwt, config, {} as never, {} as never);
+    await expect(service.verifyAccessToken('old-token')).rejects.toThrow('revoked by account recovery');
+  });
+});
+
+describe('Connected account recovery', () => {
+  it('disconnects only stale or inactive account sockets in a batched read', async () => {
+    const users = { find: jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([{ _id: 'student', authVersion: 2, status: 'active', disabled: false }, { _id: 'teacher', authVersion: 0, status: 'active', disabled: false }]) }) }) };
+    const service = new AuthService(users as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    expect(await service.revokedSocketSessions([{ socketId: 'old', userId: 'student', authVersion: 1 }, { socketId: 'new', userId: 'student', authVersion: 2 }, { socketId: 'teacher-current', userId: 'teacher', authVersion: 0 }, { socketId: 'deleted', userId: 'missing', authVersion: 0 }])).toEqual(['old', 'deleted']);
+    expect(users.find).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Old refresh tokens after recovery', () => {
+  it('rejects an older epoch before reuse detection can revoke newly recovered sessions', async () => {
+    const jwt = { verifyAsync: jest.fn().mockResolvedValue({ sub: 'user-id', tokenId: 'old-session', authVersion: 0 }) } as unknown as JwtService;
+    const users = { findOne: jest.fn().mockResolvedValue({ id: 'user-id', authVersion: 1 }) };
+    const sessions = { findOne: jest.fn(), updateMany: jest.fn() };
+    const config = { getOrThrow: jest.fn(() => 'test-value') } as unknown as ConfigService;
+    const service = new AuthService(users as never, sessions as never, jwt, config, {} as never, {} as never);
+    await expect(service.refresh('stolen-old-refresh')).rejects.toThrow('revoked by account recovery');
+    expect(sessions.findOne).not.toHaveBeenCalled(); expect(sessions.updateMany).not.toHaveBeenCalled();
   });
 });

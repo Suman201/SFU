@@ -1,6 +1,6 @@
 import { SFU_CLIENT_UPDATE_MESSAGE, supportsSfuProtocol } from '@native-sfu/contracts';
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, ForbiddenException, Logger, Optional, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger, OnModuleDestroy, Optional, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   Ack as WsAck,
@@ -64,6 +64,7 @@ type SfuSocket = Socket<ClientToServerEvents, ServerToClientEvents> & {
     participantId?: string;
     roomId?: string;
     requestId?: string;
+    authVersion?: number;
   };
 };
 
@@ -120,8 +121,10 @@ function uniqueNonEmpty(values: readonly (string | undefined)[]): string[] {
 @WebSocketGateway({
   namespace: '/sfu'
 })
-export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
+export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   private readonly logger = new Logger(RoomsGateway.name);
+  private recoverySweep?: NodeJS.Timeout;
+  private recoverySweepBusy = false;
   private readonly pendingRoomJoins = new Map<string, Promise<JoinRoomResponse>>();
   private readonly connectionAttempts = new Map<string, { count: number; resetAt: number }>();
   private readonly eventAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -210,12 +213,31 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   afterInit(server: Server<ClientToServerEvents, ServerToClientEvents>): void {
     // Socket.IO waits for namespace middleware before delivering `connect` or
     // application events. Nest does not await an async handleConnection hook.
+    this.recoverySweep = setInterval(() => {
+      if (this.recoverySweepBusy) return;
+      this.recoverySweepBusy = true;
+      void this.revokeRecoveredSockets().catch(() => {
+        this.logger.warn('Connected account recovery checks are temporarily unavailable.');
+      }).finally(() => { this.recoverySweepBusy = false; });
+    }, 30000);
+    this.recoverySweep.unref();
     server.use((socket, next) => {
       void this.authenticateSocket(socket).then(() => next()).catch((error) => {
         this.logger.warn(`Socket auth failed requestId=${socket.data.requestId}: ${error instanceof Error ? error.message : String(error)}`);
         next(new Error(error instanceof Error && error.message === SFU_CLIENT_UPDATE_MESSAGE ? SFU_CLIENT_UPDATE_MESSAGE : 'Unauthenticated socket'));
       });
     });
+  }
+
+  onModuleDestroy(): void {
+    if (this.recoverySweep) clearInterval(this.recoverySweep);
+  }
+
+  private async revokeRecoveredSockets(): Promise<void> {
+    const sockets = await this.server.fetchSockets();
+    const candidates = sockets.filter(socket => socket.data.user?.id).map(socket => ({ socketId: socket.id, userId: socket.data.user.id as string, authVersion: (socket.data.authVersion as number | undefined) ?? 0 }));
+    const revoked = new Set(await this.auth.revokedSocketSessions(candidates));
+    for (const socket of sockets) if (revoked.has(socket.id)) socket.disconnect(true);
   }
 
   async handleConnection(socket: SfuSocket): Promise<void> {
@@ -240,6 +262,7 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       throw new ForbiddenException('Managed staff use the authorized admin portal.');
     }
     socket.data.user = { id: payload.sub, email: payload.email, roles: payload.roles };
+    socket.data.authVersion = payload.authVersion ?? 0;
     if (payload.roles.includes('ADMIN') && !payload.roles.includes('SUPER_ADMIN')) {
       // Recheck connected administrators so assigning a profile removes legacy bypasses.
       socket.use((_events, next) => {

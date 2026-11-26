@@ -24,6 +24,10 @@ export const appConfig = () => ({
     issuer: process.env.JWT_ISSUER ?? 'native-sfu-auth',
     audience: process.env.JWT_AUDIENCE ?? 'native-sfu-clients'
   },
+  passwordRecovery: {
+    webUrl: process.env.FRONTEND_URL ?? 'http://localhost:4200',
+    adminUrl: process.env.ADMIN_PORTAL_URL?.trim() || undefined,
+  },
   socialAuth: {
     frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:4200',
     google: {

@@ -1,3 +1,4 @@
+import { validatePasswordRecoveryConfig } from './password-recovery.config';
 import { validateSocialAuthConfig } from './social-auth.config';
 import Joi from 'joi';
 import { SUPPORTED_CURRENCIES } from '@native-sfu/contracts';
@@ -74,6 +75,7 @@ const schema = Joi.object({
   UPLOAD_SCAN_TIMEOUT_MS: Joi.number().integer().min(100).max(60000).default(15000),
   UPLOAD_SCAN_MAX_BYTES: Joi.number().integer().min(1024).max(209715200).default(67108864),
   UPLOAD_SCAN_MAX_CONCURRENT: Joi.number().integer().min(1).max(8).default(2),
+  ADMIN_PORTAL_URL: Joi.string().uri({ scheme: ['https', 'http'] }).allow('').optional(),
   FRONTEND_URL: Joi.string().default('http://localhost:4200'),
   CORS_ALLOWED_ORIGINS: Joi.string().default(Joi.ref('FRONTEND_URL')),
   MONGODB_URI: Joi.string().uri({ scheme: ['mongodb', 'mongodb+srv'] }).required(),
@@ -225,6 +227,7 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
   const validated = value as Record<string, unknown>;
   const semanticErrors: string[] = [];
   validateSocialAuthConfig(validated, semanticErrors);
+  validatePasswordRecoveryConfig(validated, semanticErrors);
 
   validatePortRange(validated.HOST_CANDIDATE_PORT_RANGE, 'HOST_CANDIDATE_PORT_RANGE', semanticErrors);
   validatePortRange(validated.PIPE_PORT_RANGE, 'PIPE_PORT_RANGE', semanticErrors);

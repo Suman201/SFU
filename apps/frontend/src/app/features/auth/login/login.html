@@ -37,6 +37,8 @@
       </div>
     </div>
 
+    <a routerLink="/forgot-password" [queryParams]="{role:expectedRole}">Forgot your password?</a>
+
     <div class="remember-row">
       <label class="checkbox-row">
         <input type="checkbox" [checked]="rememberMe()" (change)="updateRememberMe($event)">

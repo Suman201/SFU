@@ -10,6 +10,18 @@
       ],
       "@sapiovian/error-ui": [
         "../frontend/src/app/shared/error-center/index.ts"
+      ],
+      "@angular/router": [
+        "./node_modules/@angular/router",
+        "../../node_modules/@angular/router"
+      ],
+      "@angular/forms": [
+        "./node_modules/@angular/forms",
+        "../../node_modules/@angular/forms"
+      ],
+      "@angular/platform-browser": [
+        "./node_modules/@angular/platform-browser",
+        "../../node_modules/@angular/platform-browser"
       ]
     },
     "useDefineForClassFields": false,

@@ -146,8 +146,8 @@ export class DesktopService {
     if (this.auth.authenticated()) await this.router.navigateByUrl(destination);
     else await this.router.navigate(['/desktop/login'], { queryParams: { returnUrl: destination } });
   }
-  async website(): Promise<void> {
-    const path = this.auth.user()?.roles.includes('teacher') ? '/teacher/dashboard' : '/student/dashboard';
+  async website(destination?: '/forgot-password'): Promise<void> {
+    const path = destination ?? (this.auth.user()?.roles.includes('teacher') ? '/teacher/dashboard' : '/student/dashboard');
     if (this.bridge) { try { await this.bridge.openWebsite(path); } catch { this.notice.set('The website could not be opened.'); } }
     else window.open(path, '_blank', 'noopener,noreferrer');
   }

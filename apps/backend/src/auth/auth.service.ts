@@ -1,14 +1,13 @@
-import { BadRequestException, ConflictException, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
+import { PasswordRecoveryService } from './password-recovery.service';
+import { ConflictException, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import bcrypt from 'bcrypt';
-import { createHash, randomBytes, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { Model } from 'mongoose';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import {
-  PasswordResetTokenDocument,
-  PasswordResetTokenMongoDocument,
   SessionDocument,
   SessionMongoDocument,
   RoleDocument, RoleMongoDocument,
@@ -43,6 +42,7 @@ export interface JwtPayload {
   permissions: string[];
   tokenId: string;
   adminRoleId?: string;
+  authVersion?: number;
 }
 
 export interface RequestContext {
@@ -55,10 +55,10 @@ export class AuthService {
   constructor(
     @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>,
     @InjectModel(SessionDocument.name) private readonly sessions: Model<SessionMongoDocument>,
-    @InjectModel(PasswordResetTokenDocument.name) private readonly resetTokens: Model<PasswordResetTokenMongoDocument>,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly auditLogs: AuditLogsService,
+    private readonly recovery: PasswordRecoveryService,
     @Optional() @InjectModel(RoleDocument.name) private readonly staffRoles?: Model<RoleMongoDocument>,
   ) {}
 
@@ -150,18 +150,20 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
+    const user = await this.findActiveUser(payload.sub);
+    if ((payload.authVersion ?? 0) !== (user.authVersion ?? 0)) throw new UnauthorizedException('Session was revoked by account recovery');
+
     const session = await this.sessions
       .findOne({ refreshTokenJti: payload.tokenId, userId: payload.sub, revokedAt: { $exists: false }, expiresAt: { $gt: new Date() } })
       .select('+refreshTokenHash');
     const validToken = session ? await bcrypt.compare(refreshToken, session.refreshTokenHash) : false;
     if (!session || !validToken) {
-      await this.sessions.updateMany({ userId: payload.sub, revokedAt: { $exists: false } }, { $set: { revokedAt: new Date() } });
+      await this.sessions.updateMany({ userId: payload.sub, revokedAt: { $exists: false }, $or: [{ authVersion: payload.authVersion ?? 0 }, ...((payload.authVersion ?? 0) === 0 ? [{ authVersion: { $exists: false } }] : [])] }, { $set: { revokedAt: new Date() } });
       await this.auditLogs.record({ actorId: payload.sub, action: 'auth.refresh_reuse_detected', targetType: 'session', targetId: payload.tokenId, ...context });
       throw new UnauthorizedException('Refresh token revoked');
     }
 
     await this.sessions.updateOne({ _id: session.id }, { $set: { revokedAt: new Date() } });
-    const user = await this.findActiveUser(payload.sub);
     return this.issueTokens(user, context);
   }
 
@@ -175,32 +177,12 @@ export class AuthService {
     await this.auditLogs.record({ actorId: userId, action: 'auth.logout_all', targetType: 'user', targetId: userId, ...context });
   }
 
-  async forgotPassword(email: string, context: RequestContext = {}): Promise<{ resetToken?: string }> {
-    const user = await this.users.findOne({ email: email.toLowerCase(), deletedAt: { $exists: false }, status: 'active', disabled: false });
-    if (!user) {
-      return {};
-    }
-    const resetToken = randomBytes(32).toString('hex');
-    await this.resetTokens.create({
-      userId: user.id,
-      tokenHash: this.hashOpaqueToken(resetToken),
-      expiresAt: new Date(Date.now() + 30 * 60 * 1000)
-    });
-    await this.auditLogs.record({ actorId: user.id, action: 'auth.password_reset_requested', targetType: 'user', targetId: user.id, ...context });
-    return this.config.get<string>('app.nodeEnv') === 'production' ? {} : { resetToken };
+  async forgotPassword(email: string): Promise<void> {
+    await this.recovery.request(email);
   }
 
   async resetPassword(request: ResetPasswordDto, context: RequestContext = {}): Promise<void> {
-    const tokenHash = this.hashOpaqueToken(request.token);
-    const resetToken = await this.resetTokens.findOne({ tokenHash, usedAt: { $exists: false }, expiresAt: { $gt: new Date() } });
-    if (!resetToken) {
-      throw new BadRequestException('Invalid or expired password reset token');
-    }
-    const passwordHash = await bcrypt.hash(request.password, 12);
-    await this.users.updateOne({ _id: resetToken.userId }, { $set: { passwordHash } });
-    await this.resetTokens.updateOne({ _id: resetToken.id }, { $set: { usedAt: new Date() } });
-    await this.sessions.updateMany({ userId: resetToken.userId, revokedAt: { $exists: false } }, { $set: { revokedAt: new Date() } });
-    await this.auditLogs.record({ actorId: resetToken.userId, action: 'auth.password_reset_completed', targetType: 'user', targetId: resetToken.userId, ...context });
+    await this.recovery.reset(request.token, request.password, context);
   }
 
   async changePassword(userId: string, request: ChangePasswordDto, currentTokenId: string, context: RequestContext = {}): Promise<void> {
@@ -208,9 +190,13 @@ export class AuthService {
     if (!user || user.disabled || user.status !== 'active' || !user.passwordHash || !(await bcrypt.compare(request.currentPassword, user.passwordHash))) {
       throw new UnauthorizedException('Invalid current password');
     }
-    user.passwordHash = await bcrypt.hash(request.newPassword, 12);
-    await user.save();
-    await this.sessions.updateMany({ userId, refreshTokenJti: { $ne: currentTokenId }, revokedAt: { $exists: false } }, { $set: { revokedAt: new Date() } });
+    const passwordHash = await bcrypt.hash(request.newPassword, 12);
+    const updated = await this.users.updateOne({ _id: userId, passwordHash: user.passwordHash, disabled: false, status: 'active', deletedAt: { $exists: false } }, {
+      $set: { passwordHash, passwordResetCompletedAt: new Date() },
+      $unset: { passwordResetHash: 1, passwordResetExpiresAt: 1, passwordResetIssuedAt: 1 },
+    });
+    if (!updated.modifiedCount) throw new UnauthorizedException('The password changed during this request. Please sign in again.');
+    await this.sessions.updateMany({ userId, refreshTokenJti: { $ne: currentTokenId }, revokedAt: { $exists: false }, $or: [{ authVersion: { $lte: user.authVersion ?? 0 } }, { authVersion: { $exists: false } }] }, { $set: { revokedAt: new Date() } });
     await this.auditLogs.record({ actorId: userId, action: 'auth.password_changed', targetType: 'user', targetId: userId, ...context });
   }
 
@@ -231,6 +217,7 @@ export class AuthService {
       audience: this.config.getOrThrow<string>('jwt.audience')
     });
     const user = await this.findActiveUser(payload.sub);
+    if ((payload.authVersion ?? 0) !== (user.authVersion ?? 0)) throw new UnauthorizedException('Session was revoked by account recovery');
     const activeSession = await this.sessions.exists({
       userId: payload.sub,
       refreshTokenJti: payload.tokenId,
@@ -241,6 +228,17 @@ export class AuthService {
       throw new UnauthorizedException('Session is no longer active');
     }
     return { ...payload, email: user.email, roles: user.roles?.length ? user.roles : ['STUDENT'], permissions: await this.effectivePermissions(user), ...(user.adminRoleId ? { adminRoleId: user.adminRoleId } : {}) };
+  }
+
+  /** One account lookup per node sweep, rather than a database read for every media signal. */
+  async revokedSocketSessions(sessions: Array<{ socketId: string; userId: string; authVersion: number }>): Promise<string[]> {
+    if (!sessions.length) return [];
+    const users = await this.users.find({ _id: { $in: [...new Set(sessions.map(session => session.userId))] } }).select('_id authVersion status disabled deletedAt').lean();
+    const accounts = new Map(users.map(user => [String(user._id), user]));
+    return sessions.filter(session => {
+      const account = accounts.get(session.userId);
+      return !account || account.disabled || account.status !== 'active' || account.deletedAt || (account.authVersion ?? 0) !== session.authVersion;
+    }).map(session => session.socketId);
   }
 
   private async effectivePermissions(user: UserMongoDocument): Promise<string[]> {
@@ -262,10 +260,11 @@ export class AuthService {
     const refreshTtl = this.config.get<string>('jwt.refreshTtl', '7d') as never;
     const roles = user.roles?.length ? user.roles : ['STUDENT'];
     const permissions = await this.effectivePermissions(user);
-    const payload = { sub: user.id, email: user.email, roles, permissions };
+    const payload = { sub: user.id, email: user.email, roles, permissions, authVersion: user.authVersion ?? 0 };
     const refreshToken = await this.jwt.signAsync({ ...payload, tokenId: sessionTokenId }, { ...this.refreshVerifyOptions(), expiresIn: refreshTtl });
     await this.sessions.create({
       userId: user.id,
+      authVersion: user.authVersion ?? 0,
       refreshTokenHash: await bcrypt.hash(refreshToken, 12),
       refreshTokenJti: sessionTokenId,
       ipAddress: context.ipAddress,
@@ -327,10 +326,6 @@ export class AuthService {
 
   private permissionsForRoles(roles: string[]): string[] {
     return [...new Set(roles.flatMap((role) => ROLE_PERMISSION_MAP[role as keyof typeof ROLE_PERMISSION_MAP] ?? []))];
-  }
-
-  private hashOpaqueToken(token: string): string {
-    return createHash('sha256').update(token).digest('hex');
   }
 
   private refreshVerifyOptions(): { secret: string; issuer: string; audience: string } {

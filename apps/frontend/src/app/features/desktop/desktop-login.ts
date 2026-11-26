@@ -21,6 +21,7 @@ import { DesktopService } from './desktop.service';
         @if (auth.sessionNotice()) { <p class="notice" role="status">{{ auth.sessionNotice() }}</p> }
         <button class="primary full" type="submit" [disabled]="pending() || !email.trim() || !password">{{ pending() ? 'Signing in…' : 'Sign in' }}</button>
       </form>
+      <button class="quiet" type="button" (click)="desktop.website('/forgot-password')">Forgot your password?</button>
       <p class="muted small">Use your existing teacher or student account.</p><button class="quiet" (click)="desktop.website()">Manage your account on the website</button>
     </section></main>
   `

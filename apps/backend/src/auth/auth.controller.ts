@@ -1,3 +1,4 @@
+import { Throttle } from '@nestjs/throttler';
 import { Body, Controller, Get, HttpCode, HttpStatus, Ip, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
@@ -92,14 +93,16 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Request password reset instructions' })
   @ApiBody({ type: ForgotPasswordDto })
-  forgotPassword(@Body() body: ForgotPasswordDto, @Ip() ipAddress: string, @Req() request: Request): Promise<{ resetToken?: string }> {
-    return this.auth.forgotPassword(body.email, { ipAddress, userAgent: request.headers['user-agent'] });
+  forgotPassword(@Body() body: ForgotPasswordDto): Promise<void> {
+    return this.auth.forgotPassword(body.email);
   }
 
   @Post('reset-password')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Reset password using a reset token' })
   @ApiBody({ type: ResetPasswordDto })

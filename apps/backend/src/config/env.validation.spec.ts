@@ -15,6 +15,7 @@ const productionConfig = {
   PUBLIC_URL: 'https://sfu.example.com',
   NODE_PUBLIC_URL: 'https://node-a.sfu.example.com',
   FRONTEND_URL: 'https://app.example.com',
+  ADMIN_PORTAL_URL: 'https://admin.example.com',
   CORS_ALLOWED_ORIGINS: 'https://app.example.com',
   TURN_URIS: 'turn:sfu.example.com:3478?transport=udp,turn:sfu.example.com:3478?transport=tcp,turns:sfu.example.com:5349?transport=tcp',
   ICE_ANNOUNCED_ADDRESS: '203.0.113.10',

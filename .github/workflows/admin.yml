@@ -91,6 +91,8 @@ jobs:
         run: npm run test:p2:browser
       - name: Verify Google and Apple sign-in in Chromium, Firefox and WebKit
         run: npm run test:social:browser
+      - name: Verify account recovery, mail retry, expiry and cross-node session revocation
+        run: npm run test:recovery:browser
       - name: Collect test service diagnostics
         if: always()
         run: |
@@ -108,6 +110,8 @@ jobs:
             reports/p0/
             test-results/p0/
             reports/p1/
+            reports/recovery/
+            test-results/recovery/
             reports/social/
             test-results/social/
             reports/p2/

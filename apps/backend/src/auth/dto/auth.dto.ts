@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsJWT, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsJWT, Matches, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @ApiProperty({ example: 'Ada Lovelace' })
@@ -60,16 +60,14 @@ export class ForgotPasswordDto {
 }
 
 export class ResetPasswordDto {
-  @ApiProperty({ example: 'a389d4bc-0f0f-4fc6-8111-729806fcf4be' })
-  @IsString()
-  @MinLength(16)
-  @MaxLength(512)
+  @ApiProperty({ description: 'Single-use token delivered by email', minLength: 64, maxLength: 64 })
+  @Matches(/^[a-f0-9]{64}$/)
   token!: string;
 
-  @ApiProperty({ example: 'NewStrongPassword@123', minLength: 8 })
+  @ApiProperty({ minLength: 10, maxLength: 72 })
   @IsString()
-  @MinLength(8)
-  @MaxLength(128)
+  @MinLength(10)
+  @MaxLength(72)
   password!: string;
 }
 

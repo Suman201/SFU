@@ -43,8 +43,8 @@ export class EmailNotificationService {
       return result;
     } catch (error) {
       result.failed = recipients.length;
-      result.errors.push(this.safeError(error));
-      this.logger.warn(`SMTP send failed: ${this.safeError(error)}`);
+      result.errors.push(message.sensitive ? 'Sensitive email delivery failed.' : this.safeError(error));
+      this.logger.warn(message.sensitive ? 'Sensitive email delivery failed.' : `SMTP send failed: ${this.safeError(error)}`);
       return result;
     }
   }

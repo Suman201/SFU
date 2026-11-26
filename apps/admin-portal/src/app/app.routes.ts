@@ -2,6 +2,8 @@ import { Routes } from '@angular/router';
 import { adminGuard, adminFeatureGuard, guestGuard } from './core/services/auth.guards';
 
 export const routes: Routes = [
+  { path: 'forgot-password', data: { mode: 'request' }, loadComponent: () => import('./features/auth/recovery/password-recovery').then(module => module.AdminPasswordRecovery) },
+  { path: 'reset-password', data: { mode: 'reset' }, loadComponent: () => import('./features/auth/recovery/password-recovery').then(module => module.AdminPasswordRecovery) },
   { path: 'error-encyclopedia', loadComponent: () => import('./features/error-encyclopedia/error-encyclopedia').then(m => m.ErrorEncyclopedia) },
   { path: 'error-encyclopedia/:code', loadComponent: () => import('./features/error-encyclopedia/error-encyclopedia').then(m => m.ErrorEncyclopedia) },
   {

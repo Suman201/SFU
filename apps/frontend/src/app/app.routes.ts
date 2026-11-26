@@ -3,6 +3,8 @@ import { authGuard, guestGuard, roleGuard } from './core/services/auth.guards';
 import { RoomComponent } from './features/room/room.component';
 
 export const routes: Routes = [
+  { path: 'forgot-password', data: { mode: 'request' }, loadComponent: () => import('./features/auth/recovery/password-recovery').then(module => module.PasswordRecovery) },
+  { path: 'reset-password', data: { mode: 'reset' }, loadComponent: () => import('./features/auth/recovery/password-recovery').then(module => module.PasswordRecovery) },
   { path: 'auth/social/callback', loadComponent: () => import('./features/auth/social/social-callback').then(module => module.SocialCallback) },
   { path: 'pages/:slug', loadComponent: () => import('./features/cms/public-cms-page').then(module => module.PublicCmsPage) },
   { path: 'whiteboard', loadComponent: () => import('./shared/whiteboard/whiteboard').then((module) => module.Whiteboard) },

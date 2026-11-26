@@ -20,6 +20,7 @@ export async function startAcceptanceStack(
     localSmtpPort?: number;
     paymentsEnabled?: boolean;
     socialAuthEnabled?: boolean;
+    adminPortalUrl?: string;
   } = {},
 ) {
   const uri = new URL(process.env.MONGODB_URI ?? 'mongodb://invalid/missing');
@@ -39,6 +40,7 @@ export async function startAcceptanceStack(
     GOOGLE_AUTH_ENABLED: options.socialAuthEnabled ? 'true' : 'false',
     APPLE_AUTH_ENABLED: options.socialAuthEnabled ? 'true' : 'false',
     SMTP_ENABLED: options.localSmtpPort ? 'true' : 'false',
+    ADMIN_PORTAL_URL: options.adminPortalUrl ?? 'http://127.0.0.1:4300',
     PAYMENTS_ENABLED: options.paymentsEnabled ? 'true' : 'false',
     PAYMENT_GATEWAY: 'test',
     BOOKINGS_ENABLED: 'false',

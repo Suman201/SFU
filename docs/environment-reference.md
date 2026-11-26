@@ -6,6 +6,7 @@ Generate with `npm run docs:environment`; CI verifies freshness with `npm run re
 
 | Variable | Example/default in template | Notes | Source |
 | --- | --- | --- | --- |
+| `ADMIN_PORTAL_URL` | http://localhost:4300 | See the associated configuration section and deployment guide. | [source](../apps/backend/src/config/app.config.ts), [source](../apps/backend/src/config/env.validation.ts) |
 | `ALERTMANAGER_WEBHOOK_URL_FILE` | (not in template) | Configured by the referenced runtime or deployment source; inspect that source for bounds and required combinations. | [source](../infra/docker-compose.prod.yml) |
 | `APPLE_AUTH_CLIENT_ID` | (empty) | See the associated configuration section and deployment guide. | [source](../apps/backend/src/config/app.config.ts), [source](../apps/backend/src/config/env.validation.ts) |
 | `APPLE_AUTH_ENABLED` | false | See the associated configuration section and deployment guide. | [source](../apps/backend/src/config/app.config.ts), [source](../apps/backend/src/config/env.validation.ts) |
@@ -34,7 +35,7 @@ Generate with `npm run docs:environment`; CI verifies freshness with `npm run re
 | `EVENT_RETENTION_CLEANUP_INTERVAL_MS` | 3600000 | See the associated configuration section and deployment guide. | [source](../apps/backend/src/config/app.config.ts), [source](../apps/backend/src/config/env.validation.ts) |
 | `FFMPEG_PATH` | (not in template) | Configured by the referenced runtime or deployment source; inspect that source for bounds and required combinations. | [source](../apps/backend/src/config/app.config.ts), [source](../apps/backend/src/desktop/desktop.service.ts), [source](../apps/backend/src/ingest/ingest.service.ts) |
 | `FFPROBE_PATH` | (not in template) | Configured by the referenced runtime or deployment source; inspect that source for bounds and required combinations. | [source](../apps/backend/src/config/app.config.ts), [source](../apps/backend/src/desktop/desktop.service.ts), [source](../apps/backend/src/ingest/ingest.service.ts) |
-| `FRONTEND_URL` | http://localhost:4200 | See the associated configuration section and deployment guide. | [source](../apps/backend/src/config/app.config.ts), [source](../apps/backend/src/config/env.validation.ts), [source](../apps/backend/src/teaching-catalog/tutor-notices.service.ts) |
+| `FRONTEND_URL` | http://localhost:4200 | Canonical recovery email origins. Production SMTP requires HTTPS origins for both portals. | [source](../apps/backend/src/config/app.config.ts), [source](../apps/backend/src/config/env.validation.ts), [source](../apps/backend/src/teaching-catalog/tutor-notices.service.ts) |
 | `GOOGLE_AUTH_CLIENT_ID` | (empty) | See the associated configuration section and deployment guide. | [source](../apps/backend/src/config/app.config.ts), [source](../apps/backend/src/config/env.validation.ts) |
 | `GOOGLE_AUTH_CLIENT_SECRET` | Set privately; value omitted | See the associated configuration section and deployment guide. | [source](../apps/backend/src/config/app.config.ts), [source](../apps/backend/src/config/env.validation.ts) |
 | `GOOGLE_AUTH_CLIENT_SECRET_FILE` | Set privately; value omitted | See the associated configuration section and deployment guide. | [source](../apps/backend/src/config/app.config.ts) |

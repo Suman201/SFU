@@ -239,6 +239,13 @@ export class UserDocument {
   @Prop({ select: false })
   passwordHash?: string;
 
+  // Missing legacy versions are read as zero; a schema default could be written back by a stale save.
+  @Prop({ type: Number }) authVersion?: number;
+  @Prop({ type: String, select: false, unique: true, sparse: true }) passwordResetHash?: string;
+  @Prop({ type: Date, select: false }) passwordResetExpiresAt?: Date;
+  @Prop({ type: Date, select: false }) passwordResetIssuedAt?: Date;
+  @Prop({ type: Date, select: false }) passwordResetCompletedAt?: Date;
+
   @Prop({ type: String, select: false, unique: true, sparse: true }) googleSubject?: string;
   @Prop({ type: String, select: false, unique: true, sparse: true }) appleSubject?: string;
 
@@ -1667,6 +1674,7 @@ UserRoleSchema.index({ userId: 1, roleId: 1 }, { unique: true });
 
 @Schema({ collection: 'sessions', timestamps: true })
 export class SessionDocument {
+  @Prop({ type: Number }) authVersion?: number;
   @Prop({ required: true, index: true })
   userId!: string;
 
