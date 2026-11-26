@@ -19,7 +19,7 @@ test('versioned CMS, readonly history, contact delivery and audit privacy use re
   const folder = path.resolve('reports/p2', info.project.name);
   await mkdir(folder, { recursive: true });
   const nonce = randomUUID();
-  const title = 'P2 legal acceptance ' + nonce;
+  const title = 'P2 legal acceptance ' + nonce + ' ' + 'PolicyVersion'.repeat(5);
   const slug = 'p2-policy-' + nonce;
   const body1 = 'Published legal fixture one ' + nonce;
   const body2 = 'Private draft fixture two ' + nonce;
@@ -139,13 +139,21 @@ test('versioned CMS, readonly history, contact delivery and audit privacy use re
     await editor.locator('.section-builder').scrollIntoViewIfNeeded();
     await editor.screenshot({ path: path.join(folder, 'cms-editor-desktop.png'), fullPage: true });
     await editor.setViewportSize({ width: 390, height: 844 });
-    const layout = await editor.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: innerWidth, boxes: [...document.querySelectorAll('.cms-editor-shell,.cms-editor,.permission-fieldset,.section-builder,.field-grid,.cms-preview')].map(el => ({ element: el.className, width: el.getBoundingClientRect().width, right: el.getBoundingClientRect().right })) }));
+    const layout = await editor.evaluate(() => {
+      const describe = (el: Element) => { const rect = el.getBoundingClientRect(), style = getComputedStyle(el); return { element: el.tagName + '.' + el.className, parent: el.parentElement?.className, control: el.getAttribute('formcontrolname'), width: rect.width, right: rect.right, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, overflow: style.overflowX, whiteSpace: style.whiteSpace, position: style.position }; };
+      const offenders = [...document.querySelectorAll('body *')].filter(el => { const rect = el.getBoundingClientRect(); return rect.width > 0 && !el.closest('.data-table-wrap') && (rect.right > innerWidth + 1 || (getComputedStyle(el).overflowX === 'visible' && el.scrollWidth > el.clientWidth + 1)); });
+      return { width: document.documentElement.scrollWidth, viewport: innerWidth, offenders: offenders.map(describe).slice(-24) };
+    });
     await expect.poll(() => editor.evaluate(() => document.documentElement.scrollWidth), { message: JSON.stringify(layout) }).toBeLessThanOrEqual(layout.viewport);
     await setAccessibilityTheme(editor, 'dark');
     expect((await new AxeBuilder({ page: editor }).include('.section-builder').withRules(['button-name', 'label', 'color-contrast']).analyze()).violations).toEqual([]);
     await editor.screenshot({ path: path.join(folder, 'cms-editor-mobile.png'), fullPage: true });
     await publicPage.reload(); await publicPage.setViewportSize({ width: 768, height: 1024 });
+    await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(768);
     await publicPage.screenshot({ path: path.join(folder, 'cms-public-tablet.png'), fullPage: true });
+    await publicPage.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await publicPage.screenshot({ path: path.join(folder, 'cms-public-mobile.png'), fullPage: true });
     await editor.goto(admin.origin + '/audit-logs');
     await expect(editor.getByRole('heading', { name: /Audit/ }).first()).toBeVisible();
     await editor.screenshot({ path: path.join(folder, 'audit-explorer-mobile.png'), fullPage: true });

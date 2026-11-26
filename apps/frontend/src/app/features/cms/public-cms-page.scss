@@ -293,3 +293,6 @@
     padding-top: 36px;
   }
 }
+
+.cms-hero { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.cms-hero h1 { min-width: 0; max-width: min(840px, 100%); overflow-wrap: anywhere; }

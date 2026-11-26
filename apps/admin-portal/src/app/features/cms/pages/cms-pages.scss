@@ -245,3 +245,8 @@
 .cms-editor-shell, .cms-editor, .cms-preview { min-width: 0; max-width: 100%; }
 .cms-editor { grid-template-columns: minmax(0, 1fr); }
 .cms-editor input, .cms-editor select, .cms-editor textarea { min-width: 0; }
+
+.editor-head > div { min-width: 0; max-width: 100%; }
+.cms-preview, .preview-sections { grid-template-columns: minmax(0, 1fr); }
+.cms-preview > *, .preview-sections > * { min-width: 0; max-width: 100%; }
+.editor-head h2, .preview-head h2, .preview-head small { overflow-wrap: anywhere; }

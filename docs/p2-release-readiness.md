@@ -54,7 +54,7 @@ The multi-node regression includes idempotent per-process producer, consumer and
 - Backend: 68 suites and 810 tests. Learning portal: 237 tests. Admin: 12 tests. Native worker lifecycle: 13 tests. Admin/payment integration: 32 scenarios.
 - All three P0 journeys pass, including actual SFU video, recording, reconnect, authorized playback, private questions, invoices and calendar delivery.
 - All six P1 checks pass, including two-node recovery/isolation, native UDP pipes in both directions and private historical Q&A in Chromium, Firefox and WebKit. Final native and local transport counts return to zero. Producer and consumer gauges also return to zero, including owner-side remote teardown.
-- P2 classroom acceptance and all three CMS/contact/audit browser workflows pass. CMS was rechecked in all engines after correcting Firefox intrinsic grid sizing at 390px. Focused accessibility scans report no violations for the selected rules and regions; actual desktop, phone and tablet screenshots were reviewed.
+- P2 classroom acceptance and all three CMS/contact/audit browser workflows pass. CMS was rechecked in headless Linux Chromium, Firefox and WebKit against the local backend after correcting intrinsic heading and preview sizing. A deterministic long-title fixture verifies editor, preview and public-page wrapping at phone/tablet widths. Focused accessibility scans report no violations for the selected rules and regions; actual desktop, phone and tablet screenshots were reviewed.
 
 These results describe isolated local fixtures. The deployment and independent operator gates below remain open.
 
