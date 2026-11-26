@@ -84,8 +84,10 @@ jobs:
       - name: Verify paid learning, media, recording, Q&A, calendar and invoice delivery
         run: npm run test:p0:browser
       - name: Verify P1 private threads, multi-node isolation, native pipes and bounded recovery
+        id: p1_acceptance
         run: npm run test:p1:browser
       - name: Verify P2 publication history, contact, audit, policies and accessibility
+        if: ${{ success() || (failure() && steps.p1_acceptance.outcome == 'failure') }}
         run: npm run test:p2:browser
       - name: Collect test service diagnostics
         if: always()

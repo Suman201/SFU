@@ -23,6 +23,28 @@ describe('RoomsService', () => {
     expect(metrics.activeTransports.dec).toHaveBeenCalledTimes(2);
   });
 
+  it.each(['producer_first', 'room_first', 'concurrent'] as const)('releases each locally counted producer once during overlapping cleanup: %s', async order => {
+    const { service, producers, media, metrics, emitSignal } = createService();
+    const counted = (service as any).locallyCountedProducers as Map<string, object>;
+    counted.set('producer-1', { roomId: 'room-1', participantId: 'publisher-1', kind: 'video' });
+    counted.set('other-producer', { roomId: 'other-room', participantId: 'other-publisher', kind: 'audio' });
+    producers.findById.mockResolvedValue(fakeProducerDoc({ nodeId: 'node-a' }));
+    jest.spyOn(service as any, 'requireRoomOwnerLookup').mockResolvedValue(ownerLookup(true));
+    jest.spyOn(service as any, 'assertCanControlProducer').mockResolvedValue(undefined);
+    // Native summaries can overlap, and may include a producer counted elsewhere.
+    media.closeRoom.mockResolvedValue({ participantIds: [], transportCount: 0, consumerCount: 0, pipeTransportCount: 0, producerCounts: { video: 2 } });
+    const close = () => service.closeProducer('producer-1', 'publisher-1');
+    const room = () => (service as any).cleanupDistributedClosedRoom('room-1');
+    if (order === 'producer_first') { await close(); await room(); }
+    else if (order === 'room_first') { await room(); await close(); }
+    else await Promise.all([close(), room()]);
+    await close(); await room();
+    emitSignal({ sourceNodeId: 'node-b', roomId: 'room-1', event: 'producer:closed', payload: ['producer-1'] });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(metrics.activeProducers.labels.mock.results[0]?.value.dec).toHaveBeenCalledTimes(1);
+    expect([...counted.keys()]).toEqual(['other-producer']);
+  });
+
   it('does not close media when an old disconnect loses the atomic socket claim to a reconnect', async () => {
     const { service, participants, media, metrics } = createService();
     participants.findById.mockResolvedValue({ id: 'participant', roomId: 'room-1', socketId: 'old-socket' });
@@ -1543,7 +1565,7 @@ describe('RoomsService', () => {
   });
 
   it('coordinates remote-origin teardown when the owner closes a remotely hosted producer', async () => {
-    const { service, producers, media, pipeCoordinator } = createService();
+    const { service, producers, media, pipeCoordinator, metrics } = createService();
     const producer = fakeProducerDoc({ nodeId: 'node-b' });
     producers.findById.mockResolvedValue(producer);
     pipeCoordinator.closeOriginProducer.mockResolvedValue(true);
@@ -1559,6 +1581,7 @@ describe('RoomsService', () => {
     });
     expect(media.unregisterProducer).not.toHaveBeenCalled();
     expect(result.status).toBe('closed');
+    expect(metrics.activeProducers.labels).not.toHaveBeenCalled();
   });
 
   it('asserts local room ownership before mutating a producer hosted on another node from a non-owner node', async () => {
@@ -5011,6 +5034,7 @@ describe('RoomsService', () => {
   it('cleans up distributed local room state when a room is closed on another node', async () => {
     const { service, media, pipeCoordinator, metrics, emitSignal } = createService();
     (service as any).locallyCountedTransports.set('local-transport', { roomId: 'room-1', participantId: 'participant-1' });
+    (service as any).locallyCountedProducers.set('producer-1', { roomId: 'room-1', participantId: 'participant-1', kind: 'video' });
     (service as any).locallyCountedConsumers.set('local-consumer', { roomId: 'room-1', producerId: 'producer-1', participantId: 'participant-local-1' });
     (service as any).locallyCountedConsumers.set('other-consumer', { roomId: 'other-room', producerId: 'other-producer', participantId: 'other-participant' });
     media.closeRoom.mockResolvedValue({
@@ -5042,6 +5066,7 @@ describe('RoomsService', () => {
   it('decrements active room entity gauges when a room is explicitly closed', async () => {
     const { service, participants, producers, consumers, media, nodeRegistry, metrics, pipeCoordinator } = createService();
     (service as any).locallyCountedTransports.set('local-transport', { roomId: 'room-1', participantId: 'participant-1' });
+    (service as any).locallyCountedProducers.set('producer-1', { roomId: 'room-1', participantId: 'participant-1', kind: 'video' });
     (service as any).locallyCountedConsumers.set('consumer-one', { roomId: 'room-1' });
     (service as any).locallyCountedConsumers.set('consumer-two', { roomId: 'room-1' });
     const summary = summaryState();
@@ -5156,6 +5181,7 @@ describe('RoomsService', () => {
   it('clears worker-room quarantine after room failure cleanup completes', async () => {
     const { service, rooms, participants, producers, consumers, redis, media, nodeRegistry, pipeCoordinator, metrics } = createService();
     (service as any).locallyCountedTransports.set('local-transport', { roomId: 'room-1', participantId: 'participant-1' });
+    (service as any).locallyCountedProducers.set('producer-1', { roomId: 'room-1', participantId: 'participant-1', kind: 'video' });
     (service as any).locallyCountedConsumers.set('consumer-one', { roomId: 'room-1' });
     const summary = summaryState();
     (service as any).roomQualitySummaryStates.set('room-1', summary);
@@ -5269,6 +5295,9 @@ describe('RoomsService', () => {
     rooms.findById.mockResolvedValue(room);
     participants.findOne.mockResolvedValue(participant);
 
+    platformEvents.appendEvent.mockImplementation(async (event: any) => {
+      if (event.type === 'producer.created') expect(metrics.activeProducers.labels.mock.results[0]?.value.inc).toHaveBeenCalledTimes(1);
+    });
     const producer = await service.createIngestProducer({
       roomId: 'room-1',
       participantId: 'ingest-participant-1',

@@ -46,14 +46,14 @@ node scripts/p0-ci-services.cjs down
 
 The browser wrapper allows only its owned loopback replica set and Redis database, uses synthetic users, and disables external payment providers. P2 enables email only to a loopback sink. CMS/contact/history acceptance runs in Chromium, Firefox and WebKit; classroom device acceptance uses headless Chromium fake devices. Reports and actual screenshots are saved in ignored `reports/p2/`; CI retains these with logs and failure traces. The setup idempotency check runs repeatedly against existing fixture data. CI also gates existing admin/payment integration, scanner and recovery drills.
 
-The multi-node regression includes idempotent per-process transport accounting and atomic disconnect ownership: a stale socket cannot remove a replacement participant, and overlapping cleanup cannot decrement a native transport twice. Bounded two-node tests establish no production capacity claim.
+The multi-node regression includes idempotent per-process producer, consumer and transport accounting and atomic disconnect ownership: a stale socket cannot remove a replacement participant, and overlapping cleanup cannot decrement a native transport twice. Bounded two-node tests establish no production capacity claim.
 
 ## Local verification on 26 November 2026
 
 - Full production build chain, reviewed contract baseline and release inventory checks pass.
-- Backend: 68 suites and 807 tests. Learning portal: 237 tests. Admin: 12 tests. Native worker lifecycle: 13 tests. Admin/payment integration: 32 scenarios.
+- Backend: 68 suites and 810 tests. Learning portal: 237 tests. Admin: 12 tests. Native worker lifecycle: 13 tests. Admin/payment integration: 32 scenarios.
 - All three P0 journeys pass, including actual SFU video, recording, reconnect, authorized playback, private questions, invoices and calendar delivery.
-- All six P1 checks pass, including two-node recovery/isolation, native UDP pipes in both directions and private historical Q&A in Chromium, Firefox and WebKit. Final native and local transport counts return to zero.
+- All six P1 checks pass, including two-node recovery/isolation, native UDP pipes in both directions and private historical Q&A in Chromium, Firefox and WebKit. Final native and local transport counts return to zero. Producer and consumer gauges also return to zero, including owner-side remote teardown.
 - P2 classroom acceptance and all three CMS/contact/audit browser workflows pass. CMS was rechecked in all engines after correcting Firefox intrinsic grid sizing at 390px. Focused accessibility scans report no violations for the selected rules and regions; actual desktop, phone and tablet screenshots were reviewed.
 
 These results describe isolated local fixtures. The deployment and independent operator gates below remain open.

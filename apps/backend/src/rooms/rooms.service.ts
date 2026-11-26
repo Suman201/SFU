@@ -564,6 +564,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly roomClosedEventListeners = new Set<(roomId: string) => void>();
   private readonly chatReadReceiptEventListeners = new Set<(delivery: ChatReadDeliveryResult) => void>();
   private readonly locallyCountedTransports = new Map<string, { roomId: string; participantId: string }>();
+  private readonly locallyCountedProducers = new Map<string, Pick<Producer, 'roomId' | 'participantId' | 'kind'>>();
   private readonly locallyCountedConsumers = new Map<string, Pick<Consumer, 'roomId' | 'producerId' | 'participantId'>>();
   private readonly whiteboardControlByRoomId = new Map<string, WhiteboardControlState>();
   private readonly whiteboardLockByRoomId = new Map<string, WhiteboardLockState>();
@@ -1233,6 +1234,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     await this.redis.removePresence(roomId, participantId);
     await this.media.closeParticipantTransports(participantId);
     this.releaseLocalTransportMetrics(transport => transport.participantId === participantId);
+    this.releaseLocalProducerMetrics(producer => producer.participantId === participantId);
     this.releaseLocalConsumerMetrics(consumer => consumer.participantId === participantId || participantProducerIds.includes(consumer.producerId));
     if (this.pipeCoordinator.isEnabled()) {
       for (const consumer of uniqueConsumerDocs([...participantConsumers, ...producerConsumers])) {
@@ -1657,6 +1659,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       createdAt: new Date().toISOString()
     };
     await this.media.registerProducer(producer);
+    this.countLocalProducer(producer);
     if (producer.dynacast) {
       producerDoc.dynacastState = producer.dynacast as unknown as Record<string, unknown>;
     }
@@ -1664,7 +1667,6 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       producerDoc.svcState = producer.svc as unknown as Record<string, unknown>;
     }
     await producerDoc.save();
-    this.metrics.activeProducers.labels(request.kind).inc();
     await this.platformEvents.appendEvent({
       type: 'producer.created',
       roomId: request.roomId,
@@ -1846,6 +1848,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     try {
       await this.media.registerProducer(producer);
       registered = true;
+      this.countLocalProducer(producer);
       if (!ownerLookup.local && this.pipeCoordinator.isEnabled()) {
         await this.pipeCoordinator.ensureRemoteProducerPublication({ roomId: request.roomId, producer });
       }
@@ -1903,7 +1906,6 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       if (request.kind === 'screen') {
         closedProducerIds.push(...await this.closeExistingParticipantScreenProducers(request.roomId, participantId, producerDoc.id));
       }
-      this.metrics.activeProducers.labels(request.kind).inc();
       return {
         ...this.toProducer(producerDoc),
         ...(closedProducerIds.length ? { closedProducerIds } : {})
@@ -1918,7 +1920,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
         await producerDoc.save().catch(() => undefined);
       }
       if (registered) {
-        await this.media.unregisterProducer(producer.id).catch(() => undefined);
+        await this.media.unregisterProducer(producer.id).then(() => this.releaseLocalProducerMetric(producer.id)).catch(() => undefined);
       }
       if (persisted && request.kind === 'screen') {
         await this.runProducerCleanup(producer.id, 'screen sharing state', async () => {
@@ -2298,7 +2300,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
         await this.refreshParticipantScreenSharing(producer.roomId, producer.participantId);
       });
     }
-    this.metrics.activeProducers.labels(producer.kind).dec();
+    this.releaseLocalProducerMetric(producer.id);
     await this.runProducerCleanup(producerId, 'closure event', async () => {
       await this.platformEvents.appendEvent({
         type: 'producer.closed',
@@ -3172,7 +3174,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
         continue;
       }
       locallyAffectedParticipantIds.add(producer.participantId);
-      this.metrics.activeProducers.labels(producer.kind).dec();
+      this.releaseLocalProducerMetric(producer.id);
     }
     for (const participant of participants) {
       if (participant.nodeId !== localNodeId && !locallyAffectedParticipantIds.has(participant.id)) {
@@ -3182,6 +3184,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     }
     this.releaseLocalConsumerMetrics(consumer => consumer.roomId === failure.roomId);
     this.releaseLocalTransportMetrics(transport => transport.roomId === failure.roomId);
+    this.releaseLocalProducerMetrics(producer => producer.roomId === failure.roomId);
     const event: RoomFailureEvent = {
       roomId: failure.roomId,
       reason: failure.reason,
@@ -7167,6 +7170,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     await this.redis.removePresence(session.roomId, participant.id);
     await this.media.closeParticipantTransports(participant.id);
     this.releaseLocalTransportMetrics(transport => transport.participantId === participant.id);
+    this.releaseLocalProducerMetrics(producer => producer.participantId === participant.id);
     this.releaseLocalConsumerMetrics(consumer => consumer.participantId === participant.id || activeProducerIds.includes(consumer.producerId));
     await this.classSessions.updateOne(
       { _id: session.id, status: 'live' },
@@ -8355,6 +8359,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       return;
     }
     if (signal.event === 'producer:closed' && typeof payload === 'string') {
+      this.releaseLocalProducerMetric(payload);
       this.releaseLocalConsumerMetrics(consumer => consumer.producerId === payload);
       this.markObservabilityTombstone(this.distributedProducerTombstones, payload);
       this.distributedProducerQualityStates.delete(payload);
@@ -8476,6 +8481,21 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     this.metrics.activeParticipants.labels(roomId).set(0);
   }
 
+  private countLocalProducer(producer: Pick<Producer, 'id' | 'roomId' | 'participantId' | 'kind'>): void {
+    if (this.locallyCountedProducers.has(producer.id)) return;
+    this.locallyCountedProducers.set(producer.id, { roomId: producer.roomId, participantId: producer.participantId, kind: producer.kind });
+    this.metrics.activeProducers.labels(producer.kind).inc();
+  }
+
+  private releaseLocalProducerMetric(producerId: string): void {
+    const producer = this.locallyCountedProducers.get(producerId);
+    if (producer && this.locallyCountedProducers.delete(producerId)) this.metrics.activeProducers.labels(producer.kind).dec();
+  }
+
+  private releaseLocalProducerMetrics(matches: (producer: Pick<Producer, 'roomId' | 'participantId' | 'kind'>) => boolean): void {
+    for (const [id, producer] of this.locallyCountedProducers) if (matches(producer)) this.releaseLocalProducerMetric(id);
+  }
+
   private releaseLocalTransportMetrics(matches: (transport: { roomId: string; participantId: string }) => boolean): void {
     for (const [id, transport] of this.locallyCountedTransports) {
       if (matches(transport) && this.locallyCountedTransports.delete(id)) this.metrics.activeTransports.dec();
@@ -8496,11 +8516,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
         this.metrics.activeParticipants.labels(roomId).dec();
       }
     }
-    for (const [kind, count] of Object.entries(cleanup.producerCounts)) {
-      for (let index = 0; index < count; index += 1) {
-        this.metrics.activeProducers.labels(kind).dec();
-      }
-    }
+    this.releaseLocalProducerMetrics(producer => producer.roomId === roomId);
     this.releaseLocalConsumerMetrics(consumer => consumer.roomId === roomId);
     this.releaseLocalTransportMetrics(transport => transport.roomId === roomId);
   }
