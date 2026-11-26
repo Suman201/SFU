@@ -1,3 +1,4 @@
+import { SocialButtons } from '../social/social-buttons';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -26,7 +27,7 @@ interface RegisterFormModel {
 @Component({
   selector: 'sfu-register',
   standalone: true,
-  imports: [AuthLayout, FormField, FormRoot, RouterLink],
+  imports: [SocialButtons, AuthLayout, FormField, FormRoot, RouterLink],
   templateUrl: './register.html',
   styleUrl: './register.scss',
   changeDetection: ChangeDetectionStrategy.Eager,

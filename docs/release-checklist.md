@@ -13,7 +13,7 @@ Copy this checklist into the release record. Fill each evidence field with the c
 
 - [ ] Record a current encrypted backup and target-storage restore proof before applying changes.
 - [ ] Verify target MongoDB replica set/mongos and transaction support; no standalone publication fallback.
-- [ ] Review `setup:cms`, `setup:payments`, `setup:invoices`, `setup:scheduling`, `setup:bookings` and `setup:admin-operations` for the actual changes in the release. Run only applicable scripts on the reviewed target.
+- [ ] Review `setup:cms`, `setup:payments`, `setup:invoices`, `setup:scheduling`, `setup:bookings` and `setup:admin-operations` and `setup:social-auth` for the actual changes in the release. Run only applicable scripts on the reviewed target.
 - [ ] Run applicable setup twice, inspect unique-index diagnostics and compare row counts/content. Resolve duplicate data explicitly; never delete records to force index creation.
 - [ ] Confirm existing published pages, active sessions, reservations, invoices and recordings remain accessible only to permitted users.
 - [ ] Coordinate backend/admin rollout for CMS working-copy semantics; do not expose draft fields through old public handlers.
@@ -24,6 +24,7 @@ Copy this checklist into the release record. Fill each evidence field with the c
 - [ ] Verify publish, private draft edit, stale-write rejection, restore-to-draft and explicit republish on approved staging content.
 - [ ] Verify readonly staff can inspect history and cannot write, support replies reach the configured receiver, and audit entries exclude content bodies/secrets.
 - [ ] Verify teacher preset, locked entry/admission, student permission feedback, keyboard focus/Escape, English/Hindi controls, media, reconnect and whiteboard legibility.
+- [ ] When enabling Google/Apple, complete the [social sign-in live checklist](social-sign-in.md), provision identity/replay/TTL indexes, and verify teacher review and account-linking boundaries with real provider accounts.
 - [ ] Capture actual staging TURN/ingress, provider and physical-device/screen-reader checks as applicable.
 
 ## Rollback
@@ -32,6 +33,7 @@ Copy this checklist into the release record. Fill each evidence field with the c
 - [ ] Drain the affected node and preserve live-session/recording recovery before replacing application processes; use the operator runbook.
 - [ ] Preserve additive CMS history collections/indexes and published snapshots. Use a compatible prior build or a forward fix that retains draft isolation. Do not restore an older public CMS handler over working-copy documents.
 - [ ] For bad content, restore a known publication as draft and explicitly publish after review; unpublish if immediate public removal is necessary. Do not rewrite revision history.
+- [ ] To roll back enabled social sign-in, disable its provider flags and retain identity data/indexes and password-less account handling. Use a compatible backend or a forward fix; old password-only login code cannot safely handle provider-only accounts.
 - [ ] Restore databases/artifacts only through the approved backup procedure with write coordination and target verification. Record RPO/RTO and reconcile provider payment/refund state before opening writes.
 - [ ] Re-run health/readiness, authentication, public published copy, payment verification, classroom and recording smoke checks; retain incident evidence.
 

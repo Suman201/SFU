@@ -1,3 +1,4 @@
+import { SocialButtons } from '../social/social-buttons';
 import { safeAuthReturnPath } from '../../../core/services/auth-return-path';
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { email, FormField, FormRoot, form as signalForm, minLength, required } from '@angular/forms/signals';
@@ -13,7 +14,7 @@ interface LoginFormModel {
 @Component({
   selector: 'sfu-login',
   standalone: true,
-  imports: [AuthLayout, FormField, FormRoot, RouterLink],
+  imports: [SocialButtons, AuthLayout, FormField, FormRoot, RouterLink],
   templateUrl: './login.html',
   styleUrl: './login.scss',
   changeDetection: ChangeDetectionStrategy.Eager

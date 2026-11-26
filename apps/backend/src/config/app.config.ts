@@ -24,6 +24,23 @@ export const appConfig = () => ({
     issuer: process.env.JWT_ISSUER ?? 'native-sfu-auth',
     audience: process.env.JWT_AUDIENCE ?? 'native-sfu-clients'
   },
+  socialAuth: {
+    frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:4200',
+    google: {
+      enabled: process.env.GOOGLE_AUTH_ENABLED === 'true',
+      clientId: process.env.GOOGLE_AUTH_CLIENT_ID,
+      clientSecret: envOrSecretFile('GOOGLE_AUTH_CLIENT_SECRET'),
+      redirectUri: process.env.GOOGLE_AUTH_REDIRECT_URI,
+    },
+    apple: {
+      enabled: process.env.APPLE_AUTH_ENABLED === 'true',
+      clientId: process.env.APPLE_AUTH_CLIENT_ID,
+      teamId: process.env.APPLE_AUTH_TEAM_ID,
+      keyId: process.env.APPLE_AUTH_KEY_ID,
+      privateKey: envOrSecretFile('APPLE_AUTH_PRIVATE_KEY'),
+      redirectUri: process.env.APPLE_AUTH_REDIRECT_URI,
+    },
+  },
   cors: {
     allowedOrigins: (process.env.CORS_ALLOWED_ORIGINS ?? process.env.FRONTEND_URL ?? 'http://localhost:4200')
       .split(',')

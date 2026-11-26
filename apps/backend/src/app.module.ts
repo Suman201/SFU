@@ -101,6 +101,12 @@ import { UsersModule } from './users/users.module';
               'req.body.token',
               'req.body.secret',
               'req.body.credential',
+              'req.body.code',
+              'req.body.id_token',
+              'req.body.state',
+              'req.body.user',
+              'req.body.ticket',
+              'req.body.verifier',
               'res.headers["set-cookie"]'
             ]
           }

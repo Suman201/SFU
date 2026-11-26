@@ -1,3 +1,4 @@
+import { validateSocialAuthConfig } from './social-auth.config';
 import Joi from 'joi';
 import { SUPPORTED_CURRENCIES } from '@native-sfu/contracts';
 import {
@@ -52,6 +53,16 @@ const schema = Joi.object({
   TRUST_PROXY_HOPS: Joi.number().integer().min(0).max(10).default(Joi.ref('NODE_ENV', { adjust: (value) => value === 'production' ? 1 : 0 })),
   GRACEFUL_SHUTDOWN_TIMEOUT_MS: Joi.number().integer().min(1000).max(300_000).default(30_000),
   LEGACY_SCHEDULE_TIMEZONE: Joi.string().default('UTC').custom((value, helpers) => {try {new Intl.DateTimeFormat('en', {timeZone:value}).format();return value;} catch {return helpers.error('any.invalid');}}),
+  GOOGLE_AUTH_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  GOOGLE_AUTH_CLIENT_ID: Joi.string().max(255).allow('').optional(),
+  GOOGLE_AUTH_CLIENT_SECRET: Joi.string().max(4096).allow('').optional(),
+  GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri({ scheme: ['https', 'http'] }).allow('').optional(),
+  APPLE_AUTH_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  APPLE_AUTH_CLIENT_ID: Joi.string().max(255).allow('').optional(),
+  APPLE_AUTH_TEAM_ID: Joi.string().max(32).allow('').optional(),
+  APPLE_AUTH_KEY_ID: Joi.string().max(32).allow('').optional(),
+  APPLE_AUTH_PRIVATE_KEY: Joi.string().max(65536).allow('').optional(),
+  APPLE_AUTH_REDIRECT_URI: Joi.string().uri({ scheme: ['https', 'http'] }).allow('').optional(),
   GOOGLE_CALENDAR_CLIENT_ID: Joi.string().allow('').optional(),
   GOOGLE_CALENDAR_CLIENT_SECRET: Joi.string().allow('').optional(),
   GOOGLE_CALENDAR_REDIRECT_URI: Joi.string().uri({scheme:['https','http']}).allow('').optional(),
@@ -213,6 +224,7 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
   }
   const validated = value as Record<string, unknown>;
   const semanticErrors: string[] = [];
+  validateSocialAuthConfig(validated, semanticErrors);
 
   validatePortRange(validated.HOST_CANDIDATE_PORT_RANGE, 'HOST_CANDIDATE_PORT_RANGE', semanticErrors);
   validatePortRange(validated.PIPE_PORT_RANGE, 'PIPE_PORT_RANGE', semanticErrors);

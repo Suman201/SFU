@@ -1,4 +1,5 @@
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { EXPECTED_ERROR_STATUSES } from '@sapiovian/error-ui';
+import { HttpClient, HttpContext, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, signal } from '@angular/core';
 import { Observable, catchError, finalize, map, of, shareReplay, switchMap, throwError } from 'rxjs';
 import { API_BASE_URL } from './app-environment';
@@ -105,6 +106,21 @@ export class AuthService {
       catchError((error) => {
         if (generation === this.sessionGeneration) this.clearSession();
         return throwError(() => this.toAuthError(error));
+      })
+    );
+  }
+
+  socialLogin(ticket: string, verifier: string, expectedRole: AuthRole, rememberMe: boolean, credentials?: { email: string; password: string }): Observable<LoginResult> {
+    const generation = ++this.sessionGeneration;
+    this.statusSignal.set('checking');
+    return this.http.post<BackendLoginResponse | ApiEnvelope<BackendLoginResponse>>(`${API_BASE_URL}/auth/social/exchange`, { ticket, verifier, ...credentials }, { context: new HttpContext().set(EXPECTED_ERROR_STATUSES, [400, 401, 409]) }).pipe(
+      map(response => {
+        if (generation !== this.sessionGeneration) throw new Error('The session changed while signing in.');
+        return this.storeLoginResponse(this.unwrapResponse(response), expectedRole, rememberMe);
+      }),
+      catchError(error => {
+        if (generation === this.sessionGeneration) this.clearSession();
+        return throwError(() => error);
       })
     );
   }

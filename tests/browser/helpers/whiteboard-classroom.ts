@@ -19,6 +19,7 @@ export async function startAcceptanceStack(
     secondBackendPort?: number;
     localSmtpPort?: number;
     paymentsEnabled?: boolean;
+    socialAuthEnabled?: boolean;
   } = {},
 ) {
   const uri = new URL(process.env.MONGODB_URI ?? 'mongodb://invalid/missing');
@@ -35,6 +36,8 @@ export async function startAcceptanceStack(
   );
   const overrides: Record<string, string> = {
     MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER: '50',
+    GOOGLE_AUTH_ENABLED: options.socialAuthEnabled ? 'true' : 'false',
+    APPLE_AUTH_ENABLED: options.socialAuthEnabled ? 'true' : 'false',
     SMTP_ENABLED: options.localSmtpPort ? 'true' : 'false',
     PAYMENTS_ENABLED: options.paymentsEnabled ? 'true' : 'false',
     PAYMENT_GATEWAY: 'test',

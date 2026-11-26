@@ -89,6 +89,8 @@ jobs:
       - name: Verify P2 publication history, contact, audit, policies and accessibility
         if: ${{ success() || (failure() && steps.p1_acceptance.outcome == 'failure') }}
         run: npm run test:p2:browser
+      - name: Verify Google and Apple sign-in in Chromium, Firefox and WebKit
+        run: npm run test:social:browser
       - name: Collect test service diagnostics
         if: always()
         run: |
@@ -106,6 +108,8 @@ jobs:
             reports/p0/
             test-results/p0/
             reports/p1/
+            reports/social/
+            test-results/social/
             reports/p2/
             test-results/p2/
             test-results/p1/

@@ -41,3 +41,7 @@ coverage
 # P2 acceptance evidence.
 /reports/p2/
 /test-results/p2/
+
+# Social sign-in acceptance evidence.
+/reports/social/
+/test-results/social/

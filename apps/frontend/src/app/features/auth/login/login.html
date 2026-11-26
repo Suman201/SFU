@@ -7,6 +7,7 @@
       </div>
       <a [routerLink]="alternateLoginPath" [queryParams]="{returnUrl:loginReturnUrl}">{{ alternateRole === 'teacher' ? 'I’m a teacher' : 'I’m a student' }}</a>
     </header>
+    <sfu-social-buttons [role]="expectedRole" [rememberMe]="rememberMe()" [returnUrl]="loginReturnUrl ?? null" />
 
     <label>
       Email

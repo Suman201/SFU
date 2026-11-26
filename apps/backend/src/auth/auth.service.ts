@@ -17,6 +17,7 @@ import {
 } from '../database/schemas';
 import { ADMIN_PORTAL_PERMISSIONS } from '@native-sfu/contracts';
 import { ROLE_PERMISSION_MAP } from '../rbac/rbac.constants';
+import type { SocialIdentity } from './social-auth.schema';
 import { ChangePasswordDto, LoginDto, RegisterDto, ResetPasswordDto } from './dto/auth.dto';
 
 export interface TokenPair {
@@ -87,13 +88,58 @@ export class AuthService {
 
   async login(request: LoginDto, context: RequestContext = {}): Promise<TokenPair> {
     const user = await this.users.findOne({ email: request.email.toLowerCase(), deletedAt: { $exists: false } }).select('+passwordHash');
-    if (!user || user.disabled || user.status !== 'active' || !(await bcrypt.compare(request.password, user.passwordHash))) {
+    if (!user || user.disabled || user.status !== 'active' || !user.passwordHash || !(await bcrypt.compare(request.password, user.passwordHash))) {
       throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' });
     }
     user.lastLoginAt = new Date();
     await user.save();
     await this.auditLogs.record({ actorId: user.id, action: 'auth.login', targetType: 'user', targetId: user.id, ...context });
     return this.issueTokens(user, context);
+  }
+
+  async socialLogin(identity: SocialIdentity, expectedRole: 'student' | 'teacher', credentials: { email: string; password: string } | undefined, context: RequestContext = {}): Promise<TokenPair> {
+    const subjectField = identity.provider === 'google' ? 'googleSubject' : 'appleSubject';
+    let user: UserMongoDocument | null = await this.users.findOne({ [subjectField]: identity.subject }).select('+googleSubject +appleSubject');
+    let action = 'auth.social.login';
+    if (!user && credentials) {
+      user = await this.users.findOne({ email: credentials.email.toLowerCase() }).select('+passwordHash +googleSubject +appleSubject');
+      if (!user?.passwordHash || !(await bcrypt.compare(credentials.password, user.passwordHash))) {
+        throw new UnauthorizedException('The existing account email or password is incorrect.');
+      }
+      this.assertSocialAccount(user, expectedRole);
+      if (user[subjectField] && user[subjectField] !== identity.subject) throw new ConflictException('This account is already linked to another identity from this provider.');
+      try {
+        const linked = await this.users.findOneAndUpdate({ _id: user.id, $or: [{ [subjectField]: { $exists: false } }, { [subjectField]: identity.subject }] }, { $set: { [subjectField]: identity.subject } }, { new: true });
+        if (!linked) throw new ConflictException('Account linking changed. Please start again.');
+        user = linked;
+      } catch (error) {
+        if ((error as { code?: number }).code === 11000) throw new ConflictException('This identity is already linked. Please start again.');
+        throw error;
+      }
+      action = 'auth.social.link';
+    }
+    if (!user) {
+      const existing = await this.users.exists({ email: identity.email });
+      if (existing || expectedRole === 'teacher') throw new ConflictException({ code: 'SOCIAL_LINK_REQUIRED', message: 'Link your existing account by confirming its email and password. Teacher accounts must first be created by our team.' });
+      try {
+        user = await this.users.create({ displayName: identity.name || 'New learner', name: identity.name || 'New learner', email: identity.email, emailVerifiedAt: new Date(), [subjectField]: identity.subject, roles: ['STUDENT'], permissions: this.permissionsForRoles(['STUDENT']), status: 'active', disabled: false });
+      } catch (error) {
+        if ((error as { code?: number }).code === 11000) throw new ConflictException('This account was registered or linked in another sign-in. Please start again.');
+        throw error;
+      }
+      action = 'auth.social.register';
+    }
+    this.assertSocialAccount(user, expectedRole);
+    user.lastLoginAt = new Date();
+    await user.save();
+    await this.auditLogs.record({ actorId: user.id, action, targetType: 'user', targetId: user.id, metadata: { provider: identity.provider }, ...context });
+    return this.issueTokens(user, context);
+  }
+
+  private assertSocialAccount(user: UserMongoDocument, role: 'student' | 'teacher'): void {
+    if (user.disabled || user.status !== 'active' || user.deletedAt || user.roles.some(value => ['ADMIN', 'SUPER_ADMIN'].includes(value))) throw new UnauthorizedException('This account cannot use student or teacher social sign-in.');
+    const actualRole = user.roles.includes('TEACHER') ? 'teacher' : 'student';
+    if (actualRole !== role) throw new UnauthorizedException(`Use the ${actualRole} login for this account.`);
   }
 
   async refresh(refreshToken: string, context: RequestContext = {}): Promise<TokenPair> {
@@ -159,7 +205,7 @@ export class AuthService {
 
   async changePassword(userId: string, request: ChangePasswordDto, currentTokenId: string, context: RequestContext = {}): Promise<void> {
     const user = await this.users.findById(userId).select('+passwordHash');
-    if (!user || user.disabled || user.status !== 'active' || !(await bcrypt.compare(request.currentPassword, user.passwordHash))) {
+    if (!user || user.disabled || user.status !== 'active' || !user.passwordHash || !(await bcrypt.compare(request.currentPassword, user.passwordHash))) {
       throw new UnauthorizedException('Invalid current password');
     }
     user.passwordHash = await bcrypt.hash(request.newPassword, 12);

@@ -50,6 +50,24 @@ describe('AuthService', () => {
     expect(service.accessToken()).toBeTruthy();
   });
 
+  it('stores a social session using the existing role and remember-me rules', () => {
+    service.socialLogin('ticket', 'verifier', 'student', true).subscribe();
+    const request = http.expectOne(`${API_BASE_URL}/auth/social/exchange`);
+    expect(request.request.body).toEqual({ ticket: 'ticket', verifier: 'verifier' });
+    request.flush({ data: { accessToken: jwt({ sub: 'social-student', roles: ['STUDENT'], exp: futureExp() }), refreshToken: 'social-refresh', user: { id: 'social-student', email: 'social@example.test', role: 'student' } } });
+    expect(service.authenticated()).toBe(true);
+    expect(readCookie('native-sfu.auth.refreshToken')).toBe('social-refresh');
+  });
+
+  it('does not retain a session when social sign-in returns a different role', () => {
+    let message = '';
+    service.socialLogin('ticket', 'verifier', 'student', false).subscribe({ error: error => message = error.message });
+    http.expectOne(`${API_BASE_URL}/auth/social/exchange`).flush({ data: { accessToken: jwt({ sub: 'teacher', roles: ['TEACHER'], exp: futureExp() }), user: { id: 'teacher', role: 'teacher' } } });
+    expect(message).toContain('teacher login');
+    expect(service.authenticated()).toBe(false);
+    expect(service.accessToken()).toBeNull();
+  });
+
   it('stores a remembered login in cookies when remember me is enabled', () => {
     let role = '';
 

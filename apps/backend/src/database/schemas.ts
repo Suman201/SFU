@@ -236,8 +236,11 @@ export class UserDocument {
   @Prop({ type: UserSettingsSchema, default: () => ({}) })
   settings!: UserSettingsDocument;
 
-  @Prop({ required: true, select: false })
-  passwordHash!: string;
+  @Prop({ select: false })
+  passwordHash?: string;
+
+  @Prop({ type: String, select: false, unique: true, sparse: true }) googleSubject?: string;
+  @Prop({ type: String, select: false, unique: true, sparse: true }) appleSubject?: string;
 
   @Prop({ type: [String], default: ['STUDENT'] })
   roles!: string[];

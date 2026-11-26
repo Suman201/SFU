@@ -96,7 +96,9 @@
     "setup:cms": "node scripts/setup-cms.cjs",
     "docs:environment": "node scripts/environment-reference.cjs",
     "release:check": "node scripts/check-release-readiness.cjs",
-    "test:p2:browser": "node scripts/p0-browser.cjs --p2"
+    "test:p2:browser": "node scripts/p0-browser.cjs --p2",
+    "setup:social-auth": "node scripts/setup-social-auth.cjs",
+    "test:social:browser": "node scripts/p0-browser.cjs --social"
   },
   "devDependencies": {
     "@angular/compiler": "22.0.1",
