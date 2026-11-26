@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ProtocolVersionGuard } from './common/guards/protocol-version.guard';
 import { APP_GUARD } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
 import { getStorageToken, seconds, ThrottlerModule } from '@nestjs/throttler';
@@ -229,6 +230,7 @@ import { UsersModule } from './users/users.module';
     HealthModule
   ],
   providers: [
+    { provide: APP_GUARD, useClass: ProtocolVersionGuard },
     {
       provide: getStorageToken(),
       useClass: RedisThrottlerStorage

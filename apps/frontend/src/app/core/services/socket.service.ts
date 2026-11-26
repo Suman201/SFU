@@ -1,6 +1,7 @@
 import { ErrorCenter } from '@sapiovian/error-ui';
 import { Injectable, Optional } from '@angular/core';
 import {
+  SFU_PROTOCOL_VERSION,
   errorReason,
   publicErrorCode,
   type PublicErrorCode,
@@ -142,10 +143,10 @@ type ExtractAckData<T> = T extends (response: AckResponse<infer R>) => void
 /** Resolve the current token on every Socket.IO handshake, including reconnects. */
 export function createSocketAuth(
   auth: Pick<AuthService, 'ensureAccessToken'>,
-): (callback: (credentials: { token: string | null }) => void) => void {
+): (callback: (credentials: { token: string | null; protocolVersion: number }) => void) => void {
   return (callback) =>
     auth.ensureAccessToken().subscribe({
-      next: (token) => callback({ token }),
-      error: () => callback({ token: null }),
+      next: (token) => callback({ token, protocolVersion: SFU_PROTOCOL_VERSION }),
+      error: () => callback({ token: null, protocolVersion: SFU_PROTOCOL_VERSION }),
     });
 }

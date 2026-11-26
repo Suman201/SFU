@@ -59,6 +59,21 @@ describe('media worker runtime', () => {
     }
   });
 
+  it('releases an empty observed room without allocating a worker during repeated cleanup', async () => {
+    const service = new WorkerMediaService(workerOptions);
+    await service.onModuleInit();
+    try {
+      const pool = (service as any).pool as MediaWorkerPool;
+      pool.workerForRoom('chat-only-room');
+      expect(service.workerPoolSnapshot().activeRooms).toBe(1);
+      await service.closeRoom('chat-only-room');
+      expect(service.workerPoolSnapshot().activeRooms).toBe(0);
+      await service.closeRoom('chat-only-room');
+      await service.closeRoom('never-assigned-room');
+      expect(service.workerPoolSnapshot().activeRooms).toBe(0);
+    } finally { await service.onModuleDestroy(); }
+  });
+
   it('returns cached-or-undefined consumer state without touching worker mappings before registration', async () => {
     const service = new WorkerMediaService(workerOptions);
     await service.onModuleInit();
@@ -70,6 +85,31 @@ describe('media worker runtime', () => {
     } finally {
       await service.onModuleDestroy();
     }
+  });
+
+  it('does not allocate rooms for observation and contains refresh failures during worker restart', async () => {
+    const service = new WorkerMediaService(workerOptions);
+    await service.onModuleInit();
+    try {
+      const pool = (service as any).pool as MediaWorkerPool;
+      expect(service.roomQualityState('never-assigned')).toBeUndefined();
+      expect(service.roomWorkerId('never-assigned')).toBeUndefined();
+      await new Promise(resolve => setImmediate(resolve));
+      expect(service.workerPoolSnapshot().activeRooms).toBe(0);
+      const worker = pool.workerForRoom('restarting-room');
+      const request = jest.spyOn(worker, 'request').mockRejectedValue(new Error('Worker not ready'));
+      expect(service.roomQualityState('restarting-room')).toBeUndefined();
+      (service as any).transports.set('restarting-transport', { roomId: 'restarting-room', participantId: 'student' });
+      service.adaptiveTransportMetrics();
+      await new Promise(resolve => setImmediate(resolve));
+      expect(request).toHaveBeenCalled();
+      expect(service.adaptiveTransportMetrics().quality.rooms).toEqual([]);
+      request.mockRestore();
+      await service.closeRoom('restarting-room');
+      service.roomQualityState('restarting-room');
+      await new Promise(resolve => setImmediate(resolve));
+      expect(service.workerPoolSnapshot().activeRooms).toBe(0);
+    } finally { await service.onModuleDestroy(); }
   });
 
   it('provisions worker-owned UDP pipe transports and registers pipe producers through worker IPC', async () => {

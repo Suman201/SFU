@@ -1,0 +1,31 @@
+# Optional production overlay; requires an approved resource budget and current signatures.
+# docker compose -f infra/docker-compose.prod.yml -f infra/docker-compose.upload-security.yml ...
+services:
+  backend:
+    environment:
+      UPLOAD_SCAN_ENABLED: 'true'
+      UPLOAD_SCAN_HOST: upload-scanner
+      UPLOAD_SCAN_PORT: '3310'
+    depends_on:
+      upload-scanner:
+        condition: service_healthy
+  upload-scanner:
+    image: clamav/clamav:1.5_base
+    restart: always
+    mem_limit: 4g
+    # No host port: clamd is accessible only inside this Compose network.
+    volumes:
+      - upload-scan-signatures:/var/lib/clamav
+    logging:
+      driver: local
+      options:
+        max-size: 20m
+        max-file: '3'
+    healthcheck:
+      test: [CMD-SHELL, clamdcheck.sh]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 360s
+volumes:
+  upload-scan-signatures:

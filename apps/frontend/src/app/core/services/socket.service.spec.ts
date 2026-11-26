@@ -46,8 +46,8 @@ describe('Socket reconnect authentication', () => {
     authenticate(callback);
     authenticate(callback);
     expect(callback.calls.allArgs()).toEqual([
-      [{ token: 'first' }],
-      [{ token: 'rotated' }],
+      [{ token: 'first', protocolVersion: 1 }],
+      [{ token: 'rotated', protocolVersion: 1 }],
     ]);
   });
   it('does not send a stale token when renewal fails', () => {
@@ -56,7 +56,7 @@ describe('Socket reconnect authentication', () => {
     });
     const callback = jasmine.createSpy();
     authenticate(callback);
-    expect(callback).toHaveBeenCalledOnceWith({ token: null });
+    expect(callback).toHaveBeenCalledOnceWith({ token: null, protocolVersion: 1 });
   });
 });
 

@@ -131,7 +131,7 @@ Verification:
 - Frontend build passed with the repo-supported Node 22 runtime: `npm run build --workspace @native-sfu/frontend`.
 - Static native-dialog scan passed with no production matches for browser-native `confirm`, `prompt`, or `alert` in class-session/shared code.
 - `git diff --check` passed.
-- Focused chat spec still has the existing Karma/Chrome ping-timeout blocker before specs execute (`0 of 5`), so chat link-dialog behavior is covered by compile/static verification until that harness issue is resolved.
+- Historical note superseded on 26 November 2026: the full 235-test frontend suite passes with the supported headless Chromium executable, including chat and private-thread regressions. See [P1 readiness](p1-release-readiness.md).
 
 ### P0: Teacher Controls Must Be Organized
 
@@ -185,7 +185,7 @@ Verification completed:
 
 Verification still blocked:
 
-- **Pending Proof**: Focused chat spec: `npm test --workspace @native-sfu/frontend -- --include=src/app/features/class-session/session-chat/session-chat.spec.ts` currently connects ChromeHeadless and then hits a Karma ping timeout before executing specs.
+- **Done**: ~~Frontend chat unit verification: the full 235-test headless frontend suite passes on 26 November 2026. The earlier Karma startup blocker is resolved by using the installed supported headless Chromium executable.~~
 - **Pending Proof**: Real screenshot proof: pending because the current local setup does not provide a seeded authenticated live teacher/student classroom with media producers, chat, materials, and whiteboard-share state.
 
 Target viewports:
@@ -437,8 +437,8 @@ Verification:
 
 Tracked follow-ups:
 
-- **Tracked**: Post-class Q&A read-state clearing is not fully completed-session-aware yet; unread counts may require refresh/read-state hardening.
-- **Tracked**: Student Q&A does not auto-refresh teacher replies after initial page load.
+- **Done**: ~~Completed-session read state uses historical enrollment and atomic monotonic watermarks; visible messages clear unread state without a live participant. Verified by the P1 browser gate.~~
+- **Done**: ~~Student and teacher private Q&A refresh visible threads without reloading the completed-class page, preserving drafts and cancelling stale thread requests. Chromium, Firefox and WebKit coverage: `npm run test:p1:browser`.~~
 
 ### P1: Teacher Post-Class Workflow
 

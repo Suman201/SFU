@@ -224,8 +224,9 @@
 
 .video-frame.screen-mode .stage-video {
   inset: var(--student-stage-pad) var(--student-stage-pip-reserve) var(--student-screen-safe-bottom) var(--student-stage-pad);
-  width: auto;
-  height: auto;
+  box-sizing: border-box;
+  width: calc(100% - var(--student-stage-pad) - var(--student-stage-pip-reserve));
+  height: calc(100% - var(--student-stage-pad) - var(--student-screen-safe-bottom));
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   box-shadow: 0 22px 70px rgba(0, 0, 0, 0.28);
@@ -2036,6 +2037,8 @@ sfu-session-chat {
 
   .video-frame.screen-mode .stage-video {
     inset: 8px 8px calc(var(--student-screen-safe-bottom) + 2px) 8px;
+    width: calc(100% - 16px);
+    height: calc(100% - var(--student-screen-safe-bottom) - 10px);
   }
 
   .student-whiteboard-drawer,
@@ -2135,4 +2138,108 @@ sfu-session-chat {
 }
 @media (max-width: 600px) {
   .student-whiteboard-source { margin: 65px 8px 0; }
+}
+
+// Keep new utility controls in named cells; auto placement can overlap raise hand.
+.student-session-shell { --student-control-height: 132px; }
+.live-media-controls {
+  grid-template-areas:
+    'audio mic camera video refresh hand status'
+    'setup setup connection connection connection recovery speak'
+    'problem problem problem warning warning warning warning';
+}
+.live-media-controls > sfu-device-setup-dialog { grid-area: setup; min-width: 0; }
+.live-media-controls > sfu-classroom-connection-tools { grid-area: connection; min-width: 0; }
+@media (max-width: 900px) {
+  .student-session-shell { --student-control-height: 154px; }
+  .student-session-shell:has(.student-network-warning),
+  .student-session-shell:has(.student-media-controls.problem) { --student-control-height: 184px; }
+  .student-whiteboard-source { margin: 12px 82px 0 12px; }
+  .live-media-controls {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+    transform: none;
+    grid-template-columns: 38px 38px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'mic camera hand setup'
+      'connection connection connection connection'
+      'status status speak speak'
+      'warning warning warning warning'
+      'problem problem recovery recovery';
+    gap: 5px 6px;
+    border-radius: 14px;
+  }
+  // The same selectors remain available in Device setup and the pre-join form.
+  .live-media-controls > .audio-device,
+  .live-media-controls > .video-device,
+  .live-media-controls > .student-device-refresh { display: none; }
+  .live-media-controls .student-hand-button { min-width: 0; padding-inline: 8px; font-size: 12px; }
+  .live-media-controls > sfu-classroom-connection-tools { justify-content: flex-start; }
+  sfu-session-chat { --chat-reserved-bottom: calc(var(--student-control-height, 184px) + 24px); bottom: calc(var(--student-control-height, 184px) + 24px + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-offset, 0px)); }
+}
+
+// A compact utility row leaves teaching content clear on phones and short screens.
+@media (max-width: 900px) {
+  .student-whiteboard-source {
+    margin: 62px 12px 0;
+    --whiteboard-source-padding: 6px 10px;
+    --whiteboard-source-label-size: 0px;
+    --whiteboard-source-select-margin: 0px;
+  }
+  .student-whiteboard-button, .student-materials-button, .participants-button {
+    top: calc(12px + var(--student-safe-top));
+    right: auto;
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    min-height: 40px;
+    padding: 0;
+    justify-content: center;
+    font-size: 0;
+  }
+  .student-whiteboard-button { left: 12px; }
+  .student-materials-button { left: 64px; }
+  .participants-button { left: 116px; }
+  .student-materials-button::before { display: inline-block; }
+  .student-support-button {
+    top: calc(12px + var(--student-safe-top));
+    right: 12px;
+    min-height: 40px;
+    padding-inline: 10px;
+  }
+  .student-leave-button { right: 80px; }
+  sfu-session-chat.student-chat-collapsed {
+    left: 12px;
+    right: auto;
+    width: 180px;
+    bottom: calc(176px + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-offset, 0px));
+  }
+}
+@media (max-height: 620px) and (orientation: landscape) and (max-width: 900px) {
+  .student-session-shell { --student-control-height: 86px; }
+  .student-session-shell:has(.student-network-warning),
+  .student-session-shell:has(.student-media-controls.problem) { --student-control-height: 124px; }
+  .student-whiteboard-source { margin: 12px 352px 0 12px; }
+  .student-whiteboard-button { left: auto; right: 116px; }
+  .student-materials-button { left: auto; right: 64px; }
+  .participants-button { left: auto; right: 12px; }
+  .student-leave-button { right: 172px; }
+  .student-support-button:not(.student-leave-button) { right: 280px; }
+  .live-media-controls {
+    grid-template-columns: 38px 38px minmax(100px, 1fr) auto auto;
+    grid-template-areas:
+      'mic camera hand connection setup'
+      'status status speak speak speak'
+      'warning warning warning warning warning'
+      'problem problem problem recovery recovery';
+  }
+  .speaker-badge { padding: 4px 8px; grid-template-columns: 28px minmax(0, 1fr); }
+  .speaker-badge .speaker-avatar { width: 28px; height: 28px; }
+  sfu-session-chat.student-chat-collapsed {
+    left: 12px;
+    right: auto;
+    bottom: calc(108px + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-offset, 0px));
+  }
 }

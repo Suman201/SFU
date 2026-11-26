@@ -33,3 +33,7 @@ coverage
 # P0 release verification artifacts.
 /reports/p0/
 /test-results/p0/
+
+# P1 verification artifacts.
+/reports/p1/
+/test-results/p1/

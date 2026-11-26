@@ -4,7 +4,7 @@ import { ClassroomRecoveryStore } from '../../../core/services/classroom-recover
 import { ClassroomConnectionTools } from '../../../shared/classroom-connection-tools/classroom-connection-tools';
 import { isDesktopSession } from '../../../core/services/desktop-bridge';
 import { applyWhiteboardMemoryCommand } from '../../../shared/whiteboard/whiteboard-memory-reducer';
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, ViewChild, computed, inject, signal, type Signal, type WritableSignal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, HostListener, OnDestroy, OnInit, ViewChild, computed, inject, signal, type Signal, type WritableSignal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type {
   ClassSessionRecordingEvent,
@@ -241,6 +241,8 @@ export class StudentClassSession implements OnInit, OnDestroy {
   private readonly selectedAudioDeviceFallback = signal('');
   private readonly selectedVideoDeviceFallback = signal('');
   protected readonly localProducerIds = signal<readonly string[]>([]);
+  protected readonly chatCollapsed = signal(typeof window !== 'undefined' && window.innerWidth <= 900);
+  private compactViewport = typeof window !== 'undefined' && window.innerWidth <= 900;
   protected readonly participantsOpen = signal(false);
   protected readonly materialsOpen = signal(false);
   protected readonly whiteboardControlGranted = signal(false);
@@ -521,6 +523,13 @@ export class StudentClassSession implements OnInit, OnDestroy {
     this.webrtc.releaseLocalProducer(producerId); this.forgetLocalProducer(producerId); this.store.removeProducer(producerId);
     this.deviceShareNotice.set('Device sharing stopped.');
     if (notifyServer) await this.socket.emitAck('screen:stop', { producerId }).catch(() => this.deviceShareNotice.set('Sharing stopped on this device. Reconnect to update the classroom.'));
+  }
+
+  @HostListener('window:resize')
+  protected onClassroomResize(): void {
+    const compact = window.innerWidth <= 900;
+    if (compact && !this.compactViewport) this.chatCollapsed.set(true);
+    this.compactViewport = compact;
   }
 
   ngOnInit(): void {

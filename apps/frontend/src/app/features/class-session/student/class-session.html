@@ -266,7 +266,7 @@
 
   @if (roomJoined()) {
   <div
-    class="student-media-controls"
+    class="student-media-controls live-media-controls"
     [class.problem]="mediaDeviceProblem()"
     [class.teacher-moderated]="teacherModerationMessage()"
     aria-label="Your microphone and camera controls"
@@ -390,7 +390,7 @@
   }
 
   @if (roomJoined()) {
-  <button class="student-support-button" type="button" (click)="leaveClassroom()">Leave class</button>
+  <button class="student-support-button student-leave-button" type="button" (click)="leaveClassroom()">Leave class</button>
   @if (whiteboardAvailable()) {
     <button
       class="student-whiteboard-button"
@@ -562,8 +562,11 @@
 </main>
 @if (roomJoined()) {
   <sfu-session-chat
+    [class.student-chat-collapsed]="chatCollapsed()"
     [currentUser]="chatDisplayName()"
     currentRole="Student"
+    [collapsed]="chatCollapsed()"
+    (collapsedChange)="chatCollapsed.set($event)"
     [sessionId]="session()?.sessionId ?? ''"
     [batchId]="session()?.batchId ?? ''"
     [roomId]="session()?.roomId ?? ''"

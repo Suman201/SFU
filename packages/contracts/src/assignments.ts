@@ -116,6 +116,8 @@ export interface StudentAssignmentListResponse {
 }
 
 export interface AssignmentDetailResponse {
+  /** Historical completed-session access allows reading without new submissions. */
+  readOnly?: boolean;
   assignment: Assignment;
   submission?: AssignmentSubmission;
 }

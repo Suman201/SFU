@@ -167,7 +167,7 @@ export async function enterStudentClassroom(page: Page, url: string) {
   await expect(page.locator('sfu-whiteboard')).toBeVisible();
 }
 
-export async function seedClassroom(options: {enrollStudent?:boolean} = {}) {
+export async function seedClassroom(options: {enrollStudent?:boolean; batchName?: string} = {}) {
   const connection = await mongoose.createConnection(process.env.MONGODB_URI!).asPromise();
   try {
     const db = connection.db!;
@@ -178,7 +178,7 @@ export async function seedClassroom(options: {enrollStudent?:boolean} = {}) {
     const sessionId = `whiteboard-acceptance-${randomUUID()}`;
     const previousSessionId = `whiteboard-acceptance-previous-${randomUUID()}`;
     const now = new Date();
-    await db.collection('batches').insertOne({ _id: batchId as any, name: 'Whiteboard acceptance classroom', teacherId: String(teacher._id), year: now.getUTCFullYear(), startDate: new Date(now.getTime() - 86_400_000), endDate: new Date(now.getTime() + 86_400_000), maxCapacity: 30, feeAmount: 0, status: 'ACTIVE', createdAt: now, updatedAt: now });
+    await db.collection('batches').insertOne({ _id: batchId as any, name: options.batchName ?? 'Whiteboard acceptance classroom', teacherId: String(teacher._id), year: now.getUTCFullYear(), startDate: new Date(now.getTime() - 86_400_000), endDate: new Date(now.getTime() + 86_400_000), maxCapacity: 30, feeAmount: 0, status: 'ACTIVE', createdAt: now, updatedAt: now });
     if (options.enrollStudent !== false) await db.collection('student_enrollments').insertOne({ _id: randomUUID() as any, studentId: String(student._id), studentName: student.name, studentEmail, batchId, teacherId: String(teacher._id), status: 'active', enrolledAt: now, createdAt: now, updatedAt: now });
     await db.collection('class_sessions').insertOne({ _id: sessionId as any, batchId, teacherId: String(teacher._id), title: 'Whiteboard classroom acceptance', sessionNumber: 2, scheduledAt: now, durationMinutes: 60, status: 'scheduled', roomId: `pending-${sessionId}`, chatChannelId: `chat-${sessionId}`, whiteboardChannelId: `board-${sessionId}`, createdAt: now, updatedAt: now });
     await db.collection('class_sessions').insertOne({ _id: previousSessionId as any, batchId, teacherId: String(teacher._id), title: 'Previous classroom fixture', sessionNumber: 1, scheduledAt: new Date(now.getTime() - 7_200_000), durationMinutes: 60, status: 'completed', startedAt: new Date(now.getTime() - 7_200_000), completedAt: new Date(now.getTime() - 3_600_000), roomId: `prior-${previousSessionId}`, chatChannelId: `chat-${previousSessionId}`, whiteboardChannelId: `board-${previousSessionId}`, createdAt: now, updatedAt: now });

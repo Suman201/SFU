@@ -283,9 +283,8 @@ export class SessionChat {
       offsetX: offset.x,
       offsetY: offset.y
     };
-    this.dragging.set(true);
-    chatElement.setPointerCapture(event.pointerId);
-    event.preventDefault();
+    // Capture only an actual drag. Capturing on pointerdown retargets a normal
+    // button click to the section and prevents the collapsed chat from opening.
   }
 
   protected drag(event: PointerEvent, chatElement: HTMLElement): void {
@@ -301,7 +300,11 @@ export class SessionChat {
 
     if (movedFarEnough) {
       this.suppressNextToggle = true;
+      this.dragging.set(true);
+      if (!chatElement.hasPointerCapture(event.pointerId)) chatElement.setPointerCapture(event.pointerId);
+      event.preventDefault();
     }
+    if (!this.dragging()) return;
 
     this.dragOffset.set(
       this.clampOffset(chatElement, {
@@ -324,6 +327,8 @@ export class SessionChat {
 
     this.dragState = null;
     this.dragging.set(false);
+    // A captured drag can end with no button click; never swallow a later tap.
+    if (this.suppressNextToggle) setTimeout(() => { this.suppressNextToggle = false; }, 0);
   }
 
   protected selectPrivateThread(participantId: string): void {

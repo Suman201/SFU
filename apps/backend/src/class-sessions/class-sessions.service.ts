@@ -1,3 +1,4 @@
+import { assertClassroomUploadSafe } from '../common/security/upload-scanner';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -1829,6 +1830,24 @@ export class ClassSessionsService {
   ): Promise<ChatHistoryResponse> {
     const resolution = await this.resolveSession(sessionId, batchId);
     this.assertCompletedClassSession(resolution);
+    const role = this.payloadRole(user, resolution.batch);
+    if (role === 'student') {
+      await this.assertCanReadClassSessionHistory(resolution.batch, user);
+      if (options.participantId && options.participantId !== user.sub) {
+        throw new ForbiddenException('Students can only read their own post-class questions.');
+      }
+      return this.rooms.getClassSessionPostClassStudentChatHistory({
+        sessionId: resolution.planned.id,
+        batchId: resolution.batch.id,
+        roomId: resolution.persisted!.roomId,
+        channelId: resolution.persisted!.chatChannelId,
+        teacherId: resolution.batch.teacherId,
+        studentId: user.sub,
+        scope: 'private',
+        before: options.before,
+        limit: options.limit
+      });
+    }
     this.assertCanManageBatch(resolution.batch, user);
     const persisted = resolution.persisted;
     if (!persisted) {
@@ -1988,6 +2007,15 @@ export class ClassSessionsService {
       throw new BadRequestException(`You can upload up to ${CLASS_MATERIAL_MAX_COUNT} materials at once.`);
     }
 
+    // Validate/scan the whole batch before any file or metadata is persisted.
+    for (const file of files) {
+      const kind = this.materialKindForMimeType(this.normalizeMaterialMimeType(file.mimetype));
+      this.assertMaterialKindAllowed(kind, liveSettings);
+      if (!file.buffer?.length || Math.max(file.size, file.buffer.length) > this.classMaterialMaxFileSizeBytes(liveSettings)) {
+        throw new BadRequestException('Material upload is empty or exceeds the file size limit.');
+      }
+      await assertClassroomUploadSafe(file.buffer, this.config);
+    }
     const roomId = resolution.persisted?.roomId ?? classSessionChannelIds(resolution.planned.id).roomId;
     const directory = join(this.classMaterialStorageRoot(), 'class-sessions', this.safeStorageSegment(resolution.planned.id));
     await mkdir(directory, { recursive: true });
@@ -2621,7 +2649,7 @@ export class ClassSessionsService {
     options: { roomId?: string; participantId?: string; scope?: ChatMessageScope; readAt?: string } = {}
   ): Promise<ChatReadState> {
     const resolution = await this.resolveSession(sessionId, batchId);
-    await this.assertCanReadClassSession(resolution.batch, user);
+    await this.assertCanReadClassSessionForResolution(resolution, user);
     const channelIds = classSessionChannelIds(resolution.planned.id);
     const persisted = resolution.persisted;
     const roomId = persisted?.roomId ?? channelIds.roomId;
@@ -2639,7 +2667,8 @@ export class ClassSessionsService {
         requesterRole: this.payloadRole(user, resolution.batch),
         participantId: options.participantId,
         scope: options.scope,
-        readAt: options.readAt
+        readAt: options.readAt,
+        ...(persisted?.status === 'completed' ? { completed: true } : {})
       });
     } catch (error) {
       this.metrics?.classSessionChatFailures

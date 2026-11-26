@@ -31,6 +31,7 @@ test.describe('browser cross-node pipe transport interoperability', () => {
       try {
         await stack.setupUdpPipePair({ roomId, ownerPipeId, remotePipeId });
       } catch (error) {
+        if (process.env.P1_REQUIRED_PROOF === 'true') throw error;
         test.skip(true, `UDP pipe loopback transport is unavailable in this environment: ${errorMessage(error)}`);
         return;
       }

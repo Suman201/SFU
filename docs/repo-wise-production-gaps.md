@@ -229,9 +229,11 @@ Related files:
 - `tests/browser/staging-turn-validation.spec.ts`
 - `tests/browser/staging-ingress-browser-proof.spec.ts`
 
+The P1 implementation and bounded local gates are recorded in [P1 release readiness](p1-release-readiness.md). Deployment gates below remain open unless explicitly closed with target-environment evidence.
+
 ## P1: Scale And Multi-Node Proof
 
-Status: **Blocker** for large-scale or multi-node production.
+Status: **Bounded local two-node acceptance added; target-environment proof remains a blocker** for large-scale or multi-node production.
 
 Required proof:
 
@@ -388,7 +390,7 @@ Repo areas:
 
 ## P1: Recording And Playback Proof
 
-Status: **Pending Proof**.
+Status: **P0 real local recording/playback verified; target storage and failure recovery proof pending**.
 
 Required proof:
 
@@ -403,7 +405,7 @@ Required proof:
 
 ## P1: File, Attachment, And Material Storage
 
-Status: **Pending Proof**.
+Status: **Repository checks and real-engine scan drill added; target storage and scanner activation pending**. Optional fail-closed scanning covers classroom attachments/materials and assignment files; see the P1 activation policy.
 
 Required proof:
 
@@ -418,7 +420,7 @@ Required proof:
 
 ## P1: Cross-Browser And Device Confidence
 
-Status: **Pending Proof**.
+Status: **Three-browser Q&A and headless responsive classroom acceptance added; physical-device proof pending**.
 
 Required coverage:
 
@@ -440,7 +442,7 @@ Related commands:
 
 ## P1: Contracts And API Compatibility
 
-Status: **Pending Proof**.
+Status: **Implemented** for protocol v1 negotiation, incompatible-client rejection and CI declaration drift detection. API changes still require human compatibility review and deliberate protocol rollout.
 
 Required proof:
 

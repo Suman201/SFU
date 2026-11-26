@@ -1,5 +1,8 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnInit, afterEveryRender, inject, signal, viewChild } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
+import { combineLatest } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { PostClassThreadStore, threadVisible } from '../../class-session/post-class-thread.store';
 import type {
   Assignment,
   AssignmentSubmission,
@@ -17,6 +20,7 @@ import { Whiteboard } from '../../../shared/whiteboard/whiteboard';
 
 @Component({
   selector: 'sfu-student-completed-class-detail',
+  providers: [PostClassThreadStore],
   standalone: true,
   imports: [Footer, Header, RouterLink, Whiteboard],
   templateUrl: './completed-class-detail.html',
@@ -37,16 +41,33 @@ export class StudentCompletedClassDetail implements OnInit {
   protected readonly assignmentsError = signal('');
   protected readonly whiteboardState = signal<WhiteboardMemoryState | null>(null);
   protected readonly whiteboardError = signal('');
-  protected readonly privateMessages = computed(() => this.detail()?.privateThread.messages ?? []);
+  protected readonly thread = inject(PostClassThreadStore);
+  protected readonly privateMessages = this.thread.messages;
+  protected readonly threadElement = viewChild<ElementRef<HTMLElement>>('privateThread');
+  private readonly destroyRef = inject(DestroyRef);
+  private generation = 0;
+
+  constructor() {
+    afterEveryRender(() => this.thread.markVisibleRead(this.threadElement()?.nativeElement));
+  }
 
   private sessionId = '';
   private batchId = '';
   private readonly lastRecordingHeartbeat = new Map<string, number>();
 
   ngOnInit(): void {
-    this.sessionId = this.route.snapshot.paramMap.get('sessionId') ?? '';
-    this.batchId = this.route.snapshot.queryParamMap.get('batchId') ?? '';
-    this.load();
+    combineLatest([this.route.paramMap, this.route.queryParamMap]).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(([params, query]) => {
+      this.generation++;
+      this.thread.close();
+      this.detail.set(null);
+      this.draft.set('');
+      this.sending.set(false);
+      this.assignments.set([]);
+      this.whiteboardState.set(null);
+      this.sessionId = params.get('sessionId') ?? '';
+      this.batchId = query.get('batchId') ?? '';
+      this.load();
+    });
   }
 
   protected load(): void {
@@ -55,16 +76,21 @@ export class StudentCompletedClassDetail implements OnInit {
       this.loading.set(false);
       return;
     }
+    const generation = this.generation;
     this.loading.set(true);
     this.error.set('');
-    this.classSessions.getCompletedStudentSessionDetail(this.sessionId, this.batchId).subscribe({
+    this.classSessions.getCompletedStudentSessionDetail(this.sessionId, this.batchId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (detail) => {
+        if (generation !== this.generation) return;
         this.detail.set(detail);
+        this.thread.open({ sessionId: this.sessionId, batchId: this.batchId || detail.session.batchId,
+          roomId: detail.chatSummary?.roomId ?? '', visible: () => threadVisible(this.threadElement()?.nativeElement) }, detail.privateThread.messages);
         this.loading.set(false);
         this.loadAssignments(detail.session.batchId);
         this.loadWhiteboardState(detail.session.batchId);
       },
       error: (error) => {
+        if (generation !== this.generation) return;
         this.error.set(this.classSessions.errorMessage(error));
         this.loading.set(false);
       }
@@ -72,10 +98,12 @@ export class StudentCompletedClassDetail implements OnInit {
   }
 
   private loadWhiteboardState(batchId: string): void {
+    const generation = this.generation;
     this.whiteboardError.set('');
-    this.classSessions.getWhiteboardMemory(this.sessionId, { batchId: this.batchId || batchId }).subscribe({
-      next: (state) => this.whiteboardState.set(state),
+    this.classSessions.getWhiteboardMemory(this.sessionId, { batchId: this.batchId || batchId }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (state) => { if (generation === this.generation) this.whiteboardState.set(state); },
       error: (error) => {
+        if (generation !== this.generation) return;
         this.whiteboardState.set(null);
         this.whiteboardError.set(this.classSessions.errorMessage(error));
       }
@@ -89,27 +117,21 @@ export class StudentCompletedClassDetail implements OnInit {
   protected sendQuestion(event: Event): void {
     event.preventDefault();
     const message = this.draft().trim();
-    if (!message || !this.detail()) {
+    if (!message || !this.detail() || this.sending()) {
       return;
     }
+    const generation = this.generation;
     this.sending.set(true);
     this.sendError.set('');
-    this.classSessions.sendPostClassQuestion(this.sessionId, { batchId: this.batchId || this.detail()!.session.batchId, message }).subscribe({
+    this.classSessions.sendPostClassQuestion(this.sessionId, { batchId: this.batchId || this.detail()!.session.batchId, message }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (sent) => {
-        this.detail.update((current) => {
-          if (!current) return current;
-          return {
-            ...current,
-            privateThread: {
-              ...current.privateThread,
-              messages: [...current.privateThread.messages, sent]
-            }
-          };
-        });
+        if (generation !== this.generation) return;
+        this.thread.append(sent);
         this.draft.set('');
         this.sending.set(false);
       },
       error: (error) => {
+        if (generation !== this.generation) return;
         this.sendError.set(this.classSessions.errorMessage(error));
         this.sending.set(false);
       }
@@ -199,10 +221,11 @@ export class StudentCompletedClassDetail implements OnInit {
   }
 
   private loadAssignments(batchId: string): void {
+    const generation = this.generation;
     this.assignmentsError.set('');
-    this.classSessions.listStudentAssignments({ batchId, sessionId: this.sessionId }).subscribe({
-      next: (response) => this.assignments.set(response.items),
-      error: (error) => this.assignmentsError.set(this.classSessions.errorMessage(error))
+    this.classSessions.listStudentAssignments({ batchId, sessionId: this.sessionId }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (response) => { if (generation === this.generation) this.assignments.set(response.items); },
+      error: (error) => { if (generation === this.generation) this.assignmentsError.set(this.classSessions.errorMessage(error)); }
     });
   }
 

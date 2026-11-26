@@ -31,6 +31,7 @@ export class StudentAssignmentDetail implements OnInit {
   protected readonly assignment = signal<Assignment | null>(null);
   protected readonly submission = signal<AssignmentSubmission | null>(null);
   protected readonly loading = signal(true);
+  protected readonly readOnly = signal(false);
   protected readonly saving = signal(false);
   protected readonly error = signal("");
   protected readonly notice = signal("");
@@ -59,10 +60,11 @@ export class StudentAssignmentDetail implements OnInit {
       .pipe(finalize(() => this.loading.set(false)))
       .subscribe({
         next: (detail) => {
+          this.readOnly.set(detail.readOnly === true);
           this.assignment.set(detail.assignment);
           this.submission.set(detail.submission ?? null);
           this.text.set(detail.submission?.text ?? "");
-          this.classSessions
+          if (!this.readOnly()) this.classSessions
             .markAssignmentViewed(this.assignmentId)
             .subscribe({ error: () => undefined });
         },
@@ -101,7 +103,7 @@ export class StudentAssignmentDetail implements OnInit {
   protected submit(event: Event): void {
     event.preventDefault();
     const assignment = this.assignment();
-    if (!assignment || this.saving()) {
+    if (!assignment || this.saving() || this.readOnly()) {
       return;
     }
     const linkTitle = this.linkTitle().trim();

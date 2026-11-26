@@ -45,3 +45,5 @@ export * from './errors.js';
 
 export * from './admin-operations.js';
 export * from './payments.js';
+
+export * from './protocol.js';

@@ -1,3 +1,4 @@
+import { assertClassroomUploadSafe } from '../common/security/upload-scanner';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -166,9 +167,11 @@ export class AssignmentsService {
   async getAssignment(user: AuthenticatedUser, assignmentId: string): Promise<AssignmentDetailResponse> {
     const assignment = await this.findVisibleAssignment(assignmentId);
     if (user.roles.includes('STUDENT') && !this.isAdmin(user)) {
-      await this.assertStudentCanAccessAssignment(user.sub, assignment);
-      const submission = await this.ensureStudentSubmission(assignment, user);
-      return { assignment: this.toAssignment(assignment), submission: this.toSubmission(submission) };
+      const active = await this.assertStudentCanReadAssignment(user.sub, assignment);
+      const submission = active
+        ? await this.ensureStudentSubmission(assignment, user)
+        : await this.submissions.findOne({ assignmentId: assignment.assignmentId, studentId: user.sub, deletedAt: { $exists: false } });
+      return { assignment: this.toAssignment(assignment), submission: submission ? this.toSubmission(submission) : this.toAssignedSubmission(assignment, user), readOnly: !active };
     }
     await this.assertTeacherCanManageAssignment(assignment, user);
     return { assignment: this.toAssignment(assignment, { submissions: await this.submissions.find({ assignmentId: assignment.assignmentId, deletedAt: { $exists: false } }).exec() }) };
@@ -177,15 +180,18 @@ export class AssignmentsService {
   async listStudentAssignments(user: AuthenticatedUser, options: { batchId?: string; sessionId?: string } = {}): Promise<StudentAssignmentListResponse> {
     const enrolledBatches = await this.enrollments.listStudentBatches(user.sub, { status: 'active' });
     const batchIds = enrolledBatches.map((batch) => batch.id).filter(Boolean);
-    if (!batchIds.length) return { items: [] };
+    // Historical access is read-only and restricted to one completed session.
+    if (options.batchId && !batchIds.includes(options.batchId)) {
+      if (!options.sessionId || !await this.canReadCompletedSession(user.sub, options.batchId, options.sessionId)) {
+        throw new ForbiddenException('You are not enrolled in this batch.');
+      }
+    }
+    if (!batchIds.length && !options.batchId) return { items: [] };
     const filter: Record<string, unknown> = {
       batchId: options.batchId ? options.batchId : { $in: batchIds },
       status: 'published',
       deletedAt: { $exists: false }
     };
-    if (options.batchId && !batchIds.includes(options.batchId)) {
-      throw new ForbiddenException('You are not enrolled in this batch.');
-    }
     if (options.sessionId) filter.sessionId = options.sessionId;
     const assignments = await this.assignments.find(filter).sort({ dueAt: 1, createdAt: -1 }).exec();
     const submissions = await this.submissions.find({
@@ -293,7 +299,7 @@ export class AssignmentsService {
   async downloadAssignmentAttachment(user: AuthenticatedUser, assignmentId: string, attachmentId: string): Promise<AssignmentFileDownload> {
     const assignment = await this.findVisibleAssignment(assignmentId);
     if (user.roles.includes('STUDENT') && !this.isAdmin(user)) {
-      await this.assertStudentCanAccessAssignment(user.sub, assignment);
+      await this.assertStudentCanReadAssignment(user.sub, assignment);
     } else {
       await this.assertTeacherCanManageAssignment(assignment, user);
     }
@@ -312,7 +318,7 @@ export class AssignmentsService {
     if (!submission) throw new NotFoundException('Submission not found.');
     if (user.roles.includes('STUDENT') && !this.isAdmin(user)) {
       if (submission.studentId !== user.sub) throw new ForbiddenException('You can only access your own submission.');
-      await this.assertStudentCanAccessAssignment(user.sub, assignment);
+      await this.assertStudentCanReadAssignment(user.sub, assignment);
     } else {
       await this.assertTeacherCanManageAssignment(assignment, user);
     }
@@ -342,6 +348,18 @@ export class AssignmentsService {
   private async assertTeacherCanManageAssignment(assignment: AssignmentMongoDocument, user: AuthenticatedUser): Promise<void> {
     if (this.isAdmin(user) || (user.roles.includes('TEACHER') && assignment.teacherId === user.sub)) return;
     throw new ForbiddenException('You are not allowed to manage this assignment.');
+  }
+
+  private async canReadCompletedSession(studentId: string, batchId: string, sessionId: string): Promise<boolean> {
+    const session = await this.classSessions.findOne({ _id: sessionId, batchId, status: 'completed' });
+    return Boolean(session && await this.enrollments.isStudentHistoricallyEnrolledInBatch(studentId, batchId));
+  }
+
+  private async assertStudentCanReadAssignment(studentId: string, assignment: AssignmentMongoDocument): Promise<boolean> {
+    if (assignment.status !== 'published') throw new NotFoundException('Assignment not found.');
+    if (await this.enrollments.isStudentEnrolledInBatch(studentId, assignment.batchId)) return true;
+    if (assignment.sessionId && await this.canReadCompletedSession(studentId, assignment.batchId, assignment.sessionId)) return false;
+    throw new ForbiddenException('You are not enrolled in this batch.');
   }
 
   private async assertStudentCanAccessAssignment(studentId: string, assignment: AssignmentMongoDocument): Promise<void> {
@@ -394,6 +412,10 @@ export class AssignmentsService {
   }
 
   private async persistAssignmentFiles(assignment: AssignmentMongoDocument, files: AssignmentUploadFile[]): Promise<StoredAssignmentAttachment[]> {
+    for (const file of files) {
+      this.assertUploadFile(file);
+      await assertClassroomUploadSafe(file.buffer, this.config);
+    }
     const root = this.assignmentStorageRoot();
     const directory = join(root, 'assignments', this.safeStorageSegment(assignment.assignmentId));
     await mkdir(directory, { recursive: true });
@@ -429,6 +451,10 @@ export class AssignmentsService {
   ): Promise<StoredAssignmentAttachment[]> {
     if (files.length > ASSIGNMENT_SUBMISSION_FILE_MAX_COUNT) {
       throw new BadRequestException(`You can upload up to ${ASSIGNMENT_SUBMISSION_FILE_MAX_COUNT} submission files.`);
+    }
+    for (const file of files) {
+      this.assertUploadFile(file);
+      await assertClassroomUploadSafe(file.buffer, this.config);
     }
     const root = this.assignmentStorageRoot();
     const directory = join(root, 'submissions', this.safeStorageSegment(assignment.assignmentId), this.safeStorageSegment(user.sub));

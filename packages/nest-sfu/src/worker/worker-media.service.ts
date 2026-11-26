@@ -464,11 +464,12 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
     return state;
   }
 
+  // Snapshot refresh is best effort during worker restart; commands still propagate failures.
   consumerLayerState(consumerId: string): ConsumerLayerState | undefined {
     if (!this.consumers.has(consumerId)) {
       return this.consumerLayerStates.get(consumerId);
     }
-    void this.refreshConsumerLayerState(consumerId);
+    void this.refreshConsumerLayerState(consumerId).catch(() => undefined);
     return this.consumerLayerStates.get(consumerId);
   }
 
@@ -476,7 +477,7 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
     if (!this.consumers.has(consumerId)) {
       return this.consumerQualityStates.get(consumerId);
     }
-    void this.refreshConsumerQualityState(consumerId);
+    void this.refreshConsumerQualityState(consumerId).catch(() => undefined);
     return this.consumerQualityStates.get(consumerId);
   }
 
@@ -484,7 +485,7 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
     if (!this.producers.has(producerId)) {
       return this.producerQualityStates.get(producerId);
     }
-    void this.refreshProducerQualityState(producerId);
+    void this.refreshProducerQualityState(producerId).catch(() => undefined);
     return this.producerQualityStates.get(producerId);
   }
 
@@ -492,18 +493,18 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
     if (!this.transports.has(transportId)) {
       return this.transportQualityStates.get(transportId);
     }
-    void this.refreshTransportQualityState(transportId);
+    void this.refreshTransportQualityState(transportId).catch(() => undefined);
     return this.transportQualityStates.get(transportId);
   }
 
   roomQualityState(roomId: string): RoomQualityState | undefined {
-    void this.refreshRoomQualityState(roomId);
+    void this.refreshRoomQualityState(roomId).catch(() => undefined);
     return this.roomQualityStates.get(roomId);
   }
 
   roomWorkerId(roomId: string): string | undefined {
     try {
-      return this.pool.workerForRoom(roomId).workerId;
+      return this.pool.existingWorkerForRoom(roomId)?.workerId;
     } catch {
       return undefined;
     }
@@ -513,7 +514,7 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
     if (!this.producers.has(producerId)) {
       return this.producerLayerStates.get(producerId);
     }
-    void this.refreshProducerLayerState(producerId);
+    void this.refreshProducerLayerState(producerId).catch(() => undefined);
     return this.producerLayerStates.get(producerId);
   }
 
@@ -523,12 +524,12 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
 
   mediaCounters(transportId: string, participantId: string): MediaPacketBridgeCounters {
     this.assertTransportOwner(transportId, participantId);
-    void this.refreshMediaCounters(transportId, participantId);
+    void this.refreshMediaCounters(transportId, participantId).catch(() => undefined);
     return this.counterSnapshots.get(transportId) ?? emptyMediaCounters();
   }
 
   adaptiveTransportMetrics(): AdaptiveMetricsSnapshot {
-    void this.refreshAdaptiveMetrics();
+    void this.refreshAdaptiveMetrics().catch(() => undefined);
     return this.adaptiveMetricsSnapshot;
   }
 
@@ -605,16 +606,10 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
       }
     }
     summary.participantIds = [...participantIds];
-    const hasLocalState = summary.transportCount > 0
-      || summary.consumerCount > 0
-      || summary.pipeTransportCount > 0
-      || Object.keys(summary.producerCounts).length > 0
-      || this.roomQualityStates.has(roomId);
-    if (!hasLocalState) {
-      return summary;
-    }
-    const worker = this.pool.workerForRoom(roomId);
-    await worker.request({ type: 'closeRoom', roomId });
+    // Even a chat-only/quality-observed room can hold a pool assignment without
+    // transports. Closing must release that assignment and never allocate one.
+    const worker = this.pool.existingWorkerForRoom(roomId);
+    if (worker) await worker.request({ type: 'closeRoom', roomId });
     for (const [transportId, owner] of this.transports) {
       if (owner.roomId === roomId) {
         this.transports.delete(transportId);
@@ -861,8 +856,11 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async refreshRoomQualityState(roomId: string): Promise<void> {
-    const state = (await this.pool.workerForRoom(roomId).request({ type: 'roomQualityState', roomId })) as RoomQualityState | undefined;
-    if (state) {
+    // Observing a closed/failed room must not allocate another worker assignment.
+    const worker = this.pool.existingWorkerForRoom(roomId);
+    if (!worker) return;
+    const state = (await worker.request({ type: 'roomQualityState', roomId })) as RoomQualityState | undefined;
+    if (state && this.pool.existingWorkerForRoom(roomId) === worker) {
       this.roomQualityStates.set(roomId, state);
     }
   }
@@ -885,7 +883,12 @@ export class WorkerMediaService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     const results = await Promise.all(
-      [...rooms].map((roomId) => this.pool.workerForRoom(roomId).request({ type: 'adaptiveTransportMetrics' }).catch(() => emptyAdaptiveMetrics()))
+      [...rooms].map(async (roomId) => {
+        try {
+          const worker = this.pool.existingWorkerForRoom(roomId);
+          return worker ? await worker.request({ type: 'adaptiveTransportMetrics' }) : emptyAdaptiveMetrics();
+        } catch { return emptyAdaptiveMetrics(); }
+      })
     );
     this.adaptiveMetricsSnapshot = mergeAdaptiveMetrics(results as AdaptiveMetricsSnapshot[]);
   }

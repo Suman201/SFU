@@ -181,7 +181,7 @@ export class ClassSessionsController {
   }
 
   @Get(':sessionId/post-class-chat')
-  @Roles('TEACHER', 'ADMIN', 'SUPER_ADMIN')
+  @Roles('TEACHER', 'STUDENT', 'ADMIN', 'SUPER_ADMIN')
   @ApiOperation({ summary: 'Get one private post-class Q&A thread for a completed session' })
   getPostClassChatHistory(
     @Param('sessionId') sessionId: string,

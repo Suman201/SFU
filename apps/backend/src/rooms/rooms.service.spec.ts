@@ -1,6 +1,7 @@
+import * as uploadScanner from '../common/security/upload-scanner';
 import { expect, it } from '@jest/globals';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_PARTICIPANT_PERMISSIONS, Role, type ConsumerLayerEvent, type RoomQualityState, type RoomQualitySummaryState } from '@native-sfu/contracts';
@@ -1573,7 +1574,8 @@ describe('RoomsService', () => {
   });
 
   it('persists class-session chat with server-derived sender and session metadata', async () => {
-    const { service, classSessions, participants, chat } = createService();
+    const { service, classSessions, participants, chat, nodeRegistry } = createService();
+    nodeRegistry.lookupRoomOwner.mockResolvedValue(ownerLookup(false));
     const createdAt = new Date('2026-06-22T10:05:00.000Z');
     participants.findOne.mockImplementation(async (filter: Record<string, unknown>) => {
       if (filter['_id'] === 'student-participant') {
@@ -1649,6 +1651,20 @@ describe('RoomsService', () => {
     expect(result.deliveryState).toBe('delivered');
     expect(message.deliveredAt).toBeDefined();
     expect(message.createdAt).toBe(createdAt.toISOString());
+    expect(nodeRegistry.assertLocalRoomOwner).not.toHaveBeenCalled();
+    expect(nodeRegistry.lookupRoomOwner).toHaveBeenCalledWith('room-1');
+  });
+
+  it('keeps chat owner fencing when pipe is disabled and rejects unavailable owners when enabled', async () => {
+    const { service, nodeRegistry, pipeCoordinator, chat } = createService();
+    pipeCoordinator.isEnabled.mockReturnValue(false);
+    nodeRegistry.assertLocalRoomOwner.mockRejectedValue(new ForbiddenException('Owner required'));
+    await expect(service.sendChat({ roomId: 'room-1', message: 'must reject' }, 'participant')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(nodeRegistry.assertLocalRoomOwner).toHaveBeenCalledWith('room-1');
+    pipeCoordinator.isEnabled.mockReturnValue(true);
+    nodeRegistry.lookupRoomOwner.mockResolvedValue({ ...ownerLookup(false), available: false });
+    await expect(service.sendChat({ roomId: 'room-1', message: 'must reject' }, 'participant')).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(chat.create).not.toHaveBeenCalled();
   });
 
   it('rejects student attempts to spoof class-session broadcast chat', async () => {
@@ -1781,6 +1797,20 @@ describe('RoomsService', () => {
       context: 'post_class',
       senderRole: { $ne: 'student' }
     });
+  });
+
+  it.each([new BadRequestException('detected'), new ServiceUnavailableException('unavailable')])('persists no chat attachment from a batch when a later security scan fails: %s', async failure => {
+    const { service, participants, chatAttachments, config } = createService();
+    const directory = await mkdtemp(join(tmpdir(), 'p1-chat-scan-'));
+    config.get.mockImplementation((key: string, fallback?: unknown) => key === 'chatAttachments.localPath' ? directory : fallback);
+    participants.findOne.mockResolvedValue({ id: 'student-participant', userId: 'student-1', socketId: 'student-socket', roomId: 'room-1', role: Role.PARTICIPANT, displayName: 'Student', admitted: true });
+    const scan = jest.spyOn(uploadScanner, 'assertClassroomUploadSafe').mockResolvedValueOnce(undefined).mockRejectedValueOnce(failure);
+    try {
+      await expect(service.createClassSessionChatAttachments({ sessionId: 'session-1', batchId: 'batch-1', roomId: 'room-1', channelId: 'classroom:session-1:chat', teacherId: 'teacher-1', requesterUserId: 'student-1', files: ['clean.pdf', 'rejected.pdf'].map(originalname => ({ originalname, mimetype: 'application/pdf', size: 5, buffer: Buffer.from('hello') })) })).rejects.toBe(failure);
+      expect(scan).toHaveBeenCalledTimes(2);
+      expect(chatAttachments.create).not.toHaveBeenCalled();
+      expect(await readdir(directory)).toEqual([]);
+    } finally { scan.mockRestore(); await rm(directory, { recursive: true, force: true }); }
   });
 
   it('stores uploaded class-session chat attachments with sanitized metadata and checksum', async () => {
@@ -2927,6 +2957,30 @@ describe('RoomsService', () => {
     expect(history.messages.map((message) => message.id)).toEqual(['private-offline-1']);
   });
 
+  it('marks completed private threads without requiring a live participant and preserves the read watermark', async () => {
+    const { service, chatReadStates } = createService();
+    const context = { sessionId: 'session-1', batchId: 'batch-1', roomId: 'room-1', channelId: 'chat-1', teacherId: 'teacher-1', requesterUserId: 'student-1', requesterRole: 'student' as const, scope: 'private' as const };
+    const current = new Date('2026-06-22T10:12:00.000Z');
+    chatReadStates.findOneAndUpdate.mockImplementation(async (_filter: unknown, update: any) => ({ id: 'read-1', ...update.$set, lastReadAt: current, updatedAt: current }));
+    const result = await service.markClassSessionChatRead({ ...context, completed: true, readAt: '2026-06-22T10:00:00.000Z' });
+    expect(result.lastReadAt).toBe(current.toISOString());
+    const update = chatReadStates.findOneAndUpdate.mock.calls[0]?.[1] as any;
+    expect(update.$max.lastReadAt.toISOString()).toBe('2026-06-22T10:00:00.000Z');
+    expect(update.$set.lastReadAt).toBeUndefined();
+    expect(update.$set.threadKey).toBe('session-1:teacher:teacher-1:student:student-1');
+    await expect(service.markClassSessionChatRead(context)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.markClassSessionChatRead({ ...context, completed: true, participantId: 'student-2' })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('lets a teacher mark historical completed-student threads read', async () => {
+    const { service, studentEnrollments, chatReadStates } = createService();
+    studentEnrollments.listBatchRoster.mockResolvedValue([{ id: 'enrollment-1', enrollmentId: 'enrollment-1', userId: 'student-1', status: 'completed' }]);
+    chatReadStates.findOneAndUpdate.mockImplementation(async (_filter: unknown, update: any) => ({ id: 'read-1', ...update.$set, lastReadAt: update.$max.lastReadAt, updatedAt: update.$max.lastReadAt }));
+    await service.markClassSessionChatRead({ sessionId: 'session-1', batchId: 'batch-1', roomId: 'room-1', channelId: 'chat-1', teacherId: 'teacher-1', requesterUserId: 'teacher-1', requesterRole: 'teacher', participantId: 'student-1', scope: 'private', completed: true });
+    expect(studentEnrollments.listBatchRoster).toHaveBeenCalledWith('batch-1', { includeInactive: true });
+    expect((chatReadStates.findOneAndUpdate.mock.calls[0]?.[1] as any).$set.threadKey).toBe('session-1:teacher:teacher-1:student:student-1');
+  });
+
   it('marks student read state for their own private teacher thread', async () => {
     const { service, participants, chatReadStates } = createService();
     const readAt = new Date('2026-06-22T10:12:00.000Z');
@@ -2943,9 +2997,10 @@ describe('RoomsService', () => {
       }
       return null;
     });
-    chatReadStates.findOneAndUpdate.mockImplementation(async (_filter: Record<string, unknown>, update: { $set: Record<string, unknown> }) => ({
+    chatReadStates.findOneAndUpdate.mockImplementation(async (_filter: Record<string, unknown>, update: { $set: Record<string, unknown>; $max: { lastReadAt: Date } }) => ({
       id: 'read-1',
       ...update.$set,
+      lastReadAt: update.$max.lastReadAt,
       updatedAt: readAt
     }));
 
@@ -3016,9 +3071,10 @@ describe('RoomsService', () => {
       }
       return null;
     });
-    chatReadStates.findOneAndUpdate.mockImplementation(async (_filter: Record<string, unknown>, update: { $set: Record<string, unknown> }) => ({
+    chatReadStates.findOneAndUpdate.mockImplementation(async (_filter: Record<string, unknown>, update: { $set: Record<string, unknown>; $max: { lastReadAt: Date } }) => ({
       id: 'read-1',
       ...update.$set,
+      lastReadAt: update.$max.lastReadAt,
       updatedAt: readAt
     }));
     redis.participantsPresence.mockResolvedValue([
@@ -3084,10 +3140,11 @@ describe('RoomsService', () => {
         displayName: 'Student One',
         admitted: true
       });
-      chatReadStates.findOneAndUpdate.mockImplementation(async (_filter: Record<string, unknown>, update: { $set: Record<string, unknown> }) => ({
+      chatReadStates.findOneAndUpdate.mockImplementation(async (_filter: Record<string, unknown>, update: { $set: Record<string, unknown>; $max: { lastReadAt: Date } }) => ({
         id: 'read-1',
         ...update.$set,
-        updatedAt: update.$set['lastReadAt']
+      lastReadAt: update.$max.lastReadAt,
+        updatedAt: update.$max.lastReadAt
       }));
 
       const state = await service.markClassSessionChatRead({
@@ -4927,11 +4984,13 @@ describe('RoomsService', () => {
   });
 
   it('cleans up distributed local room state when a room is closed on another node', async () => {
-    const { media, pipeCoordinator, metrics, emitSignal } = createService();
+    const { service, media, pipeCoordinator, metrics, emitSignal } = createService();
+    (service as any).locallyCountedConsumers.set('local-consumer', { roomId: 'room-1', producerId: 'producer-1', participantId: 'participant-local-1' });
+    (service as any).locallyCountedConsumers.set('other-consumer', { roomId: 'other-room', producerId: 'other-producer', participantId: 'other-participant' });
     media.closeRoom.mockResolvedValue({
       participantIds: ['participant-local-1'],
       transportCount: 1,
-      consumerCount: 1,
+      consumerCount: 0,
       producerCounts: { video: 1 },
       pipeTransportCount: 1
     });
@@ -4950,10 +5009,14 @@ describe('RoomsService', () => {
     expect(metrics.activeTransports.dec).toHaveBeenCalledTimes(1);
     expect(metrics.activeConsumers.dec).toHaveBeenCalledTimes(1);
     expect(metrics.activeProducers.labels).toHaveBeenCalledWith('video');
+    expect((service as any).locallyCountedConsumers.has('other-consumer')).toBe(true);
+    expect(metrics.activeParticipants.labels.mock.results[0]?.value.set).toHaveBeenCalledWith(0);
   });
 
   it('decrements active room entity gauges when a room is explicitly closed', async () => {
     const { service, participants, producers, consumers, media, nodeRegistry, metrics, pipeCoordinator } = createService();
+    (service as any).locallyCountedConsumers.set('consumer-one', { roomId: 'room-1' });
+    (service as any).locallyCountedConsumers.set('consumer-two', { roomId: 'room-1' });
     const summary = summaryState();
     (service as any).roomQualitySummaryStates.set('room-1', summary);
     const room = {
@@ -4988,7 +5051,7 @@ describe('RoomsService', () => {
     expect(metrics.roomProfileDistribution.labels).toHaveBeenCalledWith('meeting');
     expect(metrics.activeTransports.dec).toHaveBeenCalledTimes(1);
     expect(metrics.activeParticipants.labels).toHaveBeenCalledWith('room-1');
-    expect(metrics.activeParticipants.labels.mock.results[0]?.value.dec).toHaveBeenCalledTimes(1);
+    expect(metrics.activeParticipants.labels.mock.results[0]?.value.set).toHaveBeenCalledWith(0);
     expect(metrics.activeConsumers.dec).toHaveBeenCalledTimes(2);
     expect(metrics.activeRooms.dec).toHaveBeenCalledTimes(1);
   });
@@ -5065,6 +5128,7 @@ describe('RoomsService', () => {
 
   it('clears worker-room quarantine after room failure cleanup completes', async () => {
     const { service, rooms, participants, producers, consumers, redis, media, nodeRegistry, pipeCoordinator, metrics } = createService();
+    (service as any).locallyCountedConsumers.set('consumer-one', { roomId: 'room-1' });
     const summary = summaryState();
     (service as any).roomQualitySummaryStates.set('room-1', summary);
     const room = {
@@ -5552,6 +5616,7 @@ function createService(): {
     assertLocalRoomOwner: jest.Mock;
     claimRoom: jest.Mock;
     getRoomOwner: jest.Mock;
+    lookupRoomOwner: jest.Mock;
     releaseRoom: jest.Mock;
   };
   pipeCoordinator: {
@@ -5827,7 +5892,7 @@ function createService(): {
     appendEvent: jest.fn(async () => ({ id: 'platform-event-1' })),
     listEvents: jest.fn(async () => ({ events: [] }))
   };
-  const activeParticipantsMetric = { inc: jest.fn(), dec: jest.fn() };
+  const activeParticipantsMetric = { inc: jest.fn(), dec: jest.fn(), set: jest.fn() };
   const activeTransports = { inc: jest.fn(), dec: jest.fn() };
   const activeProducersMetric = { inc: jest.fn(), dec: jest.fn() };
   const activeConsumers = { inc: jest.fn(), dec: jest.fn() };

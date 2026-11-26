@@ -8,7 +8,7 @@ Cross-module context links require access to their destination. Dashboard totals
 
 `.github/workflows/admin.yml` runs on pull requests, pushes to main and manual dispatch. It uses read-only repository permissions, disables persisted checkout credentials, pins GitHub Actions to immutable commits, and cancels superseded runs. The job uses Ubuntu 24.04, the project's Node 22.22.3 version and `npm ci`.
 
-The workflow installs Chromium/WebKit and their Linux dependencies, builds contracts and backend dependencies plus the student/teacher and admin portals, runs all admin, frontend and backend unit tests, then runs real-HTTP admin/payment scenarios and the dedicated browser suite. It also installs FFmpeg and runs the P0 paid classroom, calendar, invoice/PDF/local-email, payment index, encrypted recovery and monitoring acceptance gate described in [P0 release readiness](p0-release-readiness.md). Admin services are isolated MongoDB 7 (`booking-tests` replica set on localhost:27124) and Redis 7 (localhost:6395). Only synthetic fixture accounts and payment-provider adapters are used; no production database, Stripe or SMTP secrets are required.
+The workflow installs Chromium/Firefox/WebKit and their Linux dependencies, builds contracts and backend dependencies plus the student/teacher and admin portals, runs all admin, frontend and backend unit tests, then runs real-HTTP admin/payment scenarios and the dedicated browser suite. It also installs FFmpeg and runs the P0 paid classroom, calendar, invoice/PDF/local-email, payment index, encrypted recovery and monitoring acceptance gate described in [P0 release readiness](p0-release-readiness.md). Admin services are isolated MongoDB 7 (`booking-tests` replica set on localhost:27124) and Redis 7 (localhost:6395). Only synthetic fixture accounts and payment-provider adapters are used; no production database, Stripe or SMTP secrets are required.
 
 Reports, actual screenshots, JUnit results and retained failure traces are uploaded as `admin-ci-evidence` for seven days, including when checks fail. Test service diagnostics are collected before cleanup. Production configuration and live merchant/email delivery checks remain separate from this workflow. The workflow does not modify branch-protection settings.
 
@@ -16,8 +16,11 @@ Reports, actual screenshots, JUnit results and retained failure traces are uploa
 
 ```sh
 npm ci
-npx playwright install --with-deps chromium webkit
+npx playwright install --with-deps chromium firefox webkit
 npm run build:admin-ci
+npm run contracts:check
+npm run test:p1:workers
+npm run test:p1:uploads
 export CHROME_BIN="$(node -p "require('playwright').chromium.executablePath()")"
 npm run test:admin:unit
 npm run test:p0:frontend
@@ -31,6 +34,7 @@ npm run test:p0:operations
 node scripts/p0-ci-services.cjs up
 npm run test:p0:setup
 npm run test:p0:browser
+npm run test:p1:browser
 node scripts/p0-ci-services.cjs down
 ```
 
@@ -47,3 +51,5 @@ Validated locally on 25 November 2026: the complete build chain, 78 focused unit
 The payment-branch merge extends the gate with payment ledger/Stripe tests, enrollment and configuration regressions, real settlement/refund/payout and cross-checkout capacity scenarios, and real student/teacher/Finance browser screens. `PAYMENT_MERGE_OUTPUT` selects the new payment screen captures. The earlier validation counts above describe the pre-merge baseline.
 
 P0 classroom services use their own labelled MongoDB replica set on localhost:27028 and Redis on localhost:6394 (database 15). Headless Chromium verifies the actual local SFU and recording; production network paths and live providers remain separate. P0 reports and failure traces are included in `admin-ci-evidence`.
+
+P1 extends the same gate with public declaration drift detection, real worker lifecycle regressions, an isolated ClamAV engine drill, three-browser completed-class private Q&A, two-node targeted event isolation, bounded worker crash/recovery churn, and required native UDP video in both directions. P1 reports and traces are included in the same artifact. Local proof boundaries and activation instructions are in [P1 release readiness](p1-release-readiness.md).

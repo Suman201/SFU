@@ -143,7 +143,8 @@ async function login(baseUrl, account) {
   if (!response.ok) {
     throw new Error(`Login failed for ${account.email} on ${baseUrl}: ${response.status} ${await response.text()}`);
   }
-  return response.json();
+  const responseBody = await response.json();
+  return responseBody.data ?? responseBody;
 }
 
 async function createScenarioRooms(roomCount, auth) {
@@ -527,7 +528,8 @@ async function getJson(url, accessToken) {
   if (!response.ok) {
     throw new Error(`Request failed ${url}: ${response.status} ${await response.text()}`);
   }
-  return response.json();
+  const responseBody = await response.json();
+  return responseBody.data ?? responseBody;
 }
 
 async function postJson(url, accessToken, body) {
@@ -542,7 +544,8 @@ async function postJson(url, accessToken, body) {
   if (!response.ok) {
     throw new Error(`Request failed ${url}: ${response.status} ${await response.text()}`);
   }
-  return response.json();
+  const responseBody = await response.json();
+  return responseBody.data ?? responseBody;
 }
 
 async function getText(url) {

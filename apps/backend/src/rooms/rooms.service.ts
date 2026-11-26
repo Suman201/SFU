@@ -1,3 +1,4 @@
+import { assertClassroomUploadSafe } from '../common/security/upload-scanner';
 import { assertWhiteboardSnapshotWithinLimits } from '../common/whiteboard-limits';
 import {
   BadRequestException,
@@ -277,6 +278,8 @@ interface ClassSessionChatContext {
   requesterRole: 'teacher' | 'student' | 'admin';
   participantId?: string;
   scope?: ChatMessageScope;
+  /** Set by the authorized completed-session service, never from a socket payload. */
+  completed?: boolean;
 }
 
 interface ClassSessionReadTarget {
@@ -560,6 +563,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly roomSnapshotGeneratedEventListeners = new Set<(summary: RoomSnapshotBundleSummary) => void>();
   private readonly roomClosedEventListeners = new Set<(roomId: string) => void>();
   private readonly chatReadReceiptEventListeners = new Set<(delivery: ChatReadDeliveryResult) => void>();
+  private readonly locallyCountedConsumers = new Map<string, Pick<Consumer, 'roomId' | 'producerId' | 'participantId'>>();
   private readonly whiteboardControlByRoomId = new Map<string, WhiteboardControlState>();
   private readonly whiteboardLockByRoomId = new Map<string, WhiteboardLockState>();
   private readonly classSessionLifecycleEventListeners = new Set<
@@ -651,7 +655,9 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     this.media.onTransportQualityUpdated((state) => this.handleTransportQualityState(state));
     this.media.onRoomQualityUpdated((state) => this.handleRoomQualityState(state));
     this.media.onMediaWorkerRoomFailed((event) => {
-      void this.handleMediaRoomFailure(event);
+      void this.handleMediaRoomFailure(event).catch(() => {
+        this.logger.error('Media room failure cleanup could not complete; inspect worker failure state.');
+      });
     });
     this.signals.onSignal((signal) => {
       this.handleDistributedRoomSignal(signal);
@@ -1216,6 +1222,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     }
     await this.redis.removePresence(roomId, participantId);
     await this.media.closeParticipantTransports(participantId);
+    this.releaseLocalConsumerMetrics(consumer => consumer.participantId === participantId || participantProducerIds.includes(consumer.producerId));
     if (this.pipeCoordinator.isEnabled()) {
       for (const consumer of uniqueConsumerDocs([...participantConsumers, ...producerConsumers])) {
         await this.releaseRemoteConsumerFeedSafely(consumer.id, 'participant_left', 'participant_left_consumer');
@@ -1353,8 +1360,6 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     if (!room) {
       throw new NotFoundException('Room not found');
     }
-    const activeParticipants = await this.participants.find({ roomId, leftAt: { $exists: false } });
-    const localNodeId = this.nodeRegistry.localNodeId();
     await this.rooms.updateOne({ _id: roomId }, { closedAt: new Date() });
     await this.participants.updateMany({ roomId, leftAt: { $exists: false } }, { leftAt: new Date() });
     await this.producers.updateMany({ roomId, status: { $ne: 'closed' } }, { status: 'closed', closedAt: new Date() });
@@ -1369,12 +1374,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     this.metrics.roomProfileDistribution.labels(room.mediaProfile?.id ?? 'meeting').dec();
     this.clearDistributedRoomObservability(roomId);
     await this.nodeRegistry.releaseRoom(roomId);
-    for (const participant of activeParticipants) {
-      if (participant.nodeId !== undefined && participant.nodeId !== localNodeId) {
-        continue;
-      }
-      this.metrics.activeParticipants.labels(roomId).dec();
-    }
+    this.metrics.activeParticipants.labels(roomId).set(0);
     this.applyLocalRoomCleanupMetrics(roomId, cleanup, { includeParticipants: false });
     this.metrics.activeRooms.dec();
     await this.platformEvents.appendEvent({
@@ -2276,7 +2276,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
             await this.releaseRemoteConsumerFeedSafely(consumer.id, 'consumer_closed', 'close_producer_consumer');
           }
         }
-        this.metrics.activeConsumers.dec(dependentConsumers.length);
+        for (const consumer of dependentConsumers) this.releaseLocalConsumerMetric(consumer.id);
       }
     });
     if (producer.kind === 'screen') {
@@ -2386,7 +2386,10 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       await this.recordClassSessionMediaFailure(classSession, 'consume', producer.kind, this.auditErrorReason(error), participant);
       throw error;
     }
-    this.metrics.activeConsumers.inc();
+    if (!this.locallyCountedConsumers.has(consumerDoc.id)) {
+      this.locallyCountedConsumers.set(consumerDoc.id, { roomId: request.roomId, producerId: consumerDoc.producerId, participantId: consumerDoc.participantId });
+      this.metrics.activeConsumers.inc();
+    }
     await this.platformEvents.appendEvent({
       type: 'consumer.created',
       roomId: request.roomId,
@@ -3163,9 +3166,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       }
       this.metrics.activeParticipants.labels(failure.roomId).dec();
     }
-    for (let index = 0; index < failure.affectedConsumers.length; index += 1) {
-      this.metrics.activeConsumers.dec();
-    }
+    this.releaseLocalConsumerMetrics(consumer => consumer.roomId === failure.roomId);
     for (let index = 0; index < failure.affectedTransports.length; index += 1) {
       this.metrics.activeTransports.dec();
     }
@@ -3271,7 +3272,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     if (this.pipeCoordinator.isEnabled()) {
       await this.releaseRemoteConsumerFeedSafely(consumerId, 'consumer_closed', 'close_consumer');
     }
-    this.metrics.activeConsumers.dec();
+    this.releaseLocalConsumerMetric(consumerId);
     const actor = await this.participants.findOne({ _id: participantId, roomId: consumer.roomId, leftAt: { $exists: false } });
     await this.platformEvents.appendEvent({
       type: 'consumer.closed',
@@ -3415,7 +3416,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     senderId: string
   ): Promise<ChatDeliveryResult> {
     try {
-    await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
+    await this.assertChatNodeMayServe(request.roomId);
     const sender = await this.assertParticipant(request.roomId, senderId);
     const messageBody = request.message.trim();
     const requestedAttachments = request.attachments ?? [];
@@ -3901,6 +3902,14 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       throw new ForbiddenException('Chat permission denied');
     }
 
+    for (const file of request.files) {
+      const mimeType = this.normalizeUploadedChatAttachmentMimeType(file.mimetype);
+      this.assertChatAttachmentExtensionMatchesMimeType(file.originalname, mimeType);
+      if (!file.buffer?.length || Math.max(file.size, file.buffer.length) > this.chatAttachmentMaxFileSizeBytes()) {
+        throw new BadRequestException('Attachment upload is empty or exceeds the file size limit.');
+      }
+      await assertClassroomUploadSafe(file.buffer, this.config);
+    }
     const directory = join(this.chatAttachmentStorageRoot(), 'class-sessions', this.safeStorageSegment(request.sessionId));
     await mkdir(directory, { recursive: true });
     const created: ChatAttachmentFileMongoDocument[] = [];
@@ -4017,13 +4026,13 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       userId: request.requesterUserId,
       participantId: target.participantId,
       scope: target.scope,
-      lastReadAt,
       ...(target.threadKey ? { threadKey: target.threadKey } : {})
     };
     const doc = await this.chatReadStates.findOneAndUpdate(
       { readStateKey },
       {
         $set: readStatePayload,
+        $max: { lastReadAt },
         ...(target.threadKey ? {} : { $unset: { threadKey: '' } })
       },
       { new: true, upsert: true }
@@ -4043,7 +4052,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     participantId: string | undefined
   ): Promise<ChatReadDeliveryResult> {
     try {
-    await this.nodeRegistry.assertLocalRoomOwner(request.roomId);
+    await this.assertChatNodeMayServe(request.roomId);
     const classSession = await this.classSessions.findOne({ _id: request.sessionId, roomId: request.roomId });
     if (!classSession) {
       throw new NotFoundException('Class session chat not found.');
@@ -4213,12 +4222,32 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     };
   }
 
+  private async assertChatNodeMayServe(roomId: string): Promise<void> {
+    if (this.pipeCoordinator.isEnabled()) {
+      // Chat/read records and authorization are shared MongoDB state. Media and
+      // moderation keep their owner fence; a missing/unavailable owner still fails.
+      await this.requireRoomOwnerLookup(roomId);
+      return;
+    }
+    await this.nodeRegistry.assertLocalRoomOwner(roomId);
+  }
+
   private async resolveClassSessionReadTarget(request: ClassSessionChatContext): Promise<ClassSessionReadTarget> {
     const scope = request.requesterRole === 'student' ? request.scope ?? 'private' : request.scope ?? (request.participantId ? 'private' : 'broadcast');
     if (scope !== 'private' && scope !== 'broadcast') {
       throw new BadRequestException('Unsupported chat read scope.');
     }
 
+    if (request.requesterRole === 'student' && request.completed) {
+      if (request.participantId && request.participantId !== request.requesterUserId) {
+        throw new ForbiddenException('Students can only update their own post-class read state.');
+      }
+      return {
+        scope,
+        participantId: request.requesterUserId,
+        ...(scope === 'private' ? { threadKey: this.privateClassSessionThreadKeyForStudentId(request.sessionId, request.teacherId, request.requesterUserId) } : {})
+      };
+    }
     if (request.requesterRole === 'student') {
       const student = await this.findActiveParticipantByUserId(request.roomId, request.requesterUserId);
       if (!student || student.role !== Role.PARTICIPANT) {
@@ -4245,7 +4274,9 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     if (!request.participantId) {
       throw new BadRequestException('Student participant id is required for private read state.');
     }
-    const target = await this.resolveClassSessionStudentThreadTarget({
+    const target: { studentId: string; threadKey: string; participant?: ParticipantMongoDocument } = await (request.completed
+      ? this.resolveClassSessionHistoricalStudentThreadTarget.bind(this)
+      : this.resolveClassSessionStudentThreadTarget.bind(this))({
       roomId: request.roomId,
       batchId: request.batchId,
       sessionId: request.sessionId,
@@ -8310,11 +8341,13 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       return;
     }
     if (signal.event === 'producer:closed' && typeof payload === 'string') {
+      this.releaseLocalConsumerMetrics(consumer => consumer.producerId === payload);
       this.markObservabilityTombstone(this.distributedProducerTombstones, payload);
       this.distributedProducerQualityStates.delete(payload);
       return;
     }
     if (signal.event === 'consumer:closed' && typeof payload === 'string') {
+      this.releaseLocalConsumerMetric(payload);
       this.markObservabilityTombstone(this.distributedConsumerTombstones, payload);
       this.distributedConsumerQualityStates.delete(payload);
       return;
@@ -8328,7 +8361,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
     }
     if (signal.event === 'room:closed' || signal.event === 'room:failed') {
       this.clearDistributedRoomObservability(signal.roomId);
-      void this.cleanupDistributedClosedRoom(signal.roomId);
+      void this.cleanupDistributedClosedRoom(signal.roomId).catch(() => { this.metrics.pipeCleanupFailures.labels('distributed_room_closed_media').inc(); });
     }
   }
 
@@ -8423,7 +8456,18 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
       }
     }
     const cleanup = normalizeMediaRoomCleanupSummary(await this.media.closeRoom(roomId));
-    this.applyLocalRoomCleanupMetrics(roomId, cleanup);
+    this.applyLocalRoomCleanupMetrics(roomId, cleanup, { includeParticipants: false });
+    // Transport summaries omit chat-only participants; a closed room has none.
+    // Resetting is also safe when a durable close event is replayed.
+    this.metrics.activeParticipants.labels(roomId).set(0);
+  }
+
+  private releaseLocalConsumerMetric(consumerId: string): void {
+    if (this.locallyCountedConsumers.delete(consumerId)) this.metrics.activeConsumers.dec();
+  }
+
+  private releaseLocalConsumerMetrics(matches: (consumer: Pick<Consumer, 'roomId' | 'producerId' | 'participantId'>) => boolean): void {
+    for (const [id, consumer] of this.locallyCountedConsumers) if (matches(consumer)) this.releaseLocalConsumerMetric(id);
   }
 
   private applyLocalRoomCleanupMetrics(roomId: string, cleanup: LocalRoomCleanupMetrics, options: { includeParticipants?: boolean } = {}): void {
@@ -8437,9 +8481,7 @@ export class RoomsService implements OnApplicationBootstrap, OnModuleDestroy {
         this.metrics.activeProducers.labels(kind).dec();
       }
     }
-    for (let index = 0; index < cleanup.consumerCount; index += 1) {
-      this.metrics.activeConsumers.dec();
-    }
+    this.releaseLocalConsumerMetrics(consumer => consumer.roomId === roomId);
     for (let index = 0; index < cleanup.transportCount; index += 1) {
       this.metrics.activeTransports.dec();
     }

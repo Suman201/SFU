@@ -395,13 +395,13 @@ export class ClassSessionService {
 
   getPostClassChatHistory(
     sessionId: string,
-    options: { batchId?: string; participantId: string; before?: string; limit?: number }
+    options: { batchId?: string; participantId?: string; before?: string; limit?: number }
   ): Observable<ChatHistoryResponse> {
     const url = new URL(`${API_BASE_URL}/class-sessions/${encodeURIComponent(sessionId)}/post-class-chat`);
     if (options.batchId) {
       url.searchParams.set('batchId', options.batchId);
     }
-    url.searchParams.set('participantId', options.participantId);
+    if (options.participantId) url.searchParams.set('participantId', options.participantId);
     if (options.before) {
       url.searchParams.set('before', options.before);
     }
@@ -486,7 +486,7 @@ export class ClassSessionService {
       url.searchParams.set('batchId', options.batchId);
     }
     if (options.participantId) {
-      url.searchParams.set('participantId', options.participantId);
+      if (options.participantId) url.searchParams.set('participantId', options.participantId);
     }
     if (options.scope) {
       url.searchParams.set('scope', options.scope);

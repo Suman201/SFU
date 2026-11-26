@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { SFU_PROTOCOL_HEADER } from '@native-sfu/contracts';
 import helmet from 'helmet';
 import { BadRequestException, ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -42,7 +43,7 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: allowedOrigins,
     credentials: true,
-    exposedHeaders: ['x-request-id', 'x-error-code'],
+    exposedHeaders: ['x-request-id', 'x-error-code', SFU_PROTOCOL_HEADER],
   });
   const metricsPath = config.get<string>('metrics.path', 'metrics');
   app.setGlobalPrefix('api', {

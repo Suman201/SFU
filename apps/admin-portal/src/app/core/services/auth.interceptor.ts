@@ -1,4 +1,5 @@
 import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
+import { SFU_PROTOCOL_HEADER, SFU_PROTOCOL_VERSION } from '@native-sfu/contracts';
 import { inject } from '@angular/core';
 import { catchError, switchMap, throwError } from 'rxjs';
 import { AuthService } from './auth.service';
@@ -14,6 +15,7 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
     !url.pathname.startsWith(`${base.pathname}/`)
   )
     return next(request);
+  request = request.clone({ setHeaders: { [SFU_PROTOCOL_HEADER]: String(SFU_PROTOCOL_VERSION) } });
   const publicAuth =
     /\/auth\/(login|register|refresh|forgot-password|reset-password)$/.test(
       url.pathname,

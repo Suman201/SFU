@@ -217,10 +217,10 @@
           <p class="eyebrow">Private Q&A</p>
           <h2>Ask the teacher</h2>
         </header>
-        <div class="message-list">
+        <div class="message-list" #privateThread (scroll)="thread.markVisibleRead(privateThread)" aria-live="polite">
           @if (privateMessages().length) {
             @for (message of privateMessages(); track message.id) {
-              <div class="message" [class.mine]="message.senderRole === 'student'">
+              <div class="message" [class.mine]="message.senderRole === 'student'" [attr.data-message-created-at]="message.createdAt">
                 <strong>{{ messageAuthor(message) }}</strong>
                 <p>{{ message.message }}</p>
                 <small>{{ formatDate(message.createdAt) }}</small>
@@ -230,6 +230,9 @@
             <p class="muted">No private follow-up questions yet.</p>
           }
         </div>
+        @if (thread.error()) {
+          <p class="muted" role="status">{{ thread.error() }}</p>
+        }
         @if (sendError()) {
           <p class="form-alert" role="alert">{{ sendError() }}</p>
         }

@@ -185,6 +185,7 @@ export const appConfig = () => ({
     encryptionKey: envOrSecretFile('TUTOR_VERIFICATION_ENCRYPTION_KEY'),
     retentionDays: Number(process.env.TUTOR_VERIFICATION_RETENTION_DAYS ?? 30),
   },
+  uploadSecurity: { enabled: process.env.UPLOAD_SCAN_ENABLED === 'true', host: process.env.UPLOAD_SCAN_HOST ?? '127.0.0.1', port: Number(process.env.UPLOAD_SCAN_PORT ?? 3310), timeoutMs: Number(process.env.UPLOAD_SCAN_TIMEOUT_MS ?? 15000), maxBytes: Number(process.env.UPLOAD_SCAN_MAX_BYTES ?? 67108864), maxConcurrent: Number(process.env.UPLOAD_SCAN_MAX_CONCURRENT ?? 2) },
   profileMedia: {
     introVideoPath: process.env.TUTOR_INTRO_VIDEO_LOCAL_PATH?.trim() || undefined,
     storageProvider: 'local',

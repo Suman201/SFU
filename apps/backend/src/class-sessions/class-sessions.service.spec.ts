@@ -1,6 +1,7 @@
-import { expect } from '@jest/globals';
-import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import * as uploadScanner from '../common/security/upload-scanner';
+import { expect, it } from '@jest/globals';
+import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WhiteboardMemorySnapshot } from '@native-sfu/contracts';
@@ -2556,6 +2557,51 @@ describe('ClassSessionsService', () => {
 
     expect(thrown).toBeInstanceOf(ForbiddenException);
     expect(studentEnrollments.listStudentClassHistoryBatchIds).not.toHaveBeenCalled();
+  });
+
+  it.each([new BadRequestException('detected'), new ServiceUnavailableException('unavailable')])('persists no material from a batch when a later security scan fails: %s', async failure => {
+    const { service, classSessions, materials } = createService();
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'live', roomId: 'room-1' }));
+    const directory = await mkdtemp(join(tmpdir(), 'p1-material-scan-'));
+    (service as any).config.get.mockImplementation((key: string, fallback: unknown) => key === 'classMaterials.localPath' ? directory : fallback);
+    const scan = jest.spyOn(uploadScanner, 'assertClassroomUploadSafe').mockResolvedValueOnce(undefined).mockRejectedValueOnce(failure);
+    const files = ['clean.pdf', 'rejected.pdf'].map(originalname => ({ originalname, mimetype: 'application/pdf', size: 5, buffer: Buffer.from('hello') }));
+    try {
+      await expect(service.uploadMaterials(sessionId, 'batch-1', teacher, files)).rejects.toBe(failure);
+      expect(scan).toHaveBeenCalledTimes(2);
+      expect(materials.create).not.toHaveBeenCalled();
+      expect(await readdir(directory)).toEqual([]);
+    } finally { scan.mockRestore(); await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it('loads only the historical student own post-class thread and rejects peer access', async () => {
+    const { service, classSessions, rooms, studentEnrollments } = createService();
+    const student: AuthenticatedUser = { ...teacher, sub: 'student-1', roles: ['STUDENT'] };
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'completed', roomId: 'room-1' }));
+    studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(false);
+    studentEnrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(true);
+    rooms.getClassSessionPostClassStudentChatHistory.mockResolvedValue({ messages: [{ id: 'own-question' }] });
+    const history = await service.getPostClassChatHistory(sessionId, 'batch-1', student);
+    expect(history.messages[0]?.id).toBe('own-question');
+    expect(rooms.getClassSessionPostClassStudentChatHistory).toHaveBeenCalledWith(expect.objectContaining({ studentId: 'student-1', scope: 'private' }));
+    await expect(service.getPostClassChatHistory(sessionId, 'batch-1', student, { participantId: 'student-2' })).rejects.toBeInstanceOf(ForbiddenException);
+    studentEnrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(false);
+    await expect(service.getPostClassChatHistory(sessionId, 'batch-1', student)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(rooms.getClassSessionPostClassStudentChatHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it('authorizes completed-session read receipts through historical enrollment', async () => {
+    const { service, classSessions, rooms, studentEnrollments } = createService();
+    const student: AuthenticatedUser = { ...teacher, sub: 'student-1', roles: ['STUDENT'] };
+    classSessions.findById.mockResolvedValue(persistedSession({ status: 'completed', roomId: 'room-1' }));
+    studentEnrollments.isStudentEnrolledInBatch.mockResolvedValue(false);
+    studentEnrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(true);
+    rooms.markClassSessionChatRead.mockResolvedValue({ id: 'historical-read' });
+    await service.markChatRead(sessionId, 'batch-1', student, { roomId: 'room-1', scope: 'private' });
+    expect(rooms.markClassSessionChatRead).toHaveBeenCalledWith(expect.objectContaining({ requesterUserId: 'student-1', completed: true }));
+    studentEnrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(false);
+    await expect(service.markChatRead(sessionId, 'batch-1', student, { roomId: 'room-1', scope: 'private' })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(rooms.markClassSessionChatRead).toHaveBeenCalledTimes(1);
   });
 
   function createService(): {

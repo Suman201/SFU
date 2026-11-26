@@ -17,6 +17,8 @@ export type LocalUiStackOptions = {
   nodePorts: [number] | [number, number];
   workerMode: 'in-process' | 'worker';
   operationsToken?: string;
+  pipeEnabled?: boolean;
+  nodePrefix?: string;
 };
 
 export type LocalUiStack = {
@@ -42,7 +44,7 @@ export async function startLocalUiStack(options: LocalUiStackOptions): Promise<L
 
   try {
     for (const [index, port] of options.nodePorts.entries()) {
-      const nodeId = index === 0 ? 'u2a-node-a' : 'u2a-node-b';
+      const nodeId = `${options.nodePrefix ?? 'u2a'}-node-${index === 0 ? 'a' : 'b'}`;
       const hostCandidateStart = 46000 + index * 50;
       const processHandle = spawnManagedProcess({
         name: `backend-${nodeId}`,
@@ -64,9 +66,11 @@ export async function startLocalUiStack(options: LocalUiStackOptions): Promise<L
           REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
           REDIS_REQUIRED: 'true',
           OPERATIONS_TOKEN: operationsToken,
-          ENABLE_PIPE_TRANSPORT: 'false',
+          ENABLE_PIPE_TRANSPORT: options.pipeEnabled ? 'true' : 'false',
+          ...(options.pipeEnabled ? { PIPE_ADVERTISE_IP: '127.0.0.1', PIPE_CLUSTER_SECRET: 'p1-local-pipe-synthetic-secret-32characters' } : {}),
           MEDIA_WORKER_MODE: options.workerMode,
           MEDIA_WORKER_COUNT: '1',
+          MEDIA_WORKER_MAX_TRANSPORTS_PER_WORKER: '50',
           HOST_CANDIDATE_PORT_RANGE: `${hostCandidateStart}-${hostCandidateStart + 49}`,
           PIPE_PORT_RANGE: `${47000 + index * 50}-${47049 + index * 50}`,
           TURN_URIS: 'turn:127.0.0.1:3478?transport=udp'

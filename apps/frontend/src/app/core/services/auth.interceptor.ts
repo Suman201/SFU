@@ -1,4 +1,5 @@
 import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
+import { SFU_PROTOCOL_HEADER, SFU_PROTOCOL_VERSION } from '@native-sfu/contracts';
 import { inject } from '@angular/core';
 import { catchError, switchMap, throwError } from 'rxjs';
 import { AuthService } from './auth.service';
@@ -10,6 +11,7 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
   const url = new URL(request.url, globalThis.location?.origin);
   // Never attach classroom credentials to material links or an unrelated origin.
   if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}/`)) return next(request);
+  request = request.clone({ setHeaders: { [SFU_PROTOCOL_HEADER]: String(SFU_PROTOCOL_VERSION) } });
   const publicAuth = /\/auth\/(login|register|refresh|forgot-password|reset-password)$/.test(url.pathname);
   if (publicAuth) return next(request);
   if (url.pathname.endsWith('/auth/logout')) {

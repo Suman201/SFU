@@ -59,6 +59,12 @@ That stack starts two backend nodes with pipe enabled, distinct media and pipe U
 
 This local validation is intentionally not a browser or public-network proof. Production readiness still requires staging evidence for public TURN, public ICE candidate reachability, ingress behavior, and real inter-node UDP exposure.
 
+## Required P1 acceptance
+
+`npm run test:p1:browser` runs the isolated localhost two-node gate after `npm run build:admin-ci`, `npm run build:p0:classroom` and `node scripts/p0-ci-services.cjs up`. Stop those owned services afterwards. The gate verifies actual Redis-targeted private chat/read/control/moderation isolation, admission drain with existing chat, reconnect identity, bounded room churn, child-worker crash/replacement and zero cleanup gauges. Separate native UDP tests require browser-decoded video from owner to remote and remote to owner; setup failures fail this required gate.
+
+Only shared chat/read operations may execute on a remote pipe-enabled node after resolving a healthy owner. Media, whiteboard mutations and moderation retain their existing owner fencing. Draining ingress rejects new rooms while current room traffic is allowed; active owner migration remains out of scope. Reports are under `reports/p1/multi-node/`. These checks establish local behavior, not sustained RTP capacity, public network routing or production rollout safety. See [P1 release readiness](p1-release-readiness.md).
+
 ## Troubleshooting
 
 If distributed pipe setup is enabled, start with:

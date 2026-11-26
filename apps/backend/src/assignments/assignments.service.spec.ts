@@ -1,4 +1,9 @@
-import { ForbiddenException } from '@nestjs/common';
+import { expect, it } from '@jest/globals';
+import * as uploadScanner from '../common/security/upload-scanner';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AssignmentsService } from './assignments.service';
 
 describe('AssignmentsService', () => {
@@ -75,6 +80,54 @@ describe('AssignmentsService', () => {
     expect(thrown).toBeInstanceOf(ForbiddenException);
   });
 
+  it('lists historical homework only for an explicitly selected completed session', async () => {
+    const h = createHarness();
+    h.classSessions.findOne.mockResolvedValue(sessionDoc({ status: 'completed' }));
+    h.enrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(true);
+    h.assignments.find.mockReturnValue(query([assignmentDoc({ sessionId: 'session-1' })]));
+    h.submissions.find.mockReturnValue(query([]));
+    const result = await h.service.listStudentAssignments(studentUser(), { batchId: 'batch-1', sessionId: 'session-1' });
+    expect(result.items).toHaveLength(1);
+    expect(h.classSessions.findOne).toHaveBeenCalledWith({ _id: 'session-1', batchId: 'batch-1', status: 'completed' });
+    expect(h.assignments.find).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-1', batchId: 'batch-1', status: 'published' }));
+    await expect(h.service.listStudentAssignments(studentUser(), { batchId: 'batch-1' })).rejects.toBeInstanceOf(ForbiddenException);
+    h.enrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(false);
+    await expect(h.service.listStudentAssignments(studentUser(), { batchId: 'batch-1', sessionId: 'session-1' })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('returns historical assignment detail read-only without creating a submission and denies writes', async () => {
+    const h = createHarness();
+    h.assignments.findOne.mockResolvedValue(assignmentDoc({ sessionId: 'session-1' }));
+    h.enrollments.isStudentEnrolledInBatch.mockResolvedValue(false);
+    h.enrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(true);
+    h.classSessions.findOne.mockResolvedValue(sessionDoc({ status: 'completed' }));
+    h.submissions.findOne.mockResolvedValue(null);
+    const result = await h.service.getAssignment(studentUser(), 'assignment-1');
+    expect(result.readOnly).toBe(true);
+    expect(result.submission?.studentId).toBe('student-1');
+    expect(h.submissions.create).not.toHaveBeenCalled();
+    await expect(h.service.submitAssignment(studentUser(), 'assignment-1', { text: 'denied' })).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(h.service.markViewed(studentUser(), 'assignment-1')).rejects.toBeInstanceOf(ForbiddenException);
+    h.classSessions.findOne.mockResolvedValue(null);
+    await expect(h.service.getAssignment(studentUser(), 'assignment-1')).rejects.toBeInstanceOf(ForbiddenException);
+    h.classSessions.findOne.mockResolvedValue(sessionDoc({ status: 'completed' }));
+    h.enrollments.isStudentHistoricallyEnrolledInBatch.mockResolvedValue(false);
+    await expect(h.service.getAssignment(studentUser(), 'assignment-1')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it.each(['persistAssignmentFiles', 'persistSubmissionFiles'])('rejects a scanned assignment file batch before filesystem writes in %s', async method => {
+    const h = createHarness(); const directory = await mkdtemp(join(tmpdir(), 'p1-assignment-scan-'));
+    h.config.get.mockImplementation((key: string, fallback: unknown) => key === 'assignments.localPath' ? directory : fallback);
+    const failure = new BadRequestException('detected');
+    const scan = jest.spyOn(uploadScanner, 'assertClassroomUploadSafe').mockResolvedValueOnce(undefined).mockRejectedValueOnce(failure);
+    const files = ['clean.pdf', 'rejected.pdf'].map(originalname => ({ originalname, mimetype: 'application/pdf', size: 5, buffer: Buffer.from('hello') }));
+    try {
+      const args = method === 'persistSubmissionFiles' ? [assignmentDoc(), studentUser(), files] : [assignmentDoc(), files];
+      await expect((h.service as any)[method](...args)).rejects.toBe(failure);
+      expect(scan).toHaveBeenCalledTimes(2); expect(await readdir(directory)).toEqual([]);
+    } finally { scan.mockRestore(); await rm(directory, { recursive: true, force: true }); }
+  });
+
   it('marks a submission late when submitted after the due date', async () => {
     const harness = createHarness();
     const assignment = assignmentDoc({ dueAt: new Date('2026-01-01T00:00:00.000Z'), allowedSubmissionTypes: ['text'] });
@@ -137,6 +190,7 @@ function createHarness() {
   const users = { findById: jest.fn() };
   const enrollments = {
     isStudentEnrolledInBatch: jest.fn(async () => true),
+    isStudentHistoricallyEnrolledInBatch: jest.fn(async () => false),
     listStudentBatches: jest.fn(async () => [])
   };
   const config = { get: jest.fn((_key: string, fallback: unknown) => fallback) };

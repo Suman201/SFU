@@ -141,7 +141,8 @@ async function login(baseUrl, account) {
   if (!response.ok) {
     throw new Error(`Login failed for ${account.email} on ${baseUrl}: ${response.status} ${await response.text()}`);
   }
-  return response.json();
+  const responseBody = await response.json();
+  return responseBody.data ?? responseBody;
 }
 
 async function bootstrapRooms(auth) {
@@ -788,7 +789,8 @@ async function getJson(url) {
   if (!response.ok) {
     throw new Error(`Request failed ${url}: ${response.status} ${await response.text()}`);
   }
-  return response.json();
+  const responseBody = await response.json();
+  return responseBody.data ?? responseBody;
 }
 
 async function getText(url) {
@@ -811,7 +813,8 @@ async function postJson(url, accessToken, body) {
   if (!response.ok) {
     throw new Error(`Request failed ${url}: ${response.status} ${await response.text()}`);
   }
-  return response.json();
+  const responseBody = await response.json();
+  return responseBody.data ?? responseBody;
 }
 
 async function patchJson(url, accessToken, body) {
@@ -826,7 +829,8 @@ async function patchJson(url, accessToken, body) {
   if (!response.ok) {
     throw new Error(`Request failed ${url}: ${response.status} ${await response.text()}`);
   }
-  return response.json();
+  const responseBody = await response.json();
+  return responseBody.data ?? responseBody;
 }
 
 function operatorHeaders(accessToken) {

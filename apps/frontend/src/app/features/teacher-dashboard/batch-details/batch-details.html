@@ -1479,8 +1479,9 @@
                 <small>Private teacher-student thread</small>
               </div>
 
-              <div class="post-class-message-list" aria-live="polite">
-                @if (postClassLoading()) {
+              <p class="muted" role="status">{{ postClassThread.error() }}</p>
+              <div class="post-class-message-list" #postClassMessageList (scroll)="postClassThread.markVisibleRead(postClassMessageList)" aria-live="polite">
+                @if (postClassLoading() || (postClassThread.loading() && !postClassMessages().length)) {
                   <div class="empty-state compact">
                     <h3>Loading thread</h3>
                     <p>Fetching the private conversation.</p>
@@ -1492,7 +1493,7 @@
                   </div>
                 } @else {
                   @for (message of postClassMessages(); track message.id) {
-                    <article class="post-class-message" [class.mine]="message.senderRole !== 'student'">
+                    <article class="post-class-message" [class.mine]="message.senderRole !== 'student'" [attr.data-message-created-at]="message.createdAt">
                       <header>
                         <strong>{{ messageSenderLabel(message) }}</strong>
                         <time [attr.datetime]="message.createdAt">{{ postClassMessageTime(message.createdAt) }}</time>

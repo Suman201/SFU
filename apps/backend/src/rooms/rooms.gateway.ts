@@ -1,3 +1,4 @@
+import { SFU_CLIENT_UPDATE_MESSAGE, supportsSfuProtocol } from '@native-sfu/contracts';
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, ForbiddenException, Logger, Optional, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -212,7 +213,7 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     server.use((socket, next) => {
       void this.authenticateSocket(socket).then(() => next()).catch((error) => {
         this.logger.warn(`Socket auth failed requestId=${socket.data.requestId}: ${error instanceof Error ? error.message : String(error)}`);
-        next(new Error('Unauthenticated socket'));
+        next(new Error(error instanceof Error && error.message === SFU_CLIENT_UPDATE_MESSAGE ? SFU_CLIENT_UPDATE_MESSAGE : 'Unauthenticated socket'));
       });
     });
   }
@@ -227,6 +228,7 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   }
 
   private async authenticateSocket(socket: SfuSocket): Promise<void> {
+    if (!supportsSfuProtocol(socket.handshake.auth?.protocolVersion)) throw new Error(SFU_CLIENT_UPDATE_MESSAGE);
     socket.data.requestId = randomUUID();
     if (this.isConnectionThrottled(socket)) {
       throw new Error('Socket connection throttled');

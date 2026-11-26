@@ -4,7 +4,7 @@ This document tracks the areas that are still not proven by the current local an
 
 Use it as a backlog after staging so the team can close the remaining confidence gaps without mixing them into the active rollout signoff work.
 
-Updated local evidence and remaining deployment gates: [P0 release readiness](p0-release-readiness.md), 26 November 2026.
+Updated local evidence and remaining deployment gates: [P0 release readiness](p0-release-readiness.md) and [P1 release readiness](p1-release-readiness.md), 26 November 2026.
 
 ## How To Use This Checklist
 
@@ -14,19 +14,18 @@ Updated local evidence and remaining deployment gates: [P0 release readiness](p0
 
 ## Local Proof Gaps
 
-These items were not fully proven in the current local pass.
+Completed local proof is bounded by the scope below; unchecked environment gates remain separate.
 
 - [x] Real frontend-to-backend local paid classroom journey
   - `npm run test:p0:browser`: real login, checkout, SFU media, reconnect, recording/playback and private post-class Q&A; actual screenshots in `reports/p0/`. Public staging remains separate.
 - [x] Clean backend unit-suite proof
-  - `npm run test:p0:backend`: all 66 suites / 770 tests passed locally on 26 November 2026 with FFmpeg available.
-- [ ] Honest local distributed/two-node proof
-  - Done: the checked-in local two-node stack and report-writing soak harness now exist (`npm run docker:start:multi-node`, `npm run seed:dummy-users:multi-node`, `npm run test:live-soak:local`).
-  - Current issue: keep this proof item open until a real passing report from `reports/live-soak/` is attached. The latest run did not start the soak because existing Docker containers already occupied host ports `3000`, `3002`, and `6379`.
-- [ ] Honest local soak/drain proof
-  - Current issue: the fallback `npm run test:load:node-drain` could not run because `k6` was not installed.
-- [ ] True two-gateway targeted-event integration proof
-  - Current issue: service and gateway unit coverage proves private targeting and Redis fanout separately, but there is not yet a two-live-gateway integration run proving private chat, moderation, read receipts, and whiteboard commands reach only intended sockets across nodes.
+  - `npm run test:p0:backend`: the complete backend suite passed locally on 26 November 2026 with FFmpeg available.
+- [x] Bounded local distributed/two-node proof
+  - `npm run test:p1:browser`: two actual worker-mode backends with shared Redis/Mongo, native UDP video in both directions, and zero cleanup baselines. Reports: `reports/p1/multi-node/` and browser JUnit. Public ingress and active owner handoff remain unproven.
+- [x] Bounded local churn/drain/recovery proof
+  - Required P1 gate: three descriptor churn cycles, room steps 2/4, admission drain while current chat continues, intentional child-worker crash and replacement. This does not establish production capacity or long-running browser RTP stability.
+- [x] Two-live-gateway private/targeted-event proof
+  - Required P1 gate verifies private chat, read receipts, whiteboard control grants, targeted media moderation and class-only broadcasts; unrelated classmates/rooms receive no private or targeted payloads. This does not prove cross-owner whiteboard mutation routing or active-room migration.
 
 ## Staging Proof Gaps
 

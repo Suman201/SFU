@@ -1,5 +1,6 @@
 import { expect, test, chromium, type Page } from '@playwright/test';
 import mongoose from 'mongoose';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -44,7 +45,7 @@ test('P0 paid learner journey: real login, checkout, media, reconnect, recording
   let fixture: Awaited<ReturnType<typeof seedClassroom>>;
   let recordingId = '';
   try {
-    fixture = await seedClassroom({ enrollStudent: false });
+    fixture = await seedClassroom({ enrollStudent: false, batchName: 'P0 learning journey ' + randomUUID() });
     const db = await mongoose.createConnection(process.env.MONGODB_URI!).asPromise();
     try { await db.db!.collection('batches').updateOne({ _id: fixture.batchId as any }, { $set: { feeAmount: 100, feeMinor: 10000, feeCurrency: 'USD' } }); }
     finally { await db.close(); }
@@ -83,6 +84,48 @@ test('P0 paid learner journey: real login, checkout, media, reconnect, recording
       }), { timeout: 30000 }).toBeGreaterThan(40);
       await teacher.screenshot({ path: path.join(output, 'teacher-live-classroom.png'), fullPage: true });
       await student.screenshot({ path: path.join(output, 'student-live-classroom.png'), fullPage: true });
+      // A replaced video with width:auto can remain at its intrinsic thumbnail size.
+      for (const viewport of [{ width: 1440, height: 1050 }, { width: 390, height: 844 }, { width: 844, height: 390 }, { width: 1024, height: 768 }]) {
+        await student.setViewportSize(viewport);
+        await expect.poll(async () => (await student.locator('video.stage-video').boundingBox())?.width ?? 0).toBeGreaterThan(viewport.width * 0.7);
+        await expect.poll(async () => (await student.locator('video.stage-video').boundingBox())?.height ?? 0).toBeGreaterThan(viewport.height * (viewport.height < 500 ? 0.4 : 0.2));
+        expect(await student.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        if (viewport.width <= 900) {
+          await expect(student.locator('sfu-session-chat .session-chat')).toHaveClass(/collapsed/);
+          await expect(student.locator('sfu-session-chat .chat-toggle')).toBeInViewport();
+          if (viewport.width === 390) {
+            const toggle = student.locator('sfu-session-chat .chat-toggle');
+            const handle = (await toggle.boundingBox())!;
+            await student.mouse.move(handle.x + 20, handle.y + handle.height / 2);
+            await student.mouse.down();
+            await student.mouse.move(handle.x + 30, handle.y + handle.height / 2 - 10, { steps: 3 });
+            await student.mouse.up();
+            await expect(student.locator('sfu-session-chat .session-chat')).toHaveClass(/collapsed/);
+            await toggle.click();
+            await expect(student.locator('sfu-session-chat .chat-panel')).toBeVisible();
+            await student.getByRole('button', { name: 'Collapse chat', exact: true }).click();
+            await expect(student.locator('sfu-session-chat .chat-toggle')).toBeInViewport();
+          }
+          const controls = student.locator('.live-media-controls');
+          const mic = await controls.locator('.mic-toggle').boundingBox();
+          const camera = await controls.locator('.camera-toggle').boundingBox();
+          const hand = await controls.locator('.student-hand-button').boundingBox();
+          const setup = await controls.locator('sfu-device-setup-dialog').boundingBox();
+          expect(mic!.x + mic!.width).toBeLessThanOrEqual(camera!.x);
+          expect(camera!.x + camera!.width).toBeLessThanOrEqual(hand!.x);
+          expect(hand!.x + hand!.width).toBeLessThanOrEqual(setup!.x);
+          const utility = ['.student-whiteboard-source', '.student-whiteboard-button', '.student-materials-button', '.participants-button', '.student-leave-button', '.student-support-button:not(.student-leave-button)'];
+          const boxes = await Promise.all(utility.map(selector => student.locator(selector).boundingBox()));
+          for (let a = 0; a < boxes.length; a++) for (let b = a + 1; b < boxes.length; b++) {
+            const first = boxes[a]!, second = boxes[b]!;
+            const overlap = first.x < second.x + second.width && first.x + first.width > second.x && first.y < second.y + second.height && first.y + first.height > second.y;
+            expect(overlap, utility[a] + ' overlaps ' + utility[b]).toBe(false);
+          }
+
+        }
+        await student.screenshot({ path: path.join(output, `student-presentation-${viewport.width}x${viewport.height}.png`), fullPage: true });
+      }
+      await student.setViewportSize({ width: 1440, height: 1050 });
     });
     const recordingStart = Date.now();
     await step('actual recording and student reconnect preserve the lesson', async () => {
@@ -129,7 +172,7 @@ test('P0 paid learner journey: real login, checkout, media, reconnect, recording
       await teacher.getByPlaceholder('Write a private answer for this student', { exact: true }).fill('Review the second board example and apply the same rule.');
       await teacher.getByRole('button', { name: 'Send reply', exact: true }).click();
       await expect(teacher.locator('.post-class-message-list').getByText('Review the second board example and apply the same rule.', { exact: true })).toBeVisible();
-      await student.reload(); await expect(student.getByText('Review the second board example and apply the same rule.', { exact: true })).toBeVisible();
+      await expect(student.getByText('Review the second board example and apply the same rule.', { exact: true })).toBeVisible();
       const outsider = await login(stack.nodeAUrl, 'student.two@example.com', 'Password@12345');
       await api(outsider.accessToken, '/class-sessions/student/completed/' + fixture.sessionId + '?batchId=' + fixture.batchId, 'GET', undefined, 403);
       await api(outsider.accessToken, '/desktop/recordings/' + recordingId + '/playback', 'GET', undefined, 403);

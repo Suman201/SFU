@@ -87,7 +87,12 @@
     "build:p0:classroom": "npm run build -w @native-sfu/frontend -- --configuration development --output-path dist/p0-frontend",
     "test:p0:browser": "node scripts/p0-browser.cjs",
     "verify:p0:launch": "node scripts/p0-launch-readiness.cjs",
-    "test:p0:setup": "node --test tests/operations/payment-indexes.test.cjs"
+    "test:p0:setup": "node --test tests/operations/payment-indexes.test.cjs",
+    "test:p1:browser": "node scripts/p0-browser.cjs --p1",
+    "contracts:check": "node scripts/check-contract-api.cjs",
+    "contracts:baseline": "node scripts/check-contract-api.cjs --update",
+    "test:p1:workers": "npm test -w @native-sfu/nest-sfu -- --runInBand src/worker/worker-media.service.spec.ts",
+    "test:p1:uploads": "node scripts/p1-upload-scan-drill.cjs"
   },
   "devDependencies": {
     "@angular/compiler": "22.0.1",

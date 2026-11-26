@@ -1,6 +1,8 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
-import { TitleCasePipe } from '@angular/common';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterEveryRender, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { DOCUMENT, TitleCasePipe } from '@angular/common';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { interval } from 'rxjs';
+import { PostClassThreadStore, threadVisible } from '../../class-session/post-class-thread.store';
 import { FormField, FormRoot, form as signalForm, maxLength, required } from '@angular/forms/signals';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type {
@@ -252,6 +254,7 @@ const EMPTY_LIVE_SETTINGS_FORM: LiveSettingsForm = {
 
 @Component({
   selector: 'sfu-batch-details',
+  providers: [PostClassThreadStore],
   standalone: true,
   imports: [Footer, FormField, FormRoot, Header, RouterLink, TitleCasePipe],
   templateUrl: './batch-details.html',
@@ -299,7 +302,12 @@ export class BatchDetails {
   protected readonly actionError = signal('');
   protected readonly postClassSession = signal<TeacherSession | null>(null);
   protected readonly postClassSummary = signal<ChatThreadSummaryResponse | null>(null);
-  protected readonly postClassMessages = signal<ChatMessage[]>([]);
+  protected readonly postClassThread = inject(PostClassThreadStore);
+  protected readonly postClassMessages = this.postClassThread.messages;
+  protected readonly postClassThreadElement = viewChild<ElementRef<HTMLElement>>('postClassMessageList');
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly document = inject(DOCUMENT);
+  private postClassGeneration = 0;
   protected readonly postClassSelectedStudentId = signal('');
   protected readonly postClassDraft = signal('');
   protected readonly postClassLoading = signal(false);
@@ -444,6 +452,13 @@ export class BatchDetails {
   private loadedAssignmentsBatchId = '';
 
   constructor() {
+    afterEveryRender(() => this.postClassThread.markVisibleRead(this.postClassThreadElement()?.nativeElement));
+    interval(10000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      const session = this.postClassSession();
+      if (session && this.document.visibilityState === 'visible' && !this.postClassLoading() && !this.postClassSending()) {
+        this.loadPostClassSummary(session, false);
+      }
+    });
     this.dashboard.loadBatches();
     effect(() => {
       const batchId = this.batchId();
@@ -836,6 +851,8 @@ export class BatchDetails {
   }
 
   protected openPostClassQa(session: TeacherSession): void {
+    this.postClassGeneration++;
+    this.postClassThread.close();
     this.closeSessionMenu();
     this.postClassSession.set(session);
     this.postClassSelectedStudentId.set('');
@@ -845,6 +862,9 @@ export class BatchDetails {
   }
 
   protected closePostClassQa(): void {
+    this.postClassGeneration++;
+    this.postClassThread.close();
+    this.postClassSending.set(false);
     this.postClassSession.set(null);
     this.postClassSummary.set(null);
     this.postClassMessages.set([]);
@@ -1029,6 +1049,7 @@ export class BatchDetails {
   }
 
   protected selectPostClassThread(studentId: string): void {
+    this.postClassSending.set(false);
     this.postClassSelectedStudentId.set(studentId);
     this.postClassDraft.set('');
     this.loadPostClassThread();
@@ -1046,16 +1067,19 @@ export class BatchDetails {
     if (!session || !target || !message || this.postClassSending()) {
       return;
     }
+    const generation = this.postClassGeneration;
+    const current = () => generation === this.postClassGeneration && this.postClassSession()?.id === session.id && this.postClassSelectedStudentId() === target.id;
     this.postClassSending.set(true);
     this.postClassError.set('');
-    this.classSessions.sendPostClassChat(session.id, { batchId: session.batchId, recipientId: target.id, message }).subscribe({
+    this.classSessions.sendPostClassChat(session.id, { batchId: session.batchId, recipientId: target.id, message }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (sent) => {
-        this.postClassMessages.update((messages) => [...messages, sent]);
+        if (!current()) return;
+        this.postClassThread.append(sent);
         this.postClassDraft.set('');
         this.loadPostClassSummary(session, false);
       },
-      error: (error) => this.postClassError.set(this.classSessions.errorMessage(error)),
-      complete: () => this.postClassSending.set(false)
+      error: (error) => { if (current()) { this.postClassError.set(this.classSessions.errorMessage(error)); this.postClassSending.set(false); } },
+      complete: () => { if (current()) this.postClassSending.set(false); }
     });
   }
 
@@ -1289,10 +1313,12 @@ export class BatchDetails {
   }
 
   private loadPostClassSummary(session: TeacherSession, loadFirstThread = true): void {
-    this.postClassLoading.set(true);
-    this.postClassError.set('');
-    this.classSessions.getPostClassChatSummary(session.id, { batchId: session.batchId }).subscribe({
+    const generation = this.postClassGeneration;
+    if (loadFirstThread) this.postClassLoading.set(true);
+    if (loadFirstThread) this.postClassError.set('');
+    this.classSessions.getPostClassChatSummary(session.id, { batchId: session.batchId }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (summary) => {
+        if (generation !== this.postClassGeneration || this.postClassSession()?.id !== session.id) return;
         this.postClassSummary.set(summary);
         const threads = this.postClassThreads();
         const selectedId = this.postClassSelectedStudentId();
@@ -1302,26 +1328,22 @@ export class BatchDetails {
           this.loadPostClassThread();
         }
       },
-      error: (error) => this.postClassError.set(this.classSessions.errorMessage(error)),
-      complete: () => this.postClassLoading.set(false)
+      error: (error) => { if (generation === this.postClassGeneration) this.postClassError.set(this.classSessions.errorMessage(error)); },
+      complete: () => { if (loadFirstThread && generation === this.postClassGeneration) this.postClassLoading.set(false); }
     });
   }
 
   private loadPostClassThread(): void {
     const session = this.postClassSession();
     const participantId = this.postClassSelectedStudentId();
-    if (!session || !participantId) {
-      this.postClassMessages.set([]);
+    const roomId = this.postClassSummary()?.roomId;
+    if (!session || !participantId || !roomId) {
+      this.postClassThread.close();
       return;
     }
-
-    this.postClassLoading.set(true);
     this.postClassError.set('');
-    this.classSessions.getPostClassChatHistory(session.id, { batchId: session.batchId, participantId }).subscribe({
-      next: (history) => this.postClassMessages.set(history.messages),
-      error: (error) => this.postClassError.set(this.classSessions.errorMessage(error)),
-      complete: () => this.postClassLoading.set(false)
-    });
+    this.postClassThread.open({ sessionId: session.id, batchId: session.batchId, roomId, participantId,
+      visible: () => threadVisible(this.postClassThreadElement()?.nativeElement) });
   }
 
   private loadTimeline(session: TeacherSession, before?: string, append = false): void {

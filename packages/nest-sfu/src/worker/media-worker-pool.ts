@@ -129,6 +129,11 @@ export class MediaWorkerPool extends EventEmitter {
     await Promise.all(this.workers.map((worker) => worker.stop('pool shutdown')));
   }
 
+  existingWorkerForRoom(roomId: string): MediaWorkerClient | undefined {
+    const workerId = this.roomToWorker.get(roomId);
+    return workerId ? this.requireWorker(workerId) : undefined;
+  }
+
   workerForRoom(roomId: string): MediaWorkerClient {
     const existing = this.roomToWorker.get(roomId);
     if (existing) {
