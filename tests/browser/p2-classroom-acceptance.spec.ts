@@ -1,3 +1,4 @@
+import { setAccessibilityTheme } from './helpers/accessibility-theme';
 import { expect, test, type Page, type Locator } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import mongoose from 'mongoose';
@@ -52,10 +53,9 @@ test('classroom presets enforce server permissions and accessible English/Hindi 
     await expect(teacher.getByRole('button', { name: 'Start Live Class', exact: true })).toBeEnabled();
     await keyboardDialog(teacher, preflight); await scan(teacher, '.teacher-preflight-backdrop');
     await teacher.screenshot({ path: path.join(folder, 'teacher-preflight.png'), fullPage: true });
-    await teacher.evaluate(() => { document.documentElement.dataset['theme'] = 'dark'; });
-    await teacher.waitForFunction(() => document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity)); await scan(teacher, '.teacher-preflight-backdrop');
+    await setAccessibilityTheme(teacher, 'dark'); await scan(teacher, '.teacher-preflight-backdrop');
     await teacher.screenshot({ path: path.join(folder, 'teacher-preflight-dark.png'), fullPage: true });
-    await teacher.evaluate(() => { document.documentElement.dataset['theme'] = 'light'; });
+    await setAccessibilityTheme(teacher, 'light');
     await teacher.getByRole('button', { name: 'Start Live Class', exact: true }).focus(); await teacher.keyboard.press('Enter');
     await waitJoined(teacher, 'teacher');
     expect(await teacher.locator('sfu-teacher-class-session').evaluate(el => (window as any).ng.getComponent(el).store.room().settings.locked)).toBe(true);

@@ -1,3 +1,4 @@
+import { setAccessibilityTheme } from './helpers/accessibility-theme';
 import { expect, test, type BrowserContext } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import mongoose from 'mongoose';
@@ -140,8 +141,7 @@ test('versioned CMS, readonly history, contact delivery and audit privacy use re
     await editor.setViewportSize({ width: 390, height: 844 });
     const layout = await editor.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: innerWidth, boxes: [...document.querySelectorAll('.cms-editor-shell,.cms-editor,.permission-fieldset,.section-builder,.field-grid,.cms-preview')].map(el => ({ element: el.className, width: el.getBoundingClientRect().width, right: el.getBoundingClientRect().right })) }));
     await expect.poll(() => editor.evaluate(() => document.documentElement.scrollWidth), { message: JSON.stringify(layout) }).toBeLessThanOrEqual(layout.viewport);
-    await editor.evaluate(() => { document.documentElement.dataset['theme'] = 'dark'; });
-    await editor.waitForFunction(() => document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity));
+    await setAccessibilityTheme(editor, 'dark');
     expect((await new AxeBuilder({ page: editor }).include('.section-builder').withRules(['button-name', 'label', 'color-contrast']).analyze()).violations).toEqual([]);
     await editor.screenshot({ path: path.join(folder, 'cms-editor-mobile.png'), fullPage: true });
     await publicPage.reload(); await publicPage.setViewportSize({ width: 768, height: 1024 });
