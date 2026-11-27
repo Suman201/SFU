@@ -2,6 +2,7 @@
   min-height: 70vh;
 
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .cms-hero,
@@ -61,12 +62,14 @@
 
 .cms-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 22px;
   padding: 0 0 clamp(56px, 8vw, 96px);
 }
 
 .body-copy,
 .cms-block {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: var(--surface-radius);
   background: var(--panel-glass);
@@ -91,11 +94,14 @@
 
 .cms-sections {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
 }
 
 .cms-block {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   padding: clamp(20px, 4vw, 30px);
 }
@@ -251,6 +257,8 @@
 
 .cms-item {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 9px;
   border: 1px solid color-mix(in srgb, #458b73 12%, transparent);
   border-radius: 12px;

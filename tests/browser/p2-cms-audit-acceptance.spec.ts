@@ -21,7 +21,7 @@ test('versioned CMS, readonly history, contact delivery and audit privacy use re
   const nonce = randomUUID();
   const title = 'P2 legal acceptance ' + nonce + ' ' + 'PolicyVersion'.repeat(5);
   const slug = 'p2-policy-' + nonce;
-  const body1 = 'Published legal fixture one ' + nonce;
+  const body1 = 'Published legal fixture one ' + nonce + ' ' + 'LongReference'.repeat(8);
   const body2 = 'Private draft fixture two ' + nonce;
   const users = ['root', 'reader'].map(name => ({ id: new mongoose.Types.ObjectId().toHexString(), email: name + nonce + '@p2.test' }));
   let pageId = '';
@@ -152,7 +152,13 @@ test('versioned CMS, readonly history, contact delivery and audit privacy use re
     await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(768);
     await publicPage.screenshot({ path: path.join(folder, 'cms-public-tablet.png'), fullPage: true });
     await publicPage.setViewportSize({ width: 390, height: 844 });
-    await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    const publicLayout = await publicPage.evaluate(() => ({
+      width: document.documentElement.scrollWidth, viewport: innerWidth,
+      offenders: [...document.querySelectorAll('.cms-page, .cms-page *')].filter(element => {
+        const rect = element.getBoundingClientRect(); return rect.width > 0 && (rect.right > innerWidth || element.scrollWidth > element.clientWidth + 1);
+      }).map(element => { const rect = element.getBoundingClientRect(); return { element: element.tagName + '.' + element.className, width: rect.width, right: rect.right, scrollWidth: element.scrollWidth }; }),
+    }));
+    await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth), { message: JSON.stringify(publicLayout) }).toBeLessThanOrEqual(390);
     await publicPage.screenshot({ path: path.join(folder, 'cms-public-mobile.png'), fullPage: true });
     await editor.goto(admin.origin + '/audit-logs');
     await expect(editor.getByRole('heading', { name: /Audit/ }).first()).toBeVisible();
