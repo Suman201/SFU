@@ -1,6 +1,8 @@
 export interface DesktopReminder { id: string; title: string; startsAt: string; joinPath: string; }
 export interface DesktopUpdateState { status: 'unavailable' | 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error' | 'deferred'; message: string; version?: string; }
 export interface ClassroomDesktopBridge {
+  startSocialLogin(provider: 'google' | 'apple', role: 'student' | 'teacher'): Promise<{ ticket: string; verifier: string }>;
+  cancelSocialLogin(): Promise<void>;
   getInfo(): Promise<{ version: string; platform: string; websiteUrl: string; serverUrl: string; packaged: boolean }>;
   getPreferences(): Promise<{ remindersEnabled: boolean }>;
   setPreferences(preferences: { remindersEnabled: boolean }): Promise<{ remindersEnabled: boolean }>;

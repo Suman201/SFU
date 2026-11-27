@@ -99,3 +99,7 @@ To withdraw public downloads, remove/replace the backend catalogue configuration
 - Backend desktop/config unit tests validate catalogue filtering, file bounds and failure states.
 - `npm run test:desktop:distribution:browser`: real backend and headless Chromium/Firefox/WebKit, unpublished/approved/invalid catalogues, desktop/tablet/mobile layouts, dark mode, accessibility and actual screenshots in `reports/desktop-distribution`.
 - Ordinary desktop CI runs validation without signing secrets. Native unsigned packaging remains a development check, separate from the manually dispatched signed release workflow.
+
+## Google and Apple sign-in
+
+Desktop students and teachers can use enabled Google/Apple providers through their system browser. The backend and desktop sign-in implementation share existing website credentials, role checks, identity linking and session storage. Installers contain no provider secrets. Deploy the updated backend before the desktop installer. See [social sign-in](social-sign-in.md#native-desktop-sign-in) for the temporary loopback handshake, automated evidence and real macOS/Windows acceptance checklist. Email/password login remains available while providers are disabled.

@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, OnModuleInit, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { createHash, randomBytes } from 'node:crypto';
@@ -37,11 +37,12 @@ export class SocialAuthService implements OnModuleInit {
     return { google: this.oauth.enabled('google'), apple: this.oauth.enabled('apple') };
   }
 
-  async start(provider: SocialProvider, role: 'student' | 'teacher', challenge: string, link?: { userId: string; tokenId: string; authVersion: number }): Promise<{ authorizationUrl: string }> {
+  async start(provider: SocialProvider, role: 'student' | 'teacher', challenge: string, link?: { userId: string; tokenId: string; authVersion: number }, desktopRedirectUri?: string): Promise<{ authorizationUrl: string }> {
+    if (desktopRedirectUri !== undefined && (link || !this.desktopDestination(desktopRedirectUri))) throw new BadRequestException('Invalid desktop callback.');
     if (!this.oauth.enabled(provider)) throw new ServiceUnavailableException('This sign-in provider is not available yet. Please use email and password.');
     const state = this.opaque(), nonce = this.opaque();
     const codeVerifier = provider === 'google' ? this.opaque() : undefined;
-    await this.flows.create({ stateHash: this.hash(state), nonce, codeVerifier, provider, role, challenge, ...(link ? { purpose: 'link', linkUserId: link.userId, linkTokenId: link.tokenId, linkAuthVersion: link.authVersion } : {}), status: 'pending', expiresAt: new Date(Date.now() + 10 * 60000) });
+    await this.flows.create({ stateHash: this.hash(state), nonce, codeVerifier, provider, role, challenge, ...(desktopRedirectUri ? { desktopRedirectUri } : {}), ...(link ? { purpose: 'link', linkUserId: link.userId, linkTokenId: link.tokenId, linkAuthVersion: link.authVersion } : {}), status: 'pending', expiresAt: new Date(Date.now() + 10 * 60000) });
     return { authorizationUrl: this.oauth.authorizationUrl(provider, state, nonce, codeVerifier) };
   }
 
@@ -51,17 +52,19 @@ export class SocialAuthService implements OnModuleInit {
     if (!input.state || input.state.length > 128 || !this.oauth.enabled(provider)) return destination.href;
     const flow = await this.flows.findOneAndUpdate({ stateHash: this.hash(input.state), provider, status: 'pending', expiresAt: { $gt: new Date() } }, { $set: { status: 'processing' } }, { new: true });
     if (!flow) return destination.href;
+    const desktop = flow.purpose !== 'link' && flow.desktopRedirectUri ? this.desktopDestination(flow.desktopRedirectUri) : null;
+    if (desktop) { destination.href = desktop.href; destination.search = 'error=failed'; }
     if (flow.purpose === 'link') destination.pathname = '/account/link-provider';
     try {
       if (input.error) {
-        destination.hash = 'error=cancelled';
+        if (desktop) destination.search = 'error=cancelled'; else destination.hash = 'error=cancelled';
         return destination.href;
       }
       if (!input.code || input.code.length > 4096 || (input.user?.length ?? 0) > 8192) return destination.href;
       const identity = await this.oauth.exchange(provider, input.code, flow.nonce, flow.codeVerifier, input.user);
       const ticket = this.opaque();
       await this.flows.updateOne({ _id: flow.id, status: 'processing' }, { $set: { status: 'ready', ticketHash: this.hash(ticket), identity, expiresAt: new Date(Date.now() + 2 * 60000) }, $unset: { nonce: 1, codeVerifier: 1 } });
-      destination.hash = `ticket=${ticket}`;
+      if (desktop) destination.search = `ticket=${ticket}`; else destination.hash = `ticket=${ticket}`;
       return destination.href;
     } catch {
       return destination.href;
@@ -89,5 +92,9 @@ export class SocialAuthService implements OnModuleInit {
     finally { await this.flows.deleteOne({ _id: flow.id }); }
   }
   private opaque(): string { return randomBytes(32).toString('base64url'); }
+  private desktopDestination(value: string): URL | null {
+    if (!/^http:\/\/127\.0\.0\.1:[1-9][0-9]{3,4}\/oauth\/callback\/[A-Za-z0-9_-]{43}$/.test(value)) return null;
+    try { const url = new URL(value); return Number(url.port) >= 1024 && url.href === value ? url : null; } catch { return null; }
+  }
   private hash(value: string): string { return createHash('sha256').update(value).digest('hex'); }
 }

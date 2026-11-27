@@ -25,6 +25,7 @@ const {
   externalUrl,
 } = require("./policy.cjs");
 const { UpdateController } = require("./updates.cjs");
+const { DesktopSocialLogin } = require("./social-login.cjs");
 const {
   trustedPermissionFrame,
   mediaTypes,
@@ -47,6 +48,7 @@ let mainWindow,
   localServer,
   config,
   updater,
+  socialLogin,
   setupWindow,
   captureWindow,
   captureSources = [],
@@ -152,6 +154,7 @@ else {
     else if (localServer) createWindow();
   });
   app.on("will-quit", () => {
+    socialLogin?.cancel();
     clearInterval(reminderTimer);
     localServer?.close();
   });
@@ -227,6 +230,15 @@ async function boot() {
   persist();
   configurePermissions();
   configureCapture();
+  socialLogin = new DesktopSocialLogin({
+    backendOrigin: config.serverUrl,
+    openExternal: (url) => shell.openExternal(url),
+    focus: () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show(); mainWindow.focus();
+    },
+  });
   configureIPC();
   configureUpdates();
   if (app.isPackaged) app.setAsDefaultProtocolClient("sfu-classroom");
@@ -308,7 +320,7 @@ function createWindow() {
   mainWindow.webContents.on(
     "did-start-navigation",
     (_event, _url, sameDocument, mainFrame) => {
-      if (mainFrame && !sameDocument) rendererReady = false;
+      if (mainFrame && !sameDocument) { rendererReady = false; socialLogin?.cancel(); }
     },
   );
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -330,6 +342,7 @@ function createWindow() {
     event.preventDefault(),
   );
   mainWindow.webContents.on("render-process-gone", () => {
+    socialLogin?.cancel();
     activeClass = false;
     updater?.setActive(false);
     dialog
@@ -352,6 +365,7 @@ function createWindow() {
     }
   });
   mainWindow.on("closed", () => {
+    socialLogin?.cancel();
     mainWindow = null;
   });
   mainWindow.loadURL(localServer.origin + "/desktop");
@@ -380,6 +394,13 @@ async function confirmExit() {
   }
 }
 function configureIPC() {
+  handle("desktop:social-start", async (provider, role) => {
+    if (activeClass || new URL(mainWindow.webContents.getURL()).pathname !== "/desktop/login")
+      return { error: "Open the sign-in screen to continue." };
+    try { return await socialLogin.start(provider, role); }
+    catch (error) { return { error: error instanceof Error ? error.message : "Sign-in could not start. Please try again." }; }
+  });
+  handle("desktop:social-cancel", () => socialLogin.cancel());
   handle("desktop:info", () => ({
     version: app.getVersion(),
     platform: process.platform,

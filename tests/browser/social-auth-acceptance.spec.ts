@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
@@ -6,6 +6,8 @@ import path from 'node:path';
 import mongoose from 'mongoose';
 import { startAcceptanceStack } from './helpers/whiteboard-classroom';
 import { startSocialProvider } from './helpers/social-provider';
+const { startServer } = require('../../apps/desktop/src/server.cjs');
+const { DesktopSocialLogin } = require('../../apps/desktop/src/social-login.cjs');
 const { setupSocialAuthIndexes } = require('../../scripts/setup-social-auth.cjs');
 
 // Real Angular + NestJS + Mongo + signed synthetic provider JWTs; no mocked auth service or API responses.
@@ -36,6 +38,7 @@ test('Google and Apple sign-in, safe linking, role boundaries and replay protect
     const teacherEmail = `teacher-${nonce}@example.test`, adminEmail = `admin-${nonce}@example.test`;
     await db.collection('users').insertMany([
       { ...template, _id: new mongoose.Types.ObjectId(), email: teacherEmail, roles: ['TEACHER'], tutorReviewStatus: 'draft', googleSubject: undefined, appleSubject: undefined },
+      { ...template, _id: new mongoose.Types.ObjectId(), email: 'native-link-' + nonce + '@example.test', roles: ['STUDENT'], googleSubject: undefined, appleSubject: undefined },
       { ...template, _id: new mongoose.Types.ObjectId(), email: adminEmail, roles: ['SUPER_ADMIN'], googleSubject: undefined, appleSubject: undefined },
     ], { ignoreUndefined: true });
     const context = await browser.newContext({ viewport: { width: 1366, height: 950 } }); contexts.push(context);
@@ -180,6 +183,107 @@ test('Google and Apple sign-in, safe linking, role boundaries and replay protect
     await db.collection('users').updateOne({ email: newEmail }, { $set: { disabled: true } });
     expect((await api('/exchange', disabled)).status).toBe(401);
     expect((await api('/google/start', { role: 'admin', challenge: 'a'.repeat(64) })).status).toBe(400);
+    // Native controller + loopback listener, real backend and signed provider proofs.
+    // Only the OS browser/IPC surface is replaced by a headless bridge adapter.
+    let consentPage: Page | undefined;
+    const native = new DesktopSocialLogin({ backendOrigin: stack.nodeAUrl, openExternal: async (url: string) => { consentPage = await context.newPage(); await consentPage.goto(url); } });
+    await context.exposeBinding('nativeSocialStart', (_source, name, role) => native.start(name, role));
+    await context.exposeBinding('nativeSocialCancel', () => native.cancel());
+    await context.addInitScript(() => {
+      (window as any).classroomDesktop = {
+        startSocialLogin: (provider: string, role: string) => (window as any).nativeSocialStart(provider, role),
+        cancelSocialLogin: () => (window as any).nativeSocialCancel(),
+        getInfo: async () => ({ version: 'test', platform: 'headless', serverUrl: '', websiteUrl: '' }),
+        getPreferences: async () => ({ remindersEnabled: false }), getUpdateState: async () => ({ status: 'unavailable', message: '' }),
+        getPendingClass: async () => null, onOpenClass: () => () => {}, onUpdateState: () => () => {}, setReminders: async () => {},
+      };
+    });
+    const desktopServer = await startServer({ frontendDir: path.resolve('apps/frontend/dist/desktop/browser'), backendOrigin: stack.nodeAUrl, websiteOrigin: stack.frontendBaseUrl });
+    const desktop = await context.newPage();
+    const desktopErrors: string[] = [];
+    desktop.on('pageerror', error => desktopErrors.push(error.message));
+    const beginDesktop = async (name: 'Google' | 'Apple', role: string, returnUrl = '/desktop/upcoming', remember = false) => {
+      console.info(`Desktop social acceptance: ${name}, ${role}, remember=${remember}`);
+      await desktop.evaluate(() => { try { for (const storage of [sessionStorage, localStorage]) { storage.removeItem('native-sfu.auth.accessToken'); storage.removeItem('native-sfu.auth.refreshToken'); } } catch { /* Initial blank page has no storage. */ } });
+      await context.clearCookies();
+      await desktop.goto(desktopServer.origin + '/desktop/login?returnUrl=' + encodeURIComponent(returnUrl));
+      await desktop.getByLabel('Sign in as', { exact: true }).selectOption(role);
+      await desktop.getByRole('checkbox', { name: 'Keep me signed in on this computer' }).setChecked(remember);
+      await desktop.getByRole('button', { name: 'Continue with ' + name, exact: true }).click();
+      await expect(desktop.getByRole('status')).toContainText('Complete sign-in in your browser');
+      await expect.poll(() => !!consentPage).toBe(true);
+      await expect(consentPage!.getByRole('button', { name: 'Authorize test account' })).toBeVisible();
+    };
+    try {
+      scenario = { email: 'native-student-' + nonce + '@example.test', subject: 'native-google-student-' + nonce, cancel: false, invalid: '' };
+      await beginDesktop('Google', 'student', '/desktop/recordings');
+      await consentPage!.getByRole('button', { name: 'Authorize test account' }).click();
+      await desktop.getByRole('button', { name: 'Finish signing in', exact: true }).click();
+      await expect(desktop).toHaveURL(/\/desktop\/recordings$/);
+      expect(await desktop.evaluate(() => localStorage.getItem('native-sfu.auth.accessToken'))).toBeNull();
+      expect(await desktop.evaluate(() => !!sessionStorage.getItem('native-sfu.auth.accessToken'))).toBe(true);
+      expect(consentPage!.url()).not.toContain('accessToken');
+      await consentPage!.close(); consentPage = undefined;
+      for (const name of ['Google', 'Apple'] as const) {
+        scenario = { email: relayEmail, subject: name === 'Apple' ? 'teacher-apple-' + nonce : 'teacher-google-' + nonce, cancel: false, invalid: '' };
+        await beginDesktop(name, 'teacher', '/desktop/upcoming', name === 'Google');
+        await consentPage!.getByRole('button', { name: 'Authorize test account' }).click();
+        await desktop.getByRole('button', { name: 'Finish signing in', exact: true }).click();
+        await expect(desktop).toHaveURL(/\/desktop\/upcoming$/);
+        expect((await db.collection('users').findOne({ email: teacherEmail }))?.tutorReviewStatus).toBe('draft');
+        const remembered = (await context.cookies(desktopServer.origin)).find(cookie => cookie.name === 'native-sfu.auth.refreshToken');
+        expect(Boolean(remembered && remembered.expires > Date.now() / 1000)).toBe(name === 'Google');
+        await consentPage!.close(); consentPage = undefined;
+      }
+      // A new Apple relay identity needs explicit existing-account proof.
+      scenario = { email: 'native-relay-' + nonce + '@privaterelay.appleid.com', subject: 'native-apple-student-' + nonce, cancel: false, invalid: '' };
+      await beginDesktop('Apple', 'student');
+      await consentPage!.getByRole('button', { name: 'Authorize test account' }).click();
+      await desktop.getByRole('button', { name: 'Link an existing email/password account', exact: true }).click();
+      await expect(desktop.getByRole('button', { name: 'Link account and sign in' })).toBeVisible();
+      await desktop.getByLabel('Account email', { exact: true }).fill('native-link-' + nonce + '@example.test');
+      await desktop.getByLabel('Account password', { exact: true }).fill('WrongPassword123');
+      await desktop.getByRole('button', { name: 'Link account and sign in' }).click();
+      await expect(desktop.getByRole('alert')).toContainText('incorrect');
+      await desktop.getByLabel('Account password', { exact: true }).fill('Password@12345');
+      await desktop.getByRole('button', { name: 'Link account and sign in' }).click();
+      await expect(desktop).toHaveURL(/\/desktop\/upcoming$/);
+      await consentPage!.close(); consentPage = undefined;
+      // Wrong role, provider cancellation and local cancellation never create a desktop session.
+      scenario = { email: relayEmail, subject: 'teacher-apple-' + nonce, cancel: false, invalid: '' };
+      await beginDesktop('Apple', 'student');
+      await consentPage!.getByRole('button', { name: 'Authorize test account' }).click();
+      await desktop.getByRole('button', { name: 'Finish signing in', exact: true }).click();
+      await expect(desktop.getByRole('alert')).toContainText('teacher login');
+      await consentPage!.close(); consentPage = undefined;
+      scenario.cancel = true;
+      await beginDesktop('Google', 'student');
+      await consentPage!.getByRole('button', { name: 'Authorize test account' }).click();
+      await expect(desktop.getByRole('alert')).toContainText('cancelled');
+      await consentPage!.close(); consentPage = undefined;
+      scenario.cancel = false;
+      await beginDesktop('Google', 'student');
+      await desktop.getByRole('button', { name: 'Cancel sign-in', exact: true }).click();
+      await expect(desktop.getByRole('button', { name: 'Continue with Google' })).toBeEnabled();
+      expect(await desktop.evaluate(() => sessionStorage.getItem('native-sfu.auth.accessToken'))).toBeNull();
+      await consentPage!.close(); consentPage = undefined;
+      for (const theme of ['light', 'dark']) {
+        await desktop.evaluate(value => { document.documentElement.setAttribute('data-theme', value); }, theme);
+        for (const width of [1366, 768, 390]) {
+          await desktop.setViewportSize({ width, height: 1000 });
+          expect(await desktop.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+          await desktop.screenshot({ path: path.join(folder, `desktop-login-${theme}-${width}.png`), fullPage: true, animations: 'disabled' });
+        }
+      }
+      await expect(new AxeBuilder({ page: desktop }).include('.login-card').withTags(['wcag2a', 'wcag2aa']).analyze()).resolves.toMatchObject({ violations: [] });
+      for (const desktopRedirectUri of ['https://attacker.test/', 'http://localhost:54001/oauth/callback/' + 'a'.repeat(43), 'http://127.0.0.1:99999/oauth/callback/' + 'a'.repeat(43)])
+        expect((await api('/google/start', { role: 'student', challenge: 'a'.repeat(64), desktopRedirectUri })).status).toBe(400);
+      expect(desktopErrors).toEqual([]);
+    } finally {
+      await desktop.screenshot({ path: path.join(folder, 'desktop-final.png'), fullPage: true }).catch(() => undefined);
+      if (desktopErrors.length) console.error('Desktop browser errors:', desktopErrors);
+      native.cancel(); await consentPage?.close(); await desktop.close(); await desktopServer.close();
+    }
     // Unique provider indexes prevent one identity being bound to multiple accounts.
     await expect(db.collection('users').insertOne({ email: 'duplicate-' + nonce + '@example.test', googleSubject: 'new-' + nonce })).rejects.toMatchObject({ code: 11000 });
     const audit = await db.collection('audit_logs').find({ action: /^auth.social./, targetId: teacher!._id.toString() }).toArray();

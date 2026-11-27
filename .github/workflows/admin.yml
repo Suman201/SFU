@@ -104,7 +104,9 @@ jobs:
       - name: Verify P2 publication history, contact, audit, policies and accessibility
         if: ${{ success() || (failure() && steps.p1_acceptance.outcome == 'failure') }}
         run: npm run test:p2:browser
-      - name: Verify Google and Apple sign-in in Chromium, Firefox and WebKit
+      - name: Build native desktop sign-in acceptance frontend
+        run: npm run build -w @native-sfu/frontend -- --configuration desktop
+      - name: Verify website and desktop Google and Apple sign-in in Chromium, Firefox and WebKit
         run: npm run test:social:browser
       - name: Verify account recovery, mail retry, expiry and cross-node session revocation
         run: npm run test:recovery:browser

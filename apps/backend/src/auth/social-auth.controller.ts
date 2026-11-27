@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Header, HttpCode, Ip, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { IsEmail, IsIn, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
 import { Request, Response } from 'express';
 import { SocialAuthService } from './social-auth.service';
 
@@ -8,6 +8,8 @@ class ProviderParams { @IsIn(['google', 'apple']) provider!: 'google' | 'apple';
 export class StartSocialAuthDto {
   @IsIn(['student', 'teacher']) role!: 'student' | 'teacher';
   @Matches(/^[a-f0-9]{64}$/) challenge!: string;
+  @IsOptional() @Matches(/^http:\/\/127\.0\.0\.1:[1-9][0-9]{3,4}\/oauth\/callback\/[A-Za-z0-9_-]{43}$/)
+  desktopRedirectUri?: string;
 }
 export class ExchangeSocialAuthDto {
   @Matches(/^[A-Za-z0-9_-]{43}$/) ticket!: string;
@@ -25,7 +27,7 @@ export class SocialAuthController {
 
   @Post(':provider/start') @HttpCode(200) @Header('Cache-Control', 'no-store')
   start(@Param() { provider }: ProviderParams, @Body() input: StartSocialAuthDto) {
-    return this.social.start(provider, input.role, input.challenge);
+    return this.social.start(provider, input.role, input.challenge, undefined, input.desktopRedirectUri);
   }
 
   @Get(':provider/callback')

@@ -15,6 +15,7 @@ export class SocialAuthFlow {
   @Prop({ type: String }) linkUserId?: string;
   @Prop({ type: String }) linkTokenId?: string;
   @Prop({ type: Number }) linkAuthVersion?: number;
+  @Prop({ type: String }) desktopRedirectUri?: string;
   @Prop({ required: true, unique: true }) stateHash!: string;
   @Prop({ required: true }) challenge!: string;
   @Prop({ required: true, enum: ['google', 'apple'] }) provider!: SocialProvider;

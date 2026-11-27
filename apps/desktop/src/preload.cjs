@@ -9,6 +9,14 @@ const listen = (channel, callback) => {
 contextBridge.exposeInMainWorld(
   "classroomDesktop",
   Object.freeze({
+    startSocialLogin: async (provider, role) => {
+      let result;
+      try { result = await ipcRenderer.invoke("desktop:social-start", provider, role); }
+      catch { throw new Error("Sign-in could not start. Please try again."); }
+      if (result?.error) throw new Error(result.error);
+      return result;
+    },
+    cancelSocialLogin: () => ipcRenderer.invoke("desktop:social-cancel"),
     getInfo: () => ipcRenderer.invoke("desktop:info"),
     getPreferences: () => ipcRenderer.invoke("desktop:preferences"),
     setPreferences: (value) =>
