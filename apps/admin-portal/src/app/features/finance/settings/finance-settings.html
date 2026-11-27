@@ -2,7 +2,7 @@
   <div>
     <p class="eyebrow">Finance</p>
     <h1>Commission & payout settings</h1>
-    <p>Only super administrators can change these values. Each payment stores the commission rate in force at checkout, so changes never alter past earnings.</p>
+    <p>Only super administrators can change these values. Each booking stores its commission rate when reserved, so changes never alter past earnings.</p>
   </div>
 </section>
 
@@ -36,7 +36,7 @@
         <label class="field">
           Holding period (days)
           <input name="holdDays" type="number" min="0" max="90" [ngModel]="holdDays()" (ngModelChange)="holdDays.set($event)" />
-          <small>Covers refunds and early disputes before money can be withdrawn.</small>
+          <small>Bookings also require recorded class completion before earnings become available.</small>
         </label>
         <label class="field">
           Minimum payout ({{ s.defaultCurrency }})
@@ -45,8 +45,27 @@
       </div>
     </fieldset>
 
+    <fieldset class="panel" [disabled]="!superAdmin() || saving()" style="margin: 0; grid-column: 1 / -1">
+      <h2>Additional payout currencies</h2>
+      <p>Choose a minimum in each original currency. Amounts are never converted or combined. The provider and connected account must support the selected currency.</p>
+      @for (row of payoutMinimums(); track $index; let i = $index) {
+        <div class="form-grid">
+          <label class="field">Payout currency
+            <select [name]="'payout-currency-' + i" [ngModel]="row.currency" (ngModelChange)="updatePayoutCurrency(i, { currency: $event })">
+              @for (code of codes; track code) { @if (code !== s.defaultCurrency) { <option [value]="code">{{ code }}</option> } }
+            </select>
+          </label>
+          <label class="field">Minimum ({{ row.currency }})
+            <input [name]="'payout-minimum-' + i" inputmode="decimal" [ngModel]="row.amount" (ngModelChange)="updatePayoutCurrency(i, { amount: $event })" />
+          </label>
+          <div class="inline-actions"><button type="button" class="table-action danger" (click)="removePayoutCurrency(i)">Remove currency</button></div>
+        </div>
+      } @empty { <p>Only {{ s.defaultCurrency }} has a payout minimum configured.</p> }
+      <button type="button" class="table-action" (click)="addPayoutCurrency()">Add payout currency</button>
+    </fieldset>
+
     <fieldset class="panel" [disabled]="!superAdmin() || saving()" style="margin: 0">
-      <h2>Currencies</h2>
+      <h2>Class checkout currencies</h2>
       <p>{{ s.defaultCurrency }} is the default currency. Other currencies need a gateway that supports them before checkout offers them.</p>
       <div class="check-row">
         @for (code of codes; track code) {

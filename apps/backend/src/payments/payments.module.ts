@@ -1,3 +1,8 @@
+import { StripeGateway as BookingStripeGateway } from '../bookings/stripe.gateway';
+import { BookingFinanceService } from './booking-finance.service';
+import { TeacherFinanceTransactions } from './teacher-finance-transactions.service';
+import { BookingOrderDocument, BookingOrderSchema, BookingRefundDocument, BookingRefundSchema, BookingCreditNoteDocument, BookingCreditNoteSchema } from '../bookings/booking.schema';
+import { InvoiceDocument, InvoiceSchema } from '../invoices/invoice.schema';
 import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -37,10 +42,13 @@ function createGateway(config: ConfigService): PaymentGateway {
 }
 
 @Module({
-  imports: [AuthModule, DatabaseModule, AuditLogsModule, NotificationsModule, InvoicesModule, StudentEnrollmentsModule, MongooseModule.forFeature(PAYMENT_MODELS)],
+  imports: [AuthModule, DatabaseModule, AuditLogsModule, NotificationsModule, InvoicesModule, StudentEnrollmentsModule, MongooseModule.forFeature([...PAYMENT_MODELS, { name: BookingOrderDocument.name, schema: BookingOrderSchema }, { name: BookingRefundDocument.name, schema: BookingRefundSchema }, { name: BookingCreditNoteDocument.name, schema: BookingCreditNoteSchema }, { name: InvoiceDocument.name, schema: InvoiceSchema }])],
   controllers: [StudentPaymentsController, PaymentWebhooksController, TeacherEarningsController, AdminFinanceController, TestGatewayController],
   providers: [
     { provide: PAYMENT_GATEWAY, inject: [ConfigService], useFactory: createGateway },
+    BookingStripeGateway,
+    BookingFinanceService,
+    TeacherFinanceTransactions,
     FinanceSettingsService,
     LedgerService,
     PaymentsService,
@@ -48,6 +56,6 @@ function createGateway(config: ConfigService): PaymentGateway {
     PaymentEventsService,
     FinanceReportsService,
   ],
-  exports: [PaymentsService, LedgerService, FinanceSettingsService],
+  exports: [PaymentsService, LedgerService, FinanceSettingsService, BookingFinanceService, TeacherFinanceTransactions],
 })
 export class PaymentsModule {}

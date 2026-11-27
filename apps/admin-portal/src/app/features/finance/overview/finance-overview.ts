@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import type { FinanceOverview, PaymentGatewayStatus } from '@native-sfu/contracts';
+import { PAYMENT_CURRENCY_CODES, type PaymentCurrency, type FinanceOverview, type PaymentGatewayStatus } from '@native-sfu/contracts';
 import { FinanceApi, financeError } from '../../../core/services/finance-api.service';
 import { FinanceTabs } from '../finance-tabs';
 import { isoDay, money } from '../finance-shared';
@@ -22,6 +22,8 @@ export class FinanceOverviewPage implements OnInit {
   protected readonly error = signal('');
   protected readonly from = signal(isoDay(-29));
   protected readonly to = signal(isoDay());
+  protected readonly currency = signal<PaymentCurrency>('USD');
+  protected readonly currencies = PAYMENT_CURRENCY_CODES;
   protected readonly money = money;
 
   protected readonly chart = computed(() => {
@@ -47,7 +49,7 @@ export class FinanceOverviewPage implements OnInit {
   protected load(): void {
     this.loading.set(true);
     this.error.set('');
-    this.api.overview({ from: this.from(), to: this.to() }).subscribe({
+    this.api.overview({ from: this.from(), to: this.to(), currency: this.currency() }).subscribe({
       next: (data) => {
         this.data.set(data);
         this.loading.set(false);

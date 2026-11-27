@@ -52,6 +52,9 @@ export class FinanceSettingsService {
       throw new BadRequestException(`${current.defaultCurrency} is the default currency and must stay enabled.`);
     }
 
+    const payoutMinimums = input.payoutMinimums ?? current.payoutMinimums ?? [];
+    if (new Set(payoutMinimums.map(item => item.currency)).size !== payoutMinimums.length || payoutMinimums.some(item => !isPaymentCurrency(item.currency) || item.currency === current.defaultCurrency || !Number.isSafeInteger(item.minimumMinor) || item.minimumMinor < 1 || item.minimumMinor > 100_000_000)) throw new BadRequestException('Each additional payout currency needs one positive minimum in its original minor units.');
+
     const overrideIds = [...new Set(input.teacherOverrides.map((item) => item.teacherId.trim()))];
     if (overrideIds.length !== input.teacherOverrides.length) throw new BadRequestException('Each teacher can have only one commission override.');
     const teachers = overrideIds.length
@@ -71,6 +74,7 @@ export class FinanceSettingsService {
       holdDays: input.holdDays,
       minimumPayoutMinor: input.minimumPayoutMinor,
       enabledCurrencies: enabled,
+      payoutMinimums: payoutMinimums.map(item => ({ currency: item.currency, minimumMinor: item.minimumMinor })),
       teacherOverrides,
       updatedAt: new Date().toISOString(),
       updatedBy: actor.email || actor.sub,
@@ -88,8 +92,8 @@ export class FinanceSettingsService {
       metadata: {
         summary: `Commission ${bpsToPercentLabel(current.commissionBps)} → ${bpsToPercentLabel(value.commissionBps)}, hold ${value.holdDays} days`,
       },
-      before: { commissionBps: current.commissionBps, holdDays: current.holdDays, minimumPayoutMinor: current.minimumPayoutMinor, enabledCurrencies: current.enabledCurrencies, teacherOverrides: current.teacherOverrides },
-      after: { commissionBps: value.commissionBps, holdDays: value.holdDays, minimumPayoutMinor: value.minimumPayoutMinor, enabledCurrencies: value.enabledCurrencies, teacherOverrides: value.teacherOverrides },
+      before: { commissionBps: current.commissionBps, holdDays: current.holdDays, minimumPayoutMinor: current.minimumPayoutMinor, enabledCurrencies: current.enabledCurrencies, payoutMinimums: current.payoutMinimums, teacherOverrides: current.teacherOverrides },
+      after: { commissionBps: value.commissionBps, holdDays: value.holdDays, minimumPayoutMinor: value.minimumPayoutMinor, enabledCurrencies: value.enabledCurrencies, payoutMinimums: value.payoutMinimums, teacherOverrides: value.teacherOverrides },
     });
     return saved.value;
   }

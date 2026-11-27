@@ -56,6 +56,50 @@
   }
 }
 
+@if (report()?.bookingEarnings; as b) {
+  <section class="panel" aria-label="Booking earnings reconciliation">
+    <h2>Booking earnings</h2>
+    <p>Checked {{ b.checkedOrders }} bookings on this page · {{ b.totalOrders }} recorded bookings in total. {{ b.legacyCount }} historical paid bookings need a reviewed commission policy.</p>
+    <p>{{ b.feesAwaitingProvider }} provider fees awaiting confirmation · {{ b.feesInOtherCurrency }} fees need settlement-currency review.</p>
+    @if (b.hasMore) { <button type="button" class="table-action" (click)="checkReconciliation(b.nextCursor)">Check next bookings</button> }
+    @for (id of b.disputedOrderIds; track id) { <p class="warn-text">Disputed booking · {{ id }}. Payouts in this teacher’s currency are blocked. Resolve evidence in Stripe; lost disputes require manual chargeback settlement and tax review.</p> }
+    @for (id of b.unfulfilledOrderIds; track id) { <p class="warn-text">Paid booking needs fulfillment or refund review · {{ id }}. Earnings remain pending.</p> }
+    @for (id of b.missingCaptureOrderIds; track id) { <p>Booking capture missing · {{ id }} @if (superAdmin()) { <button class="table-action" type="button" [disabled]="busy()" (click)="repairBooking(id)">Restore booking entries</button> }</p> }
+    @for (id of b.missingRefundOrderIds; track id) { <p>Booking refund coverage differs · {{ id }} @if (superAdmin()) { <button class="table-action" type="button" [disabled]="busy()" (click)="repairBooking(id)">Restore booking entries</button> }</p> }
+    @for (id of b.missingReleaseOrderIds; track id) { <p>Booking release missing · {{ id }} @if (superAdmin()) { <button class="table-action" type="button" [disabled]="busy()" (click)="repairBooking(id)">Restore booking entries</button> }</p> }
+    @for (id of b.mismatchedOrderIds; track id) { <p class="warn-text">The recorded split differs from the paid booking · {{ id }}. Review the financial history before any correction.</p> }
+  </section>
+}
+
+@if (legacyTotal() > 0) {
+  <section class="data-table-shell" aria-label="Historical booking earnings">
+    <div class="data-table-toolbar"><div><h2>Historical paid bookings</h2><p>These payments predate booking earnings. A super administrator must approve their commission policy.</p></div></div>
+    <div class="data-table-wrap" style="--data-table-min-width: 850px"><table class="data-table">
+      <thead><tr><th>Paid</th><th>Booking / teacher</th><th>Lesson fee</th><th>Tax</th><th>Refunded</th><th>Actions</th></tr></thead>
+      <tbody>@for (order of legacyBookings(); track order.orderId) { <tr>
+        <td>{{ order.paidAt | date: 'mediumDate' }}</td><td><div class="cell-stack"><strong>{{ order.title }}</strong><small>{{ order.teacherName }}</small><small>{{ order.currency }}</small></div></td>
+        <td>{{ money(order.netMinor, order.currency) }}</td><td>{{ money(order.taxMinor, order.currency) }}</td><td>{{ money(order.refundedMinor, order.currency) }}</td>
+        <td class="actions-cell">@if (auth.can('admin:bookings:read')) { <a class="table-action" routerLink="/bookings" [queryParams]="{ orderId: order.orderId }">Booking</a> } @if (superAdmin()) { <button type="button" class="table-action" [disabled]="busy()" (click)="beginReview(order)">Review earnings</button> }</td>
+      </tr> }</tbody>
+    </table></div>
+    <footer class="table-footer"><span>{{ legacyTotal() }} bookings · Page {{ legacyPage() }}</span><div><button class="table-action" type="button" [disabled]="legacyPage() === 1" (click)="loadLegacy(legacyPage() - 1)">Previous historical bookings</button><button class="table-action" type="button" [disabled]="legacyPage() * 25 >= legacyTotal()" (click)="loadLegacy(legacyPage() + 1)">Next historical bookings</button></div></footer>
+  </section>
+}
+
+@if (review(); as order) {
+  <section class="panel" aria-label="Booking earnings review">
+    <h2>Review earnings for {{ order.title }}</h2>
+    <p>Withdrawals require recorded class completion and resolved refunds. Lesson price {{ money(order.netMinor, order.currency) }} · Tax {{ money(order.taxMinor, order.currency) }} stays separate from teacher earnings.</p>
+    <div class="form-grid">
+      <label class="field">Historical commission (%)<input name="reviewCommission" inputmode="decimal" [ngModel]="reviewCommission()" (ngModelChange)="reviewCommission.set($event)" /></label>
+      <label class="field">Historical holding period (days)<input name="reviewHoldDays" type="number" min="0" max="90" [ngModel]="reviewHoldDays()" (ngModelChange)="reviewHoldDays.set($event)" /></label>
+      <label class="field">Review reason<textarea name="reviewReason" maxlength="500" [ngModel]="reviewReason()" (ngModelChange)="reviewReason.set($event)"></textarea></label>
+    </div>
+    @if (reviewAllocation(); as a) { <p>Original teacher share {{ money(a.teacherMinor, order.currency) }} · Platform commission {{ money(a.commissionMinor, order.currency) }}. Confirmed refunds are deducted proportionally.</p> }
+    <div class="inline-actions"><button type="button" class="primary-action" [disabled]="busy() || !reviewAllocation()" (click)="adoptReview()">Approve reviewed earnings</button><button type="button" class="table-action" [disabled]="busy()" (click)="review.set(null)">Close review</button></div>
+  </section>
+}
+
 <section class="data-table-shell">
   <div class="data-table-toolbar">
     <div>
@@ -130,7 +174,8 @@
                 </ul>
               </td>
               <td class="actions-cell">
-                @if (entry.paymentId) { <a class="table-action" [routerLink]="['/finance/payments', entry.paymentId]">Payment</a> }
+                @if (entry.bookingOrderId) { @if (auth.can('admin:bookings:read')) { <a class="table-action" routerLink="/bookings" [queryParams]="{ orderId: entry.bookingOrderId }">Booking</a> } @else { <span>Booking</span> } }
+                @else if (entry.paymentId) { <a class="table-action" [routerLink]="['/finance/payments', entry.paymentId]">Payment</a> }
                 @else if (entry.payoutId) { <a class="table-action" routerLink="/finance/payouts" [queryParams]="{ status: 'all' }">Payout</a> }
               </td>
             </tr>

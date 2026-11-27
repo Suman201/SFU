@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { PaymentCurrency } from '@native-sfu/contracts';
 import {
   InvalidWebhookSignatureError,
@@ -18,6 +18,7 @@ import {
  * webhooks do. Configuration validation rejects this gateway in production.
  */
 export class TestGateway implements PaymentGateway {
+  private static readonly transfers = new Map<string, import('./payment-gateway').VerifiedTransfer>();
   readonly id = 'test' as const;
   readonly testMode = true;
   readonly payoutsSupported = true;
@@ -63,7 +64,17 @@ export class TestGateway implements PaymentGateway {
     return { detailsSubmitted: true, payoutsEnabled: true };
   }
 
-  async transfer(_input: TransferInput): Promise<{ transferId: string }> {
-    return { transferId: `test_tr_${randomUUID().replace(/-/g, '')}` };
+  async transfer(input: TransferInput): Promise<{ transferId: string }> {
+    const transferId = 'test_tr_' + createHash('sha256').update(input.idempotencyKey).digest('hex').slice(0, 32);
+    const existing = TestGateway.transfers.get(transferId);
+    if (existing && (existing.amountMinor !== input.amountMinor || existing.currency !== input.currency || existing.accountId !== input.accountId)) throw new Error('Idempotent transfer parameters changed.');
+    TestGateway.transfers.set(transferId, { transferId, accountId: input.accountId, amountMinor: input.amountMinor, currency: input.currency, payoutId: input.payoutId, teacherId: input.teacherId, amountReversedMinor: existing?.amountReversedMinor ?? 0, livemode: false });
+    return { transferId };
+  }
+
+  async retrieveTransfer(transferId: string) {
+    const transfer = TestGateway.transfers.get(transferId);
+    if (!transfer) throw new Error('Test transfer not found.');
+    return { ...transfer };
   }
 }

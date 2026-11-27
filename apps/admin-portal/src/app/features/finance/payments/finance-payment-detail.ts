@@ -3,7 +3,7 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { fromMinorUnits, toMinorUnits, type AdminPaymentRecord, type PaymentGatewayStatus } from '@native-sfu/contracts';
+import { fromMinorUnits, majorToMinor, type AdminPaymentRecord, type PaymentGatewayStatus } from '@native-sfu/contracts';
 import { FinanceApi, downloadBlob, financeError, newRequestId } from '../../../core/services/finance-api.service';
 import { ConfirmDialogService } from '../../../shared/confirm-dialog/confirm-dialog.service';
 import { FinanceTabs } from '../finance-tabs';
@@ -77,7 +77,9 @@ export class FinancePaymentDetailPage implements OnInit {
       this.error.set('Enter a refund amount.');
       return;
     }
-    const amountMinor = toMinorUnits(value, payment.currency);
+    let amountMinor: number;
+    try { amountMinor = majorToMinor(this.refundAmount(), payment.currency); }
+    catch (error) { this.error.set(error instanceof Error ? error.message : 'Enter an exact refund amount.'); return; }
     if (amountMinor > this.refundable()) {
       this.error.set(`You can refund at most ${money(this.refundable(), payment.currency)}.`);
       return;

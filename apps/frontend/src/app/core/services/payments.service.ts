@@ -74,8 +74,8 @@ export class PaymentsApi {
     return this.http.get<Envelope<TeacherEarningsSummary>>(this.earnings).pipe(map(unwrap));
   }
 
-  earningsTransactions(page = 1): Observable<PageResult<TeacherEarningsLine>> {
-    return this.http.get<Envelope<PageResult<TeacherEarningsLine>>>(`${this.earnings}/transactions`, { params: { page } }).pipe(map(unwrap));
+  earningsTransactions(page = 1, currency?: string): Observable<PageResult<TeacherEarningsLine>> {
+    return this.http.get<Envelope<PageResult<TeacherEarningsLine>>>(`${this.earnings}/transactions`, { params: { page, ...(currency ? { currency } : {}) } }).pipe(map(unwrap));
   }
 
   payouts(page = 1): Observable<PageResult<PayoutRecord>> {

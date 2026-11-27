@@ -1,3 +1,5 @@
+import { needsBookingRefundReview } from './refund-review';
+import { BookingFinanceService } from '../payments/booking-finance.service';
 import { StudentEnrollmentsService } from '../student-enrollments/student-enrollments.service';
 import {
   BadRequestException,
@@ -92,6 +94,7 @@ export class BookingsService {
     readonly gateway: StripeGateway,
     private readonly config: ConfigService,
     private readonly enrollmentService: StudentEnrollmentsService,
+    private readonly finance: BookingFinanceService,
   ) {}
   get enabled(): boolean {
     return this.config.get<boolean>('BOOKINGS_ENABLED', false);
@@ -512,6 +515,7 @@ export class BookingsService {
       offer.value.taxRateBps,
       offer.value.price.currency,
     );
+    const earningsPolicy = await this.finance.snapshot(teacher.id, invoiceSource.netMinor);
     let order: BookingOrderMongo;
     try {
       order = await this.calendar.transaction(async (session) => {
@@ -608,6 +612,7 @@ export class BookingsService {
                 slot.startsAt.getTime() - this.noticeHours * 3600000,
               ),
               invoiceSource,
+              earningsPolicy,
               goal: input.goal?.trim() ?? '',
               status: 'awaiting_payment',
               nextReconcileAt: new Date(Date.now() + 60000),
@@ -666,6 +671,7 @@ export class BookingsService {
       rate,
       batch.feeCurrency,
     );
+    const earningsPolicy = await this.finance.snapshot(batch.teacherId, invoiceSource.netMinor);
     try {
       await this.calendar.transaction(async (session) => {
         await this.calendar.lockStudent(user.sub, session);
@@ -739,6 +745,7 @@ export class BookingsService {
                   this.noticeHours * 3600000,
               ),
               invoiceSource,
+              earningsPolicy,
               goal: input.goal?.trim() ?? '',
               status: 'awaiting_payment',
               nextReconcileAt: new Date(Date.now() + 60000),
@@ -762,7 +769,12 @@ export class BookingsService {
     return this.getOrder(user, id);
   }
   async checkout(user: AuthenticatedUser, id: string) {
-    const order = await this.ownedOrder(user, id, true);
+    let order = await this.ownedOrder(user, id, true);
+    if (!order.earningsPolicy && !order.paidAt && !order.stripeSessionId && !order.checkoutAttemptedAt) {
+      const policy = await this.finance.snapshot(order.teacherId, order.invoiceSource.netMinor);
+      await this.orders.updateOne({ _id: id, earningsPolicy: { $exists: false }, paidAt: { $exists: false }, stripeSessionId: { $exists: false }, checkoutAttemptedAt: { $exists: false } }, { $set: { earningsPolicy: policy } });
+      order = await this.ownedOrder(user, id, true);
+    }
     if (order.status !== 'awaiting_payment')
       throw new ConflictException('This order cannot start another payment.');
     if (order.stripeSessionId) {
@@ -1122,6 +1134,7 @@ export class BookingsService {
       ],
       { session },
     );
+    await this.finance.transactions.lock(order.teacherId, session);
     order.refundPendingMinor += amount;
     return refund!;
   }
@@ -1270,7 +1283,10 @@ export class BookingsService {
       order.invoiceSource = source;
       order.paymentIntentId = remote?.paymentIntentId;
       order.paidAt = source.paidAt;
+      order.paymentLivemode = remote?.livemode;
       order.invoiceId = await this.billing.invoice(source, session);
+      await this.finance.capture(order, session);
+      if (remote?.fee) await this.finance.fee(order, remote.fee, session);
       const teacherAvailable = await this.users
         .exists({
           _id: order.teacherId,
@@ -1387,6 +1403,7 @@ export class BookingsService {
             { session },
           );
       }
+      order.earningsEligible = canFulfill;
       if (canFulfill) order.status = 'confirmed';
       else {
         await this.release(order, session);
@@ -1471,6 +1488,7 @@ export class BookingsService {
       const order = await this.orders.findById(refund.orderId).session(session);
       if (!order) throw new Error('Refund order not found.');
       await this.calendar.lockTeacher(order.teacherId, session);
+      await this.finance.transactions.lock(order.teacherId, session);
       refund.status = 'failed';
       refund.leaseToken = undefined;
       refund.leaseUntil = undefined;
@@ -1482,6 +1500,7 @@ export class BookingsService {
         (sum, item) => sum + item.amountMinor,
         0,
       );
+      order.refundReviewRequired = order.refundedMinor < order.invoiceSource.totalMinor && needsBookingRefundReview(await this.refunds.find({ orderId: order.id }).session(session).lean());
       if (order.status === 'refund_pending' && order.refundPendingMinor === 0)
         order.status =
           order.refundedMinor >= order.invoiceSource.totalMinor
@@ -1499,6 +1518,7 @@ export class BookingsService {
         .session(session);
       if (!order) return;
       await this.calendar.lockTeacher(order.teacherId, session);
+      await this.finance.transactions.lock(order.teacherId, session);
       if (
         remote.currency.toUpperCase() !== order.invoiceSource.currency ||
         !Number.isSafeInteger(remote.amountMinor) ||
@@ -1577,8 +1597,11 @@ export class BookingsService {
       order.refundPendingMinor = all
         .filter((item) => item.status === 'queued' || item.status === 'pending')
         .reduce((sum, item) => sum + item.amountMinor, 0);
-      if (refund.status === 'succeeded')
+      order.refundReviewRequired = order.refundedMinor < order.invoiceSource.totalMinor && needsBookingRefundReview(all);
+      if (refund.status === 'succeeded') {
         refund.creditNoteId = await this.billing.credit(order, refund, session);
+        await this.finance.refund(order, refund, session);
+      }
       if (order.refundedMinor >= order.invoiceSource.totalMinor) {
         await this.cancelEntitlement(order, session, true);
         order.status = 'refunded';

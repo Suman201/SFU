@@ -1,3 +1,7 @@
+import { UserDocument, type UserMongoDocument } from '../database/schemas';
+import { BookingFinanceService } from './booking-finance.service';
+import { LedgerEntryDocument } from './payment.schemas';
+import { currencyDefinition } from '@native-sfu/contracts';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
@@ -39,6 +43,9 @@ export class FinanceReportsService {
     private readonly settings: FinanceSettingsService,
     private readonly events: PaymentEventsService,
     private readonly paymentsService: PaymentsService,
+    private readonly bookingFinance: BookingFinanceService,
+    @InjectModel(LedgerEntryDocument.name) private readonly entries: Model<LedgerEntryDocument>,
+    @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>,
   ) {}
 
   private async range(query: { from?: string; to?: string; currency?: string }): Promise<{ from: Date; to: Date; currency: PaymentCurrency }> {
@@ -83,12 +90,15 @@ export class FinanceReportsService {
       teacherEarningsMinor: entryTypeTotals.teacher,
       successfulPayments: entryTypeTotals.payments,
       failedPayments,
+      unrecordedBookingFeeCount: await this.bookingFinance.unrecordedFees(currency, from, to),
+      taxPayableMinor: sum(currentTotals, 'tax_payable', 'balanceMinor'),
       teacherPendingMinor: sum(currentTotals, 'teacher_pending', 'balanceMinor'),
       teacherAvailableMinor: sum(currentTotals, 'teacher_available', 'balanceMinor'),
       teacherReservedMinor: sum(currentTotals, 'teacher_reserved', 'balanceMinor'),
       teacherFrozenMinor: sum(currentTotals, 'teacher_frozen', 'balanceMinor'),
       paidOutMinor: entryTypeTotals.paidOutAllTime,
       openDisputes,
+      bookingDisputeReviewCount: await this.bookingFinance.disputedCount(currency),
       pendingPayoutRequests,
       failedGatewayEvents,
       ledgerBalanced: trial.balanced,
@@ -104,7 +114,7 @@ export class FinanceReportsService {
     const refunds = await this.ledger.accountTotals({ currency, from, to, types: ['refund', 'dispute_lost'] });
     const pick = (rows: typeof period, account: string, field: 'debitMinor' | 'creditMinor') =>
       rows.filter((row) => row.account === account).reduce((total, row) => total + row[field], 0);
-    const capturedCount = await this.payments.countDocuments({ currency, paidAt: { $gte: from, $lt: to }, amountMinor: { $gt: 0 } }).exec();
+    const capturedCount = await this.entries.countDocuments({ currency, type: 'payment_captured', occurredAt: { $gte: from, $lt: to } }).exec();
     return {
       gross: pick(period, 'gateway_clearing', 'debitMinor'),
       commission: pick(period, 'platform_revenue', 'creditMinor'),
@@ -119,54 +129,34 @@ export class FinanceReportsService {
   async teachers(query: { currency?: string; q?: string }): Promise<TeacherFinanceRow[]> {
     const settings = await this.settings.get();
     const currency = isPaymentCurrency(query.currency) ? query.currency : settings.defaultCurrency;
-    const [totals, grossRows, names] = await Promise.all([
-      this.ledger.accountTotals({ currency }),
-      this.payments
-        .aggregate<{ _id: string; grossMinor: number; commissionMinor: number; refundedMinor: number; teacherName: string }>([
-          { $match: { currency, status: { $in: ['succeeded', 'partially_refunded', 'refunded'] } } },
-          {
-            $group: {
-              _id: '$teacherId',
-              grossMinor: { $sum: '$amountMinor' },
-              commissionMinor: { $sum: { $subtract: ['$commissionMinor', '$refundedCommissionMinor'] } },
-              refundedMinor: { $sum: '$refundedMinor' },
-              teacherName: { $last: '$teacherName' },
-            },
-          },
-        ])
-        .exec(),
-      this.payouts.aggregate<{ _id: string; teacherName: string; paidOutMinor: number }>([
-        { $match: { currency } },
-        { $group: { _id: '$teacherId', teacherName: { $last: '$teacherName' }, paidOutMinor: { $sum: { $cond: [{ $eq: ['$status', 'paid'] }, '$amountMinor', 0] } } } },
-      ]).exec(),
-    ]);
-    const teacherIds = new Set<string>([...grossRows.map((row) => row._id), ...names.map((row) => row._id), ...totals.map((row) => row.teacherId).filter((id): id is string => Boolean(id))]);
-    const balance = (teacherId: string, account: string) =>
-      totals.filter((row) => row.teacherId === teacherId && row.account === account).reduce((sum, row) => sum + row.balanceMinor, 0);
-    const rows = [...teacherIds].map((teacherId): TeacherFinanceRow => {
-      const gross = grossRows.find((row) => row._id === teacherId);
-      const payout = names.find((row) => row._id === teacherId);
-      return {
-        teacherId,
-        teacherName: gross?.teacherName ?? payout?.teacherName ?? teacherId,
-        currency,
-        grossMinor: gross?.grossMinor ?? 0,
-        commissionMinor: gross?.commissionMinor ?? 0,
-        refundedMinor: gross?.refundedMinor ?? 0,
-        pendingMinor: balance(teacherId, 'teacher_pending'),
-        availableMinor: balance(teacherId, 'teacher_available'),
-        reservedMinor: balance(teacherId, 'teacher_reserved'),
-        frozenMinor: balance(teacherId, 'teacher_frozen'),
-        paidOutMinor: payout?.paidOutMinor ?? 0,
-      };
+    const totals = await this.ledger.accountTotals({ currency });
+    const flows = await this.entries.aggregate<{ _id: string; grossMinor: number; commissionMinor: number; refundedMinor: number; paidOutMinor: number }>([
+      { $match: { currency, teacherId: { $type: 'string' }, type: { $in: ['payment_captured', 'refund', 'dispute_lost', 'payout_paid', 'payout_reversed'] } } },
+      { $unwind: '$lines' },
+      { $group: {
+        _id: '$teacherId',
+        grossMinor: { $sum: { $cond: [{ $and: [{ $eq: ['$type', 'payment_captured'] }, { $eq: ['$lines.account', 'gateway_clearing'] }] }, '$lines.debitMinor', 0] } },
+        commissionMinor: { $sum: { $cond: [{ $eq: ['$lines.account', 'platform_revenue'] }, { $subtract: ['$lines.creditMinor', '$lines.debitMinor'] }, 0] } },
+        refundedMinor: { $sum: { $cond: [{ $and: [{ $in: ['$type', ['refund', 'dispute_lost']] }, { $in: ['$lines.account', ['gateway_clearing', 'dispute_hold']] }] }, '$lines.creditMinor', 0] } },
+        paidOutMinor: { $sum: { $switch: { branches: [
+          { case: { $and: [{ $eq: ['$type', 'payout_paid'] }, { $eq: ['$lines.account', 'teacher_reserved'] }] }, then: '$lines.debitMinor' },
+          { case: { $and: [{ $eq: ['$type', 'payout_reversed'] }, { $eq: ['$lines.account', 'teacher_available'] }] }, then: { $multiply: ['$lines.creditMinor', -1] } },
+        ], default: 0 } } },
+      } },
+    ]).exec();
+    const ids = [...new Set([...flows.map(row => row._id), ...totals.map(row => row.teacherId).filter((id): id is string => Boolean(id))])];
+    const users = await this.users.find({ _id: { $in: ids } }).select('displayName name').lean();
+    const names = new Map(users.map(user => [String(user._id), user.displayName || user.name || String(user._id)]));
+    const balance = (teacherId: string, account: string) => totals.filter(row => row.teacherId === teacherId && row.account === account).reduce((sum, row) => sum + row.balanceMinor, 0);
+    const rows: TeacherFinanceRow[] = ids.map(teacherId => {
+      const flow = flows.find(row => row._id === teacherId);
+      return { teacherId, teacherName: names.get(teacherId) ?? teacherId, currency, grossMinor: flow?.grossMinor ?? 0, commissionMinor: flow?.commissionMinor ?? 0, refundedMinor: flow?.refundedMinor ?? 0, paidOutMinor: flow?.paidOutMinor ?? 0, pendingMinor: balance(teacherId, 'teacher_pending'), availableMinor: balance(teacherId, 'teacher_available'), reservedMinor: balance(teacherId, 'teacher_reserved'), frozenMinor: balance(teacherId, 'teacher_frozen') };
     });
     const q = query.q?.trim().toLowerCase();
-    return rows
-      .filter((row) => !q || row.teacherName.toLowerCase().includes(q) || row.teacherId.toLowerCase().includes(q))
-      .sort((left, right) => right.grossMinor - left.grossMinor);
+    return rows.filter(row => !q || row.teacherName.toLowerCase().includes(q) || row.teacherId.toLowerCase().includes(q)).sort((a, b) => b.grossMinor - a.grossMinor);
   }
 
-  async reconciliation(): Promise<ReconciliationReport> {
+  async reconciliation(bookingAfter?: string): Promise<ReconciliationReport> {
     const paid = await this.payments
       .find({ status: { $in: ['succeeded', 'partially_refunded', 'refunded'] }, amountMinor: { $gt: 0 } })
       .select('_id teacherMinor enrollmentState status paidAt')
@@ -181,6 +171,7 @@ export class FinanceReportsService {
     ]);
     const cutoff = Date.now() - 5 * 60_000;
     return {
+      bookingEarnings: await this.bookingFinance.reconciliation(bookingAfter),
       checkedAt: new Date().toISOString(),
       ledgerBalanced: trial.balanced,
       unbalancedEntries: trial.unbalancedEntries,
@@ -200,6 +191,8 @@ export class FinanceReportsService {
     for (const id of [...new Set([...report.paymentsMissingLedger, ...report.paymentsAwaitingEnrollment])]) {
       await this.paymentsService.ensureSettled(id).catch(() => undefined);
     }
+    for (const id of [...new Set([...(report.bookingEarnings?.missingCaptureOrderIds ?? []), ...(report.bookingEarnings?.missingRefundOrderIds ?? []), ...(report.bookingEarnings?.missingReleaseOrderIds ?? [])])]) await this.bookingFinance.repairOrder(id);
+    await this.bookingFinance.releaseDue();
     await this.paymentsService.sweep();
     return this.reconciliation();
   }
@@ -237,12 +230,12 @@ export class FinanceReportsService {
         row.teacherName,
         row.batchName,
         row.currency,
-        fromMinorUnits(row.amountMinor, row.currency).toFixed(2),
+        fromMinorUnits(row.amountMinor, row.currency).toFixed(currencyDefinition(row.currency).minorUnits),
         (row.commissionBps / 100).toFixed(2),
-        fromMinorUnits(row.commissionMinor, row.currency).toFixed(2),
-        fromMinorUnits(row.teacherMinor, row.currency).toFixed(2),
-        fromMinorUnits(row.gatewayFeeMinor, row.currency).toFixed(2),
-        fromMinorUnits(row.refundedMinor, row.currency).toFixed(2),
+        fromMinorUnits(row.commissionMinor, row.currency).toFixed(currencyDefinition(row.currency).minorUnits),
+        fromMinorUnits(row.teacherMinor, row.currency).toFixed(currencyDefinition(row.currency).minorUnits),
+        fromMinorUnits(row.gatewayFeeMinor, row.currency).toFixed(currencyDefinition(row.currency).minorUnits),
+        fromMinorUnits(row.refundedMinor, row.currency).toFixed(currencyDefinition(row.currency).minorUnits),
         row.disputeState,
         row.gatewayPaymentId ?? '',
         row.id,

@@ -1,3 +1,4 @@
+import { BookingFinanceService } from './booking-finance.service';
 import {
   BadRequestException,
   Body,
@@ -28,7 +29,7 @@ import { FinanceSettingsService } from './finance-settings.service';
 import { InvalidWebhookSignatureError } from './gateways/payment-gateway';
 import { LedgerService } from './ledger.service';
 import { PaymentEventsService } from './payment-events.service';
-import { CheckoutDto, FinanceSettingsDto, PayoutDecisionDto, PayoutRequestDto, RefundDto, TestCheckoutDto, TestDisputeDto } from './payments.dto';
+import { AdoptBookingEarningsDto, CheckoutDto, FinanceSettingsDto, PayoutDecisionDto, PayoutRequestDto, ReconcilePayoutDto, RefundDto, TestCheckoutDto, TestDisputeDto } from './payments.dto';
 import { PaymentsService } from './payments.service';
 import { PayoutsService } from './payouts.service';
 
@@ -119,8 +120,8 @@ export class TeacherEarningsController {
     return this.payouts.summary(user);
   }
 
-  @Get('transactions') transactions(@Query('page') page: string | undefined, @CurrentUser() user: AuthenticatedUser) {
-    return this.payouts.transactions(user, Number(page) || 1);
+  @Get('transactions') transactions(@Query('page') page: string | undefined, @Query('currency') currency: string | undefined, @CurrentUser() user: AuthenticatedUser) {
+    return this.payouts.transactions(user, Number(page) || 1, currency);
   }
 
   @Get('payouts') list(@Query('page') page: string | undefined, @CurrentUser() user: AuthenticatedUser) {
@@ -156,6 +157,7 @@ export class AdminFinanceController {
     private readonly reports: FinanceReportsService,
     private readonly ledger: LedgerService,
     private readonly events: PaymentEventsService,
+    private readonly bookingFinance: BookingFinanceService,
   ) {}
 
   @Get('overview') overview(@Query() query: Record<string, string>) {
@@ -222,6 +224,11 @@ export class AdminFinanceController {
     return this.payouts.reject(id, input.note ?? '', actor);
   }
 
+  @Post('payouts/:id/reconcile')
+  reconcilePayout(@Param('id') id: string, @Body() input: ReconcilePayoutDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.payouts.reconcile(id, input.transferId, input.reason, actor);
+  }
+
   @Get('teachers') teachers(@Query() query: Record<string, string>) {
     return this.reports.teachers(query);
   }
@@ -238,8 +245,25 @@ export class AdminFinanceController {
     return this.events.retry(id);
   }
 
-  @Get('reconciliation') reconciliation() {
+  @Get('booking-earnings/legacy')
+  legacyBookingEarnings(@Query('page') page?: string) { return this.bookingFinance.legacy(Number(page) || 1); }
+
+  @Post('booking-earnings/:id/adopt')
+  @Roles('SUPER_ADMIN')
+  async adoptBookingEarnings(@Param('id') id: string, @Body() input: AdoptBookingEarningsDto, @CurrentUser() actor: AuthenticatedUser) {
+    await this.bookingFinance.adopt(id, input, actor);
     return this.reports.reconciliation();
+  }
+
+  @Post('booking-earnings/:id/repair')
+  @Roles('SUPER_ADMIN')
+  async repairBookingEarnings(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    await this.bookingFinance.repairOrder(id, user);
+    return this.reports.reconciliation();
+  }
+
+  @Get('reconciliation') reconciliation(@Query('bookingAfter') bookingAfter?: string) {
+    return this.reports.reconciliation(bookingAfter);
   }
 
   @Post('reconciliation/repair')

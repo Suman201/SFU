@@ -95,6 +95,7 @@ async function startBookingStack(options = {}) {
       super(new ConfigService(env));
       this.sessions = new Map();
       this.remoteRefunds = new Map();
+      this.remoteDisputes = new Map();
       this.creates = 0;
       this.refundCreates = 0;
       this.failCreateOnce = false;
@@ -116,6 +117,7 @@ async function startBookingStack(options = {}) {
           paidAt: new Date(),
           url: 'https://checkout.stripe.com/c/pay/test_' + order._id,
           livemode: false,
+          fee: { amountMinor: 0, currency: order.invoiceSource.currency },
         });
       }
       if (this.failCreateOnce) {
@@ -125,6 +127,12 @@ async function startBookingStack(options = {}) {
         );
       }
       return { ...this.sessions.get(order._id) };
+    }
+    async disputesFor(paymentIntentId) { return [...this.remoteDisputes.values()].filter(item => item.paymentIntentId === paymentIntentId).map(item => ({ ...item })); }
+    async retrieveDispute(id) { const item = this.remoteDisputes.get(id); if (!item) throw new Error('Unknown fixture dispute'); return { ...item }; }
+    async fetchPaymentFee(paymentIntentId) {
+      const session = [...this.sessions.values()].find(item => item.paymentIntentId === paymentIntentId);
+      return session?.fee ?? null;
     }
     async recoverCheckout(order) {
       return this.createCheckout(order);

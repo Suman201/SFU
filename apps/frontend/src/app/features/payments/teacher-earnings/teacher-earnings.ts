@@ -4,10 +4,14 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
   bpsToPercentLabel,
+  currencyDefinition,
+  isPaymentCurrency,
+  majorToMinor,
+  MAX_PAYMENT_MINOR,
+  type PaymentCurrency,
   formatPaymentMoney,
   fromMinorUnits,
   payoutStatusLabel,
-  toMinorUnits,
   type LedgerEntryType,
   type PayoutRecord,
   type PayoutStatus,
@@ -62,6 +66,8 @@ export class TeacherEarnings implements OnInit {
   protected readonly amount = signal('');
   protected readonly note = signal('');
   private pendingKey = requestKey();
+  private transactionVersion = 0;
+  protected readonly selectedCurrency = signal<PaymentCurrency | null>(null);
 
   protected readonly money = formatPaymentMoney;
   protected readonly percent = bpsToPercentLabel;
@@ -69,14 +75,15 @@ export class TeacherEarnings implements OnInit {
 
   protected readonly balance = computed<TeacherBalance | null>(() => {
     const summary = this.summary();
-    return summary?.balances.find((item) => item.currency === summary.defaultCurrency) ?? summary?.balances[0] ?? null;
+    return summary?.balances.find(item => item.currency === this.selectedCurrency()) ?? summary?.balances.find(item => [item.pendingMinor, item.availableMinor, item.reservedMinor, item.paidOutMinor, item.frozenMinor, item.grossMinor].some(amount => amount !== 0)) ?? summary?.balances.find(item => item.currency === summary.defaultCurrency) ?? summary?.balances[0] ?? null;
   });
-  protected readonly currency = computed(() => this.balance()?.currency ?? 'USD');
-  protected readonly openPayouts = computed(() => this.payouts().filter((item) => item.status === 'requested' || item.status === 'processing'));
+  protected readonly currency = computed<PaymentCurrency>(() => this.balance()?.currency ?? 'USD');
+  protected readonly currencySymbol = computed(() => currencyDefinition(this.currency()).symbol);
+  protected readonly openPayouts = computed(() => this.payouts().filter(item => item.currency === this.currency() && (item.status === 'requested' || item.status === 'processing')));
   protected readonly canRequest = computed(() => {
     const summary = this.summary();
     const balance = this.balance();
-    return Boolean(summary?.payoutsEnabled && summary.payoutAccount.payoutsEnabled && balance && balance.availableMinor >= summary.minimumPayoutMinor);
+    return Boolean(summary?.payoutsEnabled && summary.payoutAccount.payoutsEnabled && balance && !balance.payoutBlockedReason && balance.minimumPayoutMinor !== undefined && balance.availableMinor >= balance.minimumPayoutMinor);
   });
 
   ngOnInit(): void {
@@ -95,8 +102,10 @@ export class TeacherEarnings implements OnInit {
     this.api.earningsSummary().subscribe({
       next: (summary) => {
         this.summary.set(summary);
-        const balance = summary.balances.find((item) => item.currency === summary.defaultCurrency);
-        if (!this.amount() && balance && balance.availableMinor > 0) this.amount.set(fromMinorUnits(balance.availableMinor, balance.currency).toFixed(2));
+        const balance = this.balance();
+        if (balance && !this.selectedCurrency()) this.selectedCurrency.set(balance.currency);
+        if (!this.amount() && balance && balance.availableMinor > 0) this.amount.set(this.amountText(balance.availableMinor, balance.currency));
+        this.loadTransactions(1);
         this.loading.set(false);
       },
       error: (error) => {
@@ -104,7 +113,6 @@ export class TeacherEarnings implements OnInit {
         this.loading.set(false);
       },
     });
-    this.loadTransactions(1);
     this.api.payouts(1).subscribe({
       next: (result) => {
         this.payouts.set(result.items);
@@ -115,14 +123,29 @@ export class TeacherEarnings implements OnInit {
   }
 
   protected loadTransactions(page: number): void {
-    this.api.earningsTransactions(page).subscribe({
+    const version = ++this.transactionVersion;
+    this.api.earningsTransactions(page, this.currency()).subscribe({
       next: (result) => {
+        if (version !== this.transactionVersion) return;
         this.transactions.set(result.items);
         this.transactionTotal.set(result.total);
         this.transactionPage.set(result.page);
       },
       error: () => undefined,
     });
+  }
+
+  protected selectCurrency(value: string): void {
+    if (this.busy() || !isPaymentCurrency(value) || !this.summary()?.balances.some(item => item.currency === value)) return;
+    this.selectedCurrency.set(value);
+    this.amount.set(this.amountText(Math.max(0, this.balance()?.availableMinor ?? 0), value));
+    this.pendingKey = requestKey();
+    this.error.set('');
+    this.loadTransactions(1);
+  }
+
+  private amountText(amountMinor: number, currency: PaymentCurrency): string {
+    return fromMinorUnits(Math.min(amountMinor, MAX_PAYMENT_MINOR), currency).toFixed(currencyDefinition(currency).minorUnits);
   }
 
   protected setupPayouts(): void {
@@ -147,15 +170,13 @@ export class TeacherEarnings implements OnInit {
 
   protected requestPayout(): void {
     const summary = this.summary();
-    const value = Number(this.amount());
-    if (!summary || !Number.isFinite(value) || value <= 0) {
-      this.error.set('Enter the amount you want to withdraw.');
-      return;
-    }
+    if (!summary || !this.canRequest()) return;
+    let amountMinor: number;
+    try { amountMinor = majorToMinor(this.amount(), this.currency()); if (amountMinor < 1) throw new Error('Enter a positive payout amount.'); }
+    catch (error) { this.error.set(error instanceof Error ? error.message : 'Enter a valid amount.'); return; }
     this.busy.set(true);
     this.error.set('');
     this.success.set('');
-    const amountMinor = toMinorUnits(value, this.currency());
     this.api.requestPayout({ currency: this.currency(), amountMinor, note: this.note().trim() || undefined, requestId: this.pendingKey }).subscribe({
       next: (payout) => {
         this.busy.set(false);
@@ -191,14 +212,15 @@ export class TeacherEarnings implements OnInit {
   protected intro(): string {
     const summary = this.summary();
     const fee = summary ? ` (${bpsToPercentLabel(summary.commissionBps)})` : '';
-    return `Your share of every class payment after the platform fee${fee}. Payment processing fees are paid by Sapiovian, not deducted from your share.`;
+    return `Your share of lesson fees before tax, after the platform fee${fee}. Each booking keeps its agreed commission rate. Payment processing fees are paid by Sapiovian, not deducted from your share.`;
   }
 
   protected accountLine(currency: string): string {
     const summary = this.summary();
     if (!summary) return '';
     const hint = summary.payoutAccount.accountHint ? ` (••••${summary.payoutAccount.accountHint})` : '';
-    return `Payout account connected${hint}. Minimum payout ${formatPaymentMoney(summary.minimumPayoutMinor, currency)}.`;
+    const minimum = this.balance()?.minimumPayoutMinor;
+    return minimum === undefined ? `Payout account connected${hint}. A minimum for this currency needs to be configured.` : `Payout account connected${hint}. Minimum payout ${formatPaymentMoney(minimum, currency)}.`;
   }
 
   /** Entries that only move money between balance buckets. */

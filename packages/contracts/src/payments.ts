@@ -1,3 +1,5 @@
+import { CURRENCY_DECIMALS, SUPPORTED_CURRENCIES, majorToMinor, type CurrencyCode } from './money';
+
 /**
  * Payments, earnings and payouts.
  *
@@ -21,13 +23,17 @@ export interface PaymentCurrencyDefinition {
  * it selectable; it only becomes payable once an admin enables it in finance
  * settings and the configured gateway supports it.
  */
-export const PAYMENT_CURRENCIES = {
-  USD: { code: 'USD', name: 'US Dollar', symbol: '$', minorUnits: 2, locale: 'en-US' },
-  INR: { code: 'INR', name: 'Indian Rupee', symbol: '₹', minorUnits: 2, locale: 'en-IN' },
-} as const satisfies Record<string, PaymentCurrencyDefinition>;
+const currencyNames = new Intl.DisplayNames(['en'], { type: 'currency' });
+export const PAYMENT_CURRENCIES = Object.fromEntries(SUPPORTED_CURRENCIES.map(code => [code, {
+  code,
+  name: code === 'USD' ? 'US Dollar' : code === 'INR' ? 'Indian Rupee' : currencyNames.of(code) ?? code,
+  symbol: new Intl.NumberFormat('en', { style: 'currency', currency: code, currencyDisplay: 'narrowSymbol' }).formatToParts(0).find(part => part.type === 'currency')?.value ?? code,
+  minorUnits: CURRENCY_DECIMALS[code],
+  locale: code === 'INR' ? 'en-IN' : 'en-US',
+}])) as Record<CurrencyCode, PaymentCurrencyDefinition>;
 
-export type PaymentCurrency = keyof typeof PAYMENT_CURRENCIES;
-export const PAYMENT_CURRENCY_CODES = Object.keys(PAYMENT_CURRENCIES) as PaymentCurrency[];
+export type PaymentCurrency = CurrencyCode;
+export const PAYMENT_CURRENCY_CODES = SUPPORTED_CURRENCIES;
 export const DEFAULT_PAYMENT_CURRENCY: PaymentCurrency = 'USD';
 /** Currencies enabled for new installations. INR is registered but disabled. */
 export const INITIAL_ENABLED_CURRENCIES: PaymentCurrency[] = ['USD'];
@@ -43,9 +49,7 @@ export function currencyDefinition(currency: PaymentCurrency): PaymentCurrencyDe
 /** Converts a major-unit amount (e.g. 49.99) to integer minor units (4999). */
 export function toMinorUnits(amount: number, currency: PaymentCurrency): number {
   if (!Number.isFinite(amount) || amount < 0) throw new Error('Amount must be a finite, non-negative number.');
-  const factor = 10 ** PAYMENT_CURRENCIES[currency].minorUnits;
-  // toFixed removes binary floating point noise such as 19.99 * 100 = 1998.9999999999998.
-  return Math.round(Number((amount * factor).toFixed(6)));
+  return majorToMinor(amount, currency);
 }
 
 export function fromMinorUnits(minor: number, currency: PaymentCurrency): number {
@@ -175,6 +179,7 @@ export function payoutStatusLabel(status: PayoutStatus): string {
 export const LEDGER_ACCOUNTS = [
   'gateway_clearing',
   'platform_revenue',
+  'tax_payable',
   'gateway_fees',
   'dispute_hold',
   'teacher_pending',
@@ -218,6 +223,7 @@ export interface LedgerEntryRecord {
   occurredAt: string;
   memo: string;
   paymentId?: string;
+  bookingOrderId?: string;
   refundId?: string;
   disputeId?: string;
   payoutId?: string;
@@ -261,13 +267,25 @@ export interface FinanceSettings {
   /** Smallest payout a teacher may request, in minor units of the default currency. */
   minimumPayoutMinor: number;
   defaultCurrency: PaymentCurrency;
+  /** Explicit payout minimums for currencies other than the default. */
+  payoutMinimums?: PayoutCurrencyMinimum[];
   enabledCurrencies: PaymentCurrency[];
   teacherOverrides: TeacherCommissionOverride[];
   updatedAt?: string;
   updatedBy?: string;
 }
 
+export interface PayoutCurrencyMinimum {
+  currency: PaymentCurrency;
+  minimumMinor: number;
+}
+
+export function minimumPayoutFor(settings: Pick<FinanceSettings, 'defaultCurrency' | 'minimumPayoutMinor' | 'payoutMinimums'>, currency: PaymentCurrency): number | undefined {
+  return currency === settings.defaultCurrency ? settings.minimumPayoutMinor : settings.payoutMinimums?.find(item => item.currency === currency)?.minimumMinor;
+}
+
 export interface FinanceSettingsUpdate {
+  payoutMinimums?: PayoutCurrencyMinimum[];
   version: number;
   commissionBps: number;
   holdDays: number;
@@ -424,6 +442,7 @@ export interface DisputeRecord {
 }
 
 export interface PayoutRecord {
+  reversedMinor?: number;
   id: string;
   teacherId: string;
   teacherName: string;
@@ -452,6 +471,8 @@ export interface PayoutDecisionInput {
 }
 
 export interface TeacherBalance {
+  minimumPayoutMinor?: number;
+  payoutBlockedReason?: string;
   currency: PaymentCurrency;
   pendingMinor: number;
   availableMinor: number;
@@ -484,6 +505,8 @@ export interface TeacherEarningsSummary {
 }
 
 export interface TeacherEarningsLine {
+  bookingOrderId?: string;
+  taxMinor?: number;
   id: string;
   type: LedgerEntryType;
   occurredAt: string;
@@ -510,6 +533,9 @@ export interface FinanceDailyPoint {
 }
 
 export interface FinanceOverview {
+  bookingDisputeReviewCount?: number;
+  unrecordedBookingFeeCount?: number;
+  taxPayableMinor?: number;
   currency: PaymentCurrency;
   from: string;
   to: string;
@@ -563,6 +589,7 @@ export interface GatewayEventRecord {
 }
 
 export interface ReconciliationReport {
+  bookingEarnings?: BookingEarningsReconciliation;
   checkedAt: string;
   ledgerBalanced: boolean;
   unbalancedEntries: number;
@@ -574,4 +601,65 @@ export interface ReconciliationReport {
   paymentsAwaitingEnrollment: string[];
   failedEvents: GatewayEventRecord[];
   stalePendingPayments: number;
+}
+
+
+/** Immutable allocation agreed when reserving a booking, or explicitly reviewed for a historical payment. */
+export interface BookingEarningsPolicy {
+  version: 1;
+  settingsVersion: number;
+  commissionBps: number;
+  commissionMinor: number;
+  teacherMinor: number;
+  holdDays: number;
+  source: 'reservation' | 'legacy_review';
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reason?: string;
+}
+
+export interface BookingEarningsReview {
+  orderId: string;
+  teacherName: string;
+  title: string;
+  currency: PaymentCurrency;
+  netMinor: number;
+  taxMinor: number;
+  totalMinor: number;
+  refundedMinor: number;
+  paidAt: string;
+  updatedAt: string;
+}
+
+export interface AdoptBookingEarningsInput {
+  commissionBps: number;
+  holdDays: number;
+  reason: string;
+  expectedUpdatedAt: string;
+}
+
+export interface BookingEarningsReconciliation {
+  /** Open and lost booking disputes block this teacher/currency until provider resolution or settlement review. */
+  disputedOrderIds: string[];
+  unfulfilledOrderIds: string[];
+  feesAwaitingProvider: number;
+  feesInOtherCurrency: number;
+  legacyCount: number;
+  missingCaptureOrderIds: string[];
+  missingRefundOrderIds: string[];
+  missingReleaseOrderIds: string[];
+  nextCursor?: string;
+  mismatchedOrderIds: string[];
+  /** Bounded scans are explicit; never infer complete coverage from a sample. */
+  checkedOrders: number;
+  totalOrders: number;
+  hasMore: boolean;
+}
+
+export interface BookingEarningsRefundAllocation {
+  netMinor: number;
+  taxMinor: number;
+  totalMinor: number;
+  commissionMinor: number;
+  teacherMinor: number;
 }

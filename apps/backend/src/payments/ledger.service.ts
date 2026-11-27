@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import type { Model, PipelineStage } from 'mongoose';
+import type { ClientSession, Model, PipelineStage } from 'mongoose';
 import {
   assertBalancedLedgerLines,
   type LedgerAccount,
@@ -35,8 +35,22 @@ export class LedgerService {
    * Writes a balanced entry exactly once. Returns false when an entry with the
    * same key already exists (the business event was already recorded).
    */
-  async post(draft: LedgerEntryDraft): Promise<boolean> {
+  async post(draft: LedgerEntryDraft, session?: ClientSession): Promise<boolean> {
     assertBalancedLedgerLines(draft.lines);
+    if (session) {
+      const existing = await this.entries.findOne({ key: draft.key }).session(session).lean();
+      if (existing) {
+        const facts = (value: LedgerEntryDraft | LedgerEntryDocument) => JSON.stringify({
+          type: value.type, currency: value.currency, paymentId: value.paymentId, bookingOrderId: value.bookingOrderId,
+          refundId: value.refundId, payoutId: value.payoutId, teacherId: value.teacherId,
+          lines: value.lines.map(line => ({ account: line.account, teacherId: line.teacherId, debitMinor: line.debitMinor, creditMinor: line.creditMinor })),
+        });
+        if (facts(existing) !== facts(draft)) throw new Error('Existing journal entry conflicts with the verified financial facts.');
+        return false;
+      }
+      await this.entries.create([draft], { session });
+      return true;
+    }
     try {
       await this.entries.create({ ...draft });
       return true;
@@ -47,8 +61,8 @@ export class LedgerService {
     }
   }
 
-  async exists(key: string): Promise<boolean> {
-    return Boolean(await this.entries.exists({ key }).exec());
+  async exists(key: string, session?: ClientSession): Promise<boolean> {
+    return Boolean(await this.entries.exists({ key }).session(session ?? null).exec());
   }
 
   toRecord(doc: LedgerEntryMongo | LedgerEntryDocument): LedgerEntryRecord {
@@ -60,6 +74,7 @@ export class LedgerService {
       occurredAt: doc.occurredAt.toISOString(),
       memo: doc.memo,
       paymentId: doc.paymentId,
+      bookingOrderId: doc.bookingOrderId,
       refundId: doc.refundId,
       disputeId: doc.disputeId,
       payoutId: doc.payoutId,
@@ -95,9 +110,10 @@ export class LedgerService {
   }
 
   /** Totals per account (and teacher), optionally restricted to a teacher, payment or period. */
-  async accountTotals(match: { teacherId?: string; paymentId?: string; currency?: PaymentCurrency; from?: Date; to?: Date; types?: string[] } = {}): Promise<AccountTotals[]> {
+  async accountTotals(match: { teacherId?: string; paymentId?: string; bookingOrderId?: string; currency?: PaymentCurrency; from?: Date; to?: Date; types?: string[]; session?: ClientSession } = {}): Promise<AccountTotals[]> {
     const entryMatch: Record<string, unknown> = {};
     if (match.paymentId) entryMatch.paymentId = match.paymentId;
+    if (match.bookingOrderId) entryMatch.bookingOrderId = match.bookingOrderId;
     if (match.currency) entryMatch.currency = match.currency;
     if (match.types) entryMatch.type = { $in: match.types };
     if (match.from || match.to) entryMatch.occurredAt = { ...(match.from ? { $gte: match.from } : {}), ...(match.to ? { $lt: match.to } : {}) };
@@ -114,7 +130,7 @@ export class LedgerService {
         },
       },
     ];
-    const rows = await this.entries.aggregate<{ _id: { account: LedgerAccount; teacherId?: string; currency: PaymentCurrency }; debitMinor: number; creditMinor: number }>(pipeline).exec();
+    const rows = await this.entries.aggregate<{ _id: { account: LedgerAccount; teacherId?: string; currency: PaymentCurrency }; debitMinor: number; creditMinor: number }>(pipeline).session(match.session ?? null).exec();
     return rows.map((row) => ({
       account: row._id.account,
       teacherId: row._id.teacherId ?? undefined,
@@ -131,8 +147,8 @@ export class LedgerService {
     return totals.filter((row) => row.account === account && row.teacherId === teacherId).reduce((sum, row) => sum + row.balanceMinor, 0);
   }
 
-  async teacherAccountBalance(teacherId: string, currency: PaymentCurrency, account: LedgerAccount): Promise<number> {
-    const totals = await this.accountTotals({ teacherId, currency });
+  async teacherAccountBalance(teacherId: string, currency: PaymentCurrency, account: LedgerAccount, session?: ClientSession): Promise<number> {
+    const totals = await this.accountTotals({ teacherId, currency, session });
     return totals.filter((row) => row.account === account).reduce((sum, row) => sum + row.balanceMinor, 0);
   }
 
@@ -151,7 +167,7 @@ export class LedgerService {
                 $sum: {
                   $switch: {
                     branches: [
-                      { case: { $eq: ['$type', 'payment_captured'] }, then: '$lines.debitMinor' },
+                      { case: { $eq: ['$type', 'payment_captured'] }, then: { $subtract: ['$lines.debitMinor', { $cond: [{ $eq: ['$lines.account', 'tax_payable'] }, '$lines.creditMinor', 0] }] } },
                       { case: { $eq: ['$type', 'refund'] }, then: '$lines.creditMinor' },
                       { case: { $eq: ['$type', 'dispute_lost'] }, then: '$lines.creditMinor' },
                       { case: { $eq: ['$type', 'payout_paid'] }, then: '$lines.debitMinor' },

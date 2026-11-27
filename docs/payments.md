@@ -4,6 +4,8 @@ Students pay class fees online, the platform keeps a configurable commission, an
 
 ## Switching it on
 
+MongoDB must run as a replica set or mongos: booking credits and payout balance changes use transactions. Provision the financial indexes before enabling payouts.
+
 | Variable | Purpose |
 | --- | --- |
 | `PAYMENTS_ENABLED` | `true` makes paid classes require a verified payment. When `false`, paid classes retain the existing booking checkout and cannot self-enroll for free. |
@@ -25,18 +27,18 @@ Stripe setup:
 2. **Verification** – access is granted only from a signed webhook, never from the browser redirect. Webhooks are verified on the raw body, stored once by event id (`payment_gateway_events`), acknowledged immediately and applied by a worker with retries and backoff.
 3. **Settlement** (idempotent, re-runnable): mark paid and assign `RCPT-YYYY-NNNNNN`; post the ledger capture; record the Stripe processing fee (borne by the platform); grant enrollment. If the class filled up or closed, the payment is refunded automatically.
 4. **Holding period** – the teacher share stays *pending* for `holdDays`, then becomes *available*. Disputed payments are not released.
-5. **Payouts** – the teacher connects a Stripe Express account and requests a payout up to the available balance (serialised per teacher). An admin approves (Stripe transfer with an idempotency key; safe to retry) or rejects with a reason.
+5. **Payouts** – the teacher connects a Stripe Express account and requests a payout up to the available balance. Reservation, cancellation and financial adjustments share a database transaction lock per teacher. Approval sends the original idempotent Stripe transfer. Unknown outcomes keep funds reserved; after 23 hours another send is blocked until finance verifies the original transfer ID. Partial transfer reversals return only the newly confirmed amount.
 
 ## Money and currency
 
-- Every amount is an integer of minor units plus a currency code. Currencies live in a registry (`PAYMENT_CURRENCIES` in `packages/contracts/src/payments.ts`); USD is enabled, INR is registered but disabled.
+- Every amount is an integer of minor units plus a currency code. The finance registry shares all 27 product currency codes and their zero-, two- or three-decimal precision. Existing class checkout collection remains USD-only; booking collection keeps its separate `BOOKING_CHARGE_CURRENCIES` configuration. A registered currency alone does not enable collection or payouts.
 - Commission is stored in basis points (1500 = 15%), rounded half-up; the teacher receives the exact remainder.
 - Refunds split commission and teacher share proportionally and cumulatively, so a full refund returns exactly the original split.
-- Adding INR later: enable it in *Finance settings*, set explicit `feeCurrency: 'INR'` and `feeMinor` on batches, and add a gateway adapter (e.g. Razorpay) implementing `PaymentGateway`. Ledger, reports and UI already work per currency.
+- Finance settings require an explicit payout minimum for each additional currency. Payout support is checked separately from checkout support. The Stripe Connect adapter accepts registered zero- and two-decimal currencies subject to the actual platform/connected-account capabilities; three-decimal transfers stay blocked. The synthetic test adapter supports them to verify accounting precision. No internal FX conversion or cross-currency balance netting occurs.
 
 ## Ledger
 
-`ledger_entries` holds balanced double-entry journal entries. Each entry stores all its lines in one document (atomic without MongoDB transactions) and has a unique key such as `payment:<id>:captured` or `refund:<id>`, so replayed events never double count.
+`ledger_entries` holds balanced double-entry journal entries. Each entry stores all its lines in one document. Booking settlement, fiscal records and payout reservations also use MongoDB replica-set transactions and has a unique key such as `payment:<id>:captured` or `refund:<id>`, so replayed events never double count.
 
 | Event | Lines |
 | --- | --- |
@@ -44,7 +46,8 @@ Stripe setup:
 | Processing fee | Dr gateway fees; Cr gateway clearing |
 | Earnings released | Dr teacher pending; Cr teacher available |
 | Refund | Dr platform revenue; Dr teacher pending/available; Cr gateway clearing |
-| Dispute opened / won / lost | Funds to/from dispute hold; teacher share frozen, returned or reversed |
+| Class-payment dispute opened / won / lost | Funds to/from dispute hold; teacher share frozen, returned or reversed |
+| Booking payment captured / refunded | Commission and teacher share use net lesson fees; tax credits/debits stay in tax payable |
 | Payout requested / returned / paid / reversed | Teacher available ↔ reserved; reserved → gateway clearing |
 
 *Admin → Finance → Ledger & reconciliation* checks that every entry balances, every paid payment has a capture entry with the right teacher share, access was granted, and no gateway event failed. Super admins can re-run settlement for flagged payments.
@@ -73,11 +76,12 @@ The test gateway opens `/payments/test-checkout/:id` instead of Stripe, with *Pa
 - Recurring (monthly) billing per batch: fees are one-time per batch.
 - Teacher promotion fees retain their existing manually confirmed payment flow. Individual and batch bookings retain the implemented reservation, Stripe verification, invoice and credit-note flow described in [booking payments](booking-preview.md).
 - Responding to disputes with evidence happens in the Stripe dashboard.
-- Tax/VAT on class fees is not calculated.
+- Tax/VAT on the separate class-payment checkout is not calculated; bookings retain their existing invoice tax snapshot.
+- Booking dispute evidence, lost-chargeback accounting, tax treatment and any recovery of an already-sent transfer require manual finance review. Verified open or lost booking disputes block further payouts in that teacher/currency; a provider-confirmed win or closed inquiry clears that dispute hold. See [booking earnings](booking-earnings.md).
 
 ## Local merge integration
 
-The payment branch is integrated with the existing booking, currency and staff-permission work. `/finance` keeps the booking collections report; `/finance/overview` opens the new payment-ledger overview. These reports cover their respective record types and must not be treated as one combined financial statement. Existing booking orders do not automatically create commission ledger entries or teacher payout balances.
+New booking reservations now snapshot commission and holding policy and post to the same earnings ledger as class payments. `/finance/overview` and teacher earnings include all posted booking and class-payment journals. `/finance` remains the booking cash report, including historical orders that have not been adopted into earnings. Historical paid bookings require a super administrator to verify the original provider payment and approve a commission policy. Do not add these reports together. Payment-list CSV exports still cover the separate class-payment records; booking exports remain in booking operations. See [booking earnings rollout and reconciliation](booking-earnings.md).
 
 Class charges read the explicit `feeMinor` and `feeCurrency` snapshot. A legacy fee without a known currency, or a currency unsupported by this payment gateway, is rejected rather than assumed to be USD. The new gateway currently collects USD; existing booking charge currencies remain independent. Paid self-enrollment stays blocked even when the new payments flag is disabled. Both checkout paths and administrative enrollment respect the other path's held capacity.
 

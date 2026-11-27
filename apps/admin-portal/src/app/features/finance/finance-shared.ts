@@ -66,6 +66,7 @@ export const ENTRY_LABELS: Record<LedgerEntryType, string> = {
 export const ACCOUNT_LABELS: Record<LedgerAccount, string> = {
   gateway_clearing: 'Gateway clearing',
   platform_revenue: 'Platform revenue',
+  tax_payable: 'Tax payable',
   gateway_fees: 'Gateway fees',
   dispute_hold: 'Dispute hold',
   teacher_pending: 'Teacher pending',

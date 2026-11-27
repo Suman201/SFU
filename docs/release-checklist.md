@@ -28,6 +28,8 @@ Copy this checklist into the release record. Fill each evidence field with the c
 - [ ] When enabling Google/Apple, complete the [social sign-in live checklist](social-sign-in.md), provision identity/replay/TTL indexes, and verify teacher review and account-linking boundaries with real provider accounts.
 - [ ] Capture actual staging TURN/ingress, provider and physical-device/screen-reader checks as applicable.
 
+- [ ] For booking earnings, follow [the finance rollout](booking-earnings.md): provision indexes, configure per-currency payout minima, verify Stripe environments and booking dispute webhooks, review historical commission policies, and reconcile provider fees/FX before approving real transfers.
+
 ## Rollback
 
 - [ ] Record the prior known-good image/config digests and rollback owner.

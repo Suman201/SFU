@@ -60,6 +60,7 @@
               <td>
                 <div class="cell-stack">
                   <span class="data-pill {{ tone(row.status) }}">{{ label(row.status) }}</span>
+                  @if (row.reversedMinor) { <small>Returned: {{ money(row.reversedMinor, row.currency) }}</small> }
                   @if (row.failureReason) { <small>{{ row.failureReason }}</small> }
                 </div>
               </td>
@@ -78,11 +79,12 @@
                 </div>
               </td>
               <td class="actions-cell">
-                @if (auth.can('admin:finance:write') && (row.status === 'requested' || row.status === 'processing')) {
+                @if (auth.can('admin:finance:write') && (row.status === 'requested' || row.status === 'processing' || row.gatewayTransferId)) {
                   <div class="inline-actions">
-                    <button type="button" class="table-action primary" [disabled]="savingId() !== null" (click)="approve(row)">
+                    @if (row.status === 'requested' || row.status === 'processing') { <button type="button" class="table-action primary" [disabled]="savingId() !== null" (click)="approve(row)">
                       {{ savingId() === row.id ? 'Sending…' : row.status === 'processing' ? 'Retry send' : 'Approve & send' }}
-                    </button>
+                    </button> }
+                    @if (row.status === 'processing' || row.gatewayTransferId) { <button type="button" class="table-action" [disabled]="savingId() !== null" (click)="beginReconcile(row)">Reconcile transfer</button> }
                     @if (row.status === 'requested') {
                       <button type="button" class="table-action danger" [disabled]="savingId() !== null" (click)="reject(row)">Reject</button>
                     }
@@ -108,3 +110,15 @@
     </div>
   </footer>
 </section>
+
+@if (reconciling(); as row) {
+  <section class="panel" aria-label="Verify payout transfer">
+    <h2>Verify the original provider transfer</h2>
+    <p>{{ row.teacherName }} · {{ money(row.amountMinor, row.currency) }}. Fetch the original transfer to verify its amount, currency, destination and reference before recording the outcome.</p>
+    <form class="form-grid" (ngSubmit)="reconcileTransfer()">
+      <label class="field">Provider transfer ID<input name="transferId" [ngModel]="transferId()" (ngModelChange)="transferId.set($event)" maxlength="150" required /></label>
+      <label class="field">Reconciliation reason<textarea name="reconcileReason" [ngModel]="reconcileReason()" (ngModelChange)="reconcileReason.set($event)" maxlength="500" required></textarea></label>
+      <div class="inline-actions"><button type="submit" class="primary-action" [disabled]="savingId() !== null">Verify transfer</button><button type="button" class="table-action" [disabled]="savingId() !== null" (click)="reconciling.set(null)">Close verification</button></div>
+    </form>
+  </section>
+}

@@ -3,6 +3,8 @@ import { HydratedDocument } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import type {
   BookingInvoiceSource,
+  BookingEarningsPolicy,
+  BookingEarningsRefundAllocation,
   BookingOrderStatus,
   InvoiceRecord,
   LessonOffer,
@@ -46,6 +48,20 @@ export const BookingCalendarLockSchema = SchemaFactory.createForClass(
 
 @Schema({ collection: 'booking_orders', timestamps: true })
 export class BookingOrderDocument {
+  /** Provider-owned dispute state; lost disputes retain a payout hold for manual settlement review. */
+  @Prop({ type: [Object], default: undefined }) earningsDisputes?: Array<{ id: string; status: string; amountMinor: number; blocking: boolean; checkedAt: Date }>;
+  @Prop({ type: Object }) earningsPolicy?: BookingEarningsPolicy;
+  @Prop({ type: Date }) earningsAvailableAt?: Date;
+  @Prop({ type: Date }) earningsNextCheckAt?: Date;
+  @Prop({ type: Boolean }) earningsEligible?: boolean;
+  @Prop({ type: Boolean }) refundReviewRequired?: boolean;
+  @Prop({ type: Date }) earningsReleasedAt?: Date;
+  @Prop({ type: Number }) earningsReleasedMinor?: number;
+  @Prop({ type: Date }) earningsCreditedAt?: Date;
+  @Prop({ type: Boolean }) paymentLivemode?: boolean;
+  @Prop({ type: Number }) gatewayFeeMinor?: number;
+  @Prop({ type: String }) gatewayFeeCurrency?: string;
+  @Prop({ type: Date }) gatewayFeeRecordedAt?: Date;
   @Prop({ type: String, default: () => randomUUID() }) _id!: string;
   @Prop({ required: true }) requestId!: string;
   @Prop({ required: true, index: true }) studentId!: string;
@@ -105,12 +121,15 @@ BookingOrderSchema.index(
   },
 );
 BookingOrderSchema.index({ status: 1, nextReconcileAt: 1 });
+BookingOrderSchema.index({ 'earningsPolicy.version': 1, earningsReleasedAt: 1, earningsNextCheckAt: 1 });
 BookingOrderSchema.index({ createdAt: -1, _id: -1 });
 BookingOrderSchema.index({ paidAt: 1, 'invoiceSource.currency': 1 });
 BookingOrderSchema.index({ cancelledAt: 1, 'invoiceSource.currency': 1 });
 
 @Schema({ collection: 'booking_refunds', timestamps: true })
 export class BookingRefundDocument {
+  @Prop({ type: Object }) earningsAllocation?: BookingEarningsRefundAllocation;
+  @Prop({ type: String, enum: ['teacher_pending', 'teacher_available'] }) earningsBucket?: 'teacher_pending' | 'teacher_available';
   @Prop({ type: String, index: true }) retryOfRefundId?: string;
   @Prop({ type: String, default: () => randomUUID() }) _id!: string;
   @Prop({ required: true, index: true }) orderId!: string;

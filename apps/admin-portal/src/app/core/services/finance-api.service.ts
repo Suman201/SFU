@@ -3,6 +3,8 @@ import { Injectable, inject } from '@angular/core';
 import { map, type Observable } from 'rxjs';
 import type {
   AdminPaymentRecord,
+  AdoptBookingEarningsInput,
+  BookingEarningsReview,
   CreateRefundRequest,
   DisputeRecord,
   FinanceOverview,
@@ -116,6 +118,10 @@ export class FinanceApi {
     return this.http.post<Envelope<PayoutRecord>>(`${this.base}/payouts/${encodeURIComponent(id)}/approve`, { note }).pipe(map(unwrap));
   }
 
+  reconcilePayout(id: string, transferId: string, reason: string): Observable<PayoutRecord> {
+    return this.http.post<Envelope<PayoutRecord>>(`${this.base}/payouts/${encodeURIComponent(id)}/reconcile`, { transferId, reason }).pipe(map(unwrap));
+  }
+
   rejectPayout(id: string, note: string): Observable<PayoutRecord> {
     return this.http.post<Envelope<PayoutRecord>>(`${this.base}/payouts/${encodeURIComponent(id)}/reject`, { note }).pipe(map(unwrap));
   }
@@ -136,8 +142,20 @@ export class FinanceApi {
     return this.http.post<Envelope<GatewayEventRecord>>(`${this.base}/events/${encodeURIComponent(id)}/retry`, {}).pipe(map(unwrap));
   }
 
-  reconciliation(): Observable<ReconciliationReport> {
-    return this.http.get<Envelope<ReconciliationReport>>(`${this.base}/reconciliation`).pipe(map(unwrap));
+  legacyBookingEarnings(page = 1): Observable<PageResult<BookingEarningsReview>> {
+    return this.http.get<Envelope<PageResult<BookingEarningsReview>>>(`${this.base}/booking-earnings/legacy`, { params: { page } }).pipe(map(unwrap));
+  }
+
+  adoptBookingEarnings(id: string, input: AdoptBookingEarningsInput): Observable<ReconciliationReport> {
+    return this.http.post<Envelope<ReconciliationReport>>(`${this.base}/booking-earnings/${encodeURIComponent(id)}/adopt`, input).pipe(map(unwrap));
+  }
+
+  repairBookingEarnings(id: string): Observable<ReconciliationReport> {
+    return this.http.post<Envelope<ReconciliationReport>>(`${this.base}/booking-earnings/${encodeURIComponent(id)}/repair`, {}).pipe(map(unwrap));
+  }
+
+  reconciliation(bookingAfter?: string): Observable<ReconciliationReport> {
+    return this.http.get<Envelope<ReconciliationReport>>(`${this.base}/reconciliation`, { params: clean({ bookingAfter }) }).pipe(map(unwrap));
   }
 
   repair(): Observable<ReconciliationReport> {

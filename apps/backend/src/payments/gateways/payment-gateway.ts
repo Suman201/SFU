@@ -90,12 +90,25 @@ export interface TransferInput {
   teacherId: string;
 }
 
+export interface VerifiedTransfer {
+  transferId: string;
+  accountId: string;
+  amountMinor: number;
+  currency: string;
+  amountReversedMinor: number;
+  payoutId?: string;
+  teacherId?: string;
+  livemode: boolean;
+}
+
 export interface PaymentGateway {
   readonly id: PaymentGatewayId;
   readonly testMode: boolean;
   /** Whether teacher payouts can be sent through this gateway. */
   readonly payoutsSupported: boolean;
   supportsCurrency(currency: PaymentCurrency): boolean;
+  supportsPayoutCurrency?(currency: PaymentCurrency): boolean;
+  retrieveTransfer?(transferId: string): Promise<VerifiedTransfer>;
   createCheckout(input: CheckoutInput): Promise<CheckoutSession>;
   expireCheckout(sessionId: string): Promise<void>;
   /** Verifies the signature and returns the normalised event. Throws when invalid. */

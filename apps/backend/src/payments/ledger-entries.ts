@@ -15,6 +15,7 @@ export interface LedgerEntryDraft {
   occurredAt: Date;
   memo: string;
   paymentId?: string;
+  bookingOrderId?: string;
   refundId?: string;
   disputeId?: string;
   payoutId?: string;
@@ -246,9 +247,9 @@ export function payoutPaidEntry(payout: PayoutFacts, occurredAt: Date): LedgerEn
 }
 
 /** The gateway returned a transfer: the money is owed to the teacher again. */
-export function payoutReversedEntry(payout: PayoutFacts, amountMinor: number, occurredAt: Date): LedgerEntryDraft {
+export function payoutReversedEntry(payout: PayoutFacts, amountMinor: number, occurredAt: Date, cumulativeMinor?: number): LedgerEntryDraft {
   return entry({
-    key: `payout:${payout.id}:reversed`,
+    key: cumulativeMinor === undefined ? `payout:${payout.id}:reversed` : `payout:${payout.id}:reversed:${cumulativeMinor}`,
     type: 'payout_reversed',
     currency: payout.currency,
     occurredAt,

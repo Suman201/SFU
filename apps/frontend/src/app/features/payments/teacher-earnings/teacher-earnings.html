@@ -7,6 +7,13 @@
       <p>{{ intro() }}</p>
     </div>
     <div class="head-actions">
+      @if (summary(); as s) {
+        <label class="field">Earnings currency
+          <select name="earningsCurrency" aria-label="Earnings currency" [ngModel]="currency()" (ngModelChange)="selectCurrency($event)" [disabled]="busy()">
+            @for (item of s.balances; track item.currency) { <option [value]="item.currency">{{ item.currency }}</option> }
+          </select>
+        </label>
+      }
       <a class="table-action" routerLink="/teacher/dashboard">My teaching</a>
       <button type="button" class="table-action" (click)="loadAll()" [disabled]="loading()">Refresh</button>
     </div>
@@ -20,12 +27,12 @@
       <article class="stat tone-rose">
         <span>Available to withdraw</span>
         <strong class="money">{{ money(b.availableMinor, b.currency) }}</strong>
-        <small>Ready for a payout request</small>
+        <small>{{ b.payoutBlockedReason ? 'Payout temporarily unavailable' : 'Ready for a payout request' }}</small>
       </article>
       <article class="stat tone-amber">
         <span>Pending</span>
         <strong class="money">{{ money(b.pendingMinor, b.currency) }}</strong>
-        <small>Released {{ summary()?.holdDays }} {{ summary()?.holdDays === 1 ? 'day' : 'days' }} after payment</small>
+        <small>Bookings are released after completion and their agreed holding period.</small>
       </article>
       <article class="stat tone-coral">
         <span>In payout</span>
@@ -50,8 +57,8 @@
       <article class="panel-card" aria-labelledby="breakdown-title">
         <h2 id="breakdown-title">How your earnings add up</h2>
         <dl class="summary-list">
-          <div><dt>Student payments</dt><dd class="money">{{ money(b.grossMinor, b.currency) }}</dd></div>
-          <div><dt>Platform fee ({{ percent(summary()!.commissionBps) }})</dt><dd class="money">−{{ money(b.commissionMinor, b.currency) }}</dd></div>
+          <div><dt>Lesson fees before tax</dt><dd class="money">{{ money(b.grossMinor, b.currency) }}</dd></div>
+          <div><dt>Platform fees at agreed rates</dt><dd class="money">−{{ money(b.commissionMinor, b.currency) }}</dd></div>
           <div><dt>Refunds and chargebacks (your share)</dt><dd class="money">−{{ money(refundShare(b), b.currency) }}</dd></div>
           <div class="total">
             <dt>Your total earnings</dt>
@@ -77,11 +84,12 @@
           </div>
         } @else {
           <p>{{ accountLine(b.currency) }}</p>
+          @if (b.payoutBlockedReason) { <p class="notice attention" role="status">{{ b.payoutBlockedReason }}</p> }
           <form class="field-row" (ngSubmit)="requestPayout()">
             <label>
               Amount ({{ b.currency }})
               <span class="amount-input">
-                <span aria-hidden="true">$</span>
+                <span aria-hidden="true">{{ currencySymbol() }}</span>
                 <input name="amount" inputmode="decimal" [ngModel]="amount()" (ngModelChange)="amount.set($event)" placeholder="0.00" aria-describedby="payout-limit" />
               </span>
             </label>
@@ -119,7 +127,7 @@
               <th>Date</th>
               <th>Activity</th>
               <th>Class / student</th>
-              <th class="num">Payment</th>
+              <th class="num">Lesson fee</th>
               <th class="num">Platform fee</th>
               <th class="num">Your balance</th>
             </tr>
@@ -136,7 +144,8 @@
                 </td>
                 <td>
                   <div class="cell-stack">
-                    <span>{{ row.batchName ?? '—' }}</span>
+                    @if (row.bookingOrderId) { <a [routerLink]="['/bookings', row.bookingOrderId]">{{ row.batchName }}</a> } @else { <span>{{ row.batchName ?? '—' }}</span> }
+                    @if (row.taxMinor) { <small>{{ money(row.taxMinor, row.currency) }} tax excluded from earnings</small> }
                     @if (row.studentName) { <small>{{ row.studentName }}</small> }
                   </div>
                 </td>

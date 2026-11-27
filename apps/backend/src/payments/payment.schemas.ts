@@ -202,6 +202,10 @@ export class PayoutDocument {
   @Prop({ type: String }) adminNote?: string;
   @Prop({ type: String }) failureReason?: string;
   @Prop({ type: String }) gatewayTransferId?: string;
+  @Prop({ type: Number }) reversedMinor?: number;
+  @Prop({ type: Date }) transferAttemptedAt?: Date;
+  @Prop({ type: String }) gatewayAccountId?: string;
+  @Prop({ type: Boolean }) gatewayTestMode?: boolean;
   @Prop({ type: String }) decidedById?: string;
   @Prop({ type: String }) decidedByName?: string;
   @Prop({ type: Date }) decidedAt?: Date;
@@ -233,9 +237,10 @@ export type PayoutAccountMongo = HydratedDocument<PayoutAccountDocument>;
 export const PayoutAccountSchema = SchemaFactory.createForClass(PayoutAccountDocument);
 PayoutAccountSchema.index({ gateway: 1, accountId: 1 }, { unique: true });
 
-/** Short lease used to serialise balance-reducing actions for one teacher. */
+/** Transaction revision used to serialize balance changes; legacy lease fields remain readable. */
 @Schema({ collection: 'teacher_balance_locks', versionKey: false })
 export class TeacherBalanceLockDocument {
+  @Prop({ type: Number }) revision?: number;
   @Prop({ type: String }) _id!: string;
   @Prop({ type: String }) token?: string;
   @Prop({ type: Date }) until?: Date;
@@ -260,6 +265,7 @@ export class LedgerEntryDocument {
   @Prop({ required: true, index: true }) occurredAt!: Date;
   @Prop({ required: true }) memo!: string;
   @Prop({ type: String, index: true }) paymentId?: string;
+  @Prop({ type: String, index: true }) bookingOrderId?: string;
   @Prop({ type: String }) refundId?: string;
   @Prop({ type: String }) disputeId?: string;
   @Prop({ type: String, index: true }) payoutId?: string;

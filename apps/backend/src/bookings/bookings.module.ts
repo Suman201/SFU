@@ -1,3 +1,4 @@
+import { PaymentsModule } from '../payments/payments.module';
 import { StudentEnrollmentsModule } from '../student-enrollments/student-enrollments.module';
 import { AdminBookingOperationsService } from './admin-booking-operations.service';
 import { Module } from '@nestjs/common';
@@ -43,6 +44,7 @@ import {
 
 @Module({
   imports: [
+    PaymentsModule,
     AuthModule,
     AuditLogsModule,
     DatabaseModule,

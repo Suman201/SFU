@@ -167,7 +167,7 @@
   &.success {
     border-color: var(--success-border);
     background: var(--success-soft);
-    color: var(--brand-green-strong, var(--success));
+    color: var(--success-ink, var(--text));
   }
 
   &.attention {
@@ -201,7 +201,7 @@
 }
 
 .positive {
-  color: var(--brand-green-strong, var(--success));
+  color: var(--success-ink, var(--text));
 }
 
 .negative {
@@ -418,11 +418,16 @@
 .data-pill.success {
   border-color: var(--success-border);
   background: var(--success-soft);
-  color: var(--brand-green-strong, var(--success));
+  color: var(--success-ink, var(--text));
 }
 
 .data-pill.neutral {
   border-color: var(--line);
   background: var(--panel-muted, var(--panel));
   color: var(--muted);
+}
+
+// Keep selected payment-history tabs readable on their rose-tinted surface.
+.filter-chip.active {
+  color: var(--text);
 }

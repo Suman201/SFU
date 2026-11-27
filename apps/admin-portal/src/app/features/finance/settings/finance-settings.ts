@@ -7,7 +7,8 @@ import {
   formatPaymentMoney,
   fromMinorUnits,
   splitCommission,
-  toMinorUnits,
+  majorToMinor,
+  currencyDefinition,
   type FinanceSettings,
   type PaymentCurrency,
   type PaymentGatewayStatus,
@@ -45,6 +46,7 @@ export class FinanceSettingsPage implements OnInit {
   protected readonly minimumPayout = signal('20.00');
   protected readonly currencies = signal<PaymentCurrency[]>(['USD']);
   protected readonly overrides = signal<OverrideRow[]>([]);
+  protected readonly payoutMinimums = signal<Array<{ currency: PaymentCurrency; amount: string }>>([]);
   protected readonly codes = PAYMENT_CURRENCY_CODES;
   protected readonly definitions = PAYMENT_CURRENCIES;
   protected readonly superAdmin = computed(() => (this.auth.user()?.roles ?? []).map((role) => role.toUpperCase()).includes('SUPER_ADMIN'));
@@ -74,6 +76,7 @@ export class FinanceSettingsPage implements OnInit {
     this.holdDays.set(String(settings.holdDays));
     this.minimumPayout.set(fromMinorUnits(settings.minimumPayoutMinor, settings.defaultCurrency).toFixed(2));
     this.currencies.set([...settings.enabledCurrencies]);
+    this.payoutMinimums.set((settings.payoutMinimums ?? []).map(item => ({ currency: item.currency, amount: fromMinorUnits(item.minimumMinor, item.currency).toFixed(currencyDefinition(item.currency).minorUnits) })));
     this.overrides.set(settings.teacherOverrides.map((item) => ({ teacherId: item.teacherId, teacherName: item.teacherName, percent: String(item.commissionBps / 100) })));
   }
 
@@ -87,6 +90,15 @@ export class FinanceSettingsPage implements OnInit {
   protected toggleCurrency(code: PaymentCurrency, enabled: boolean): void {
     this.currencies.update((list) => (enabled ? [...new Set([...list, code])] : list.filter((item) => item !== code)));
   }
+
+  protected addPayoutCurrency(): void {
+    const currency = this.codes.find(code => code !== this.settings()?.defaultCurrency && !this.payoutMinimums().some(item => item.currency === code));
+    if (currency) this.payoutMinimums.update(items => [...items, { currency, amount: '' }]);
+  }
+  protected updatePayoutCurrency(index: number, patch: Partial<{ currency: PaymentCurrency; amount: string }>): void {
+    this.payoutMinimums.update(items => items.map((item, i) => i === index ? { ...item, ...patch } : item));
+  }
+  protected removePayoutCurrency(index: number): void { this.payoutMinimums.update(items => items.filter((_, i) => i !== index)); }
 
   protected addOverride(): void {
     this.overrides.update((list) => [...list, { teacherId: '', percent: this.commission() }]);
@@ -114,6 +126,16 @@ export class FinanceSettingsPage implements OnInit {
     if (commissionBps === null) return this.error.set('Commission must be between 0 and 100 with at most two decimals.');
     if (!Number.isInteger(holdDays) || holdDays < 0 || holdDays > 90) return this.error.set('Holding period must be 0–90 whole days.');
     if (!Number.isFinite(minimum) || minimum < 1) return this.error.set('Minimum payout must be at least 1.00.');
+    const payoutMinimums = [];
+    let minimumPayoutMinor: number;
+    try {
+      minimumPayoutMinor = majorToMinor(this.minimumPayout(), current.defaultCurrency);
+      for (const row of this.payoutMinimums()) {
+        const minimumMinor = majorToMinor(row.amount, row.currency);
+        if (!minimumMinor) throw new Error('Each payout currency needs a positive minimum.');
+        payoutMinimums.push({ currency: row.currency, minimumMinor });
+      }
+    } catch (error) { return this.error.set(error instanceof Error ? error.message : 'Review the payout currency minimums.'); }
     const teacherOverrides = [];
     for (const row of this.overrides()) {
       const bps = this.percentToBps(row.percent);
@@ -137,9 +159,10 @@ export class FinanceSettingsPage implements OnInit {
         version: current.version,
         commissionBps,
         holdDays,
-        minimumPayoutMinor: toMinorUnits(minimum, current.defaultCurrency),
+        minimumPayoutMinor,
         enabledCurrencies: this.currencies(),
         teacherOverrides,
+        payoutMinimums,
       })
       .subscribe({
         next: (settings) => {

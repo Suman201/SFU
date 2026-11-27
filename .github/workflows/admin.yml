@@ -80,6 +80,8 @@ jobs:
           ADMIN_PERMISSION_UI_OUTPUT: ${{ github.workspace }}/reports/admin-ci/screenshots/permissions
           PAYMENT_MERGE_OUTPUT: ${{ github.workspace }}/reports/admin-ci/screenshots/payments
         run: npm run test:admin:browser
+      - name: Verify booking earnings, currency payouts and historical finance review
+        run: npm run test:finance:browser
       - name: Build classroom acceptance frontend
         run: npm run build:p0:classroom
       - name: Verify backup restore and monitoring delivery
@@ -114,6 +116,8 @@ jobs:
           path: |
             reports/admin-ci/
             test-results/admin/
+            reports/finance/
+            test-results/finance/
             reports/p0/
             test-results/p0/
             reports/p1/

@@ -1,3 +1,4 @@
+import { BookingFinanceService } from './booking-finance.service';
 import { Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -34,6 +35,7 @@ export class PaymentEventsService implements OnModuleInit, OnModuleDestroy {
     private readonly payments: PaymentsService,
     private readonly payouts: PayoutsService,
     private readonly config: ConfigService,
+    private readonly bookingFinance: BookingFinanceService,
   ) {}
 
   onModuleInit(): void {
@@ -94,7 +96,7 @@ export class PaymentEventsService implements OnModuleInit, OnModuleDestroy {
       let paymentId: string | undefined;
       if (event.kind === 'payout_account.updated' || event.kind === 'transfer.reversed') {
         await this.payouts.applyEvent(event);
-      } else {
+      } else if (!await this.bookingFinance.handleGatewayEvent(event)) {
         paymentId = await this.payments.applyEvent(event);
       }
       await this.events
@@ -190,6 +192,7 @@ export class PaymentEventsService implements OnModuleInit, OnModuleDestroy {
         this.lastSweep = Date.now();
         await this.payments.sweep();
         await this.payments.releaseDueEarnings();
+        await this.bookingFinance.releaseDue();
       }
       await this.payments.sendDueReceiptEmails();
     } catch (error) {

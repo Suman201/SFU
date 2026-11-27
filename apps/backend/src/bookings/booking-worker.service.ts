@@ -1,3 +1,4 @@
+import { BookingFinanceService } from '../payments/booking-finance.service';
 import {
   BadRequestException,
   Injectable,
@@ -33,6 +34,7 @@ export class BookingWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly email: EmailNotificationService,
     @InjectModel(BookingCreditNoteDocument.name)
     private readonly credits: Model<BookingCreditNoteDocument>,
+    private readonly finance: BookingFinanceService,
   ) {}
   async onModuleInit(): Promise<void> {
     if (!this.bookings.enabled && !this.bookings.gateway.enabled) return;
@@ -52,6 +54,7 @@ export class BookingWorkerService implements OnModuleInit, OnModuleDestroy {
         ['studentId_1_requestId_1', 'stripeSessionId_1', 'paymentIntentId_1'],
       ],
       ['booking_refunds', ['orderId_1_requestId_1', 'stripeRefundId_1']],
+      ['ledger_entries', ['key_1']],
       ['invoices', ['orderId_1']],
       ['student_enrollments', ['studentId_1_batchId_1']],
     ] as const) {
@@ -101,6 +104,11 @@ export class BookingWorkerService implements OnModuleInit, OnModuleDestroy {
         'refund.updated',
         'refund.failed',
         'charge.refunded',
+        'charge.dispute.created',
+        'charge.dispute.updated',
+        'charge.dispute.closed',
+        'charge.dispute.funds_withdrawn',
+        'charge.dispute.funds_reinstated',
       ].includes(event.type)
     )
       return { received: true };
@@ -166,7 +174,9 @@ export class BookingWorkerService implements OnModuleInit, OnModuleDestroy {
               });
               if (order) await this.bookings.reconcileOrder(order.id);
             }
-          } else if (event.eventType.startsWith('refund.'))
+          } else if (event.eventType.startsWith('charge.dispute.'))
+            await this.finance.recordDispute(await this.bookings.gateway.retrieveDispute(event.objectId));
+          else if (event.eventType.startsWith('refund.'))
             await this.bookings.syncRefund(
               await this.bookings.gateway.retrieveRefund(event.objectId),
             );
@@ -223,10 +233,15 @@ export class BookingWorkerService implements OnModuleInit, OnModuleDestroy {
         if (!order) break;
         try {
           if (order.paidAt && order.paymentIntentId) {
+            for (const dispute of await this.bookings.gateway.disputesFor(order.paymentIntentId)) await this.finance.recordDispute(dispute);
             for (const refund of await this.bookings.gateway.refundsFor(
               order.paymentIntentId,
             ))
               await this.bookings.syncRefund(refund);
+            if (order.earningsPolicy && !order.gatewayFeeCurrency) {
+              const fee = await this.bookings.gateway.fetchPaymentFee(order.paymentIntentId);
+              if (fee) await this.finance.recordFee(order.id, fee);
+            }
           } else await this.bookings.reconcileOrder(order.id);
           const current = await this.bookings.orders.findById(order.id);
           const settled =

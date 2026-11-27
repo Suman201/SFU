@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsDateString, IsIn, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { PAYMENT_CURRENCY_CODES, type PaymentCurrency } from '@native-sfu/contracts';
 
 export class CheckoutDto {
@@ -19,6 +19,11 @@ export class PayoutRequestDto {
   @IsString() @Length(8, 100) requestId!: string;
 }
 
+export class ReconcilePayoutDto {
+  @IsString() @Length(4, 150) transferId!: string;
+  @IsString() @Length(10, 500) reason!: string;
+}
+
 export class PayoutDecisionDto {
   @IsOptional() @IsString() @MaxLength(500) note?: string;
 }
@@ -29,12 +34,25 @@ export class TeacherCommissionOverrideDto {
   @IsInt() @Min(0) @Max(10_000) commissionBps!: number;
 }
 
+export class PayoutCurrencyMinimumDto {
+  @IsIn(PAYMENT_CURRENCY_CODES) currency!: PaymentCurrency;
+  @IsInt() @Min(1) @Max(100_000_000) minimumMinor!: number;
+}
+
+export class AdoptBookingEarningsDto {
+  @IsInt() @Min(0) @Max(10000) commissionBps!: number;
+  @IsInt() @Min(0) @Max(90) holdDays!: number;
+  @IsString() @Length(10, 500) reason!: string;
+  @IsDateString() expectedUpdatedAt!: string;
+}
+
 export class FinanceSettingsDto {
+  @IsOptional() @IsArray() @ArrayMaxSize(30) @ValidateNested({ each: true }) @Type(() => PayoutCurrencyMinimumDto) payoutMinimums?: PayoutCurrencyMinimumDto[];
   @IsInt() @Min(0) version!: number;
   @IsInt() @Min(0) @Max(10_000) commissionBps!: number;
   @IsInt() @Min(0) @Max(90) holdDays!: number;
   @IsInt() @Min(100) @Max(10_000_000) minimumPayoutMinor!: number;
-  @IsArray() @ArrayMaxSize(10) @IsIn(PAYMENT_CURRENCY_CODES, { each: true }) enabledCurrencies!: PaymentCurrency[];
+  @IsArray() @ArrayMaxSize(30) @IsIn(PAYMENT_CURRENCY_CODES, { each: true }) enabledCurrencies!: PaymentCurrency[];
   @IsArray() @ArrayMaxSize(500) @ValidateNested({ each: true }) @Type(() => TeacherCommissionOverrideDto) teacherOverrides!: TeacherCommissionOverrideDto[];
 }
 

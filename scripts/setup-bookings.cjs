@@ -37,6 +37,7 @@ async function setupBookingIndexes(connection) {
     'User',
   ])
     models.push(connection.model(name + 'Document', core[name + 'Schema']));
+  await require('./setup-payments.cjs').setupPaymentIndexes(connection);
   for (const model of models) {
     await model.createCollection();
     await model.createIndexes();

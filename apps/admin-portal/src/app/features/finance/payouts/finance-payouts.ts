@@ -34,6 +34,9 @@ export class FinancePayoutsPage implements OnInit {
   protected readonly success = signal('');
   protected readonly filter = signal<PayoutFilter>('open');
   protected readonly note = signal('');
+  protected readonly reconciling = signal<PayoutRecord | null>(null);
+  protected readonly transferId = signal('');
+  protected readonly reconcileReason = signal('');
   protected readonly money = money;
   protected readonly label = payoutLabel;
   protected readonly tone = payoutTone;
@@ -52,9 +55,9 @@ export class FinancePayoutsPage implements OnInit {
     this.load(1);
   }
 
-  protected load(page = this.page()): void {
+  protected load(page = this.page(), preserveError = false): void {
     this.loading.set(true);
-    this.error.set('');
+    if (!preserveError) this.error.set('');
     this.api.payouts({ status: this.filter(), page }).subscribe({
       next: (result) => {
         this.rows.set(result.items);
@@ -106,6 +109,19 @@ export class FinancePayoutsPage implements OnInit {
     this.run(row, this.api.rejectPayout(row.id, this.note().trim()), () => 'Payout rejected and returned to the teacher balance.');
   }
 
+  protected beginReconcile(row: PayoutRecord): void {
+    if (!this.auth.can('admin:finance:write')) return;
+    this.reconciling.set(row); this.transferId.set(row.gatewayTransferId ?? ''); this.reconcileReason.set('');
+  }
+
+  protected reconcileTransfer(): void {
+    const row = this.reconciling();
+    if (!row || !this.auth.can('admin:finance:write') || this.savingId() !== null) return;
+    if (this.transferId().trim().length < 4 || this.reconcileReason().trim().length < 10) { this.error.set('Add the original provider transfer ID and a useful reconciliation reason.'); return; }
+    this.savingId.set(row.id); this.error.set('');
+    this.api.reconcilePayout(row.id, this.transferId().trim(), this.reconcileReason().trim()).subscribe({ next: payout => { this.savingId.set(null); this.reconciling.set(null); this.success.set(`Provider transfer verified. Payout is ${payout.status}.`); this.load(); }, error: error => { this.savingId.set(null); this.error.set(financeError(error)); } });
+  }
+
   private run(row: PayoutRecord, request: ReturnType<FinanceApi['approvePayout']>, message: (payout: PayoutRecord) => string): void {
     this.savingId.set(row.id);
     this.error.set('');
@@ -120,7 +136,7 @@ export class FinancePayoutsPage implements OnInit {
       error: (error) => {
         this.savingId.set(null);
         this.error.set(financeError(error));
-        this.load();
+        this.load(this.page(), true);
       },
     });
   }

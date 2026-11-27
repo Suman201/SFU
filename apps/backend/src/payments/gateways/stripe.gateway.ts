@@ -1,3 +1,4 @@
+import { CURRENCY_DECIMALS } from '@native-sfu/contracts';
 import Stripe from 'stripe';
 import type { PaymentCurrency } from '@native-sfu/contracts';
 import {
@@ -62,6 +63,11 @@ export class StripeGateway implements PaymentGateway {
 
   supportsCurrency(currency: PaymentCurrency): boolean {
     return SUPPORTED_CURRENCIES.has(currency);
+  }
+
+  supportsPayoutCurrency(currency: PaymentCurrency): boolean {
+    // Connect transfers use the same minor units; three-decimal currencies need a separately verified adapter.
+    return this.payoutsSupported && CURRENCY_DECIMALS[currency] <= 2;
   }
 
   async createCheckout(input: CheckoutInput): Promise<CheckoutSession> {
@@ -269,6 +275,11 @@ export class StripeGateway implements PaymentGateway {
   async payoutAccountStatus(accountId: string): Promise<{ detailsSubmitted: boolean; payoutsEnabled: boolean }> {
     const account = await this.client.accounts.retrieve(accountId);
     return { detailsSubmitted: Boolean(account.details_submitted), payoutsEnabled: Boolean(account.payouts_enabled) };
+  }
+
+  async retrieveTransfer(transferId: string) {
+    const transfer = await this.client.transfers.retrieve(transferId);
+    return { transferId: transfer.id, accountId: typeof transfer.destination === 'string' ? transfer.destination : transfer.destination?.id ?? '', amountMinor: transfer.amount, currency: transfer.currency.toUpperCase(), amountReversedMinor: transfer.amount_reversed, payoutId: transfer.metadata.payoutId, teacherId: transfer.metadata.teacherId, livemode: transfer.livemode };
   }
 
   async transfer(input: TransferInput): Promise<{ transferId: string }> {

@@ -8,7 +8,12 @@ import Stripe from 'stripe';
 import { isCurrencyCode, type CurrencyCode } from '@native-sfu/contracts';
 import { BookingOrderDocument } from './booking.schema';
 
+export interface VerifiedBookingDispute { id: string; paymentIntentId: string; orderId?: string; amountMinor: number; currency: string; status: string; livemode: boolean }
+
+export interface VerifiedBookingFee { amountMinor: number; currency: string; occurredAt?: Date }
+
 export interface VerifiedCheckout {
+  fee?: VerifiedBookingFee;
   id: string;
   orderId: string;
   studentId: string;
@@ -105,10 +110,17 @@ export class StripeGateway {
   async retrieveCheckout(id: string): Promise<VerifiedCheckout> {
     return this.checkoutView(
       await this.api().checkout.sessions.retrieve(id, {
-        expand: ['payment_intent.latest_charge'],
+        expand: ['payment_intent.latest_charge.balance_transaction'],
       }),
     );
   }
+  async fetchPaymentFee(paymentIntentId: string): Promise<VerifiedBookingFee | null> {
+    const intent = await this.api().paymentIntents.retrieve(paymentIntentId, { expand: ['latest_charge.balance_transaction'] });
+    const charge = intent.latest_charge;
+    if (!charge || typeof charge === 'string' || !charge.balance_transaction || typeof charge.balance_transaction === 'string') return null;
+    return { amountMinor: charge.balance_transaction.fee, currency: charge.balance_transaction.currency.toUpperCase(), occurredAt: new Date(charge.balance_transaction.created * 1000) };
+  }
+
   async recoverCheckout(
     order: BookingOrderDocument,
   ): Promise<VerifiedCheckout | null> {
@@ -138,6 +150,19 @@ export class StripeGateway {
       return null;
     }
   }
+  async retrieveDispute(id: string): Promise<VerifiedBookingDispute> {
+    const dispute = await this.api().disputes.retrieve(id, { expand: ['payment_intent'] });
+    return this.disputeView(dispute);
+  }
+  async disputesFor(paymentIntentId: string): Promise<VerifiedBookingDispute[]> {
+    const result: VerifiedBookingDispute[] = [];
+    for await (const dispute of this.api().disputes.list({ payment_intent: paymentIntentId, limit: 100 })) result.push(this.disputeView(dispute));
+    return result;
+  }
+  private disputeView(dispute: Stripe.Dispute): VerifiedBookingDispute {
+    const intent = dispute.payment_intent;
+    return { id: dispute.id, paymentIntentId: typeof intent === 'string' ? intent : intent?.id ?? '', orderId: intent && typeof intent !== 'string' ? intent.metadata.orderId : undefined, amountMinor: dispute.amount, currency: dispute.currency.toUpperCase(), status: dispute.status, livemode: dispute.livemode };
+  }
   async refundsForCharge(chargeId: string): Promise<VerifiedRefund[]> {
     const charge = await this.api().charges.retrieve(chargeId);
     const id =
@@ -163,7 +188,9 @@ export class StripeGateway {
       intent?.latest_charge && typeof intent.latest_charge !== 'string'
         ? intent.latest_charge
         : undefined;
+    const transaction = charge?.balance_transaction && typeof charge.balance_transaction !== 'string' ? charge.balance_transaction : undefined;
     return {
+      ...(transaction ? { fee: { amountMinor: transaction.fee, currency: transaction.currency.toUpperCase(), occurredAt: new Date(transaction.created * 1000) } } : {}),
       id: session.id,
       orderId: session.client_reference_id ?? session.metadata?.orderId ?? '',
       studentId: session.metadata?.studentId ?? '',
