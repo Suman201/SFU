@@ -46,3 +46,28 @@ test("unconfigured unsigned builds expose an honest unavailable state", async ()
   assert.equal((await controller.check()).status, "unavailable");
   assert.equal((await controller.install()).status, "unavailable");
 });
+test('late update check responses remain deferred after a class opens', async () => {
+  const { native, controller } = setup();
+  let finish; native.checkForUpdates = () => new Promise(resolve => { finish = resolve; });
+  const checking = controller.check(); controller.setActive(true);
+  native.emit('update-available', {version:'2.0.0'}); finish({cancellationToken:{cancel(){},cancelled:false}}); await checking;
+  assert.equal(controller.state.status,'deferred');
+  controller.setActive(false); assert.equal(controller.state.status,'available');
+});
+test('a newer candidate never installs the previously downloaded version', async () => {
+  const {native,controller,counts}=setup();
+  native.emit('update-downloaded',{version:'2.0.0'});
+  native.emit('update-available',{version:'2.1.0'});
+  assert.equal(controller.ready,false);
+  await controller.install();assert.equal(counts().installs,0);
+  native.emit('update-downloaded',{version:'2.0.0'});assert.equal(controller.ready,false);
+});
+test('failed update verification clears installation readiness', async () => {
+  const {native,controller,counts}=setup();
+  native.emit('update-downloaded',{version:'2.0.0'});native.emit('error',new Error('signature mismatch'));
+  await controller.install();assert.equal(counts().installs,0);assert.equal(controller.state.status,'error');
+});
+
+test('a withdrawn cached candidate is not offered after a fresh update check',async()=>{
+  const {native,controller,counts}=setup();native.emit('update-downloaded',{version:'2.0.0'});native.emit('update-not-available',{version:'1.0.0'});await controller.install();assert.equal(counts().installs,0);assert.equal(controller.ready,false);
+});

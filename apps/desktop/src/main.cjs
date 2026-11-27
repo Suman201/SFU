@@ -656,8 +656,11 @@ function configureUpdates() {
   const nativeUpdater = available
     ? require("electron-updater").autoUpdater
     : null;
-  if (available)
+  if (available) {
+    nativeUpdater.allowDowngrade = false;
+    nativeUpdater.allowPrerelease = false;
     nativeUpdater.setFeedURL({ provider: "generic", url: config.updateUrl });
+  }
   updater = new UpdateController({
     updater: nativeUpdater,
     available,

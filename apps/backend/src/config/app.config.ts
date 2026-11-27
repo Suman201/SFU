@@ -186,6 +186,7 @@ export const appConfig = () => ({
     maxFileSizeBytes: Number(process.env.CLASS_MATERIAL_MAX_FILE_SIZE_BYTES ?? 10 * 1024 * 1024)
   },
   invoices: { emailPollMs: Number(process.env.INVOICE_EMAIL_POLL_MS ?? 30000) },
+  desktopDistribution: { manifestPath: process.env.DESKTOP_RELEASE_MANIFEST?.trim(), downloadOrigins: (process.env.DESKTOP_DOWNLOAD_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean) },
   promotions: { enabled: process.env.PROMOTIONS_ENABLED === 'true', webhookSecret: envOrSecretFile('PROMOTIONS_STRIPE_WEBHOOK_SECRET'), currencies: (process.env.PROMOTION_CHARGE_CURRENCIES ?? 'EUR,GBP,USD').split(',').map(value => value.trim()), pollMs: Number(process.env.PROMOTION_WORKER_POLL_MS ?? 60000) },
   payments: {
     enabled: process.env.PAYMENTS_ENABLED === 'true',

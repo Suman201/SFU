@@ -1,5 +1,8 @@
 name: Classroom desktop builds
 on:
+  push:
+    branches: [main]
+    paths: ['apps/desktop/**', 'apps/frontend/**', 'packages/contracts/**', 'scripts/desktop.cjs', 'tests/operations/desktop-distribution.test.cjs', '.github/workflows/desktop*.yml', 'package*.json']
   workflow_dispatch:
   pull_request:
     paths:
@@ -9,8 +12,26 @@ on:
       - "packages/contracts/**"
       - "package*.json"
       - ".github/workflows/desktop.yml"
+      - ".github/workflows/desktop-release.yml"
+      - "tests/operations/desktop-distribution.test.cjs"
+permissions:
+  contents: read
 jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22.22.3"
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npm test -w @native-sfu/desktop
+      - run: npm run test:desktop:hosting
   desktop:
+    needs: unit
     strategy:
       fail-fast: false
       matrix:
@@ -20,9 +41,13 @@ jobs:
           - os: windows-latest
             package: package:win
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+      NG_BUILD_MAX_WORKERS: '2'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22.22.3"
           cache: npm
@@ -33,7 +58,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           SFU_DESKTOP_SERVER_URL: ${{ vars.SFU_DESKTOP_SERVER_URL || 'http://127.0.0.1:3000' }}
           SFU_DESKTOP_WEBSITE_URL: ${{ vars.SFU_DESKTOP_WEBSITE_URL || 'http://localhost:4200' }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: classroom-${{ matrix.os }}
           path: |
@@ -42,3 +67,4 @@ jobs:
             apps/desktop/release/*.exe
             apps/desktop/release/*.blockmap
           if-no-files-found: error
+          retention-days: 7

@@ -218,3 +218,7 @@ Follow [account settings](account-settings.md) and [customer billing](customer-b
 ## English support, CMS media and promotion commerce
 
 Follow [product expansion](product-expansion.md) for role boundaries, persisted media, promotion plan setup, dedicated Stripe webhooks and rollback. Run `npm run setup:cms` and `npm run setup:promotions` on the reviewed replica set before enabling promotion purchases. Keep `PROMOTIONS_ENABLED=false` until merchant invoice/tax configuration and Stripe test-mode acceptance are complete. Online promotion orders have their own invoice/credit links in `/teacher/promotions` and `/promotion-commerce`; legacy manual campaigns remain available.
+
+## Desktop download hosting
+
+Follow [desktop distribution](desktop-distribution.md) for protected signing environments and the four-target release bundle. Mount only the reviewed publication web root read-only at `/srv/desktop-distribution` on the frontend static server. Mount its catalogue read-only on the backend and configure `DESKTOP_RELEASE_MANIFEST` plus `DESKTOP_DOWNLOAD_ORIGINS`. Without them `/download` displays an unpublished state. Publishing installers/update feeds and performing native signed upgrade acceptance are separate release operations.

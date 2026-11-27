@@ -80,3 +80,7 @@ Runtime tests verify trusted URLs/deep links, reminders, local API and WebSocket
 For automated Electron tests only, unpackaged builds support `SFU_DESKTOP_USER_DATA` (isolated profile), `SFU_DESKTOP_FRONTEND_DIR` (built interface directory), and `SFU_DESKTOP_TEST_MEDIA=1` (Chromium synthetic camera/microphone). Packaged apps ignore the profile/frontend/test-media overrides. Synthetic devices do not replace physical camera, microphone, screen-capture, or stylus acceptance on each OS.
 
 Public error descriptions are hosted on the admin portal. Add `--admin-url https://admin.example.com` (use the actual admin origin) to desktop packaging, or set `SFU_DESKTOP_ADMIN_URL`. The app opens code explanations in the system browser; the code reference is public and incident records remain protected.
+
+## Production distribution workflow
+
+See [desktop distribution](../../docs/desktop-distribution.md) for the signed `0.2.0` release pipeline, protected Apple/Azure settings, native signature/notarization verification, per-architecture feeds, publication ordering and rollback. The workflow produces a reviewable four-target bundle; publication remains a separate operator action. The public website `/download` page stays unavailable until the backend is configured with the verified signed catalogue and its allowed download origins. Existing Git LFS installers are unsigned development snapshots, not public releases.

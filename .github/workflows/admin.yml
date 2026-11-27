@@ -82,6 +82,8 @@ jobs:
         run: npm run test:admin:browser
       - name: Verify booking earnings, currency payouts and historical finance review
         run: npm run test:finance:browser
+      - name: Verify public desktop download availability and release boundaries
+        run: npm run test:desktop:distribution:browser
       - name: Verify English support, CMS media and paid promotions
         run: npm run test:expansion:browser
       - name: Verify account settings and customer billing in all browsers
@@ -120,6 +122,8 @@ jobs:
           path: |
             reports/admin-ci/
             test-results/admin/
+            reports/desktop-distribution/
+            test-results/desktop-distribution/
             reports/expansion/
             test-results/expansion/
             reports/account/

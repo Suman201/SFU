@@ -2,6 +2,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { serverOrigin } = require("../src/policy.cjs");
+const release = process.env.SFU_DESKTOP_RELEASE === 'true' ? require('./release-config.cjs').releaseConfiguration(process.env, { credentials: false }) : undefined;
+if (release) process.env.SFU_DESKTOP_UPDATE_URL = release.updateUrl;
 const root = path.resolve(__dirname, "..");
 const source = path.resolve(root, "../frontend/dist/desktop/browser");
 if (!fs.existsSync(path.join(source, "index.html")))

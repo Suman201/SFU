@@ -61,3 +61,10 @@ coverage
 # English product expansion acceptance evidence.
 /reports/expansion/
 /test-results/expansion/
+
+# Desktop release validation and staging.
+/reports/desktop-distribution/
+/test-results/desktop-distribution/
+/desktop-stage/
+/desktop-stages/
+/desktop-release-bundle/

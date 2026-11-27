@@ -3,6 +3,7 @@ import { authGuard, guestGuard, roleGuard } from './core/services/auth.guards';
 import { RoomComponent } from './features/room/room.component';
 
 export const routes: Routes = [
+  { path: 'download', loadComponent: () => import('./features/download/download').then(m => m.DesktopDownloadPage) },
   { path: 'teacher/promotions', canActivate: [roleGuard], data: { role: 'teacher' }, loadComponent: () => import('./features/promotions/teacher-promotions').then(m => m.TeacherPromotions) },
   { path: 'teacher/support', canActivate: [roleGuard], data: { role: 'teacher' }, loadComponent: () => import('./features/support/teacher-support').then(m => m.TeacherSupport) },
   { path: 'account', redirectTo: 'account/settings', pathMatch: 'full' },

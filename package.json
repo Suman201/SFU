@@ -105,7 +105,12 @@
     "setup:account-settings": "node scripts/setup-account-settings.cjs",
     "test:account:browser": "node scripts/patch-playwright-loader.cjs && playwright test --config=playwright.account.config.ts",
     "setup:promotions": "node scripts/setup-promotions.cjs",
-    "test:expansion:browser": "node scripts/patch-playwright-loader.cjs && playwright test --config=playwright.expansion.config.ts"
+    "test:expansion:browser": "node scripts/patch-playwright-loader.cjs && playwright test --config=playwright.expansion.config.ts",
+    "desktop:release:doctor": "node apps/desktop/scripts/release-config.cjs",
+    "desktop:release:assemble": "node apps/desktop/scripts/release-bundle.cjs assemble",
+    "desktop:release:publish": "node apps/desktop/scripts/release-bundle.cjs publish",
+    "test:desktop:distribution:browser": "node scripts/patch-playwright-loader.cjs && playwright test --config=playwright.desktop-distribution.config.ts",
+    "test:desktop:hosting": "node --test tests/operations/desktop-distribution.test.cjs"
   },
   "devDependencies": {
     "@angular/compiler": "22.0.1",

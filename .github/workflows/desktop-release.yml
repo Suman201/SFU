@@ -1,0 +1,145 @@
+name: Signed desktop release bundle
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Stable version from apps/desktop/package.json'
+        type: string
+        required: true
+      notes:
+        description: 'Public release notes (up to 2000 characters)'
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: signed-desktop-release
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22.22.3
+      - id: plan
+        name: Validate immutable source and public destinations
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+          SFU_DESKTOP_SERVER_URL: ${{ vars.SFU_DESKTOP_SERVER_URL }}
+          SFU_DESKTOP_WEBSITE_URL: ${{ vars.SFU_DESKTOP_WEBSITE_URL }}
+          SFU_DESKTOP_ADMIN_URL: ${{ vars.SFU_DESKTOP_ADMIN_URL }}
+          SFU_DESKTOP_DISTRIBUTION_URL: ${{ vars.SFU_DESKTOP_DISTRIBUTION_URL }}
+        run: node apps/desktop/scripts/release-plan.cjs
+  signed:
+    needs: plan
+    environment: desktop-signing-${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+            arch: x64
+          - os: macos-latest
+            platform: mac
+            arch: arm64
+          - os: windows-latest
+            platform: win
+            arch: x64
+          - os: windows-latest
+            platform: win
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+      NG_BUILD_MAX_WORKERS: '2'
+      SFU_DESKTOP_RELEASE: 'true'
+      SFU_DESKTOP_SOURCE_SHA: ${{ needs.plan.outputs.sha }}
+      SFU_DESKTOP_TARGET_PLATFORM: ${{ matrix.platform }}
+      SFU_DESKTOP_TARGET_ARCH: ${{ matrix.arch }}
+      SFU_DESKTOP_SERVER_URL: ${{ vars.SFU_DESKTOP_SERVER_URL }}
+      SFU_DESKTOP_WEBSITE_URL: ${{ vars.SFU_DESKTOP_WEBSITE_URL }}
+      SFU_DESKTOP_ADMIN_URL: ${{ vars.SFU_DESKTOP_ADMIN_URL }}
+      SFU_DESKTOP_DISTRIBUTION_URL: ${{ vars.SFU_DESKTOP_DISTRIBUTION_URL }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      SFU_DESKTOP_WIN_PUBLISHER: ${{ vars.SFU_DESKTOP_WIN_PUBLISHER }}
+      SFU_DESKTOP_AZURE_ENDPOINT: ${{ vars.SFU_DESKTOP_AZURE_ENDPOINT }}
+      SFU_DESKTOP_AZURE_ACCOUNT: ${{ vars.SFU_DESKTOP_AZURE_ACCOUNT }}
+      SFU_DESKTOP_AZURE_PROFILE: ${{ vars.SFU_DESKTOP_AZURE_PROFILE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Runtime and release tests
+        run: npm test -w @native-sfu/desktop
+        env:
+          SFU_DESKTOP_RELEASE: 'false'
+      - name: Prepare temporary Apple notarization key
+        if: matrix.platform == 'mac'
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: node apps/desktop/scripts/notary-key.cjs create
+      - name: Preflight, build, sign and notarize
+        env:
+          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_API_KEY_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.platform == 'mac' && secrets.APPLE_API_ISSUER || '' }}
+          AZURE_TENANT_ID: ${{ matrix.platform == 'win' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ matrix.platform == 'win' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ matrix.platform == 'win' && secrets.AZURE_CLIENT_SECRET || '' }}
+        run: node apps/desktop/scripts/release-build.cjs
+      - name: Verify native signatures and stage exact update bytes
+        run: node apps/desktop/scripts/release-artifacts.cjs apps/desktop/release desktop-stage
+      - name: Remove notarization key
+        if: always() && matrix.platform == 'mac'
+        run: node apps/desktop/scripts/notary-key.cjs remove
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: signed-desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: desktop-stage/
+          if-no-files-found: error
+          retention-days: 14
+  bundle:
+    needs: [plan, signed]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: signed-desktop-*
+          path: desktop-stages
+      - name: Assemble all four verified builds
+        env:
+          SFU_DESKTOP_RELEASE_NOTES: ${{ inputs.notes }}
+        run: node apps/desktop/scripts/release-bundle.cjs assemble desktop-stages desktop-release-bundle
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: desktop-release-${{ inputs.version }}
+          path: desktop-release-bundle/
+          if-no-files-found: error
+          retention-days: 30

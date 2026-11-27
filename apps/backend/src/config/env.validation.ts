@@ -39,6 +39,8 @@ const secretSchema = Joi.string()
   });
 
 const schema = Joi.object({
+  DESKTOP_RELEASE_MANIFEST: Joi.string().max(4096).allow('').optional(),
+  DESKTOP_DOWNLOAD_ORIGINS: Joi.string().allow('').default('').custom((value: string, helpers) => { try { for (const origin of value.split(',').map(v => v.trim()).filter(Boolean)) { const url = new URL(origin); if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.port || url.pathname !== '/') return helpers.error('any.invalid'); } return value; } catch { return helpers.error('any.invalid'); } }),
   PROMOTIONS_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
   PROMOTIONS_STRIPE_WEBHOOK_SECRET: Joi.string().pattern(/^whsec_/).allow('').optional(),
   PROMOTION_CHARGE_CURRENCIES: Joi.string().default('EUR,GBP,USD').custom((value: string, helpers) => value.split(',').every(code => ['EUR','GBP','USD','INR','JPY'].includes(code.trim())) ? value : helpers.error('any.invalid')),
