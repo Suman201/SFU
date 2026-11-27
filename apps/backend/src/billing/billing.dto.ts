@@ -10,6 +10,7 @@ export class CustomerBillingDto extends BillingVersionDto {
 }
 
 export class BillingHistoryQueryDto {
+  @IsOptional() @IsIn(['booking', 'payment', 'promotion']) source?: string;
   @IsOptional() @Matches(/^[1-9][0-9]{0,4}$/) page?: string;
   @IsOptional() @IsIn(SUPPORTED_CURRENCIES) currency?: string;
   @IsOptional() @IsIn(['all', 'paid', 'open', 'refunds', 'unsuccessful', 'review']) status?: string;

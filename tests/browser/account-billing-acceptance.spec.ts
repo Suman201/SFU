@@ -193,3 +193,68 @@ test('billing centre saves defaults, combines purchases and downloads owned invo
     expect(errors).toEqual([]);
   } finally { for (const context of contexts) await context.close().catch(() => undefined); await web.stop(); await stack.stop(); }
 });
+
+test('promotion billing shares owned history, totals, invoices and refunds with lesson purchases', async ({ browser, request }, info) => {
+  const { randomUUID } = require('node:crypto');
+  const { promotionBillingFixture } = require('./helpers/promotion-billing.cjs');
+  const stack = await startBookingStack(), fixture = await promotionBillingFixture(stack);
+  const web = await startBuiltUiTestServer(stack.origin, path.resolve('apps/frontend/dist/frontend/browser'));
+  const contexts: BrowserContext[] = [], errors: string[] = [], tokens: Record<string, string> = {};
+  const folder = path.resolve('reports/account', info.project.name); await mkdir(folder, { recursive: true });
+  async function api(name: string, method: string, endpoint: string, data?: unknown, expected = method === 'POST' ? 201 : 200) {
+    const response = await request.fetch(stack.origin + '/api/v1/' + endpoint, { method, data, headers: tokens[name] ? { authorization: 'Bearer ' + tokens[name] } : {} });
+    const text = await response.text(); expect(response.status(), endpoint + ': ' + text).toBe(expected);
+    const value = text ? JSON.parse(text) : undefined; return value?.data ?? value;
+  }
+  try {
+    for (const name of ['teacher', 'student', 'secondTeacher', 'admin']) tokens[name] = (await api('', 'POST', 'auth/login', { email: stack.users[name].email, password: stack.password }, 200)).accessToken;
+    const yen = await fixture.purchase(api, 'teacher', { name: 'Featured profile week' });
+    await fixture.purchase(api, 'teacher', { name: 'Taxed search promotion', currency: 'EUR', amountMinor: 10000, taxMinor: 2000 });
+    await fixture.purchase(api, 'teacher', { name: 'Open promotion quote', currency: 'GBP', amountMinor: 500, pay: false });
+    const db = stack.connection.db;
+    await db.collection('booking_orders').insertOne({ _id: randomUUID(), studentId: stack.users.teacher.id, teacherName: 'Historical tutor', title: 'Personal booking purchase', status: 'confirmed', createdAt: new Date(), paidAt: new Date(), invoiceSource: { currency: 'USD', totalMinor: 1200 } });
+    await db.collection('payments').insertOne({ _id: randomUUID(), studentId: stack.users.teacher.id, teacherName: 'Historical tutor', batchName: 'Personal class purchase', status: 'succeeded', createdAt: new Date(), paidAt: new Date(), currency: 'USD', amountMinor: 1500 });
+    const context = await browser.newContext({ viewport: { width: 1366, height: 1000 } }); contexts.push(context);
+    await context.addInitScript(({ token, origin }) => { if (location.origin === origin) { sessionStorage.setItem('native-sfu.auth.accessToken', token); localStorage.setItem('native-sfu-theme', 'light'); } }, { token: tokens.teacher, origin: web.origin });
+    const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
+    await page.route('https://invoice.stripe.com/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>Synthetic Stripe invoice</h1>' }));
+    await page.route('https://pay.stripe.com/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>Synthetic Stripe credit note</h1>' }));
+    await page.goto(web.origin + '/account/billing');
+    const totals = page.getByRole('region', { name: 'All-time payment totals' });
+    await expect(totals).toContainText('€120.00'); await expect(totals).toContainText('¥101'); await expect(totals).toContainText('US$27.00');
+    const yenRow = page.getByRole('row').filter({ hasText: 'Featured profile week' });
+    await expect(yenRow).toContainText('Promotion'); await expect(yenRow.getByRole('button', { name: 'View invoice', exact: true })).toBeVisible();
+    await expect(yenRow.getByRole('link', { name: 'Purchase details' })).toHaveAttribute('href', '/teacher/promotions?order=' + yen.id);
+    await expect(page.getByRole('row').filter({ hasText: 'Open promotion quote' })).toContainText('Quote before checkout tax');
+    await page.getByRole('combobox', { name: 'Purchase type', exact: true }).selectOption('promotion');
+    await expect(page.getByRole('row').filter({ hasText: 'Personal booking purchase' })).toHaveCount(0); await expect(yenRow).toBeVisible(); await expect(totals).toContainText('US$27.00');
+    await page.getByRole('combobox', { name: 'Purchase type', exact: true }).selectOption('booking'); await expect(page.getByRole('row').filter({ hasText: 'Personal booking purchase' })).toBeVisible(); await expect(yenRow).toHaveCount(0);
+    await page.getByRole('combobox', { name: 'Purchase type', exact: true }).selectOption('payment'); await expect(page.getByRole('row').filter({ hasText: 'Personal class purchase' })).toBeVisible();
+    await page.getByRole('combobox', { name: 'Purchase type', exact: true }).selectOption('');
+    await yenRow.getByRole('button', { name: 'View invoice', exact: true }).click(); await expect(page).toHaveURL('https://invoice.stripe.com/i/' + yen.id);
+    await page.goto(web.origin + '/account/billing');
+    await api('admin', 'POST', 'admin/promotion-commerce/orders/' + yen.id + '/refund', { requestId: randomUUID(), reason: 'Unified billing browser refund.' });
+    await page.getByRole('button', { name: 'Refresh history', exact: true }).click(); await expect(yenRow).toContainText('Refund in progress');
+    await yenRow.getByRole('button', { name: 'Refund details', exact: true }).click(); await expect(page.getByRole('region', { name: 'Refund history' })).toContainText('queued'); await expect(page.getByRole('button', { name: /^View credit note/ })).toHaveCount(0);
+    await fixture.commerce.tick();
+    await page.getByRole('button', { name: 'Refresh history', exact: true }).click(); await expect(yenRow).toContainText('Refunded');
+    await yenRow.getByRole('button', { name: 'Refund details', exact: true }).click(); await expect(page.getByRole('region', { name: 'Refund history' })).toContainText('Confirmed');
+    await page.getByRole('button', { name: /^View credit note/ }).click(); await expect(page).toHaveURL('https://pay.stripe.com/credit/in_' + yen.id + '.pdf');
+    await page.goto(web.origin + '/account/billing'); await yenRow.getByRole('button', { name: 'Refund details', exact: true }).click();
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme);
+      for (const width of [1366, 768, 390]) {
+        await page.setViewportSize({ width, height: 1000 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+        await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+        await page.screenshot({ path: path.join(folder, `unified-billing-${theme}-${width}.png`), fullPage: true, animations: 'disabled' });
+        expect((await new AxeBuilder({ page }).include('.account-shell').withRules(['label', 'button-name', 'color-contrast', 'aria-valid-attr-value']).analyze()).violations).toEqual([]);
+      }
+    }
+    const studentContext = await browser.newContext(); contexts.push(studentContext);
+    await studentContext.addInitScript(token => sessionStorage.setItem('native-sfu.auth.accessToken', token), tokens.student);
+    const student = await studentContext.newPage(); await student.goto(web.origin + '/account/billing');
+    await expect(student.getByRole('cell', { name: 'No purchases match these filters.', exact: true })).toBeVisible();
+    await api('secondTeacher', 'GET', 'billing/purchases/promotion/' + yen.id + '/document-link', undefined, 404);
+    expect(errors).toEqual([]);
+  } finally { for (const context of contexts) await context.close().catch(() => undefined); await web.stop(); await stack.stop(); }
+});

@@ -3,7 +3,8 @@ import type { InvoiceParty } from './invoices.js';
 export interface CustomerBillingProfile extends InvoiceParty { version: number; saved: boolean; locale: string; timezone?: string }
 export interface CustomerBillingUpdate { version: number; name: string; address: string; countryCode: string; vatNumber: string }
 export type BillingPurchaseStatus = 'paid' | 'partially_refunded' | 'refunded' | 'refund_pending' | 'awaiting_payment' | 'processing' | 'cancelled' | 'expired' | 'failed' | 'review';
-export type BillingSource = 'booking' | 'payment';
+export type BillingSource = 'booking' | 'payment' | 'promotion';
+export interface BillingDocumentLink { url: string }
 export interface BillingPurchase {
   id: string; recordId: string; source: BillingSource; title: string; teacherName: string;
   createdAt: string; paidAt?: string; currency: CurrencyCode; amountMinor: number; refundedMinor: number; refundPendingMinor: number;

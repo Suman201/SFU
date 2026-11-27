@@ -28,7 +28,7 @@ A redirect never proves payment. A signed raw-body webhook schedules reconciliat
 
 Only full refunds are offered in this release. A persistent request pauses the campaign before contacting Stripe. Stable idempotency keys, leases and provider state recovery prevent repeated charges/refunds. Confirmed refunds reverse the original net revenue and tax exactly once, cancel the campaign, and create the provider credit note. Credit-note issuance is retried independently of the confirmed financial reversal. External partial/pending refunds and ambiguous attempts older than 23 hours enter review; inspect Stripe before any manual repair. Do not delete placement claims or change saved payment facts to clear a queue.
 
-The general account billing centre continues to cover lesson and class purchases; promotion invoices and credits are managed in the promotion workspace.
+The general account billing centre combines lesson, class and promotion purchases, per-currency totals, refunds and owned invoice/credit-note access. Promotion documents use fresh Stripe-hosted links. The promotion workspace remains available for campaign management, while authorized finance staff continue to process refunds through the existing workflow. See [customer billing](customer-billing.md).
 
 ## Analytics
 

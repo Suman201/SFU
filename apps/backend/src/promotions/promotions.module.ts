@@ -9,5 +9,5 @@ import { PromotionStripeGateway } from './promotion-stripe.gateway';
 import { PROMOTION_MODELS } from './promotion.schema';
 import { PromotionAnalyticsModule } from './promotion-analytics.module';
 import { AdminPromotionCommerceController, PublicPromotionCommerceController, TeacherPromotionCommerceController } from './promotion.controller';
-@Module({ imports: [DatabaseModule, AuditLogsModule, AuthModule, PaymentsModule, PromotionAnalyticsModule, MongooseModule.forFeature(PROMOTION_MODELS)], providers: [PromotionCommerceService, PromotionStripeGateway], controllers: [AdminPromotionCommerceController, PublicPromotionCommerceController, TeacherPromotionCommerceController] })
+@Module({ imports: [DatabaseModule, AuditLogsModule, AuthModule, PaymentsModule, PromotionAnalyticsModule, MongooseModule.forFeature(PROMOTION_MODELS)], providers: [PromotionCommerceService, PromotionStripeGateway], exports: [PromotionStripeGateway], controllers: [AdminPromotionCommerceController, PublicPromotionCommerceController, TeacherPromotionCommerceController] })
 export class PromotionsModule {}

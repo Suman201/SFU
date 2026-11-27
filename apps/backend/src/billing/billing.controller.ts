@@ -5,7 +5,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { BillingService } from './billing.service';
 import { BillingVersionDto, CustomerBillingDto, BillingHistoryQueryDto } from './billing.dto';
-class SourceParams { @IsIn(['booking', 'payment']) source!: BillingSource; @IsString() @MinLength(1) @MaxLength(100) id!: string }
+class SourceParams { @IsIn(['booking', 'payment', 'promotion']) source!: BillingSource; @IsString() @MinLength(1) @MaxLength(100) id!: string }
 @Controller({ path: 'billing', version: '1' })
 @UseGuards(JwtAuthGuard)
 export class BillingController {
@@ -20,6 +20,10 @@ export class BillingController {
   history(@CurrentUser() user: AuthenticatedUser, @Query() query: BillingHistoryQueryDto) { return this.billing.history(user, query); }
   @Get('purchases/:source/:id/refunds') @Header('Cache-Control', 'private, no-store')
   refunds(@CurrentUser() user: AuthenticatedUser, @Param() params: SourceParams, @Param('id') id: string, @Query('page') page?: string) { return this.billing.refunds(user, params.source, id, page); }
+  @Get('purchases/promotion/:id/document-link') @Header('Cache-Control', 'private, no-store')
+  promotionInvoice(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) { return this.billing.promotionDocument(user, id); }
+  @Get('purchases/promotion/:id/credits/:creditId/link') @Header('Cache-Control', 'private, no-store')
+  promotionCredit(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Param('creditId') creditId: string) { return this.billing.promotionDocument(user, id, creditId); }
   @Get('purchases/:source/:id/document')
   async document(@CurrentUser() user: AuthenticatedUser, @Param() params: SourceParams, @Param('id') id: string, @Res({ passthrough: true }) response: { setHeader(key: string, value: string): void }) {
     return this.pdf(response, await this.billing.document(user, params.source, id));

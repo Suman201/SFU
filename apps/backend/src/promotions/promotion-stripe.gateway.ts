@@ -26,8 +26,15 @@ export class PromotionStripeGateway {
   async credit(invoice: string, refund: Stripe.Refund): Promise<Stripe.CreditNote> {
     return this.api().creditNotes.create({ invoice, amount: refund.amount, refunds: [{ refund: refund.id, amount_refunded: refund.amount }], metadata: { purpose: 'teacher_promotion' } }, { idempotencyKey: 'promotion-credit-' + refund.id });
   }
-  async document(invoiceId: string, creditId?: string): Promise<string> {
-    const url = creditId ? (await this.api().creditNotes.retrieve(creditId)).pdf : (await this.api().invoices.retrieve(invoiceId)).hosted_invoice_url;
+  async document(invoiceId: string, creditId?: string, orderId?: string): Promise<string> {
+    const invoice = !creditId || orderId ? await this.api().invoices.retrieve(invoiceId) : undefined;
+    if (orderId && (invoice?.metadata?.purpose !== 'teacher_promotion' || invoice.metadata.orderId !== orderId)) throw new ServiceUnavailableException('The invoice does not match this purchase.');
+    let url: string | null | undefined;
+    if (creditId) {
+      const credit = await this.api().creditNotes.retrieve(creditId);
+      if ((typeof credit.invoice === 'string' ? credit.invoice : credit.invoice?.id) !== invoiceId) throw new ServiceUnavailableException('The credit note does not match this invoice.');
+      url = credit.pdf;
+    } else url = invoice?.hosted_invoice_url;
     return this.safeUrl(url);
   }
   safeUrl(value?: string | null): string { let url: URL; try { url = new URL(value ?? ''); } catch { throw new ServiceUnavailableException('The payment document is not ready.'); } if (url.protocol !== 'https:' || !['invoice.stripe.com', 'pay.stripe.com', 'checkout.stripe.com'].includes(url.hostname) || url.username || url.password || url.port) throw new ServiceUnavailableException('Invalid payment document URL.'); return url.href; }

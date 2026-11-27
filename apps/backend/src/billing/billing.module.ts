@@ -10,8 +10,11 @@ import { PaymentDocument, PaymentSchema, RefundDocument, RefundSchema } from '..
 import { InvoiceDocument, InvoiceSchema } from '../invoices/invoice.schema';
 import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
-@Module({ imports: [AuthModule, DatabaseModule, AuditLogsModule, BookingsModule, PaymentsModule, MongooseModule.forFeature([
+import { PromotionsModule } from '../promotions/promotions.module';
+import { PromotionOrderDocument, PromotionOrderSchema, PromotionRefundDocument, PromotionRefundSchema } from '../promotions/promotion.schema';
+@Module({ imports: [AuthModule, DatabaseModule, AuditLogsModule, BookingsModule, PaymentsModule, PromotionsModule, MongooseModule.forFeature([
   { name: BookingOrderDocument.name, schema: BookingOrderSchema }, { name: BookingRefundDocument.name, schema: BookingRefundSchema }, { name: BookingCreditNoteDocument.name, schema: BookingCreditNoteSchema },
   { name: PaymentDocument.name, schema: PaymentSchema }, { name: RefundDocument.name, schema: RefundSchema }, { name: InvoiceDocument.name, schema: InvoiceSchema },
+  { name: PromotionOrderDocument.name, schema: PromotionOrderSchema }, { name: PromotionRefundDocument.name, schema: PromotionRefundSchema },
 ])], controllers: [BillingController], providers: [BillingService] })
 export class BillingModule {}
