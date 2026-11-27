@@ -33,6 +33,7 @@ export interface CmsBlockItem {
   label?: string;
   url?: string;
   imageUrl?: string;
+  imageAlt?: string;
 }
 
 export interface CmsPageBlock {
@@ -42,6 +43,7 @@ export interface CmsPageBlock {
   eyebrow?: string;
   body?: string;
   imageUrl?: string;
+  imageAlt?: string;
   links?: CmsLink[];
   items?: CmsBlockItem[];
 }
@@ -125,3 +127,6 @@ export interface CmsPageRevisionSummary {
 }
 export interface CmsPageRevision extends CmsPageRevisionSummary { content: CmsPageContent }
 export interface CmsPageRevisionListResponse { items: CmsPageRevisionSummary[]; page: number; limit: number; total: number }
+
+export interface CmsMedia { id: string; title: string; altText: string; fileName: string; mimeType: string; size: number; revision: number; archived: boolean; url: string; createdAt: string }
+export interface CmsMediaPage { items: CmsMedia[]; page: number; limit: number; total: number }

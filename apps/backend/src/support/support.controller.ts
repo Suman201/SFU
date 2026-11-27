@@ -1,3 +1,4 @@
+import { SupportReplyDto } from './teacher-support.controller';
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type {
@@ -53,6 +54,10 @@ export class SupportController {
   get(@Param('requestId') requestId: string, @CurrentUser() user: AuthenticatedUser): Promise<SupportRequest> {
     return this.support.getStudentRequest(user, requestId);
   }
+
+  @Post(':requestId/replies')
+  @Roles('STUDENT')
+  reply(@CurrentUser() user: AuthenticatedUser, @Param('requestId') id: string, @Body() input: SupportReplyDto) { return this.support.replyStudentRequest(user, id, input); }
 
   private toQuery(query: SupportRequestQueryParams, includeStudentId: boolean): SupportRequestListQuery {
     const page = query.page ? Number(query.page) : undefined;

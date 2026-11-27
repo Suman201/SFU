@@ -214,3 +214,7 @@ Before rollout, complete [release checks, rollback, escalation and independent s
 ## Account settings and billing
 
 Follow [account settings](account-settings.md) and [customer billing](customer-billing.md) for session compatibility, verified email, provider linking and purchaser-owned documents. Build and run `npm run setup:account-settings` on the reviewed MongoDB replica set before enabling SMTP in the new build. Deploy stable-session and versioned full-token refresh-hash support to all backend nodes together; retain it in rollback builds. Saved billing defaults are additive and never rewrite issued fiscal documents.
+
+## English support, CMS media and promotion commerce
+
+Follow [product expansion](product-expansion.md) for role boundaries, persisted media, promotion plan setup, dedicated Stripe webhooks and rollback. Run `npm run setup:cms` and `npm run setup:promotions` on the reviewed replica set before enabling promotion purchases. Keep `PROMOTIONS_ENABLED=false` until merchant invoice/tax configuration and Stripe test-mode acceptance are complete. Online promotion orders have their own invoice/credit links in `/teacher/promotions` and `/promotion-commerce`; legacy manual campaigns remain available.

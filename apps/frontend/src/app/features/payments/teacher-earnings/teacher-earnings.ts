@@ -26,6 +26,7 @@ import { Header } from '../../../shared/header/header';
 type Tab = 'transactions' | 'payouts';
 
 const ENTRY_LABELS: Record<LedgerEntryType, string> = {
+  promotion_capture: 'Promotion payment', promotion_refund: 'Promotion refund', promotion_gateway_fee: 'Promotion processing fee',
   payment_captured: 'Student payment',
   gateway_fee: 'Processing fee',
   earnings_released: 'Available for payout',

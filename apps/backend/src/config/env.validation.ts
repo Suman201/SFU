@@ -39,6 +39,10 @@ const secretSchema = Joi.string()
   });
 
 const schema = Joi.object({
+  PROMOTIONS_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  PROMOTIONS_STRIPE_WEBHOOK_SECRET: Joi.string().pattern(/^whsec_/).allow('').optional(),
+  PROMOTION_CHARGE_CURRENCIES: Joi.string().default('EUR,GBP,USD').custom((value: string, helpers) => value.split(',').every(code => ['EUR','GBP','USD','INR','JPY'].includes(code.trim())) ? value : helpers.error('any.invalid')),
+  PROMOTION_WORKER_POLL_MS: Joi.number().integer().min(1000).max(60000).default(60000),
   BOOKINGS_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
   STRIPE_SECRET_KEY: Joi.string().pattern(/^sk_(test|live)_/).allow('').optional(),
   STRIPE_WEBHOOK_SECRET: Joi.string().pattern(/^whsec_/).allow('').optional(),
@@ -226,6 +230,11 @@ export function validateConfig(config: Record<string, unknown>): Record<string, 
   }
   const validated = value as Record<string, unknown>;
   const semanticErrors: string[] = [];
+  if (validated.PROMOTIONS_ENABLED === true) {
+    requireNonEmpty(validated, ['STRIPE_SECRET_KEY', 'PROMOTIONS_STRIPE_WEBHOOK_SECRET'], semanticErrors, 'when PROMOTIONS_ENABLED=true');
+    try { const url = new URL(String(validated.FRONTEND_URL)); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error(); } catch { semanticErrors.push('FRONTEND_URL must be an HTTP(S) origin for promotion Checkout'); }
+    if (validated.NODE_ENV === 'production') { validatePublicUrl(validated.FRONTEND_URL, 'FRONTEND_URL', semanticErrors); if (!String(validated.STRIPE_SECRET_KEY).startsWith('sk_live_')) semanticErrors.push('Promotions require a live Stripe key in production'); }
+  }
   validateSocialAuthConfig(validated, semanticErrors);
   validatePasswordRecoveryConfig(validated, semanticErrors);
 

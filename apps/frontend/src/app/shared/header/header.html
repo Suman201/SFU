@@ -69,6 +69,8 @@
         ariaCurrentWhenActive="page"
         >Profile</a
       >
+      <a routerLink="/teacher/promotions" routerLinkActive="active" ariaCurrentWhenActive="page">Promotions</a>
+      <a routerLink="/teacher/support" routerLinkActive="active" ariaCurrentWhenActive="page">Support</a>
       } @else if (auth.role() === 'student') {
       <a
         routerLink="/student/dashboard"

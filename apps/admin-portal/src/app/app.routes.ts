@@ -22,6 +22,7 @@ export const routes: Routes = [
     loadComponent: () => import('./features/shell/admin-shell').then((route) => route.AdminShell),
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
+      { path: 'promotion-commerce', loadComponent: () => import('./features/promotions/promotion-commerce').then(m => m.AdminPromotionCommerce) },
       { path: 'errors', loadComponent: () => import('./features/errors/errors').then(m => m.ErrorsAdmin) },
       { path: 'whiteboards', loadComponent: () => import('./features/whiteboards/whiteboards').then(route => route.AdminWhiteboards) },
       { path: 'whiteboards/:sessionId', loadComponent: () => import('./features/whiteboards/whiteboards').then(route => route.AdminWhiteboards) },

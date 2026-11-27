@@ -69,7 +69,7 @@ describe('SupportService', () => {
       { status: 'resolved', response: 'We fixed the recording access.' }
     );
 
-    expect(doc.save).toHaveBeenCalled();
+    expect(supportRequests.updateOne).toHaveBeenCalled();
     expect(result.status).toBe('resolved');
     expect(result.comments.length).toBe(1);
     expect(result.comments[0]?.visibleToStudent).toBe(true);
@@ -78,6 +78,7 @@ describe('SupportService', () => {
 
 function createService() {
   const supportRequests = {
+    updateOne: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
     create: jest.fn(),
     findOne: jest.fn().mockReturnValue(query(supportDoc({}))),
     find: jest.fn().mockReturnValue(chain([])),

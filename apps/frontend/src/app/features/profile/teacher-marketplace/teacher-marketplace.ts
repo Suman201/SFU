@@ -1,3 +1,4 @@
+import { PromotionTrackingDirective } from '../../../shared/promotions/promotion-tracking';
 import { teachingCategoryIds, teachingCategoryPath } from '@native-sfu/contracts';
 import {
   ChangeDetectionStrategy,
@@ -43,7 +44,7 @@ const EMPTY_FILTERS: MarketplaceFilters = {
 @Component({
   selector: 'sfu-teacher-marketplace',
   standalone: true,
-  imports: [Footer, Header, RouterLink],
+  imports: [PromotionTrackingDirective, Footer, Header, RouterLink],
   templateUrl: './teacher-marketplace.html',
   styleUrl: './teacher-marketplace.scss',
   changeDetection: ChangeDetectionStrategy.Eager,

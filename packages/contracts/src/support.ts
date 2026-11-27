@@ -47,6 +47,8 @@ export interface SupportRequestComment {
 export interface SupportRequest {
   id: string;
   requestId: string;
+  /** Legacy student fields also identify a teacher who opened their own platform request. */
+  requesterRole?: 'student' | 'teacher';
   studentId: string;
   studentName: string;
   studentEmail?: string;

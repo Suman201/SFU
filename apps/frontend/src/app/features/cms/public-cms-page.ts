@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../core/services/app-environment';
 import { DatePipe, TitleCasePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -76,6 +77,8 @@ const FALLBACKS: Record<string, PublicCmsFallback> = {
   changeDetection: ChangeDetectionStrategy.Eager
 })
 export class PublicCmsPage implements OnInit {
+  protected mediaUrl(url: string): string { return url.startsWith('/api/v1/cms/media/') ? API_BASE_URL + url.slice('/api/v1'.length) : url; }
+
   private readonly destroyRef = inject(DestroyRef);
   private readonly route = inject(ActivatedRoute);
   private readonly cms = inject(CmsService);

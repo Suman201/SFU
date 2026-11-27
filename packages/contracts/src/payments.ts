@@ -193,6 +193,9 @@ export const TEACHER_LEDGER_ACCOUNTS: LedgerAccount[] = ['teacher_pending', 'tea
 export const DEBIT_NORMAL_ACCOUNTS: LedgerAccount[] = ['gateway_clearing', 'gateway_fees', 'dispute_hold'];
 
 export const LEDGER_ENTRY_TYPES = [
+  'promotion_capture',
+  'promotion_refund',
+  'promotion_gateway_fee',
   'payment_captured',
   'gateway_fee',
   'earnings_released',
@@ -223,6 +226,7 @@ export interface LedgerEntryRecord {
   occurredAt: string;
   memo: string;
   paymentId?: string;
+  promotionOrderId?: string;
   bookingOrderId?: string;
   refundId?: string;
   disputeId?: string;

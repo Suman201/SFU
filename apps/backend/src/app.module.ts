@@ -1,3 +1,4 @@
+import { PromotionsModule } from './promotions/promotions.module';
 import { BillingModule } from './billing/billing.module';
 import { AccountModule } from './account/account.module';
 import { AdminWhiteboardsModule } from './admin-whiteboards/admin-whiteboards.module';
@@ -132,6 +133,7 @@ import { UsersModule } from './users/users.module';
         serverSelectionTimeoutMS: 10_000
       })
     }),
+    PromotionsModule,
     DatabaseModule,
     AdminStaffModule,
     AdminWhiteboardsModule,

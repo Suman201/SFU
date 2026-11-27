@@ -13,7 +13,7 @@ Copy this checklist into the release record. Fill each evidence field with the c
 
 - [ ] Record a current encrypted backup and target-storage restore proof before applying changes.
 - [ ] Verify target MongoDB replica set/mongos and transaction support; no standalone publication fallback.
-- [ ] Review `setup:cms`, `setup:payments`, `setup:invoices`, `setup:scheduling`, `setup:bookings`, `setup:admin-operations`, `setup:social-auth`, `setup:account-recovery` and `setup:account-settings` for the actual changes in the release. Run only applicable scripts on the reviewed target.
+- [ ] Review `setup:cms`, `setup:promotions`, `setup:payments`, `setup:invoices`, `setup:scheduling`, `setup:bookings`, `setup:admin-operations`, `setup:social-auth`, `setup:account-recovery` and `setup:account-settings` for the actual changes in the release. Run only applicable scripts on the reviewed target.
 - [ ] Run applicable setup twice, inspect unique-index diagnostics and compare row counts/content. Resolve duplicate data explicitly; never delete records to force index creation.
 - [ ] Confirm existing published pages, active sessions, reservations, invoices and recordings remain accessible only to permitted users.
 - [ ] Coordinate backend/admin rollout for CMS working-copy semantics; do not expose draft fields through old public handlers.

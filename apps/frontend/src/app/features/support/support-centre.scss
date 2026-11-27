@@ -1,0 +1,15 @@
+.support-centre { min-width:0; }
+.support-tabs { display:flex; flex-wrap:wrap; gap:8px; }
+.support-tabs [aria-pressed=true] { border-color:var(--accent); background:var(--accent-soft); color:var(--text); }
+.support-form { display:grid; gap:12px; }
+.support-form label,.data-table-filters label { display:grid; gap:6px; min-width:0; }
+.support-form input,.support-form select,.support-form textarea,.data-table-filters input,.data-table-filters select { width:100%; min-width:0; box-sizing:border-box; color:var(--text); background:var(--control-bg,var(--panel)); border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit; }
+.support-form textarea { resize:vertical; }
+.support-form .action-button { justify-self:start; }
+.support-message { white-space:pre-wrap; overflow-wrap:anywhere; }
+.support-thread { display:grid; gap:12px; margin-block:16px; }
+.support-thread article { padding:12px; border:1px solid var(--line); border-radius:8px; }
+small { display:block; color:var(--muted); }
+.data-table-filters { align-items:flex-end; }
+
+.eyebrow { color: var(--text); }

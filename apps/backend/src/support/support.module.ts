@@ -1,3 +1,4 @@
+import { TeacherSupportController } from './teacher-support.controller';
 import { Module } from '@nestjs/common';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { AuthModule } from '../auth/auth.module';
@@ -10,7 +11,7 @@ import { SupportService } from './support.service';
 
 @Module({
   imports: [AuthModule, DatabaseModule, StudentEnrollmentsModule, AuditLogsModule, ClassSessionActivityModule, MetricsModule],
-  controllers: [SupportController, AdminSupportController],
+  controllers: [TeacherSupportController, SupportController, AdminSupportController],
   providers: [SupportService],
   exports: [SupportService]
 })

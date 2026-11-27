@@ -94,6 +94,7 @@
               @if (request.comments.length) {
                 <p>{{ latestCommentMessage(request) }}</p>
               }
+              <button type="button" class="button ghost" (click)="openConversation(request)">View conversation</button>
             </article>
           }
         </div>
@@ -105,5 +106,6 @@
       }
     </article>
   </section>
+  @if (selected(); as row) { <article class="support-card" aria-label="Support conversation"><header><h2>{{ row.subject }}</h2><button type="button" class="button ghost" (click)="openConversation(row)">Reload conversation</button></header><p style="white-space:pre-wrap;overflow-wrap:anywhere">{{ row.message }}</p>@for (comment of row.comments; track comment.id) { <article><strong>{{ comment.authorName }}</strong><small>{{ comment.createdAt | date:'medium' }}</small><p style="white-space:pre-wrap;overflow-wrap:anywhere">{{ comment.message }}</p></article> } @if (row.status !== 'closed') { <form (ngSubmit)="sendReply()"><label><span>Your reply</span><textarea rows="4" maxlength="5000" [formControl]="reply"></textarea></label><button class="button primary" type="submit" [disabled]="saving()">Send reply</button></form> } @else { <p>This request is closed.</p> }</article> }
 </main>
 <sfu-footer />

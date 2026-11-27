@@ -22,6 +22,7 @@ const modules: Record<string, string> = {
   'error-encyclopedia': 'admin:errors:read',
 };
 export function canVisitAdmin(auth: AuthService, url: string): boolean {
+  if (/^\/?promotion-commerce(?:[/?]|$)/.test(url)) return auth.can('admin:content:read') || auth.can('admin:finance:read');
   const path = url.split('?')[0]!.replace(/^\//, '');
   if (path === 'staff' || path.startsWith('staff/')) return auth.isSuperAdmin();
   if (path.startsWith('cms/contact')) return auth.can('admin:support:read');

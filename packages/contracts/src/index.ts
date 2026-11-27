@@ -50,3 +50,5 @@ export * from './protocol.js';
 
 export * from './account.js';
 export * from './billing.js';
+
+export * from './promotions.js';

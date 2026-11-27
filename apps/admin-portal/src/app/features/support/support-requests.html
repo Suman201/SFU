@@ -1,10 +1,10 @@
 <section class="page-head">
   <div>
-    <p class="eyebrow">Student support</p>
+    <p class="eyebrow">Customer support</p>
     <h1>Support queue</h1>
     <p>
       Triage class access, live class, recording, audio/video, assignment, and
-      other student issues.
+      other student and teacher issues.
     </p>
   </div>
 </section>
@@ -43,7 +43,7 @@
           type="search"
           class="data-table-search"
           formControlName="search"
-          placeholder="Search request, student, subject"
+          placeholder="Search request, customer, subject"
           aria-label="Search support"
         />
         <input
@@ -61,8 +61,8 @@
         <input
           type="search"
           formControlName="studentId"
-          placeholder="Student ID"
-          aria-label="Student ID"
+          placeholder="Requester ID"
+          aria-label="Requester ID"
         />
         <button type="submit" class="table-action primary">Apply</button>
         <button type="button" class="table-action" (click)="resetFilters()">
@@ -81,7 +81,7 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>Student</th>
+            <th>Requester</th>
             <th>Subject</th>
             <th>Context</th>
             <th>Issue</th>
@@ -107,7 +107,7 @@
               <div class="primary-cell">
                 <span class="table-avatar">{{ initials(row) || 'ST' }}</span>
                 <div>
-                  <strong>{{ row.studentName }}</strong>
+                  <strong>{{ row.studentName }}</strong><small>{{ row.requesterRole === 'teacher' ? 'Teacher' : 'Student' }}</small>
                   <small>{{ row.studentEmail || row.studentId }}</small>
                 </div>
               </div>
@@ -183,7 +183,7 @@
 
     <dl>
       <div>
-        <dt>Student</dt>
+        <dt>Requester</dt>
         <dd>
           {{ ticket.studentName }} · {{ ticket.studentEmail || ticket.studentId
           }}
@@ -200,7 +200,7 @@
     </dl>
 
     <section>
-      <h3>Student message</h3>
+      <h3>Requester message</h3>
       <p>{{ ticket.message }}</p>
     </section>
 
@@ -221,7 +221,7 @@
         <strong>{{ comment.authorName }}</strong>
         <p>{{ comment.message }}</p>
         <small
-          >{{ comment.visibleToStudent ? 'Student visible' : 'Internal' }} · {{
+          >{{ comment.visibleToStudent ? 'Requester visible' : 'Internal' }} · {{
           comment.createdAt | date: 'medium' }}</small
         >
       </article>

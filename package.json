@@ -78,7 +78,7 @@
     "build:admin-ci": "npm run build -w @native-sfu/contracts && npm run build -w @native-sfu/media-ingest && npm run build -w @native-sfu/sfu-core && npm run build -w @native-sfu/nest-sfu && npm run build -w @native-sfu/backend && npm run build -w @native-sfu/frontend && npm run build -w @native-sfu/admin-portal",
     "test:admin:unit": "npm exec -w @native-sfu/admin-portal -- ng test --watch=false --browsers=ChromeHeadlessCI",
     "test:admin:backend": "npm test -w @native-sfu/backend -- --runInBand src/auth/auth.service.spec.ts src/users/users.service.spec.ts src/admin-dashboard/admin-dashboard.service.spec.ts src/rbac/admin-access.spec.ts src/rooms/rooms.gateway.spec.ts src/payments src/student-enrollments/student-enrollments.service.spec.ts src/config/env.validation.spec.ts src/bookings/stripe.gateway.spec.ts",
-    "test:admin:integration": "node --test --test-concurrency=1 tests/integration/admin-completion.test.cjs tests/integration/booking-payments.test.cjs tests/integration/payment-merge.test.cjs tests/integration/booking-earnings.test.cjs tests/integration/account-settings.test.cjs tests/integration/customer-billing.test.cjs",
+    "test:admin:integration": "node --test --test-concurrency=1 tests/integration/admin-completion.test.cjs tests/integration/booking-payments.test.cjs tests/integration/payment-merge.test.cjs tests/integration/booking-earnings.test.cjs tests/integration/account-settings.test.cjs tests/integration/customer-billing.test.cjs tests/integration/product-expansion.test.cjs",
     "test:admin:browser": "node scripts/patch-playwright-loader.cjs && playwright test --config=playwright.admin.config.ts",
     "setup:payments": "node scripts/setup-payments.cjs",
     "test:p0:backend": "npm test -w @native-sfu/backend -- --runInBand",
@@ -103,7 +103,9 @@
     "test:recovery:browser": "node scripts/p0-browser.cjs --recovery",
     "test:finance:browser": "node scripts/patch-playwright-loader.cjs && playwright test --config=playwright.finance.config.ts",
     "setup:account-settings": "node scripts/setup-account-settings.cjs",
-    "test:account:browser": "node scripts/patch-playwright-loader.cjs && playwright test --config=playwright.account.config.ts"
+    "test:account:browser": "node scripts/patch-playwright-loader.cjs && playwright test --config=playwright.account.config.ts",
+    "setup:promotions": "node scripts/setup-promotions.cjs",
+    "test:expansion:browser": "node scripts/patch-playwright-loader.cjs && playwright test --config=playwright.expansion.config.ts"
   },
   "devDependencies": {
     "@angular/compiler": "22.0.1",

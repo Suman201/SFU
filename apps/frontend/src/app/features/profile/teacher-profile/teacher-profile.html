@@ -89,7 +89,7 @@
   >
     <header class="edit-header">
       <div>
-        <h2>Paid profile promotions</h2>
+        <h2>Paid profile promotions</h2><a routerLink="/teacher/promotions">Buy online, view invoices and campaign analytics</a>
         <p class="promotion-intro">Choose a placement and the dates you want to promote your profile.</p>
       </div>
       <span class="status-pill"
@@ -193,9 +193,9 @@
             <time [attr.datetime]="promotion.endsAt">Ends {{ promotion.endsAt | date:'medium' }}</time>
           </p>
           <p><strong>@if (promotion.feeCents !== undefined) {
-            {{ promotion.feeCents / 100 | currency:promotion.currency:'symbol':'1.0-2' }}
+            {{ promotionAmount(promotion) }}
           } @else { Fee not recorded }</strong> · {{ paymentLabel(promotion) }}</p>
-          <small>Campaign ID {{ promotion.promotionId }}</small>
+          <small>Campaign ID {{ promotion.promotionId }}</small><a routerLink="/teacher/promotions" [queryParams]="{campaign:promotion.promotionId}">View campaign analytics</a>
           @if (promotion.paymentReference) { <small>Payment reference {{ promotion.paymentReference }}</small> }
           @if (promotion.adminNote) { <small>{{ promotion.adminNote }}</small> }
         </article>

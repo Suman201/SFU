@@ -3,7 +3,8 @@ import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@ang
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import type { SupportIssueType, SupportRequest, SupportRequestDiagnostics } from '@native-sfu/contracts';
-import { finalize } from 'rxjs';
+import { finalize, firstValueFrom } from 'rxjs';
+import { SupportApi } from '../../../core/services/support-api.service';
 import { Footer } from '../../../shared/footer/footer';
 import { Header } from '../../../shared/header/header';
 import { ClassSessionService } from '../../class-session/class-session.service';
@@ -20,6 +21,9 @@ export class StudentSupport implements OnInit {
   private readonly formBuilder = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly classSessions = inject(ClassSessionService);
+  private readonly supportApi = inject(SupportApi);
+  protected readonly selected = signal<SupportRequest | null>(null);
+  protected readonly reply = this.formBuilder.nonNullable.control('', [Validators.required, Validators.maxLength(5000)]);
 
   protected readonly loading = signal(false);
   protected readonly saving = signal(false);
@@ -96,6 +100,17 @@ export class StudentSupport implements OnInit {
         },
         error: (error) => this.error.set(this.classSessions.errorMessage(error))
       });
+  }
+
+  protected async openConversation(row: SupportRequest): Promise<void> {
+    this.error.set('');
+    try { const value = await firstValueFrom(this.supportApi.get(row.requestId)); if (this.selected()?.requestId !== value.requestId) this.reply.reset(); this.selected.set(value); } catch (error) { this.error.set(this.classSessions.errorMessage(error)); }
+  }
+
+  protected async sendReply(): Promise<void> {
+    const row = this.selected(); this.reply.markAsTouched(); if (!row || this.reply.invalid || this.saving()) return;
+    this.saving.set(true); this.error.set('');
+    try { this.selected.set(await firstValueFrom(this.supportApi.reply(row, this.reply.value))); this.reply.reset(); this.loadRequests(); } catch (error) { this.error.set(this.classSessions.errorMessage(error)); } finally { this.saving.set(false); }
   }
 
   protected statusLabel(status: string): string {

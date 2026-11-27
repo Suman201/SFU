@@ -3,6 +3,8 @@ import { authGuard, guestGuard, roleGuard } from './core/services/auth.guards';
 import { RoomComponent } from './features/room/room.component';
 
 export const routes: Routes = [
+  { path: 'teacher/promotions', canActivate: [roleGuard], data: { role: 'teacher' }, loadComponent: () => import('./features/promotions/teacher-promotions').then(m => m.TeacherPromotions) },
+  { path: 'teacher/support', canActivate: [roleGuard], data: { role: 'teacher' }, loadComponent: () => import('./features/support/teacher-support').then(m => m.TeacherSupport) },
   { path: 'account', redirectTo: 'account/settings', pathMatch: 'full' },
   { path: 'account/billing', canActivate: [authGuard], loadComponent: () => import('./features/account/billing-centre').then(m => m.BillingCentre) },
   { path: 'account/settings', canActivate: [authGuard], loadComponent: () => import('./features/account/account-settings').then(m => m.AccountSettings) },

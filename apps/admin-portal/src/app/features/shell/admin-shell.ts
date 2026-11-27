@@ -86,6 +86,7 @@ const groups: { label: string; items: NavigationItem[] }[] = [
       { label: 'Invoices', path: '/invoices', icon: 'receipt' },
       { label: 'Support', path: '/support', icon: 'support' },
       { label: 'Contact inbox', path: '/cms/contact', icon: 'mail' },
+      { label: 'Paid promotions', path: '/promotion-commerce', icon: 'tag' },
       { label: 'Promotions', path: '/teacher-promotions', icon: 'tag' },
       { label: 'CMS', path: '/cms/pages', icon: 'file' },
     ],

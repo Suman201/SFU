@@ -361,6 +361,7 @@ TeacherPublicContentSchema.index({ teacherId: 1, contentId: 1, deletedAt: 1 }, {
 
 @Schema({ collection: 'teacher_promotions', timestamps: true, optimisticConcurrency: true })
 export class TeacherPromotionDocument {
+  @Prop({ type: String, unique: true, sparse: true }) checkoutOrderId?: string;
   @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
   promotionId!: string;
 
@@ -3422,6 +3423,7 @@ export const SupportRequestCommentSchema = SchemaFactory.createForClass(SupportR
 
 @Schema({ collection: 'class_session_support_requests', timestamps: true })
 export class SupportRequestDocument {
+  @Prop({ type: String, enum: ['student', 'teacher'] }) requesterRole?: 'student' | 'teacher';
   @Prop({ required: true, default: () => randomUUID(), unique: true, index: true })
   requestId!: string;
 

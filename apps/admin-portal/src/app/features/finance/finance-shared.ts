@@ -49,6 +49,7 @@ export const DISPUTE_LABELS: Record<DisputeStatus, string> = {
 };
 
 export const ENTRY_LABELS: Record<LedgerEntryType, string> = {
+  promotion_capture: 'Promotion payment', promotion_refund: 'Promotion refund', promotion_gateway_fee: 'Promotion processing fee',
   payment_captured: 'Payment captured',
   gateway_fee: 'Processing fee',
   earnings_released: 'Earnings released',

@@ -1,7 +1,8 @@
+import { formatMoneyWithCode, isCurrencyCode } from '@native-sfu/contracts';
 import { TutorVerification } from '../../../shared/tutor-verification/tutor-verification';
 import { TeachingAreasEditor } from '../../../shared/teaching-areas/teaching-areas-editor';
 import { DestroyRef } from '@angular/core';
-import { CurrencyPipe, DatePipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   EUROPEAN_MARKETS,
@@ -374,7 +375,6 @@ const EMPTY_PROMOTION_FORM: PromotionForm = {
   selector: 'sfu-teacher-profile',
   standalone: true,
   imports: [
-    CurrencyPipe,
     DatePipe,
     Footer,
     Header,
@@ -1284,6 +1284,7 @@ export class TeacherProfile implements OnInit {
   }
 
   protected readonly money = inject(CurrencyService);
+  protected promotionAmount(promotion: TeacherPromotion) { return promotion.feeCents === undefined ? 'Fee not recorded' : formatMoneyWithCode({ amountMinor: promotion.feeCents, currency: isCurrencyCode(promotion.currency) ? promotion.currency : PROMOTION_CURRENCY }, 'en'); }
 
   protected feeLabel(value: import("@native-sfu/contracts").BatchMoneyFields & { feeAmount?: number | null }): string {
     return this.money.batch(value);

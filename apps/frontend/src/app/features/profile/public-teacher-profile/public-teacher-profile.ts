@@ -1,3 +1,4 @@
+import { PromotionTrackingDirective } from '../../../shared/promotions/promotion-tracking';
 import { TeachingAreasSummary } from '../../../shared/teaching-areas/teaching-areas-summary';
 import type { TeachingCatalogSnapshot } from '@native-sfu/contracts';
 import {
@@ -48,7 +49,7 @@ const PROFILE_TABS: TeacherProfileTabItem[] = [
 @Component({
   selector: 'sfu-public-teacher-profile',
   standalone: true,
-  imports: [Footer, Header, RouterLink, TeachingAreasSummary],
+  imports: [PromotionTrackingDirective, Footer, Header, RouterLink, TeachingAreasSummary],
   templateUrl: './public-teacher-profile.html',
   styleUrl: './public-teacher-profile.scss',
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -1,3 +1,4 @@
+import { PromotionAnalyticsModule } from '../promotions/promotion-analytics.module';
 import { TeachingCatalogModule } from '../teaching-catalog/teaching-catalog.module';
 import { Module } from '@nestjs/common';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
@@ -13,7 +14,7 @@ import {
 import { ProfilesService } from './profiles.service';
 
 @Module({
-  imports: [TeachingCatalogModule, AuthModule, DatabaseModule, AuditLogsModule],
+  imports: [PromotionAnalyticsModule, TeachingCatalogModule, AuthModule, DatabaseModule, AuditLogsModule],
   controllers: [
     ProfilesController,
     PublicTeacherProfilesController,

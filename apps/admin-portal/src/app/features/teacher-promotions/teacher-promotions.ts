@@ -1,6 +1,6 @@
 import { AuthService } from '../../core/services/auth.service';
-import { CurrencyPipe, DatePipe } from '@angular/common';
-import { PROMOTION_CURRENCY, promotionPaymentLabel, promotionStatusLabel } from '@native-sfu/contracts';
+import { DatePipe } from '@angular/common';
+import { formatMoneyWithCode, PROMOTION_CURRENCY, promotionPaymentLabel, promotionStatusLabel } from '@native-sfu/contracts';
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
@@ -21,7 +21,7 @@ type PromotionAction = 'approve' | 'pause' | 'cancel' | 'reject';
 @Component({
   selector: 'sfu-admin-teacher-promotions',
   standalone: true,
-  imports: [CurrencyPipe, DatePipe, ReactiveFormsModule, RouterLink],
+  imports: [DatePipe, ReactiveFormsModule, RouterLink],
   templateUrl: './teacher-promotions.html',
   styleUrl: './teacher-promotions.scss',
   changeDetection: ChangeDetectionStrategy.Eager
@@ -58,12 +58,13 @@ export class TeacherPromotions implements OnInit {
 
   protected readonly paymentLabel = promotionPaymentLabel;
   protected readonly currency = PROMOTION_CURRENCY;
+  protected campaignMoney(row: TeacherPromotion) { return row.feeCents === undefined ? 'Unquoted' : formatMoneyWithCode({ amountMinor: row.feeCents, currency: (row.currency || PROMOTION_CURRENCY) as typeof PROMOTION_CURRENCY }, 'en'); }
   protected readonly paymentRow = signal<TeacherPromotion | null>(null);
   protected readonly paymentError = signal('');
   protected readonly paymentForm = this.formBuilder.nonNullable.group({ reference: '', amount: '' });
 
   protected canConfirm(row: TeacherPromotion): boolean {
-    return !row.paymentConfirmedAt && row.billingStatus !== 'refunded' &&
+    return !row.checkoutOrderId && !row.paymentConfirmedAt && row.billingStatus !== 'refunded' &&
       ['requested', 'paused', 'scheduled', 'active'].includes(row.status) && Date.parse(row.endsAt) > Date.now();
   }
 

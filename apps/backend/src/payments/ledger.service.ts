@@ -41,7 +41,7 @@ export class LedgerService {
       const existing = await this.entries.findOne({ key: draft.key }).session(session).lean();
       if (existing) {
         const facts = (value: LedgerEntryDraft | LedgerEntryDocument) => JSON.stringify({
-          type: value.type, currency: value.currency, paymentId: value.paymentId, bookingOrderId: value.bookingOrderId,
+          type: value.type, currency: value.currency, promotionOrderId: value.promotionOrderId, paymentId: value.paymentId, bookingOrderId: value.bookingOrderId,
           refundId: value.refundId, payoutId: value.payoutId, teacherId: value.teacherId,
           lines: value.lines.map(line => ({ account: line.account, teacherId: line.teacherId, debitMinor: line.debitMinor, creditMinor: line.creditMinor })),
         });
@@ -74,6 +74,7 @@ export class LedgerService {
       occurredAt: doc.occurredAt.toISOString(),
       memo: doc.memo,
       paymentId: doc.paymentId,
+      promotionOrderId: doc.promotionOrderId,
       bookingOrderId: doc.bookingOrderId,
       refundId: doc.refundId,
       disputeId: doc.disputeId,

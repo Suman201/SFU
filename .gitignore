@@ -57,3 +57,7 @@ coverage
 # Account settings and billing acceptance evidence.
 /reports/account/
 /test-results/account/
+
+# English product expansion acceptance evidence.
+/reports/expansion/
+/test-results/expansion/

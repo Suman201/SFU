@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -94,16 +94,71 @@ export class SupportService {
 
   async listStudentRequests(user: AuthenticatedUser, query: SupportRequestListQuery = {}): Promise<SupportRequestListResponse> {
     this.assertStudent(user);
-    return this.listRequests({ ...query, studentId: user.sub }, 'student');
+    return this.listRequests({ ...query, studentId: user.sub }, 'student', { requesterRole: { $ne: 'teacher' } });
   }
 
   async getStudentRequest(user: AuthenticatedUser, requestId: string): Promise<SupportRequest> {
     this.assertStudent(user);
     const doc = await this.findByRequestId(requestId);
-    if (doc.studentId !== user.sub) {
+    if (doc.studentId !== user.sub || doc.requesterRole === 'teacher') {
       throw new ForbiddenException('You are not allowed to view this support request.');
     }
     return this.toSupportRequest(doc, 'student');
+  }
+
+  async createTeacherRequest(user: AuthenticatedUser, request: CreateSupportRequestRequest): Promise<SupportRequest> {
+    this.assertTeacher(user);
+    const context = await this.resolveStudentContext(user, request, true);
+    const profile = await this.userProfile(user.sub);
+    const doc = await this.supportRequests.create({ requesterRole: 'teacher', studentId: user.sub, studentName: profile.name, studentEmail: profile.email, ...this.persistedContext(context), issueType: this.issueType(request.issueType), status: 'open', subject: this.requiredText(request.subject, 'Subject', 180), message: this.requiredText(request.message, 'Message', 5000), diagnostics: await this.supportDiagnostics(request.diagnostics, context), comments: [] });
+    await this.recordCreated(doc, user); return this.toSupportRequest(doc, 'teacher');
+  }
+
+  async listTeacherRequests(user: AuthenticatedUser, query: SupportRequestListQuery, view: 'mine' | 'class'): Promise<SupportRequestListResponse> {
+    this.assertTeacher(user);
+    if (view === 'mine') return this.listRequests({ ...query, studentId: user.sub }, 'teacher', { requesterRole: 'teacher' });
+    const batches = await this.batches.find({ teacherId: user.sub, deletedAt: { $exists: false } }).select('_id').lean();
+    return this.listRequests(query, 'teacher_related', { $and: [{ batchId: { $in: batches.map(batch => String(batch._id)) } }, { requesterRole: { $ne: 'teacher' } }] });
+  }
+
+  async getTeacherRequest(user: AuthenticatedUser, requestId: string): Promise<SupportRequest> {
+    const { doc, mine } = await this.teacherRequest(user, requestId);
+    return this.toSupportRequest(doc, mine ? 'teacher' : 'teacher_related');
+  }
+
+  async replyTeacherRequest(user: AuthenticatedUser, requestId: string, input: { message?: string; status?: SupportRequestStatus; expectedUpdatedAt: string }): Promise<SupportRequest> {
+    const { doc, mine } = await this.teacherRequest(user, requestId);
+    if (mine && input.status) throw new ForbiddenException('Support staff manage the status of your platform requests.');
+    if (input.status && !['in_review', 'waiting_for_student', 'resolved'].includes(input.status)) throw new BadRequestException('Choose a supported class-request status.');
+    return this.appendReply(user, doc, input, mine ? 'teacher' : 'teacher_related');
+  }
+
+  async replyStudentRequest(user: AuthenticatedUser, requestId: string, input: { message: string; expectedUpdatedAt: string }): Promise<SupportRequest> {
+    this.assertStudent(user); const doc = await this.findByRequestId(requestId);
+    if (doc.studentId !== user.sub || doc.requesterRole === 'teacher') throw new NotFoundException('Support request not found.');
+    return this.appendReply(user, doc, input, 'student');
+  }
+
+  private assertTeacher(user: AuthenticatedUser): void { if (!user.roles.includes('TEACHER')) throw new ForbiddenException('Teacher access required.'); }
+  private async teacherRequest(user: AuthenticatedUser, requestId: string) {
+    this.assertTeacher(user); const doc = await this.findByRequestId(requestId), mine = doc.requesterRole === 'teacher' && doc.studentId === user.sub;
+    if (!mine) {
+      if (doc.requesterRole === 'teacher' || !doc.batchId || !await this.batches.exists({ _id: doc.batchId, teacherId: user.sub, deletedAt: { $exists: false } })) throw new NotFoundException('Support request not found.');
+    }
+    return { doc, mine };
+  }
+  private async appendReply(user: AuthenticatedUser, doc: SupportRequestMongoDocument, input: { message?: string; status?: SupportRequestStatus; expectedUpdatedAt: string }, audience: 'student' | 'teacher' | 'teacher_related'): Promise<SupportRequest> {
+    const message = input.message === undefined ? undefined : this.requiredText(input.message, 'Reply', 5000);
+    if (!message && !input.status) throw new BadRequestException('Add a reply or choose a status.');
+    const timestamp = new Date(input.expectedUpdatedAt); if (!Number.isFinite(timestamp.getTime())) throw new BadRequestException('Reload the support conversation before replying.');
+    const now = new Date(Math.max(Date.now(), (doc.updatedAt?.getTime() ?? 0) + 1));
+    const updated = await this.supportRequests.findOneAndUpdate({ _id: doc.id, deletedAt: { $exists: false }, status: { $ne: 'closed' }, updatedAt: timestamp }, {
+      ...(message ? { $push: { comments: { commentId: randomUUID(), authorId: user.sub, authorName: await this.actorName(user), authorRoles: user.roles, message, visibleToStudent: true, createdAt: now } } } : {}),
+      $set: { updatedAt: now, ...(input.status ? { status: input.status, ...(input.status === 'resolved' ? { resolvedAt: now } : {}) } : {}) },
+    }, { new: true, timestamps: false });
+    if (!updated) throw new ConflictException('The conversation changed or was closed. Reload it before replying.');
+    await this.auditLogs?.record({ actor: user, action: 'support.request.reply', resourceType: 'support_request', resourceId: doc.requestId, metadata: { status: updated.status, requesterRole: doc.requesterRole ?? 'student' } });
+    return this.toSupportRequest(updated, audience);
   }
 
   async listAdminRequests(user: AuthenticatedUser, query: SupportRequestListQuery = {}): Promise<SupportRequestListResponse> {
@@ -160,7 +215,16 @@ export class SupportService {
         createdAt: now
       });
     }
-    await doc.save();
+    const updatedAt = new Date(Math.max(Date.now(), (doc.updatedAt?.getTime() ?? 0) + 1));
+    const fields: Record<string, unknown> = { status: doc.status, comments: doc.comments, updatedAt };
+    const unset: Record<string, 1> = {};
+    for (const key of ['assignedToUserId', 'assignedToName', 'resolvedAt', 'closedAt'] as const) {
+      if (doc[key] === undefined) unset[key] = 1;
+      else fields[key] = doc[key];
+    }
+    const changed = await this.supportRequests.updateOne({ _id: doc.id, updatedAt: doc.updatedAt }, { $set: fields, ...(Object.keys(unset).length ? { $unset: unset } : {}) }, { timestamps: false });
+    if (changed.modifiedCount !== 1) throw new ConflictException('The conversation changed. Reload before saving a staff reply.');
+    doc.updatedAt = updatedAt;
     if (beforeStatus !== doc.status) {
       this.metrics?.classSessionSupportRequests.labels('status_changed', doc.status, doc.issueType).inc();
     }
@@ -182,10 +246,10 @@ export class SupportService {
     return this.toSupportRequest(doc, 'admin');
   }
 
-  private async listRequests(query: SupportRequestListQuery, audience: 'student' | 'admin'): Promise<SupportRequestListResponse> {
+  private async listRequests(query: SupportRequestListQuery, audience: 'student' | 'admin' | 'teacher' | 'teacher_related', scope: FilterQuery<SupportRequestMongoDocument> = {}): Promise<SupportRequestListResponse> {
     const page = this.clamp(query.page, 1, 10000, 1);
     const limit = this.clamp(query.limit, 1, 100, 25);
-    const filter = this.requestFilter(query);
+    const filter = { ...this.requestFilter(query, audience !== 'teacher_related'), ...scope };
     const [items, total, summary] = await Promise.all([
       this.supportRequests
         .find(filter)
@@ -205,11 +269,14 @@ export class SupportService {
     };
   }
 
-  private async resolveStudentContext(user: AuthenticatedUser, request: CreateSupportRequestRequest): Promise<SupportContextResolution> {
-    const session = request.sessionId ? await this.findSession(request.sessionId) : undefined;
+  private async resolveStudentContext(user: AuthenticatedUser, request: CreateSupportRequestRequest, teacher = false): Promise<SupportContextResolution> {
+    let session = request.sessionId ? await this.findSession(request.sessionId) : undefined;
     const recording = request.recordingId ? await this.findRecording(request.recordingId) : undefined;
+    if (!session && recording?.sessionId) session = await this.findSession(recording.sessionId);
     const batchId = request.batchId ?? session?.batchId ?? recording?.batchId;
+    if ((session || recording) && !batchId) throw new ForbiddenException('This support context is not available.');
     const batch = batchId ? await this.findBatch(batchId) : undefined;
+    if (request.roomId && request.roomId !== (session?.roomId ?? recording?.roomId)) throw new BadRequestException('Choose the class session associated with this room.');
 
     if (session && batch && session.batchId !== batch.id) {
       throw new BadRequestException('Support request session does not belong to the selected batch.');
@@ -220,7 +287,7 @@ export class SupportService {
     if (recording && session && recording.sessionId && recording.sessionId !== session.id) {
       throw new BadRequestException('Support request recording does not belong to the selected session.');
     }
-    if (batch && !(await this.enrollments.isStudentHistoricallyEnrolledInBatch(user.sub, batch.id))) {
+    if (batch && (teacher ? batch.teacherId !== user.sub : !(await this.enrollments.isStudentHistoricallyEnrolledInBatch(user.sub, batch.id)))) {
       throw new ForbiddenException('You are not allowed to file support for this class context.');
     }
 
@@ -271,7 +338,7 @@ export class SupportService {
     return doc;
   }
 
-  private requestFilter(query: SupportRequestListQuery): FilterQuery<SupportRequestMongoDocument> {
+  private requestFilter(query: SupportRequestListQuery, includeEmail = true): FilterQuery<SupportRequestMongoDocument> {
     const filter: FilterQuery<SupportRequestMongoDocument> = { deletedAt: { $exists: false } };
     if (query.studentId) filter.studentId = this.requiredText(query.studentId, 'studentId', 160);
     if (query.batchId) filter.batchId = this.requiredText(query.batchId, 'batchId', 160);
@@ -285,7 +352,7 @@ export class SupportService {
         { subject: expression },
         { requestId: expression },
         { studentName: expression },
-        { studentEmail: expression },
+        ...(includeEmail ? [{ studentEmail: expression }] : []),
         { batchName: expression },
         { sessionTitle: expression }
       ];
@@ -354,7 +421,7 @@ export class SupportService {
         eventType: 'support.request.created',
         category: 'support',
         summary: `Support request opened: ${doc.subject}`,
-        actor: { id: doc.studentId, name: doc.studentName, email: doc.studentEmail, roles: ['STUDENT'] },
+        actor: { id: doc.studentId, name: doc.studentName, email: doc.studentEmail, roles: user.roles },
         source: { collection: 'class_session_support_requests', id: doc.requestId },
         visibility: 'actor_only',
         metadata: {
@@ -366,14 +433,15 @@ export class SupportService {
     this.metrics?.classSessionSupportRequests.labels('created', doc.status, doc.issueType).inc();
   }
 
-  private toSupportRequest(doc: SupportRequestMongoDocument, audience: 'student' | 'admin'): SupportRequest {
+  private toSupportRequest(doc: SupportRequestMongoDocument, audience: 'student' | 'admin' | 'teacher' | 'teacher_related'): SupportRequest {
     const timestamps = doc as SupportRequestMongoDocument & { createdAt?: Date; updatedAt?: Date };
     return {
       id: doc.id,
       requestId: doc.requestId,
+      requesterRole: doc.requesterRole ?? 'student',
       studentId: doc.studentId,
       studentName: doc.studentName,
-      ...(doc.studentEmail ? { studentEmail: doc.studentEmail } : {}),
+      ...(audience !== 'teacher_related' && doc.studentEmail ? { studentEmail: doc.studentEmail } : {}),
       ...(doc.batchId ? { batchId: doc.batchId } : {}),
       ...(doc.batchName ? { batchName: doc.batchName } : {}),
       ...(doc.teacherId ? { teacherId: doc.teacherId } : {}),
@@ -385,9 +453,9 @@ export class SupportService {
       status: doc.status,
       subject: doc.subject,
       message: doc.message,
-      ...(doc.diagnostics ? { diagnostics: this.toDiagnostics(doc.diagnostics) } : {}),
-      ...(doc.assignedToUserId ? { assignedToUserId: doc.assignedToUserId } : {}),
-      ...(doc.assignedToName ? { assignedToName: doc.assignedToName } : {}),
+      ...(audience !== 'teacher_related' && doc.diagnostics ? { diagnostics: this.toDiagnostics(doc.diagnostics) } : {}),
+      ...(audience !== 'teacher_related' && doc.assignedToUserId ? { assignedToUserId: doc.assignedToUserId } : {}),
+      ...(audience !== 'teacher_related' && doc.assignedToName ? { assignedToName: doc.assignedToName } : {}),
       comments: (doc.comments ?? [])
         .filter((comment) => audience === 'admin' || comment.visibleToStudent)
         .map((comment) => ({

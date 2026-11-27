@@ -1,14 +1,13 @@
+import { CmsMediaService } from './cms-media.service';
 import { createHash, randomUUID } from 'node:crypto';
-import { BadRequestException, ConflictException, ForbiddenException, ServiceUnavailableException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Optional, ConflictException, ForbiddenException, ServiceUnavailableException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import {
   CMS_AUDIENCES,
   CMS_BLOCK_TYPES,
   CMS_PAGE_STATUSES,
   CMS_PAGE_TYPES,
-  type CmsAudience,
   type CmsBlockItem,
-  type CmsBlockType,
   type CmsLink,
   type CmsPage,
   type CmsPageContent,
@@ -18,8 +17,6 @@ import {
   type CmsPageBlock,
   type CmsPageListQuery,
   type CmsPageListResponse,
-  type CmsPageStatus,
-  type CmsPageType,
   type CmsPageWriteRequest,
   type CmsSeoMetadata
 } from '@native-sfu/contracts';
@@ -42,7 +39,8 @@ export class CmsService {
   constructor(
     @InjectModel(CmsPageDocument.name) private readonly pages: Model<CmsPageMongoDocument>,
     private readonly auditLogs: AuditLogsService,
-    @InjectModel(CmsPageRevisionDocument.name) private readonly revisions: Model<CmsPageRevisionMongoDocument>
+    @InjectModel(CmsPageRevisionDocument.name) private readonly revisions: Model<CmsPageRevisionMongoDocument>,
+    @Optional() private readonly media?: CmsMediaService
   ) {}
 
   async listAdminPages(query: CmsPageListQuery, user: AuthenticatedUser): Promise<CmsPageListResponse> {
@@ -65,6 +63,7 @@ export class CmsService {
   async createAdminPage(request: CmsPageWriteRequest, user: AuthenticatedUser): Promise<CmsPage> {
     this.assertAdmin(user);
     const payload = this.normalizeWriteRequest(request, true);
+    await this.media?.validateReferences(payload.sections ?? []);
     try {
       const created = await this.pages.create({
         ...payload,
@@ -95,6 +94,7 @@ export class CmsService {
     const before = this.auditSnapshot(page);
     this.assertRevision(page, request.expectedRevision);
     const patch = this.normalizeWriteRequest(request, false);
+    if (patch.sections) await this.media?.validateReferences(patch.sections);
     if (page.status === 'published') {
       for (const key of ['slug', 'locale', 'audience', 'pageType'] as const) {
         if (patch[key] !== undefined && patch[key] !== page[key]) throw new ConflictException('Unpublish the page before changing its slug, locale, audience or type.');
@@ -130,6 +130,7 @@ export class CmsService {
         this.assertRevision(page, expectedRevision);
         if (page.status === 'archived') throw new BadRequestException('Archived CMS pages cannot be published.');
         const content = this.contentSnapshot(page);
+        await this.media?.validateReferences(content.sections);
         const digest = this.contentDigest(content);
         if (page.status === 'published' && page.publishedVersion > 0 && page.publishedContent && this.contentDigest(page.publishedContent) === digest) { result = page; return; }
         const publishedAt = new Date();
@@ -293,6 +294,7 @@ export class CmsService {
       ...(section.title !== undefined ? { title: this.optionalText(section.title, 180) } : {}),
       ...(section.eyebrow !== undefined ? { eyebrow: this.optionalText(section.eyebrow, 80) } : {}),
       ...(section.body !== undefined ? { body: this.optionalText(section.body, 5000) } : {}),
+      ...(section.imageAlt !== undefined ? { imageAlt: this.optionalText(section.imageAlt, 300) ?? '' } : {}),
       ...(section.imageUrl !== undefined ? { imageUrl: this.normalizeUrl(section.imageUrl, `sections[${index}].imageUrl`) } : {}),
       ...(section.links !== undefined ? { links: this.normalizeLinks(section.links, `sections[${index}].links`) } : {}),
       ...(section.items !== undefined ? { items: this.normalizeItems(section.items, `sections[${index}].items`) } : {})
@@ -312,6 +314,7 @@ export class CmsService {
       ...(item.body !== undefined ? { body: this.optionalText(item.body, 1200) } : {}),
       ...(item.label !== undefined ? { label: this.optionalText(item.label, 120) } : {}),
       ...(item.url !== undefined ? { url: this.normalizeUrl(item.url, `${field}[${index}].url`) } : {}),
+      ...(item.imageAlt !== undefined ? { imageAlt: this.optionalText(item.imageAlt, 300) ?? '' } : {}),
       ...(item.imageUrl !== undefined ? { imageUrl: this.normalizeUrl(item.imageUrl, `${field}[${index}].imageUrl`) } : {})
     }));
   }

@@ -15,6 +15,7 @@ export interface LedgerEntryDraft {
   occurredAt: Date;
   memo: string;
   paymentId?: string;
+  promotionOrderId?: string;
   bookingOrderId?: string;
   refundId?: string;
   disputeId?: string;

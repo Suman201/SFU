@@ -97,6 +97,7 @@ export interface TeacherPublicContentListResponse {
 }
 
 export interface PublicTeacherListItem {
+  promotionTracking?: import('./promotions.js').PromotionTracking;
   introVideoUploaded?: boolean;
   introVideoDurationSeconds?: number;
   introVideoUrl?: string;
@@ -149,6 +150,7 @@ export interface PublicTeacherListResponse {
 }
 
 export interface TeacherPromotion {
+  checkoutOrderId?: string;
   promotionId: string;
   teacherId: string;
   teacherName?: string;
@@ -311,6 +313,7 @@ export interface ProfileUser {
 }
 
 export interface PublicTeacherProfile {
+  promotionTracking?: import('./promotions.js').PromotionTracking;
   hasPromotionBadge?: boolean;
   introVideoUploaded?: boolean;
   introVideoDurationSeconds?: number;

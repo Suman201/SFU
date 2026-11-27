@@ -1,3 +1,5 @@
+import { CmsMediaPicker } from '../media/cms-media-picker';
+import type { CmsMedia } from '@native-sfu/contracts';
 import { AuthService } from '../../../core/services/auth.service';
 import { DatePipe, TitleCasePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
@@ -25,7 +27,7 @@ type AudienceFilter = CmsAudience | 'all';
 @Component({
   selector: 'sfu-cms-pages',
   standalone: true,
-  imports: [DatePipe, ReactiveFormsModule, TitleCasePipe],
+  imports: [CmsMediaPicker, DatePipe, ReactiveFormsModule, TitleCasePipe],
   templateUrl: './cms-pages.html',
   styleUrl: './cms-pages.scss',
   changeDetection: ChangeDetectionStrategy.Eager
@@ -35,6 +37,7 @@ export class CmsPages implements OnInit {
   private readonly api = inject(AdminApiService);
   private readonly formBuilder = inject(FormBuilder);
 
+  protected readonly mediaTarget = signal<{ blockId: string; entry?: number; signature?: string } | null>(null);
   protected readonly rows = signal<CmsPage[]>([]);
   protected readonly selected = signal<CmsPage | null>(null);
   protected readonly loading = signal(false);
@@ -100,7 +103,18 @@ export class CmsPages implements OnInit {
     });
   }
 
-  protected updateSection(index: number, key: 'title' | 'eyebrow' | 'body' | 'imageUrl', value: string): void {
+  protected openMedia(index: number, entry?: number): void {
+    let blockId = ''; let signature: string | undefined;
+    this.mutateSections(sections => { const section = sections[index]; if (!section) return; if (!section.blockId || sections.filter(value => value.blockId === section.blockId).length > 1) section.blockId = crypto.randomUUID(); blockId = section.blockId; if (entry !== undefined) signature = JSON.stringify(section.items?.[entry]); });
+    if (blockId) this.mediaTarget.set({ blockId, entry, signature });
+  }
+  protected chooseImage(media: CmsMedia): void {
+    const target = this.mediaTarget(); if (!target) return;
+    this.mutateSections(sections => { const matches = sections.filter(value => value.blockId === target.blockId); const section = matches.length === 1 ? matches[0] : undefined; if (!section) throw new Error('Section changed.'); if (target.entry === undefined) { section.imageUrl = media.url; section.imageAlt = media.altText; } else { const item = section.items?.[target.entry]; if (!item || JSON.stringify(item) !== target.signature) throw new Error('Item changed.'); item.imageUrl = media.url; item.imageAlt = media.altText; } });
+    this.mediaTarget.set(null);
+  }
+
+  protected updateSection(index: number, key: 'title' | 'eyebrow' | 'body' | 'imageUrl' | 'imageAlt', value: string): void {
     this.mutateSections(sections => { if (sections[index]) sections[index] = { ...sections[index], [key]: value }; });
   }
 

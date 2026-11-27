@@ -116,7 +116,7 @@
     } @else if (featuredCount() && $index === featuredCount()) {
     <h2 class="placement-heading">More teachers</h2>
     }
-    <article class="teacher-card" [class.featured-card]="teacher.promotionPlacement === 'marketplace_featured'"
+    <article class="teacher-card" data-promotion-event="profile_click" [sfuPromotionTracking]="teacher.promotionTracking" [class.featured-card]="teacher.promotionPlacement === 'marketplace_featured'"
       [class.single-featured]="$first && featuredCount() === 1">
       <div class="teacher-intro">
         <img
@@ -131,7 +131,7 @@
           <div class="teacher-card-labels">
             @if (teacher.promoted) {
             <span class="promotion-badge"
-              >{{ teacher.promotionLabel || 'Promoted' }}</span
+              >Sponsored · {{ teacher.promotionLabel || 'Promoted' }}</span
             >
             }@if (teacher.location) {
             <span class="location">{{ teacher.location }}</span> }

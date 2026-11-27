@@ -265,6 +265,7 @@ export class LedgerEntryDocument {
   @Prop({ required: true, index: true }) occurredAt!: Date;
   @Prop({ required: true }) memo!: string;
   @Prop({ type: String, index: true }) paymentId?: string;
+  @Prop({ type: String, index: true }) promotionOrderId?: string;
   @Prop({ type: String, index: true }) bookingOrderId?: string;
   @Prop({ type: String }) refundId?: string;
   @Prop({ type: String }) disputeId?: string;

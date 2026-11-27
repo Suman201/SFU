@@ -1,3 +1,4 @@
+import { PromotionAnalyticsService } from '../promotions/promotion-analytics.service';
 import { batchMoneyFields } from '../teacher-batches/batch-money';
 import { PROMOTION_CURRENCY, PROMOTION_FEES_CENTS, teachingCategoryIds } from '@native-sfu/contracts';
 import { normalizeTeachingAreas } from '../teaching-catalog/teaching-areas';
@@ -270,7 +271,8 @@ export class ProfilesService {
     private readonly config: ConfigService,
     @Optional() private readonly auditLogs?: AuditLogsService,
     @Optional() private readonly catalog?: TeachingCatalogService,
-    @Optional() private readonly introVideos?: IntroVideoService
+    @Optional() private readonly introVideos?: IntroVideoService,
+    @Optional() private readonly promotionAnalytics?: PromotionAnalyticsService
   ) {}
 
   async getMyProfile(user: AuthenticatedUser): Promise<ProfileUser> {
@@ -433,6 +435,7 @@ export class ProfilesService {
     return {
       id: teacher.id,
       hasPromotionBadge: Boolean(badge),
+      ...(badge && this.promotionAnalytics ? { promotionTracking: await this.promotionAnalytics.profile(teacher.id) } : {}),
       displayName: teacher.displayName || teacher.name || 'Teacher',
       ...(teacher.headline ? { headline: teacher.headline } : {}),
       ...(teacher.bio ? { bio: teacher.bio } : {}),
@@ -602,10 +605,9 @@ export class ProfilesService {
       this.publicBatchSummaryMap(teacherIds),
       this.publicContentSummaryMap(teacherIds)
     ]);
+    const publicTeachers = teachers.map((teacher, index) => this.toPublicTeacherListItem(teacher, batchSummaryMap, contentSummaryMap, index < promotedTeachers.length ? placement : undefined));
     return {
-      teachers: teachers.map((teacher, index) => this.toPublicTeacherListItem(
-        teacher, batchSummaryMap, contentSummaryMap, index < promotedTeachers.length ? placement : undefined
-      )),
+      teachers: this.promotionAnalytics ? await this.promotionAnalytics.decorate(publicTeachers, placement) : publicTeachers,
       page,
       limit,
       total,
@@ -745,6 +747,7 @@ export class ProfilesService {
       throw new BadRequestException('Enter the amount received and a payment reference of up to 160 characters.');
     }
     const promotion = await this.findPromotion(promotionId);
+    if (promotion.checkoutOrderId) throw new ConflictException('Checkout payments are verified automatically.');
     const samePayment = (record: TeacherPromotionMongoDocument) =>
       record.paymentConfirmedAt && record.billingStatus === 'paid' &&
       record.paymentReference === reference && record.feeCents === request.feeCents;
@@ -790,6 +793,7 @@ export class ProfilesService {
     }
     const teacher = await this.findPromotionTeacher(promotion.teacherId);
     this.assertPromotionEligibleTeacher(teacher);
+    if (promotion.checkoutOrderId && ((request.startsAt && request.startsAt !== promotion.startsAt.toISOString()) || (request.endsAt && request.endsAt !== promotion.endsAt.toISOString()))) throw new ConflictException('A paid checkout campaign has an immutable schedule.');
     const range = this.promotionDateRange(request.startsAt ?? promotion.startsAt.toISOString(), request.endsAt ?? promotion.endsAt.toISOString());
     await this.assertNoOverlappingPromotion(promotion.teacherId, promotion.placement, range.startsAt, range.endsAt, promotion.promotionId);
     promotion.startsAt = range.startsAt;
@@ -2147,6 +2151,7 @@ export class ProfilesService {
   ): Promise<TeacherPromotion> {
     this.assertAdmin(actor);
     const promotion = await this.findPromotion(promotionId);
+    if (promotion.checkoutOrderId && (status !== 'paused' || (request.billingStatus && request.billingStatus !== promotion.billingStatus) || (request.paymentReference && request.paymentReference !== promotion.paymentReference))) throw new ConflictException('Use promotion orders to refund and cancel a checkout campaign.');
     const currentStatus = this.effectivePromotionStatus(promotion);
     if (['cancelled', 'rejected', 'expired'].includes(currentStatus) && status !== currentStatus) {
       throw new ConflictException('This campaign is already closed.');
@@ -2238,6 +2243,7 @@ export class ProfilesService {
 
   private toPromotion(promotion: TeacherPromotionMongoDocument, now = new Date()): TeacherPromotion {
     return {
+      ...(promotion.checkoutOrderId ? { checkoutOrderId: promotion.checkoutOrderId } : {}),
       promotionId: promotion.promotionId,
       teacherId: promotion.teacherId,
       ...(promotion.teacherName ? { teacherName: promotion.teacherName } : {}),

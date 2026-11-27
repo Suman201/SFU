@@ -308,7 +308,9 @@
             <label><span>Section title</span><input [value]="section.title || ''" (input)="updateSection(index, 'title', $any($event.target).value)" maxlength="180" /></label>
             <label><span>Eyebrow</span><input [value]="section.eyebrow || ''" (input)="updateSection(index, 'eyebrow', $any($event.target).value)" maxlength="120" /></label>
             <label><span>Section body</span><textarea rows="4" [value]="section.body || ''" (input)="updateSection(index, 'body', $any($event.target).value)"></textarea></label>
-            <label><span>Public image URL</span><input type="url" [value]="section.imageUrl || ''" (input)="updateSection(index, 'imageUrl', $any($event.target).value)" placeholder="https://…" /></label>
+            <button type="button" class="table-action" (click)="openMedia(index)">Choose section image</button>
+            <label><span>Image alternative text</span><input [value]="section.imageAlt || ''" (input)="updateSection(index, 'imageAlt', $any($event.target).value)" maxlength="300" /></label>
+            <label><span>Public image URL</span><input type="text" [value]="section.imageUrl || ''" (input)="updateSection(index, 'imageUrl', $any($event.target).value)" placeholder="https://…" /></label>
             <details><summary>Links and items</summary>
               @for (link of section.links || []; track $index; let entry = $index) {
                 <div class="section-entry"><label><span>Link label</span><input [value]="link.label" (input)="updateSectionEntry(index, 'links', entry, 'label', $any($event.target).value)" /></label>
@@ -317,6 +319,7 @@
               }
               <button type="button" class="table-action" [disabled]="(section.links?.length || 0) >= 8" (click)="addSectionEntry(index, 'links')">Add link</button>
               @for (item of section.items || []; track $index; let entry = $index) {
+                <button type="button" class="table-action" (click)="openMedia(index, entry)">Choose item image</button>
                 <div class="section-entry"><label><span>Item title or question</span><input [value]="item.title || ''" (input)="updateSectionEntry(index, 'items', entry, 'title', $any($event.target).value)" /></label>
                 <label><span>Item body or answer</span><textarea rows="3" [value]="item.body || ''" (input)="updateSectionEntry(index, 'items', entry, 'body', $any($event.target).value)"></textarea></label>
                 <button type="button" class="table-action" (click)="removeSectionEntry(index, 'items', entry)">Remove item</button></div>
@@ -419,3 +422,5 @@
   }
 </section>
 }
+
+@if (mediaTarget()) { <sfu-cms-media-picker (choose)="chooseImage($event)" (closed)="mediaTarget.set(null)" /> }

@@ -6,6 +6,9 @@ export function adminPermissionForRequest(
 ): AdminPortalPermission | 'super-admin' | null {
   const path = originalUrl.split('?')[0]!.replace(/^\/api(?:\/v\d+)?/, '');
   const read = method === 'GET' || method === 'HEAD';
+  if (path.startsWith('/admin/promotion-commerce/plans')) return read ? 'admin:content:read' : 'super-admin';
+  if (path.startsWith('/admin/promotion-commerce/analytics')) return 'admin:content:read';
+  if (path.startsWith('/admin/promotion-commerce/orders')) return read ? 'admin:finance:read' : 'admin:finance:write';
   if (/^\/(?:admin\/staff|roles|permissions)(?:\/|$)/.test(path))
     return 'super-admin';
   if (/^\/admin\/whiteboards(?:\/|$)/.test(path))

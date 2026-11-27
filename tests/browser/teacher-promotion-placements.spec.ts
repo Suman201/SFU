@@ -73,20 +73,20 @@ test('students see each paid placement on its own surface', async ({ page, reque
     await expect(featuredHeading).toBeVisible();
     await card(badge.name).getByRole('link', { name: 'View profile' }).click();
     await expect(page.getByRole('heading', { level: 1, name: badge.name })).toBeVisible();
-    await expect(page.getByText('Promoted profile', { exact: true })).toBeVisible();
+    await expect(page.getByText('Sponsored profile', { exact: true })).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByText('Promoted profile', { exact: true })).toBeInViewport();
+    await expect(page.getByText('Sponsored profile', { exact: true })).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath('public-profile-badge.png') });
 
     await connection.collection('teacher_promotions').updateOne({ teacherId: badge.id.toString() }, { $set: { status: 'paused' } });
     await page.reload();
     await expect(page.getByRole('heading', { level: 1, name: badge.name })).toBeVisible();
-    await expect(page.getByText('Promoted profile', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Sponsored profile', { exact: true })).toHaveCount(0);
     for (const teacher of [featured, boosted]) {
       await page.goto(stack.frontendBaseUrl + '/teachers/' + teacher.id);
       await expect(page.getByRole('heading', { level: 1, name: teacher.name })).toBeVisible();
-      await expect(page.getByText('Promoted profile', { exact: true })).toHaveCount(0);
+      await expect(page.getByText('Sponsored profile', { exact: true })).toHaveCount(0);
     }
   } finally {
     await connection.collection('teacher_promotions').deleteMany({ teacherId: { $in: teachers.map(t => t.id.toString()) } });
