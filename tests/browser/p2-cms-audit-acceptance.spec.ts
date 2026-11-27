@@ -119,7 +119,9 @@ test('versioned CMS, readonly history, contact delivery and audit privacy use re
     await editor.getByRole('row').filter({ hasText: subject }).getByRole('button', { name: 'Open', exact: true }).click();
     const reply = 'Private support reply ' + nonce;
     await editor.getByLabel('Reply by email', { exact: true }).fill(reply);
+    const replyResponse = editor.waitForResponse(r => r.url().endsWith('/' + submission.submissionId + '/reply') && r.request().method() === 'POST');
     await editor.getByRole('button', { name: 'Send reply', exact: true }).click();
+    expect((await replyResponse).ok()).toBe(true);
     await expect.poll(() => smtp.messages.some(message => message.raw.includes(reply))).toBe(true);
     const auditConnection = await mongoose.createConnection(process.env.MONGODB_URI!).asPromise();
     try {

@@ -53,7 +53,11 @@ test('merged payment screens use real settlement, earnings and Finance permissio
     await teacher.goto(web.origin + '/teacher/earnings');
     await expect(teacher.getByRole('heading', { name: 'Earnings', exact: true })).toBeVisible();
     await expect(teacher.getByText('$85.00', { exact: true }).first()).toBeVisible();
+    const menu = teacher.getByRole('button', { name: 'Menu', exact: true });
+    const collapsedHeader = await menu.isVisible();
+    if (collapsedHeader) await menu.click();
     await teacher.getByRole('button', { name: 'Switch to dark mode', exact: true }).click();
+    if (collapsedHeader) await teacher.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(teacher.locator('html')).toHaveAttribute('data-theme', 'dark');
     await expect.poll(() => teacher.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(10, 25, 48)');
     await teacher.setViewportSize({ width: 390, height: 844 });
