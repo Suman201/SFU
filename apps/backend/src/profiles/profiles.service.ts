@@ -308,7 +308,7 @@ export class ProfilesService {
       throw new BadRequestException('Update subjects through your teaching areas to keep levels and languages together.');
     }
     if (Object.keys(update).length) {
-      const changed = isTeacher && Object.entries(update).some(([key,value]) => key !== 'publicProfileEnabled' && JSON.stringify(doc.get ? doc.get(key) : (doc as any)[key]) !== JSON.stringify(value));
+      const changed = isTeacher && Object.entries(update).some(([key,value]) => !['publicProfileEnabled', 'phone', 'timezone', 'name'].includes(key) && JSON.stringify(doc.get ? doc.get(key) : (doc as any)[key]) !== JSON.stringify(value));
       Object.assign(doc, update);
       if (request.introVideoUrl?.trim()) doc.tutorIntroVideo = undefined;
       if (changed) invalidateTutorReview(doc);
@@ -327,9 +327,15 @@ export class ProfilesService {
       notifications: { ...current.notifications, ...request.notifications },
       privacy: { ...current.privacy, ...request.privacy }
     });
-    doc.settings = settings as UserMongoDocument['settings'];
-    await doc.save();
-    return this.toProfileUser(doc);
+    const fields: Record<string, unknown> = {};
+    for (const key of ['theme', 'locale'] as const) if (request[key] !== undefined) fields[`settings.${key}`] = settings[key];
+    for (const key of ['email', 'classReminders', 'chatMessages', 'announcements', 'recordingReady'] as const) if (request.notifications?.[key] !== undefined) fields[`settings.notifications.${key}`] = settings.notifications[key];
+    for (const key of ['showEmailOnPublicProfile', 'allowTeacherMessages'] as const) if (request.privacy?.[key] !== undefined) fields[`settings.privacy.${key}`] = settings.privacy[key];
+    if (!Object.keys(fields).length) return this.toProfileUser(doc);
+    const updated = await this.users.findOneAndUpdate({ _id: doc.id, status: 'active', disabled: false, deletedAt: { $exists: false } }, { $set: fields }, { new: true });
+    if (!updated) throw new NotFoundException('Account not found.');
+    await this.auditLogs?.record({ actor: user, action: 'account.preferences_updated', resourceType: 'user', resourceId: user.sub, metadata: { fields: Object.keys(fields) } });
+    return this.toProfileUser(updated);
   }
 
   async getTeacherLiveSettings(user: AuthenticatedUser): Promise<TeacherLiveClassSettingsResponse> {
@@ -1097,7 +1103,7 @@ export class ProfilesService {
   }
 
   private assertStudentUpdateOnly(request: UpdateMyProfileDto): void {
-    const blocked = Object.keys(request).filter((key) => !STUDENT_UPDATE_FIELDS.has(key as keyof UpdateMyProfileRequest));
+    const blocked = Object.keys(request).filter((key) => request[key as keyof UpdateMyProfileDto] !== undefined && !STUDENT_UPDATE_FIELDS.has(key as keyof UpdateMyProfileRequest));
     if (blocked.length) {
       throw new ForbiddenException('Student profiles cannot update teacher-only public profile fields.');
     }
@@ -1141,7 +1147,7 @@ export class ProfilesService {
     const theme = record.theme === 'light' || record.theme === 'dark' || record.theme === 'system' ? record.theme : DEFAULT_PROFILE_SETTINGS.theme;
     return {
       theme,
-      locale: this.normalizeLocale(typeof record.locale === 'string' ? record.locale : DEFAULT_PROFILE_SETTINGS.locale),
+      locale: this.storedLocale(record.locale),
       notifications: {
         email: this.booleanSetting(notifications.email, DEFAULT_PROFILE_SETTINGS.notifications.email),
         classReminders: this.booleanSetting(notifications.classReminders, DEFAULT_PROFILE_SETTINGS.notifications.classReminders),
@@ -1832,6 +1838,11 @@ export class ProfilesService {
     return typeof aliasValue === 'boolean' ? aliasValue : fallback;
   }
 
+  private storedLocale(value: unknown): string {
+    try { return this.normalizeLocale(typeof value === 'string' ? value : undefined); }
+    catch { return DEFAULT_PROFILE_SETTINGS.locale; }
+  }
+
   private normalizeLocale(value: string | undefined): string {
     const trimmed = value?.trim();
     if (!trimmed) {
@@ -1840,7 +1851,7 @@ export class ProfilesService {
     if (!/^[a-zA-Z]{2,3}(?:[-_][a-zA-Z0-9]{2,8}){0,2}$/.test(trimmed)) {
       throw new BadRequestException('Locale must be a valid language tag.');
     }
-    return trimmed.replace('_', '-');
+    try { const locale = Intl.getCanonicalLocales(trimmed.replace('_', '-'))[0]; if (!locale || !Intl.DateTimeFormat.supportedLocalesOf(locale).length) throw new Error(); return locale; } catch { throw new BadRequestException('Choose a supported date and number locale.'); }
   }
 
   private async teacherBatchAssociations(

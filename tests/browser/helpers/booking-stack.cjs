@@ -44,7 +44,12 @@ async function startBookingStack(options = {}) {
     HOST_CANDIDATE_PORT_RANGE: '48000-48049',
     PIPE_PORT_RANGE: '49000-49049',
     ENABLE_PIPE_TRANSPORT: 'false',
-    SMTP_ENABLED: 'false',
+    SMTP_ENABLED: options.smtpPort ? 'true' : 'false',
+    SMTP_HOST: '127.0.0.1',
+    SMTP_PORT: String(options.smtpPort || 1025),
+    SMTP_FROM_EMAIL: 'security@example.com',
+    SMTP_FROM_NAME: 'Sapiovian acceptance',
+    ADMIN_PORTAL_URL: 'http://127.0.0.1:4486',
     BOOKINGS_ENABLED: 'true',
     PAYMENTS_ENABLED: options.paymentsEnabled ? 'true' : 'false',
     PAYMENT_GATEWAY: 'test',
@@ -67,6 +72,9 @@ async function startBookingStack(options = {}) {
     .asPromise();
   if (options.debug) console.log('Fixture database connected');
   await setupBookingIndexes(connection);
+  await require('../../../scripts/setup-account-settings.cjs').setupAccountSettingsIndexes(connection);
+  await require('../../../scripts/setup-account-recovery.cjs').setupAccountRecoveryIndexes(connection);
+  if (options.oauth) await require('../../../scripts/setup-social-auth.cjs').setupSocialAuthIndexes(connection);
   if (options.debug) console.log('Fixture indexes ready');
   const root = path.resolve(__dirname, '../../..');
   const { AppModule } = require(
@@ -249,10 +257,19 @@ async function startBookingStack(options = {}) {
   });
   let app, worker, bookings;
   async function boot() {
-    const module = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(StripeGateway)
-      .useValue(gateway)
-      .compile();
+    let builder = Test.createTestingModule({ imports: [AppModule] }).overrideProvider(StripeGateway).useValue(gateway);
+    // Namespace real Redis rate limits per fixture, including imported storage providers.
+    builder = builder.overrideProvider(require('@nestjs/throttler').getStorageToken()).useFactory({
+      inject: [require(path.join(root, 'apps/backend/dist/redis/redis.service.js')).RedisService],
+      factory: redis => {
+        const storage = new (require(path.join(root, 'apps/backend/dist/common/throttling/redis-throttler.storage.js')).RedisThrottlerStorage)(redis);
+        const increment = storage.increment.bind(storage);
+        storage.increment = (key, ...args) => increment(uri.pathname + ':' + key, ...args);
+        return storage;
+      },
+    });
+    if (options.oauth) builder = builder.overrideProvider(require(path.join(root, 'apps/backend/dist/auth/social-oauth.client.js')).SocialOAuthClient).useValue(options.oauth);
+    const module = await builder.compile();
     if (options.debug) console.log('Nest compiled');
     app = module.createNestApplication({ rawBody: true, abortOnError: false });
     app.useLogger(options.debug ? ['error', 'warn'] : false);

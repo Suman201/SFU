@@ -1,10 +1,12 @@
 {
   "schemaVersion": 1,
   "declarations": {
+    "account.d.ts": "9340e79f7295899e35a328d6c044b7ad494a3e3f57cc7eb5c0080b6215c5d120",
     "admin-operations.d.ts": "8ed6ea153a9a188b4b864c7bbfd0410adb7c921f8d3448dc62d463eaaed10a2b",
     "admin.d.ts": "98b02c14a0da09504e7c214ea1733bae1ff51d3d83ac1e37a286859410f13204",
     "assessment-tasks.d.ts": "a19c373ec6772367bd4ce42e859be4235fb1e9c7c1fb5c620859fdbd0d0732b2",
     "assignments.d.ts": "12608e44fe3880f1fde9836663b597d305dfbd1cdc34fa3951497c473b1e41a5",
+    "billing.d.ts": "3ed9a705ae0de692e65979345fa6db5c416ce403567be70566ead504541fea4a",
     "bookings.d.ts": "1d055353a0e3298e99983839d61997eeff617a6eef0d0b16056349afa74db749",
     "calendar.d.ts": "0b7d108908f12321222a144e3955994b2f745960807fb6143ab3b931da66339c",
     "chat.d.ts": "044a60e39f62b1ce73336be5f6474f19af531dcacfb36217d41807f01663d878",
@@ -18,7 +20,7 @@
     "contact.d.ts": "80fc4ba7c58f729757b0e99dac94ac9b308be0f05ef13d9e586751b923298689",
     "errors.d.ts": "ed16d8377aa752a78f6bc136d022b4f8bf4f1247cdaa953872931107e196cf29",
     "events.d.ts": "0e6ad5dad8c280fcd92b39df65fb952faf3eed5c8dab60839f24cc22d61b0df5",
-    "index.d.ts": "28f33a2bfca92bd5c7ac0bb0aeb67cb742f7d0013cd5749a211ef4278a892dc4",
+    "index.d.ts": "646488a478d9565ad3237b1ba1566669e6b37424a090487b351ffcabaa29ede4",
     "ingest.d.ts": "662c4e0d1736ef5a1ae166f19f2ceb7ca9e0fa2cf8810b77951a3a0ffc9ed3a7",
     "ingest.test.d.ts": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
     "invoices.d.ts": "6d0344ebad7245e3eb6f6db3d3734db0a6c17869f5a4bb044ef3d67e55a15a92",

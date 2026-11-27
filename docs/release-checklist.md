@@ -13,7 +13,7 @@ Copy this checklist into the release record. Fill each evidence field with the c
 
 - [ ] Record a current encrypted backup and target-storage restore proof before applying changes.
 - [ ] Verify target MongoDB replica set/mongos and transaction support; no standalone publication fallback.
-- [ ] Review `setup:cms`, `setup:payments`, `setup:invoices`, `setup:scheduling`, `setup:bookings`, `setup:admin-operations`, `setup:social-auth` and `setup:account-recovery` for the actual changes in the release. Run only applicable scripts on the reviewed target.
+- [ ] Review `setup:cms`, `setup:payments`, `setup:invoices`, `setup:scheduling`, `setup:bookings`, `setup:admin-operations`, `setup:social-auth`, `setup:account-recovery` and `setup:account-settings` for the actual changes in the release. Run only applicable scripts on the reviewed target.
 - [ ] Run applicable setup twice, inspect unique-index diagnostics and compare row counts/content. Resolve duplicate data explicitly; never delete records to force index creation.
 - [ ] Confirm existing published pages, active sessions, reservations, invoices and recordings remain accessible only to permitted users.
 - [ ] Coordinate backend/admin rollout for CMS working-copy semantics; do not expose draft fields through old public handlers.
@@ -25,6 +25,7 @@ Copy this checklist into the release record. Fill each evidence field with the c
 - [ ] Verify readonly staff can inspect history and cannot write, support replies reach the configured receiver, and audit entries exclude content bodies/secrets.
 - [ ] Verify teacher preset, locked entry/admission, student permission feedback, keyboard focus/Escape, English/Hindi controls, media, reconnect and whiteboard legibility.
 - [ ] For password recovery, configure canonical website/admin origins and SMTP, provision recovery indexes, deploy compatible session-version checks to every backend node, and verify actual reset/confirmation email receipt.
+- [ ] For account settings and billing, follow [account settings](account-settings.md) and [customer billing](customer-billing.md): provision email indexes, deploy stable-session/full-token-hash support to every node, verify email notices, purchaser-only document access, saved defaults and original-currency totals. Retain compatible refresh-hash and credential-version handling in rollback builds.
 - [ ] When enabling Google/Apple, complete the [social sign-in live checklist](social-sign-in.md), provision identity/replay/TTL indexes, and verify teacher review and account-linking boundaries with real provider accounts.
 - [ ] Capture actual staging TURN/ingress, provider and physical-device/screen-reader checks as applicable.
 

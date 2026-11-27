@@ -1,5 +1,6 @@
 import {
   Component,
+  ChangeDetectorRef,
   DestroyRef,
   computed,
   effect,
@@ -16,6 +17,7 @@ import {
   type BookingCatalogue,
   type LessonOffer,
 } from '@native-sfu/contracts';
+import { BillingApi } from '../../core/services/billing-api.service';
 import { BookingsApi } from '../../core/services/bookings-api.service';
 import { AuthService } from '../../core/services/auth.service';
 import { CurrencyService } from '../../core/services/currency.service';
@@ -30,6 +32,10 @@ import { Footer } from '../../shared/footer/footer';
   styleUrl: './booking.scss',
 })
 export class Booking {
+  private readonly billingApi = inject(BillingApi);
+  private readonly changeDetector = inject(ChangeDetectorRef);
+  private billingOwner: string | null = null;
+  protected billingTouched = false;
   protected readonly auth = inject(AuthService);
   protected readonly money = inject(CurrencyService);
   private readonly api = inject(BookingsApi);
@@ -90,7 +96,17 @@ export class Booking {
   constructor() {
     effect(() => {
       const user = this.auth.user();
-      if (user && !this.billingName) this.billingName = user.name;
+      const owner = user?.id ?? null;
+      if (owner === this.billingOwner) return;
+      this.billingOwner = owner; this.billingTouched = false;
+      this.billingName = user?.name ?? ''; this.billingAddress = ''; this.billingCountry = ''; this.billingVat = '';
+      if (user) this.billingApi.profile().pipe(takeUntilDestroyed(this.destroy)).subscribe({
+        next: profile => {
+          if (this.auth.user()?.id !== owner || this.billingTouched || !profile.saved) return;
+          this.billingName = profile.name; this.billingAddress = profile.address; this.billingCountry = profile.countryCode; this.billingVat = profile.vatNumber;
+          this.changeDetector.markForCheck();
+        }, error: () => { /* Saved defaults are optional; the customer can enter details for this booking. */ },
+      });
     });
     this.route.paramMap
       .pipe(takeUntilDestroyed(this.destroy))

@@ -191,6 +191,14 @@ export class AuthService {
     return this.refreshRequest;
   }
 
+  refreshUser(): Observable<AuthUser> {
+    const generation = this.sessionGeneration;
+    return this.http.get<BackendUser | ApiEnvelope<BackendUser>>(`${API_BASE_URL}/auth/me`).pipe(map(response => {
+      if (generation !== this.sessionGeneration) throw new Error('The signed-in account changed.');
+      return this.applyUser(this.normalizeUser(this.unwrapResponse(response), this.decodeToken(this.accessToken() ?? '')));
+    }));
+  }
+
   logout(): void {
     const token = this.accessToken();
     if (token && !this.isTokenExpired(token)) {

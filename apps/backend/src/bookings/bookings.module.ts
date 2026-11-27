@@ -71,6 +71,7 @@ import {
     AdminBookingOperationsService,
     BookingWorkerService,
   ],
+  exports: [BookingBillingService],
   controllers: [
     BookingsPublicController,
     BookingsController,

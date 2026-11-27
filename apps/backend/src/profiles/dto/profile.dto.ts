@@ -181,54 +181,54 @@ export class UpdateMyProfileDto {
 }
 
 export class ProfileNotificationSettingsDto {
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   email?: boolean;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   classReminders?: boolean;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   chatMessages?: boolean;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   announcements?: boolean;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   recordingReady?: boolean;
 }
 
 export class ProfilePrivacySettingsDto {
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   showEmailOnPublicProfile?: boolean;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsBoolean()
   allowTeacherMessages?: boolean;
 }
 
 export class UpdateMySettingsDto {
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsIn(['system', 'light', 'dark'])
   theme?: 'system' | 'light' | 'dark';
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsString()
   @MaxLength(24)
   locale?: string;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsObject()
   @ValidateNested()
   @Type(() => ProfileNotificationSettingsDto)
   notifications?: ProfileNotificationSettingsDto;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsObject()
   @ValidateNested()
   @Type(() => ProfilePrivacySettingsDto)

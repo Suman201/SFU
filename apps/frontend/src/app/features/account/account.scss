@@ -1,0 +1,29 @@
+.account-shell { min-width: 0; }
+.account-tabs { display:flex; gap:8px; flex-wrap:wrap; }
+.account-tabs a { padding:9px 14px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); text-decoration:none; font-size:14px; font-weight:650; }
+.account-tabs a[aria-current='page'] { border-color:var(--accent); background:var(--accent-soft); }
+.account-form { display:grid; gap:12px; min-width:0; }
+label { display:grid; gap:7px; min-width:0; color:var(--text); font-size:14px; }
+input,select,textarea { box-sizing:border-box; width:100%; min-width:0; max-width:100%; min-height:42px; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:var(--control-bg,var(--panel)); color:var(--text); font:inherit; }
+textarea { min-height:90px; resize:vertical; }
+.check-row { display:flex; align-items:center; gap:9px; }
+.check-row input { width:18px; height:18px; min-height:18px; flex:0 0 18px; accent-color:var(--accent); }
+.action-button { justify-self:start; min-height:42px; }
+.small { font-size:13px; }
+.account-email { overflow-wrap:anywhere; font-weight:650; }
+.provider-rows { display:grid; gap:8px; }
+.provider-row { display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding:12px; border:1px solid var(--line); border-radius:8px; }
+.provider-row span { color:var(--muted); margin-right:auto; }
+.notice p { color:inherit; }
+.account-shell a:not(.table-action):not(.account-tabs a) { color:var(--accent-strong); }
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible { outline:2px solid var(--accent-strong); outline-offset:3px; }
+.billing-fields { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; }
+.billing-filters { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; padding:14px; }
+.billing-filters label { flex:1 1 160px; }
+.summary-count { display:block; margin-top:4px; color:var(--muted); font-size:12px; }
+@media(max-width:480px) { .billing-fields { grid-template-columns:minmax(0,1fr); } }
+
+.account-shell .data-table-toolbar h2 { margin:0; font-size:18px; }
+.account-shell .data-table-toolbar p { margin:4px 0 0; color:var(--muted); font-size:13px; }
+
+.account-shell .data-pill.info { color: var(--text); }

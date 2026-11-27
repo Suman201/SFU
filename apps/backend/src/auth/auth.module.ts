@@ -18,6 +18,6 @@ import { JwtAuthGuard } from './jwt-auth.guard';
   imports: [JwtModule.register({}), MongooseModule.forFeature([{ name: SocialAuthFlow.name, schema: SocialAuthFlowSchema }, { name: PasswordRecoveryJob.name, schema: PasswordRecoveryJobSchema }]), DatabaseModule, AuditLogsModule, EmailModule],
   controllers: [AuthController, SocialAuthController],
   providers: [PasswordRecoveryService, AuthService, JwtAuthGuard, SocialOAuthClient, SocialAuthService],
-  exports: [AuthService, JwtAuthGuard]
+  exports: [AuthService, JwtAuthGuard, SocialAuthService]
 })
 export class AuthModule {}

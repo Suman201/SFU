@@ -3,6 +3,11 @@ import { authGuard, guestGuard, roleGuard } from './core/services/auth.guards';
 import { RoomComponent } from './features/room/room.component';
 
 export const routes: Routes = [
+  { path: 'account', redirectTo: 'account/settings', pathMatch: 'full' },
+  { path: 'account/billing', canActivate: [authGuard], loadComponent: () => import('./features/account/billing-centre').then(m => m.BillingCentre) },
+  { path: 'account/settings', canActivate: [authGuard], loadComponent: () => import('./features/account/account-settings').then(m => m.AccountSettings) },
+  { path: 'account/confirm-email', data: { mode: 'email' }, loadComponent: () => import('./features/account/account-action').then(m => m.AccountAction) },
+  { path: 'account/link-provider', data: { mode: 'provider' }, loadComponent: () => import('./features/account/account-action').then(m => m.AccountAction) },
   { path: 'forgot-password', data: { mode: 'request' }, loadComponent: () => import('./features/auth/recovery/password-recovery').then(module => module.PasswordRecovery) },
   { path: 'reset-password', data: { mode: 'reset' }, loadComponent: () => import('./features/auth/recovery/password-recovery').then(module => module.PasswordRecovery) },
   { path: 'auth/social/callback', loadComponent: () => import('./features/auth/social/social-callback').then(module => module.SocialCallback) },

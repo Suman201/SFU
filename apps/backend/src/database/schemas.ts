@@ -137,6 +137,8 @@ export const UserSettingsSchema = SchemaFactory.createForClass(UserSettingsDocum
 
 @Schema({ collection: 'users', timestamps: true })
 export class UserDocument {
+  @Prop({ type: Object, select: false }) billingProfile?: { name: string; address: string; countryCode: string; vatNumber: string };
+  @Prop({ type: Number, select: false }) billingProfileVersion?: number;
   @Prop({ type: String, index: true }) adminRoleId?: string;
   @Prop({ type: String, enum: SUPPORTED_CURRENCIES })
   preferredCurrency?: CurrencyCode;
@@ -1678,6 +1680,9 @@ export class SessionDocument {
   @Prop({ required: true, index: true })
   userId!: string;
 
+  @Prop({ type: Number }) refreshTokenHashVersion?: number;
+  createdAt!: Date;
+  updatedAt!: Date;
   @Prop({ required: true, select: false })
   refreshTokenHash!: string;
 

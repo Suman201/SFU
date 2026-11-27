@@ -210,3 +210,7 @@ After building contracts/backend and reviewing the database target, provide `MON
 Deploy the backend and admin client together: saves update a working copy and explicit publication atomically archives it and changes the public snapshot. Legacy published content remains visible and receives numbered history on the next explicit publication. There is no retrospective legal approval or fabricated old version. Custom public pages are served at `/pages/:slug`.
 
 Before rollout, complete [release checks, rollback, escalation and independent signoff](release-checklist.md), review [P2 behavior and external proof](p2-release-readiness.md), and verify the [generated environment inventory](environment-reference.md). `npm run release:check` detects stale inventory/missing documentation; it does not approve deployment. Roll back only to a compatible build preserving published snapshots and private drafts. Keep additive history/indexes; use restore-to-draft plus explicit publish to reverse a content change.
+
+## Account settings and billing
+
+Follow [account settings](account-settings.md) and [customer billing](customer-billing.md) for session compatibility, verified email, provider linking and purchaser-owned documents. Build and run `npm run setup:account-settings` on the reviewed MongoDB replica set before enabling SMTP in the new build. Deploy stable-session and versioned full-token refresh-hash support to all backend nodes together; retain it in rollback builds. Saved billing defaults are additive and never rewrite issued fiscal documents.

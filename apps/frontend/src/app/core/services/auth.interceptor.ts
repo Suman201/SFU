@@ -13,7 +13,7 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
   if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}/`)) return next(request);
   request = request.clone({ setHeaders: { [SFU_PROTOCOL_HEADER]: String(SFU_PROTOCOL_VERSION) } });
   const publicAuth = /\/auth\/(login|register|refresh|forgot-password|reset-password)$/.test(url.pathname);
-  if (publicAuth || url.pathname.includes('/auth/social/')) return next(request);
+  if (publicAuth || url.pathname.endsWith('/account/email/confirm') || url.pathname.includes('/auth/social/')) return next(request);
   if (url.pathname.endsWith('/auth/logout')) {
     const token = auth.accessToken();
     return next(token ? request.clone({ setHeaders: { Authorization: `Bearer ${token}` } }) : request);

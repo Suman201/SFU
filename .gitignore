@@ -53,3 +53,7 @@ coverage
 # Finance acceptance evidence.
 /reports/finance/
 /test-results/finance/
+
+# Account settings and billing acceptance evidence.
+/reports/account/
+/test-results/account/

@@ -1,0 +1,83 @@
+<sfu-header />
+<main class="pay-shell site-page account-shell">
+  <header class="pay-head"><div><p class="eyebrow">Your account</p><h1>Account settings</h1><p>Manage your details, preferences and sign-in security.</p></div><a class="table-action" [routerLink]="auth.role() === 'teacher' ? '/teacher/profile' : '/student/profile'">Edit profile</a></header>
+  <nav class="account-tabs" aria-label="Account"><a routerLink="/account/settings" aria-current="page">Account settings</a><a routerLink="/account/billing">Billing</a></nav>
+  @if (error()) { <p class="notice error" role="alert">{{ error() }}</p> }
+  @if (success()) { <p class="notice success" role="status">{{ success() }}</p> }
+  @if (loading()) { <p role="status">Loading account settings…</p> }
+  @if (data(); as account) {
+    <div class="split">
+      <section class="panel-card" aria-labelledby="account-details-title"><h2 id="account-details-title">Account details</h2>
+        <form (ngSubmit)="saveDetails()" class="account-form">
+          <label>Display name<input name="displayName" autocomplete="name" required minlength="2" maxlength="120" [(ngModel)]="displayName" /></label>
+          <label>Phone<input name="phone" type="tel" autocomplete="tel" maxlength="40" [(ngModel)]="phone" /></label>
+          <label>Time zone<input name="timezone" list="account-timezones" maxlength="80" placeholder="e.g. Europe/London" [(ngModel)]="timezone" /></label>
+          <datalist id="account-timezones"><option value="Europe/London"></option><option value="Europe/Berlin"></option><option value="Asia/Kolkata"></option><option value="America/New_York"></option><option value="America/Los_Angeles"></option><option value="Australia/Sydney"></option><option value="UTC"></option></datalist>
+          @if (auth.role() === 'teacher') { <p class="muted small">Changing your display name may require a new public profile review.</p> }
+          <button class="action-button" type="submit" [disabled]="!!busy()">Save account details</button>
+        </form>
+      </section>
+      <section class="panel-card" aria-labelledby="preferences-title"><h2 id="preferences-title">Preferences</h2>
+        <form (ngSubmit)="savePreferences()" class="account-form">
+          <label>Appearance<select name="appearance" [(ngModel)]="themePreference"><option value="system">Use device setting</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+          <label>Date and number locale<input name="locale" maxlength="24" placeholder="en-GB" [(ngModel)]="locale" /></label>
+          <p class="muted small">Used for dates in account and billing history.</p>
+          <button class="action-button" type="submit" [disabled]="!!busy()">Save preferences</button>
+        </form>
+        <label>Display currency<select name="displayCurrency" [ngModel]="currency.currency()" (ngModelChange)="currency.select($event)">@for (code of currency.currencies; track code) { <option [value]="code">{{ code }}</option> }</select></label>
+        <p class="muted small">Display currency saves automatically. Payments retain their original currency.</p>
+        @if (currency.notice()) { <p class="notice attention" role="status">{{ currency.notice() }}</p> }
+      </section>
+      <section class="panel-card" aria-labelledby="notification-title"><h2 id="notification-title">Notifications</h2>
+        <form (ngSubmit)="saveNotifications()" class="account-form">
+          <label class="check-row"><input name="notificationEmail" type="checkbox" [(ngModel)]="notificationEmail" /> Email notifications</label>
+          <label class="check-row"><input name="classReminders" type="checkbox" [(ngModel)]="classReminders" /> Class reminders</label>
+          <label class="check-row"><input name="chatMessages" type="checkbox" [(ngModel)]="chatMessages" /> Chat messages</label>
+          <label class="check-row"><input name="announcements" type="checkbox" [(ngModel)]="announcements" /> Announcements</label>
+          <label class="check-row"><input name="recordingReady" type="checkbox" [(ngModel)]="recordingReady" /> Recording availability</label>
+          <p class="muted small">Security and billing messages remain available regardless of these preferences.</p>
+          <button class="action-button" type="submit" [disabled]="!!busy()">Save notifications</button>
+        </form>
+      </section>
+      <section class="panel-card" aria-labelledby="privacy-title"><h2 id="privacy-title">Privacy</h2><form (ngSubmit)="savePrivacy()" class="account-form">
+        @if (auth.role() === 'teacher') { <label class="check-row"><input name="showEmail" type="checkbox" [(ngModel)]="showEmail" /> Show email on my public teacher profile</label> }
+        <label class="check-row"><input name="allowMessages" type="checkbox" [(ngModel)]="allowMessages" /> Allow teacher messages</label>
+        <button class="action-button" type="submit" [disabled]="!!busy()">Save privacy preferences</button>
+      </form><a routerLink="/privacy-policy">Privacy policy</a></section>
+      <section class="panel-card" aria-labelledby="email-title"><h2 id="email-title">Sign-in email</h2><p class="account-email">{{ account.security.email }}</p><p>{{ account.security.emailVerified ? 'Verified' : 'Not verified yet' }}</p>
+        @if (!account.security.emailDeliveryAvailable) { <p class="notice attention">Email verification is not available yet. Contact support if you need an email change.</p> }
+        @if (account.security.hasPassword) { <form (ngSubmit)="requestEmail()" class="account-form">
+          <label>Email to verify<input name="email" type="email" autocomplete="email" required maxlength="254" [(ngModel)]="email" /></label>
+          <label>Current password for email verification<input name="emailPassword" type="password" autocomplete="current-password" required maxlength="128" [(ngModel)]="emailPassword" /></label>
+          <p class="muted small">Your sign-in email changes only after you confirm the new address. A change signs out all devices. Issued invoices retain their original details.</p>
+          <button class="action-button" type="submit" [disabled]="!!busy() || !account.security.emailDeliveryAvailable">Send verification email</button>
+        </form> } @else { <p>Set a password through account recovery before changing your email.</p> }
+        @if (account.security.pendingEmail; as pending) { <div class="notice attention"><p>Pending verification: {{ pending.email }} · {{ pending.status === 'failed' ? 'Delivery failed. Request a new link.' : 'Check this inbox for the newest link.' }}</p><button class="table-action" type="button" [disabled]="!!busy()" (click)="cancelEmail()">Cancel email change</button></div> }
+      </section>
+      <section class="panel-card" aria-labelledby="password-title"><h2 id="password-title">Password</h2>
+        @if (account.security.hasPassword) { <form (ngSubmit)="changePassword()" class="account-form">
+          <label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required maxlength="128" [(ngModel)]="currentPassword" /></label>
+          <label>New password<input name="newPassword" type="password" autocomplete="new-password" required minlength="10" maxlength="72" [(ngModel)]="newPassword" /></label>
+          <label>Confirm new password<input name="confirmPassword" type="password" autocomplete="new-password" required minlength="10" maxlength="72" [(ngModel)]="confirmPassword" /></label>
+          <p class="muted small">Use at least 10 characters. All devices are signed out after a password change.</p>
+          <button class="action-button" type="submit" [disabled]="!!busy()">Change password</button>
+        </form> } @else { <p>You sign in with a provider. Use account recovery to add a password to this account.</p> }
+        <a routerLink="/forgot-password" [queryParams]="{ role: account.profile.primaryRole }">Set or recover a password</a>
+      </section>
+    </div>
+    <section class="panel-card" aria-labelledby="sign-in-method-title"><h2 id="sign-in-method-title">Connected sign-in methods</h2><p>Connect a provider to this account after confirming your password.</p>
+      @if (account.security.hasPassword) { <label>Current password for sign-in methods<input name="providerPassword" type="password" autocomplete="current-password" maxlength="128" [(ngModel)]="providerPassword" /></label> }
+      @if (desktop) { <p class="notice attention">Connect additional sign-in providers from your account on the website.</p> }
+      <div class="provider-rows">@for (provider of ['google', 'apple']; track provider) { <div class="provider-row"><strong>{{ provider === 'google' ? 'Google' : 'Apple' }}</strong>
+        @if (provider === 'google' ? account.security.googleLinked : account.security.appleLinked) { <span>Connected</span><button class="table-action" type="button" [disabled]="!!busy() || !account.security.hasPassword || !providerPassword" (click)="disconnect($any(provider))">Disconnect {{ provider === 'google' ? 'Google' : 'Apple' }}</button> }
+        @else { <span>{{ (provider === 'google' ? providers().google : providers().apple) ? 'Not connected' : 'Not available yet' }}</span><button class="table-action" type="button" [disabled]="desktop || !!busy() || !account.security.hasPassword || !providerPassword || !(provider === 'google' ? providers().google : providers().apple)" (click)="connect($any(provider))">Connect {{ provider === 'google' ? 'Google' : 'Apple' }}</button> }
+      </div> }</div>
+    </section>
+    <section class="data-table-shell" aria-labelledby="sessions-title"><div class="data-table-toolbar"><div><h2 id="sessions-title">Signed-in devices</h2><p>{{ sessions()?.total ?? 0 }} active sessions</p></div><div class="table-actions"><button class="table-action" type="button" [disabled]="!!busy()" (click)="loadSessions(sessions()?.page)">Refresh devices</button><button class="table-action" type="button" [disabled]="!!busy()" (click)="revokeOthers()">Sign out other devices</button></div></div>
+      <div class="data-table-wrap" style="--data-table-min-width: 700px"><table class="data-table"><thead><tr><th>Device</th><th>IP address</th><th>Signed in</th><th>Expires</th><th>Action</th></tr></thead><tbody>
+        @for (row of sessions()?.items ?? []; track row.id) { <tr><td><div class="cell-stack"><strong>{{ row.device }}</strong>@if (row.current) { <small>This device</small> }</div></td><td>{{ row.ipAddress ?? 'Unavailable' }}</td><td>{{ date(row.signedInAt) }}</td><td>{{ date(row.expiresAt) }}</td><td><button class="table-action" type="button" [disabled]="!!busy()" (click)="revoke(row)">Sign out {{ row.current ? 'this device' : 'device' }}</button></td></tr> }
+      </tbody></table></div>
+      @if (sessions(); as list) { <footer class="data-table-footer"><span>Page {{ list.page }} · {{ list.total }} devices</span><div class="table-actions"><button class="table-action" type="button" [disabled]="list.page === 1 || !!busy()" (click)="loadSessions(list.page - 1)">Previous devices</button><button class="table-action" type="button" [disabled]="list.page * list.limit >= list.total || !!busy()" (click)="loadSessions(list.page + 1)">Next devices</button></div></footer> }
+    </section>
+  }
+</main><sfu-footer />

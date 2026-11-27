@@ -37,11 +37,11 @@ export class SocialAuthService implements OnModuleInit {
     return { google: this.oauth.enabled('google'), apple: this.oauth.enabled('apple') };
   }
 
-  async start(provider: SocialProvider, role: 'student' | 'teacher', challenge: string): Promise<{ authorizationUrl: string }> {
+  async start(provider: SocialProvider, role: 'student' | 'teacher', challenge: string, link?: { userId: string; tokenId: string; authVersion: number }): Promise<{ authorizationUrl: string }> {
     if (!this.oauth.enabled(provider)) throw new ServiceUnavailableException('This sign-in provider is not available yet. Please use email and password.');
     const state = this.opaque(), nonce = this.opaque();
     const codeVerifier = provider === 'google' ? this.opaque() : undefined;
-    await this.flows.create({ stateHash: this.hash(state), nonce, codeVerifier, provider, role, challenge, status: 'pending', expiresAt: new Date(Date.now() + 10 * 60000) });
+    await this.flows.create({ stateHash: this.hash(state), nonce, codeVerifier, provider, role, challenge, ...(link ? { purpose: 'link', linkUserId: link.userId, linkTokenId: link.tokenId, linkAuthVersion: link.authVersion } : {}), status: 'pending', expiresAt: new Date(Date.now() + 10 * 60000) });
     return { authorizationUrl: this.oauth.authorizationUrl(provider, state, nonce, codeVerifier) };
   }
 
@@ -51,6 +51,7 @@ export class SocialAuthService implements OnModuleInit {
     if (!input.state || input.state.length > 128 || !this.oauth.enabled(provider)) return destination.href;
     const flow = await this.flows.findOneAndUpdate({ stateHash: this.hash(input.state), provider, status: 'pending', expiresAt: { $gt: new Date() } }, { $set: { status: 'processing' } }, { new: true });
     if (!flow) return destination.href;
+    if (flow.purpose === 'link') destination.pathname = '/account/link-provider';
     try {
       if (input.error) {
         destination.hash = 'error=cancelled';
@@ -70,7 +71,7 @@ export class SocialAuthService implements OnModuleInit {
   }
 
   async exchange(ticket: string, verifier: string, credentials: { email: string; password: string } | undefined, context: RequestContext): Promise<TokenPair> {
-    const flow = await this.flows.findOneAndUpdate({ ticketHash: this.hash(ticket), challenge: this.hash(verifier), status: 'ready', attempts: { $lt: 5 }, expiresAt: { $gt: new Date() } }, { $set: { status: 'exchanging' }, $inc: { attempts: 1 } }, { new: true });
+    const flow = await this.flows.findOneAndUpdate({ purpose: { $ne: 'link' }, ticketHash: this.hash(ticket), challenge: this.hash(verifier), status: 'ready', attempts: { $lt: 5 }, expiresAt: { $gt: new Date() } }, { $set: { status: 'exchanging' }, $inc: { attempts: 1 } }, { new: true });
     if (!flow?.identity) throw new UnauthorizedException('This sign-in attempt expired or belongs to another browser. Please start again.');
     try {
       const result = await this.auth.socialLogin(flow.identity, flow.role, credentials, context);
@@ -80,6 +81,12 @@ export class SocialAuthService implements OnModuleInit {
       await this.flows.updateOne({ _id: flow.id, status: 'exchanging' }, { $set: { status: 'ready' } });
       throw error;
     }
+  }
+  async completeLink(ticket: string, verifier: string, user: { sub: string; tokenId: string }, context: RequestContext): Promise<void> {
+    const flow = await this.flows.findOneAndUpdate({ purpose: 'link', linkUserId: user.sub, linkTokenId: user.tokenId, ticketHash: this.hash(ticket), challenge: this.hash(verifier), status: 'ready', expiresAt: { $gt: new Date() } }, { $set: { status: 'exchanging' } }, { new: true });
+    if (!flow?.identity || flow.linkAuthVersion === undefined) throw new UnauthorizedException('This connection attempt expired or belongs to another account or device.');
+    try { await this.auth.linkSocialIdentity(user.sub, flow.identity, flow.linkAuthVersion, flow.role, context); }
+    finally { await this.flows.deleteOne({ _id: flow.id }); }
   }
   private opaque(): string { return randomBytes(32).toString('base64url'); }
   private hash(value: string): string { return createHash('sha256').update(value).digest('hex'); }

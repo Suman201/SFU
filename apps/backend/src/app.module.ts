@@ -1,3 +1,5 @@
+import { BillingModule } from './billing/billing.module';
+import { AccountModule } from './account/account.module';
 import { AdminWhiteboardsModule } from './admin-whiteboards/admin-whiteboards.module';
 import { AdminStaffModule } from './admin-staff/admin-staff.module';
 import { BookingsModule } from './bookings/bookings.module';
@@ -225,6 +227,8 @@ import { UsersModule } from './users/users.module';
     ContactModule,
     ClassSessionsModule,
     SessionsModule,
+    AccountModule,
+    BillingModule,
     RecordingsModule,
     ProfilesModule,
     NotificationsModule,

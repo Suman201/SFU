@@ -116,6 +116,7 @@
       <a routerLink="/" fragment="how-it-works">How it works</a>
       <a routerLink="/" fragment="for-teachers">For teachers</a>
       }
+      @if (auth.authenticated()) { <a routerLink="/account/settings" routerLinkActive="active" ariaCurrentWhenActive="page">Account</a><a routerLink="/account/billing" routerLinkActive="active" ariaCurrentWhenActive="page">Billing</a> }
     </nav>
     <div class="header-actions">
       <sfu-currency-selector />

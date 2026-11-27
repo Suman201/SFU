@@ -65,6 +65,7 @@ type SfuSocket = Socket<ClientToServerEvents, ServerToClientEvents> & {
     roomId?: string;
     requestId?: string;
     authVersion?: number;
+    tokenId?: string;
   };
 };
 
@@ -235,7 +236,7 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
   private async revokeRecoveredSockets(): Promise<void> {
     const sockets = await this.server.fetchSockets();
-    const candidates = sockets.filter(socket => socket.data.user?.id).map(socket => ({ socketId: socket.id, userId: socket.data.user.id as string, authVersion: (socket.data.authVersion as number | undefined) ?? 0 }));
+    const candidates = sockets.filter(socket => socket.data.user?.id).map(socket => ({ socketId: socket.id, userId: socket.data.user.id as string, authVersion: (socket.data.authVersion as number | undefined) ?? 0, tokenId: socket.data.tokenId as string | undefined }));
     const revoked = new Set(await this.auth.revokedSocketSessions(candidates));
     for (const socket of sockets) if (revoked.has(socket.id)) socket.disconnect(true);
   }
@@ -263,6 +264,7 @@ export class RoomsGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     }
     socket.data.user = { id: payload.sub, email: payload.email, roles: payload.roles };
     socket.data.authVersion = payload.authVersion ?? 0;
+    socket.data.tokenId = payload.tokenId;
     if (payload.roles.includes('ADMIN') && !payload.roles.includes('SUPER_ADMIN')) {
       // Recheck connected administrators so assigning a profile removes legacy bypasses.
       socket.use((_events, next) => {

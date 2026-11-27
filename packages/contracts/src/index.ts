@@ -47,3 +47,6 @@ export * from './admin-operations.js';
 export * from './payments.js';
 
 export * from './protocol.js';
+
+export * from './account.js';
+export * from './billing.js';

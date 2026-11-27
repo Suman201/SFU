@@ -96,7 +96,7 @@
         } @else if(auth.role()!=='student'){
         <p>Bookings are available from a student account.</p>
         } @else {
-        <form class="billing-form" (ngSubmit)="reserve($event)">
+        <form class="billing-form" (input)="billingTouched = true" (change)="billingTouched = true" (ngSubmit)="reserve($event)">
           <label
             >Billing name<input
               name="billingName"

@@ -81,6 +81,13 @@ describe('ProfilesService', () => {
     expect(updated.batches).toEqual([]);
   });
 
+  it('keeps legacy invalid locales readable while rejecting new invalid locale writes', async () => {
+    const student = userDoc({ id: 'student-1', roles: ['STUDENT'], displayName: 'Student One', email: 'student@example.test', settings: { locale: 'bad-legacy-locale-value' } });
+    const { service } = createHarness({ findUser: student });
+    expect((await service.getMyProfile(authUser('student-1', ['STUDENT']))).settings.locale).toBe('en-US');
+    await expect(service.updateMySettings(authUser('student-1', ['STUDENT']), { locale: 'bad-new-locale-value' })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('persists normalized self settings with partial updates', async () => {
     const teacher = userDoc({
       id: 'teacher-1',
@@ -112,7 +119,7 @@ describe('ProfilesService', () => {
       privacy: { showEmailOnPublicProfile: true }
     });
 
-    expect(teacher.save).toHaveBeenCalled();
+    expect(teacher.save).not.toHaveBeenCalled();
     const { liveClassDefaults, ...settingsWithoutLiveDefaults } = updated.settings;
     expect(settingsWithoutLiveDefaults).toEqual({
       theme: 'light',
@@ -646,6 +653,16 @@ describe('ProfilesService', () => {
     const publicTeachers = options.publicTeachers ?? (options.publicTeacher ? [options.publicTeacher] : []);
     const promotionValues = [...(options.promotions ?? [])];
     const users = {
+      findOneAndUpdate: jest.fn(async (_filter: Record<string, unknown>, change: { $set: Record<string, unknown> }) => {
+        const target = options.findUser;
+        if (!target) return null;
+        for (const [path, value] of Object.entries(change.$set)) {
+          const parts = path.split('.'); let current = target;
+          for (const part of parts.slice(0, -1)) current = current[part] as Record<string, unknown>;
+          current[parts[parts.length - 1]!] = value;
+        }
+        return target;
+      }),
       findOne: jest.fn((filter: Record<string, unknown>) => {
         const candidates = [
           ...(options.findUser ? [options.findUser] : []),

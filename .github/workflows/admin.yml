@@ -82,6 +82,8 @@ jobs:
         run: npm run test:admin:browser
       - name: Verify booking earnings, currency payouts and historical finance review
         run: npm run test:finance:browser
+      - name: Verify account settings and customer billing in all browsers
+        run: npm run test:account:browser
       - name: Build classroom acceptance frontend
         run: npm run build:p0:classroom
       - name: Verify backup restore and monitoring delivery
@@ -116,6 +118,8 @@ jobs:
           path: |
             reports/admin-ci/
             test-results/admin/
+            reports/account/
+            test-results/account/
             reports/finance/
             test-results/finance/
             reports/p0/

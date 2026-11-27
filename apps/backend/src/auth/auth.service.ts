@@ -1,10 +1,10 @@
 import { PasswordRecoveryService } from './password-recovery.service';
-import { ConflictException, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, Optional, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import bcrypt from 'bcrypt';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { Model } from 'mongoose';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import {
@@ -52,6 +52,7 @@ export interface RequestContext {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   constructor(
     @InjectModel(UserDocument.name) private readonly users: Model<UserMongoDocument>,
     @InjectModel(SessionDocument.name) private readonly sessions: Model<SessionMongoDocument>,
@@ -136,6 +137,18 @@ export class AuthService {
     return this.issueTokens(user, context);
   }
 
+  async linkSocialIdentity(userId: string, identity: SocialIdentity, version: number, role: 'student' | 'teacher', context: RequestContext): Promise<void> {
+    const account = await this.findActiveUser(userId);
+    this.assertSocialAccount(account, role);
+    if ((account.authVersion ?? 0) !== version) throw new UnauthorizedException('This account changed. Start connecting the provider again.');
+    const field = identity.provider === 'google' ? 'googleSubject' : 'appleSubject';
+    try {
+      const linked = await this.users.updateOne({ _id: userId, status: 'active', disabled: false, deletedAt: { $exists: false }, $expr: { $eq: [{ $ifNull: ['$authVersion', 0] }, version] }, $or: [{ [field]: { $exists: false } }, { [field]: identity.subject }] }, { $set: { [field]: identity.subject } });
+      if (!linked.matchedCount) throw new ConflictException('This account already has another identity from this provider, or it changed.');
+    } catch (error) { if ((error as { code?: number }).code === 11000) throw new ConflictException('This provider identity is already connected to another account.'); throw error; }
+    await this.auditLogs.record({ actorId: userId, action: 'account.provider_linked', targetType: 'user', targetId: userId, metadata: { provider: identity.provider }, ...context });
+  }
+
   private assertSocialAccount(user: UserMongoDocument, role: 'student' | 'teacher'): void {
     if (user.disabled || user.status !== 'active' || user.deletedAt || user.roles.some(value => ['ADMIN', 'SUPER_ADMIN'].includes(value))) throw new UnauthorizedException('This account cannot use student or teacher social sign-in.');
     const actualRole = user.roles.includes('TEACHER') ? 'teacher' : 'student';
@@ -156,15 +169,21 @@ export class AuthService {
     const session = await this.sessions
       .findOne({ refreshTokenJti: payload.tokenId, userId: payload.sub, revokedAt: { $exists: false }, expiresAt: { $gt: new Date() } })
       .select('+refreshTokenHash');
-    const validToken = session ? await bcrypt.compare(refreshToken, session.refreshTokenHash) : false;
+    const digest = this.refreshDigest(refreshToken);
+    const validToken = session ? session.refreshTokenHashVersion === 1
+      ? session.refreshTokenHash.length === digest.length && timingSafeEqual(Buffer.from(session.refreshTokenHash), Buffer.from(digest))
+      : await bcrypt.compare(refreshToken, session.refreshTokenHash) : false;
     if (!session || !validToken) {
-      await this.sessions.updateMany({ userId: payload.sub, revokedAt: { $exists: false }, $or: [{ authVersion: payload.authVersion ?? 0 }, ...((payload.authVersion ?? 0) === 0 ? [{ authVersion: { $exists: false } }] : [])] }, { $set: { revokedAt: new Date() } });
+      if (session) await this.sessions.updateOne({ _id: session.id, userId: payload.sub }, { $set: { revokedAt: new Date() } });
       await this.auditLogs.record({ actorId: payload.sub, action: 'auth.refresh_reuse_detected', targetType: 'session', targetId: payload.tokenId, ...context });
       throw new UnauthorizedException('Refresh token revoked');
     }
 
-    await this.sessions.updateOne({ _id: session.id }, { $set: { revokedAt: new Date() } });
-    return this.issueTokens(user, context);
+    const tokens = await this.tokensForSession(user, payload.tokenId);
+    // A stable session row represents the device. Hash rotation must not resurrect a revoked row.
+    const rotated = await this.sessions.updateOne({ _id: session.id, refreshTokenHash: session.refreshTokenHash, revokedAt: { $exists: false }, expiresAt: { $gt: new Date() } }, { $set: { refreshTokenHash: this.refreshDigest(tokens.refreshToken), refreshTokenHashVersion: 1, expiresAt: this.refreshExpiryDate(), ...(context.ipAddress ? { ipAddress: context.ipAddress } : {}), ...(context.userAgent ? { userAgent: context.userAgent } : {}) } });
+    if (!rotated.modifiedCount) { await this.sessions.updateOne({ _id: session.id, userId: user.id }, { $set: { revokedAt: new Date() } }); throw new UnauthorizedException('Session was revoked or refreshed in another request.'); }
+    return tokens;
   }
 
   async logout(userId: string, tokenId: string, context: RequestContext = {}): Promise<void> {
@@ -173,7 +192,9 @@ export class AuthService {
   }
 
   async logoutAll(userId: string, context: RequestContext = {}): Promise<void> {
-    await this.sessions.updateMany({ userId, revokedAt: { $exists: false } }, { $set: { revokedAt: new Date() } });
+    const account = await this.users.findOneAndUpdate({ _id: userId, status: 'active', disabled: false, deletedAt: { $exists: false } }, { $inc: { authVersion: 1 } }, { new: true });
+    if (!account) throw new UnauthorizedException('User account is not active');
+    await this.revokeOlderSessions(userId, account.authVersion ?? 0);
     await this.auditLogs.record({ actorId: userId, action: 'auth.logout_all', targetType: 'user', targetId: userId, ...context });
   }
 
@@ -185,7 +206,8 @@ export class AuthService {
     await this.recovery.reset(request.token, request.password, context);
   }
 
-  async changePassword(userId: string, request: ChangePasswordDto, currentTokenId: string, context: RequestContext = {}): Promise<void> {
+  async changePassword(userId: string, request: ChangePasswordDto, currentTokenId: string, context: RequestContext = {}, revokeCurrent = false): Promise<void> {
+    if (Buffer.byteLength(request.newPassword, 'utf8') > 72 || request.newPassword.length < 10) throw new BadRequestException('Use at least 10 characters and at most 72 UTF-8 bytes for your new password.');
     const user = await this.users.findById(userId).select('+passwordHash');
     if (!user || user.disabled || user.status !== 'active' || !user.passwordHash || !(await bcrypt.compare(request.currentPassword, user.passwordHash))) {
       throw new UnauthorizedException('Invalid current password');
@@ -193,10 +215,12 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(request.newPassword, 12);
     const updated = await this.users.updateOne({ _id: userId, passwordHash: user.passwordHash, disabled: false, status: 'active', deletedAt: { $exists: false } }, {
       $set: { passwordHash, passwordResetCompletedAt: new Date() },
+      ...(revokeCurrent ? { $inc: { authVersion: 1 } } : {}),
       $unset: { passwordResetHash: 1, passwordResetExpiresAt: 1, passwordResetIssuedAt: 1 },
     });
     if (!updated.modifiedCount) throw new UnauthorizedException('The password changed during this request. Please sign in again.');
-    await this.sessions.updateMany({ userId, refreshTokenJti: { $ne: currentTokenId }, revokedAt: { $exists: false }, $or: [{ authVersion: { $lte: user.authVersion ?? 0 } }, { authVersion: { $exists: false } }] }, { $set: { revokedAt: new Date() } });
+    if (revokeCurrent) await this.revokeOlderSessions(userId, (user.authVersion ?? 0) + 1);
+    else await this.sessions.updateMany({ userId, refreshTokenJti: { $ne: currentTokenId }, revokedAt: { $exists: false }, $or: [{ authVersion: { $lte: user.authVersion ?? 0 } }, { authVersion: { $exists: false } }] }, { $set: { revokedAt: new Date() } });
     await this.auditLogs.record({ actorId: userId, action: 'auth.password_changed', targetType: 'user', targetId: userId, ...context });
   }
 
@@ -231,13 +255,16 @@ export class AuthService {
   }
 
   /** One account lookup per node sweep, rather than a database read for every media signal. */
-  async revokedSocketSessions(sessions: Array<{ socketId: string; userId: string; authVersion: number }>): Promise<string[]> {
+  async revokedSocketSessions(sessions: Array<{ socketId: string; userId: string; authVersion: number; tokenId?: string }>): Promise<string[]> {
     if (!sessions.length) return [];
     const users = await this.users.find({ _id: { $in: [...new Set(sessions.map(session => session.userId))] } }).select('_id authVersion status disabled deletedAt').lean();
     const accounts = new Map(users.map(user => [String(user._id), user]));
+    const tokenIds = [...new Set(sessions.map(session => session.tokenId).filter((id): id is string => Boolean(id)))];
+    const active = tokenIds.length ? await this.sessions.find({ refreshTokenJti: { $in: tokenIds }, userId: { $in: [...accounts.keys()] }, revokedAt: { $exists: false }, expiresAt: { $gt: new Date() } }).select('userId refreshTokenJti').lean() : [];
+    const activeKeys = new Set(active.map(session => `${session.userId}:${session.refreshTokenJti}`));
     return sessions.filter(session => {
       const account = accounts.get(session.userId);
-      return !account || account.disabled || account.status !== 'active' || account.deletedAt || (account.authVersion ?? 0) !== session.authVersion;
+      return !account || account.disabled || account.status !== 'active' || account.deletedAt || (account.authVersion ?? 0) !== session.authVersion || Boolean(session.tokenId && !activeKeys.has(`${session.userId}:${session.tokenId}`));
     }).map(session => session.socketId);
   }
 
@@ -254,36 +281,29 @@ export class AuthService {
     return user.permissions?.length ? user.permissions : this.permissionsForRoles(roles);
   }
 
+  private refreshDigest(value: string): string { return createHash('sha256').update(value).digest('hex'); }
+
+  private async revokeOlderSessions(userId: string, version: number): Promise<void> {
+    try { await this.sessions.updateMany({ userId, revokedAt: { $exists: false }, $or: [{ authVersion: { $lt: version } }, { authVersion: { $exists: false } }] }, { $set: { revokedAt: new Date() } }); }
+    catch { this.logger.warn('Session cleanup failed; the account epoch still rejects previous credentials.'); }
+  }
+
   private async issueTokens(user: UserMongoDocument, context: RequestContext): Promise<TokenPair> {
     const sessionTokenId = randomUUID();
-    const accessTtl = this.config.get<string>('jwt.accessTtl', '15m') as never;
-    const refreshTtl = this.config.get<string>('jwt.refreshTtl', '7d') as never;
+    const tokens = await this.tokensForSession(user, sessionTokenId);
+    await this.sessions.create({ userId: user.id, authVersion: user.authVersion ?? 0, refreshTokenHash: this.refreshDigest(tokens.refreshToken), refreshTokenHashVersion: 1, refreshTokenJti: sessionTokenId, ipAddress: context.ipAddress, userAgent: context.userAgent, expiresAt: this.refreshExpiryDate() });
+    return tokens;
+  }
+
+  private async tokensForSession(user: UserMongoDocument, sessionTokenId: string): Promise<TokenPair> {
     const roles = user.roles?.length ? user.roles : ['STUDENT'];
     const permissions = await this.effectivePermissions(user);
-    const payload = { sub: user.id, email: user.email, roles, permissions, authVersion: user.authVersion ?? 0 };
-    const refreshToken = await this.jwt.signAsync({ ...payload, tokenId: sessionTokenId }, { ...this.refreshVerifyOptions(), expiresIn: refreshTtl });
-    await this.sessions.create({
-      userId: user.id,
-      authVersion: user.authVersion ?? 0,
-      refreshTokenHash: await bcrypt.hash(refreshToken, 12),
-      refreshTokenJti: sessionTokenId,
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent,
-      expiresAt: this.refreshExpiryDate()
-    });
+    const payload = { sub: user.id, email: user.email, roles, permissions, authVersion: user.authVersion ?? 0, tokenId: sessionTokenId };
     return {
-      accessToken: await this.jwt.signAsync(
-        { ...payload, tokenId: sessionTokenId },
-        {
-          secret: this.config.getOrThrow<string>('jwt.accessSecret'),
-          expiresIn: accessTtl,
-          audience: this.config.getOrThrow<string>('jwt.audience'),
-          issuer: this.config.getOrThrow<string>('jwt.issuer')
-        }
-      ),
-      refreshToken,
-      expiresIn: this.config.get<string>('jwt.accessTtl', '15m'),
-      user: this.authResponseUser(user, roles, permissions)
+      // Random jti makes same-second rotations distinct. The full JWT is hashed, never bcrypt-truncated.
+      refreshToken: await this.jwt.signAsync({ ...payload, jti: randomUUID() }, { ...this.refreshVerifyOptions(), expiresIn: this.config.get<string>('jwt.refreshTtl', '7d') as never }),
+      accessToken: await this.jwt.signAsync(payload, { secret: this.config.getOrThrow<string>('jwt.accessSecret'), expiresIn: this.config.get<string>('jwt.accessTtl', '15m') as never, audience: this.config.getOrThrow<string>('jwt.audience'), issuer: this.config.getOrThrow<string>('jwt.issuer') }),
+      expiresIn: this.config.get<string>('jwt.accessTtl', '15m'), user: this.authResponseUser(user, roles, permissions),
     };
   }
 

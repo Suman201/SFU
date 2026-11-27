@@ -11,6 +11,10 @@ export interface SocialIdentity {
 
 @Schema({ collection: 'social_auth_flows', timestamps: true })
 export class SocialAuthFlow {
+  @Prop({ type: String, enum: ['link'] }) purpose?: 'link';
+  @Prop({ type: String }) linkUserId?: string;
+  @Prop({ type: String }) linkTokenId?: string;
+  @Prop({ type: Number }) linkAuthVersion?: number;
   @Prop({ required: true, unique: true }) stateHash!: string;
   @Prop({ required: true }) challenge!: string;
   @Prop({ required: true, enum: ['google', 'apple'] }) provider!: SocialProvider;
