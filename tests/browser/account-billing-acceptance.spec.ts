@@ -76,6 +76,7 @@ test('account settings change preferences and verified credentials, and revoke d
     await page.getByRole('combobox', { name: 'Appearance', exact: true }).selectOption('dark');
     await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await page.evaluate(async () => { await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined))); });
     expect((await new AxeBuilder({ page }).include('.account-shell').withRules(['button-name', 'label', 'color-contrast']).analyze()).violations).toEqual([]);
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' })); await page.screenshot({ path: path.join(folder, 'account-settings-dark.png'), fullPage: true });
     const target = 'account-confirmed@example.com';
