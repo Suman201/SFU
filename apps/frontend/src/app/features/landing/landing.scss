@@ -19,14 +19,14 @@ p {
 h1 {
   max-width: 15ch;
   margin-bottom: 24px;
-  font-size: clamp(40px, 4.5vw, 62px);
+  font-size: clamp(40px, 4.6vw, 70px);
   font-weight: 600;
   letter-spacing: -0.04em;
   line-height: 1.1;
 }
 h2 {
   margin-bottom: 24px;
-  font-size: 32px;
+  font-size: clamp(30px, 2.6vw, 38px);
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.2;
@@ -45,10 +45,10 @@ a:hover {
 }
 .hero {
   display: grid;
-  grid-template-columns: 1.12fr 1fr;
+  grid-template-columns: 1fr 1.05fr;
   align-items: center;
-  gap: 64px;
-  padding-block: clamp(30px, 5vw, 68px);
+  gap: clamp(48px, 6vw, 104px);
+  padding-block: clamp(40px, 6vw, 104px);
 }
 .eyebrow {
   margin-bottom: 22px;
@@ -58,9 +58,9 @@ a:hover {
 }
 .hero-lead {
   max-width: 52ch;
-  margin-bottom: 30px;
+  margin-bottom: 36px;
   color: var(--muted);
-  font-size: 17px;
+  font-size: 18px;
   line-height: 1.7;
 }
 .teacher-search label {
@@ -72,23 +72,24 @@ a:hover {
 .search-controls {
   display: flex;
   gap: 10px;
+  max-width: 600px;
 }
 .search-controls input {
   min-width: 0;
   flex: 1;
-  min-height: 48px;
-  border-radius: var(--radius);
-  font-size: 14px;
+  min-height: 52px;
+  border-radius: 12px;
+  font-size: 15px;
 }
 .teacher-search button,
 .solid-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 48px;
-  padding: 12px 19px;
+  min-height: 52px;
+  padding: 12px 24px;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: 12px;
   background: var(--brand-rose);
   color: var(--on-accent);
   font-size: 14px;
@@ -121,15 +122,17 @@ a:hover {
   height: auto;
   aspect-ratio: 4 / 3;
   object-fit: cover;
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: var(--shadow-md);
 }
 .feature-strip {
   display: flex;
   justify-content: space-between;
   gap: 20px;
-  padding-block: 24px;
+  padding-block: 28px;
   border-block: 1px solid var(--line);
-  font-size: 14px;
+  font-size: 15px;
   color: var(--muted);
 }
 .feature-strip > span {
@@ -142,13 +145,13 @@ a:hover {
   color: var(--accent-strong);
 }
 .section {
-  padding-block: 64px;
+  padding-block: clamp(64px, 7vw, 112px);
 }
 .steps {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 60px;
-  margin-top: 36px;
+  gap: clamp(40px, 5vw, 80px);
+  margin-top: 48px;
 }
 .step-number {
   color: var(--accent-strong);
@@ -169,7 +172,7 @@ a:hover {
 .classroom-section {
   display: grid;
   grid-template-columns: 1.2fr 1fr;
-  gap: 70px;
+  gap: clamp(48px, 6vw, 104px);
   align-items: center;
   padding-top: 24px;
 }
@@ -182,7 +185,8 @@ a:hover {
   width: 100%;
   height: auto;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
+  border-radius: var(--surface-radius);
+  box-shadow: var(--shadow-md);
 }
 .classroom-preview figcaption {
   margin-top: 12px;
@@ -244,7 +248,7 @@ a:hover {
 .faq-section {
   display: grid;
   grid-template-columns: 1fr 1.45fr;
-  gap: 70px;
+  gap: clamp(48px, 6vw, 104px);
 }
 .faq-section h2 {
   max-width: 14ch;

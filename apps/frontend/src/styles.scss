@@ -82,8 +82,8 @@
   --focus-ring: #458b73;
   --radius: 10px;
   --surface-radius: 16px;
-  --site-width: 1200px;
-  --site-gutter: clamp(16px, 3vw, 32px);
+  --site-width: 1440px;
+  --site-gutter: clamp(16px, 4vw, 56px);
   --site-content-width: min(var(--site-width), calc(100% - 2 * var(--site-gutter)));
   --page-title-size: clamp(28px, 3vw, 38px);
   --success-ink: #326c57;
