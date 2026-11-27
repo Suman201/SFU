@@ -35,6 +35,13 @@ jobs:
       - name: Install media verification tools
         timeout-minutes: 8
         run: |
+          # Only Ubuntu media/browser packages are needed. The runner's unused
+          # Microsoft feed can return 403 and block all subsequent apt updates.
+          for source in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            if [ -f "$source" ] && grep -Eq 'https?://packages[.]microsoft[.]com/' "$source"; then
+              sudo mv "$source" "$source.disabled"
+            fi
+          done
           echo 'Acquire::Retries "2"; Acquire::http::Timeout "30"; Acquire::https::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/80-sfu-ci-network > /dev/null
           if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
             sudo apt-get update
