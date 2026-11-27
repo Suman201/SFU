@@ -150,17 +150,31 @@ test('versioned CMS, readonly history, contact delivery and audit privacy use re
     await setAccessibilityTheme(editor, 'dark');
     expect((await new AxeBuilder({ page: editor }).include('.section-builder').withRules(['button-name', 'label', 'color-contrast']).analyze()).violations).toEqual([]);
     await editor.screenshot({ path: path.join(folder, 'cms-editor-mobile.png'), fullPage: true });
+    const publicLayout = () => publicPage.evaluate(() => ({
+      width: document.documentElement.scrollWidth, viewport: innerWidth,
+      offenders: [...document.querySelectorAll('body *')].filter(element => {
+        const rect = element.getBoundingClientRect(); return rect.width > 0 && (rect.right > innerWidth || (getComputedStyle(element).overflowX === 'visible' && element.scrollWidth > element.clientWidth + 1));
+      }).map(element => { const rect = element.getBoundingClientRect(), style = getComputedStyle(element); return { element: element.tagName + '.' + element.className, width: rect.width, right: rect.right, scrollWidth: element.scrollWidth, grid: style.gridTemplateColumns, wrap: style.overflowWrap, font: style.fontFamily }; }).slice(-30),
+    }));
     await publicPage.reload(); await publicPage.setViewportSize({ width: 768, height: 1024 });
-    await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(768);
+    const tabletLayout = await publicLayout();
+    if (tabletLayout.width > tabletLayout.viewport) console.log('CMS tablet overflow:', JSON.stringify(tabletLayout));
+    await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth), { message: JSON.stringify(tabletLayout) }).toBeLessThanOrEqual(768);
+    const checkPublicMenu = async (width: number) => {
+      await publicPage.getByRole('button', { name: 'Menu', exact: true }).click();
+      await expect(publicPage.getByRole('navigation', { name: 'Primary', exact: true })).toBeVisible();
+      await expect(publicPage.getByRole('button', { name: 'Switch to dark mode', exact: true })).toBeVisible();
+      await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      await publicPage.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(publicPage.getByRole('navigation', { name: 'Primary', exact: true })).toBeHidden();
+    };
+    await checkPublicMenu(768);
     await publicPage.screenshot({ path: path.join(folder, 'cms-public-tablet.png'), fullPage: true });
     await publicPage.setViewportSize({ width: 390, height: 844 });
-    const publicLayout = await publicPage.evaluate(() => ({
-      width: document.documentElement.scrollWidth, viewport: innerWidth,
-      offenders: [...document.querySelectorAll('.cms-page, .cms-page *')].filter(element => {
-        const rect = element.getBoundingClientRect(); return rect.width > 0 && (rect.right > innerWidth || element.scrollWidth > element.clientWidth + 1);
-      }).map(element => { const rect = element.getBoundingClientRect(); return { element: element.tagName + '.' + element.className, width: rect.width, right: rect.right, scrollWidth: element.scrollWidth }; }),
-    }));
-    await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth), { message: JSON.stringify(publicLayout) }).toBeLessThanOrEqual(390);
+    const mobileLayout = await publicLayout();
+    if (mobileLayout.width > mobileLayout.viewport) console.log('CMS mobile overflow:', JSON.stringify(mobileLayout));
+    await expect.poll(() => publicPage.evaluate(() => document.documentElement.scrollWidth), { message: JSON.stringify(mobileLayout) }).toBeLessThanOrEqual(390);
+    await checkPublicMenu(390);
     await publicPage.screenshot({ path: path.join(folder, 'cms-public-mobile.png'), fullPage: true });
     await editor.goto(admin.origin + '/audit-logs');
     await expect(editor.getByRole('heading', { name: /Audit/ }).first()).toBeVisible();

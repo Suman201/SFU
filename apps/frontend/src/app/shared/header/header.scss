@@ -6,6 +6,8 @@
   width: var(--site-content-width);
   margin: 16px auto 0;
   container: site-header / inline-size;
+  // Keep collapsed navigation from widening the page in WebKit.
+  contain: layout style inline-size;
 }
 
 .site-header {
